@@ -5,8 +5,8 @@ Der Test verwendet:
   - alle zugehoerigen Dateien mit use_for_gemini = priority_1_candidate
   - die erlaubten Klassen aus Functional_classes.xlsx
 
-Die Eingabedateien werden nicht veraendert. Precheck, Antworten, Logs und
-Ergebnisse werden in den vorhandenen output-Unterordnern gespeichert.
+Die Eingabedateien werden nicht veraendert. Antworten, Logs und Ergebnisse
+werden in den vorhandenen output-Unterordnern gespeichert.
 """
 
 from __future__ import annotations
@@ -84,7 +84,6 @@ FUNCTIONAL_CLASS_COL = "Funktionsklasse"
 
 RUN_TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 LOG_PATH = LOG_DIR / f"gemini_first5_test_{RUN_TIMESTAMP}.log"
-PRECHECK_PATH = RESULTS_DIR / f"precheck_first5_{RUN_TIMESTAMP}.xlsx"
 RESULT_PATH = RESULTS_DIR / f"gemini_first5_test_{RUN_TIMESTAMP}.xlsx"
 RAW_RESPONSES_PATH = (
     RESPONSES_DIR / f"gemini_first5_responses_{RUN_TIMESTAMP}.jsonl"
@@ -730,9 +729,6 @@ def main() -> None:
         classes,
     )
 
-    export_excel(PRECHECK_PATH, cases, used_file_rows, classes)
-    logging.info("Precheck gespeichert: %s", PRECHECK_PATH)
-
     for case in cases:
         logging.info(
             "Precheck-Ergebnis: ID=%s | Match=%s | Ordner=%s | P1=%s | Status=%s",
@@ -750,7 +746,6 @@ def main() -> None:
     logging.info("Rohantworten: %s", RAW_RESPONSES_PATH)
     logging.info("Logdatei: %s", LOG_PATH)
     print("\nFertig.")
-    print(f"Precheck: {PRECHECK_PATH}")
     print(f"Ergebnis: {RESULT_PATH}")
 
 
