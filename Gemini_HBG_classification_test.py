@@ -397,6 +397,9 @@ Du bist ein technischer Experte fuer Baugruppenklassifikation im Maschinen- und 
 Klassifiziere die folgende Baugruppe in genau eine der vorgegebenen Funktionsklassen.
 Beruecksichtige dafuer sowohl den Baugruppennamen als auch alle beigefuegten Dateien.
 Alle beigefuegten Dateien gehoeren zu derselben Baugruppe.
+Der Baugruppenname ist ein besonders wichtiger Hinweis. Wenn der Name eindeutig
+einer Funktionsklasse entspricht und die Dateien nicht klar widersprechen,
+orientiere dich vorrangig am Baugruppennamen.
 
 Baugruppenname:
 {baugruppenname}
