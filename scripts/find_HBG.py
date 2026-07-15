@@ -24,6 +24,7 @@ Erst nach Prüfung der Berichte kopieren:
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import sys
 from collections import defaultdict
@@ -36,6 +37,7 @@ EXCEL_FILENAME = "all_HBG_random_no_label.xlsx"
 SHEET_NAME = "all_HBG_random_no_label"
 SAP_COLUMN = "SAP-Nummer"
 TEAMCENTER_COLUMN = "Teamcenter ID"
+ID_PATTERN = re.compile(r"(?<![A-Z0-9])[A-Z0-9]{10}(?![A-Z0-9])")
 
 
 def normalize_id(value: object) -> str:
@@ -43,6 +45,12 @@ def normalize_id(value: object) -> str:
     if pd.isna(value):
         return ""
     return str(value).strip().upper()
+
+
+def extract_ids_from_folder_name(folder_name: str) -> list[str]:
+    """Extract independent 10-character alphanumeric IDs from a folder name."""
+    normalized_name = normalize_id(folder_name)
+    return list(dict.fromkeys(ID_PATTERN.findall(normalized_name)))
 
 
 def write_report(path: Path, rows: list[dict], columns: list[str]) -> None:
@@ -141,12 +149,23 @@ def scan_folders(
 
         for folder in baugruppe_folders:
             folder_id = normalize_id(folder.name)
+            candidate_ids = extract_ids_from_folder_name(folder.name)
             base = {
                 "Ordnername": folder.name,
                 "Urspruengliche_Kategorie": category_folder.name,
                 "Quellpfad": str(folder.resolve()),
             }
-            excel_rows = id_index.get(folder_id, [])
+
+            matched_ids = [
+                candidate_id
+                for candidate_id in candidate_ids
+                if candidate_id in id_index
+            ]
+            matched_rows_by_number: dict[int, dict] = {}
+            for matched_id in matched_ids:
+                for excel_row in id_index[matched_id]:
+                    matched_rows_by_number[int(excel_row["Excel_Zeile"])] = excel_row
+            excel_rows = list(matched_rows_by_number.values())
 
             if not excel_rows:
                 not_matched.append(base)
@@ -160,16 +179,23 @@ def scan_folders(
                         "Excel_Zeilen": ", ".join(
                             str(row["Excel_Zeile"]) for row in excel_rows
                         ),
+                        "Gefundene_IDs": ", ".join(matched_ids),
                     }
                 )
                 continue
 
             excel_row = excel_rows[0]
             match_columns = []
-            if folder_id == excel_row[SAP_COLUMN]:
+            if excel_row[SAP_COLUMN] in matched_ids:
                 match_columns.append(SAP_COLUMN)
-            if folder_id == excel_row[TEAMCENTER_COLUMN]:
+            if excel_row[TEAMCENTER_COLUMN] in matched_ids:
                 match_columns.append(TEAMCENTER_COLUMN)
+
+            match_type = (
+                "exact folder name"
+                if folder_id in matched_ids
+                else "ID contained in folder name"
+            )
 
             matched.append(
                 {
@@ -177,6 +203,8 @@ def scan_folders(
                     SAP_COLUMN: excel_row[SAP_COLUMN],
                     TEAMCENTER_COLUMN: excel_row[TEAMCENTER_COLUMN],
                     "Uebereinstimmung": " + ".join(match_columns),
+                    "Gefundene_IDs": ", ".join(matched_ids),
+                    "Trefferart": match_type,
                     "Excel_Zeile": excel_row["Excel_Zeile"],
                 }
             )
@@ -344,6 +372,8 @@ def main() -> int:
                 SAP_COLUMN,
                 TEAMCENTER_COLUMN,
                 "Uebereinstimmung",
+                "Gefundene_IDs",
+                "Trefferart",
                 "Excel_Zeile",
                 "Urspruengliche_Kategorie",
                 "Quellpfad",
@@ -363,6 +393,7 @@ def main() -> int:
                 "Quellpfad",
                 "Anzahl_Excel_Treffer",
                 "Excel_Zeilen",
+                "Gefundene_IDs",
             ],
         )
         write_report(
