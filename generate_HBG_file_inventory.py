@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -26,6 +27,9 @@ INVENTORY_COLUMNS = [
     "file_path",
     "file_size_MB",
     "guessed_type",
+    "cad_view",
+    "cad_selection_rank",
+    "cad_selected",
     "use_for_gemini",
     "note",
 ]
@@ -33,6 +37,28 @@ INVENTORY_COLUMNS = [
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 RAW_CAD_EXTENSIONS = {".iam", ".ipt", ".stp", ".step"}
 EXCEL_EXTENSIONS = {".xlsx", ".xls", ".csv"}
+
+COMPACT_CAD_VIEWS = {
+    "TLF": frozenset({"top", "left", "front"}),
+    "TRF": frozenset({"top", "right", "front"}),
+    "TLB": frozenset({"top", "left", "back"}),
+    "TRB": frozenset({"top", "right", "back"}),
+    "BLF": frozenset({"bottom", "left", "front"}),
+    "BRF": frozenset({"bottom", "right", "front"}),
+    "BLB": frozenset({"bottom", "left", "back"}),
+    "BRB": frozenset({"bottom", "right", "back"}),
+}
+
+DIRECTION_WORDS = {
+    "top": {"top", "oben"},
+    "bottom": {"bottom", "unten"},
+    "left": {"left", "links", "linke", "linker"},
+    "right": {"right", "rechts", "rechte", "rechter"},
+    "front": {"front", "vorne", "vorn", "vorder"},
+    "back": {"back", "rear", "hinten", "rueck", "ruck", "rück"},
+}
+
+DIRECTION_ORDER = ("top", "bottom", "left", "right", "front", "back")
 
 
 def contains_any(text: str, keywords: tuple[str, ...]) -> bool:
@@ -110,19 +136,159 @@ def guess_file_type(file_path: Path, baugruppe_folder: Path) -> str:
 
 
 def default_gemini_usage(guessed_type: str) -> str:
+    if guessed_type == "Technische_Zeichnung":
+        return "priority_1_candidate"
     if guessed_type in {
-        "Technische_Zeichnung",
         "DFC_structure_screenshot",
         "BOM",
         "Datenblatt",
-    }:
-        return "priority_1_candidate"
-    if guessed_type in {
-        "CAD_screenshot",
         "Excel_unknown",
     }:
         return "priority_2_candidate"
     return "nein"
+
+
+def detect_cad_view(file_name: str) -> tuple[str, frozenset[str]]:
+    """Return a normalized CAD view name and its viewing directions."""
+    stem = Path(file_name).stem
+    compact_match = re.search(
+        r"(?:^|[^A-Z0-9])(TLF|TRF|TLB|TRB|BLF|BRF|BLB|BRB)(?:$|[^A-Z0-9])",
+        stem.upper(),
+    )
+    if compact_match:
+        directions = COMPACT_CAD_VIEWS[compact_match.group(1)]
+    else:
+        words = set(re.findall(r"[a-zA-ZäöüÄÖÜß]+", stem.casefold()))
+        directions = frozenset(
+            direction
+            for direction, aliases in DIRECTION_WORDS.items()
+            if words.intersection(aliases)
+        )
+
+    view_name = "_".join(
+        direction for direction in DIRECTION_ORDER if direction in directions
+    )
+    return view_name, directions
+
+
+def select_cad_screenshots(dataframe: pd.DataFrame) -> pd.DataFrame:
+    """Rank CAD screenshots per Baugruppe and select up to three useful views."""
+    dataframe["cad_view"] = ""
+    dataframe["cad_selection_rank"] = ""
+    dataframe["cad_selected"] = ""
+
+    cad_rows = dataframe[dataframe["guessed_type"] == "CAD_screenshot"]
+    for _, group in cad_rows.groupby("folder_name", sort=False):
+        candidates = []
+        for index, row in group.iterrows():
+            view_name, directions = detect_cad_view(str(row["file_name"]))
+            dataframe.at[index, "cad_view"] = view_name
+            candidates.append(
+                {
+                    "index": index,
+                    "directions": directions,
+                    "size": float(row["file_size_MB"]),
+                    "name": str(row["file_name"]).casefold(),
+                }
+            )
+
+        selected = []
+
+        def add_best(predicate, preference=None) -> None:
+            eligible = [
+                candidate
+                for candidate in candidates
+                if candidate not in selected and predicate(candidate["directions"])
+            ]
+            if not eligible or len(selected) >= 3:
+                return
+
+            def selection_key(candidate):
+                preference_score = (
+                    preference(candidate["directions"]) if preference else 0
+                )
+                return (
+                    -preference_score,
+                    -len(candidate["directions"]),
+                    -candidate["size"],
+                    candidate["name"],
+                )
+
+            selected.append(sorted(eligible, key=selection_key)[0])
+
+        # Start with an informative upper-front diagonal view.
+        add_best(
+            lambda directions: {
+                "top",
+                "front",
+            }.issubset(directions)
+            and bool({"left", "right"}.intersection(directions))
+        )
+
+        # Then choose an opposite lower-rear diagonal view where available.
+        first_directions = selected[0]["directions"] if selected else frozenset()
+
+        def opposite_side_score(directions: frozenset[str]) -> int:
+            if "left" in first_directions and "right" in directions:
+                return 1
+            if "right" in first_directions and "left" in directions:
+                return 1
+            return 0
+
+        add_best(
+            lambda directions: {
+                "bottom",
+                "back",
+            }.issubset(directions)
+            and bool({"left", "right"}.intersection(directions)),
+            opposite_side_score,
+        )
+
+        # A straight front view usually exposes the assembly layout clearly.
+        add_best(lambda directions: directions == frozenset({"front"}))
+
+        # Fill missing slots with the most informative and diverse remaining views.
+        while len(selected) < min(3, len(candidates)):
+            remaining = [candidate for candidate in candidates if candidate not in selected]
+            covered_directions = (
+                set().union(*(candidate["directions"] for candidate in selected))
+                if selected
+                else set()
+            )
+            remaining.sort(
+                key=lambda candidate: (
+                    -len(candidate["directions"] - covered_directions),
+                    -len(candidate["directions"]),
+                    -candidate["size"],
+                    candidate["name"],
+                )
+            )
+            selected.append(remaining[0])
+
+        selected_indices = {candidate["index"] for candidate in selected}
+        unselected = sorted(
+            (
+                candidate
+                for candidate in candidates
+                if candidate["index"] not in selected_indices
+            ),
+            key=lambda candidate: (
+                -len(candidate["directions"]),
+                -candidate["size"],
+                candidate["name"],
+            ),
+        )
+
+        for rank, candidate in enumerate(selected + unselected, start=1):
+            index = candidate["index"]
+            dataframe.at[index, "cad_selection_rank"] = rank
+            is_selected = rank <= 3
+            dataframe.at[index, "cad_selected"] = "ja" if is_selected else "nein"
+            dataframe.at[index, "use_for_gemini"] = (
+                "priority_1_candidate" if is_selected else "nein"
+            )
+
+    return dataframe
 
 
 def scan_dataset(root_path: Path) -> tuple[pd.DataFrame, list[Path]]:
@@ -169,12 +335,16 @@ def scan_dataset(root_path: Path) -> tuple[pd.DataFrame, list[Path]]:
                     "file_path": str(file_path.resolve()),
                     "file_size_MB": size_mb,
                     "guessed_type": guessed_type,
+                    "cad_view": "",
+                    "cad_selection_rank": "",
+                    "cad_selected": "",
                     "use_for_gemini": default_gemini_usage(guessed_type),
                     "note": "",
                 }
             )
 
     dataframe = pd.DataFrame(rows, columns=INVENTORY_COLUMNS)
+    dataframe = select_cad_screenshots(dataframe)
     return dataframe, baugruppe_folders
 
 
@@ -200,6 +370,9 @@ def save_inventory(dataframe: pd.DataFrame, output_path: Path) -> None:
             "file_path": 70,
             "file_size_MB": 14,
             "guessed_type": 26,
+            "cad_view": 24,
+            "cad_selection_rank": 18,
+            "cad_selected": 14,
             "use_for_gemini": 20,
             "note": 35,
         }
