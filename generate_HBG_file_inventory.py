@@ -73,6 +73,9 @@ def guess_file_type(file_path: Path, baugruppe_folder: Path) -> str:
     if is_dfc_structure_screenshot(relative_path_text, extension):
         return "DFC_structure_screenshot"
 
+    if extension == ".idw":
+        return "IDW_drawing"
+
     # Specific document names take priority over generic PDF/Excel extensions.
     if contains_any(
         relative_path_text,
