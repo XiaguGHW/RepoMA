@@ -11,6 +11,7 @@ Erwartete Projektstruktur (dieses Skript liegt später unter ``scripts``)::
     ├─ output/
     │  ├─ processed_hbg/
     │  └─ reports/
+    │     └─ collect_HBG/
     └─ scripts/
        └─ collect_HBG.py
 
@@ -64,7 +65,7 @@ def project_paths() -> tuple[Path, Path, Path, Path]:
     input_dir = project_root / "input"
     raw_data_dir = input_dir / "raw_data"
     processed_dir = project_root / "output" / "processed_hbg"
-    reports_dir = project_root / "output" / "reports"
+    reports_dir = project_root / "output" / "reports" / "collect_HBG"
     return input_dir, raw_data_dir, processed_dir, reports_dir
 
 
@@ -331,7 +332,7 @@ def copy_hbg_folders(
 
     if has_error:
         raise RuntimeError(
-            "Some folders could not be copied. See output/reports/Kopierbericht.xlsx."
+            "Some folders could not be copied. See output/reports/collect_HBG/Kopierbericht.xlsx."
         )
 
 
@@ -460,3 +461,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
