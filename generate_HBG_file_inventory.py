@@ -90,7 +90,7 @@ def guess_file_type(file_path: Path, baugruppe_folder: Path) -> str:
         return "Technische_Zeichnung"
 
     if extension in RAW_CAD_EXTENSIONS:
-        return "CAD_raw_ignore_first"
+        return "CAD_raw"
 
     if extension in IMAGE_EXTENSIONS or contains_any(
         relative_path_text, ("screenshot", "view", "ansicht", "cad")
@@ -101,7 +101,7 @@ def guess_file_type(file_path: Path, baugruppe_folder: Path) -> str:
         return "Excel_unknown"
 
     if extension == ".pdf":
-        return "PDF_unknown"
+        return "Technische_Zeichnung"
 
     return "unknown"
 
@@ -117,7 +117,6 @@ def default_gemini_usage(guessed_type: str) -> str:
     if guessed_type in {
         "CAD_screenshot",
         "Excel_unknown",
-        "PDF_unknown",
     }:
         return "priority_2_candidate"
     return "nein"
@@ -244,4 +243,3 @@ def build_inventory(root_path: Path) -> Path:
 
 if __name__ == "__main__":
     build_inventory(ROOT_PATH)
-
