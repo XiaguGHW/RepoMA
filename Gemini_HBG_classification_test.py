@@ -17,7 +17,6 @@ import os
 import re
 import time
 from datetime import datetime
-from getpass import getpass
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +60,7 @@ TEST_LIMIT = 5
 RUN_API = True  # False = nur Matching und Dateipruefung, kein Gemini-Aufruf
 
 MODEL_NAME = "gemini-2.5-pro"
+BOSCH_FARM_API_KEY = ""  # Bosch Farm API Key zwischen die Anfuehrungszeichen setzen
 GENERATION_CONFIG = {
     "temperature": 0.1,
     "topP": 0.95,
@@ -422,12 +422,13 @@ Antwort:
 
 
 def get_api_key() -> str:
-    """Liest den API-Key aus der Umgebung oder fragt ihn verdeckt ab."""
-    api_key = os.getenv("BOSCH_FARM_API_KEY", "").strip()
+    """Liest den API-Key aus der Konfiguration am Anfang dieses Skripts."""
+    api_key = BOSCH_FARM_API_KEY.strip()
     if not api_key:
-        api_key = getpass("Bosch Farm API Key (Eingabe wird nicht angezeigt): ").strip()
-    if not api_key:
-        raise ValueError("Kein Bosch Farm API Key angegeben.")
+        raise ValueError(
+            "BOSCH_FARM_API_KEY ist leer. Bitte den API Key am Anfang des "
+            "Skripts zwischen die Anfuehrungszeichen setzen."
+        )
     return api_key
 
 
