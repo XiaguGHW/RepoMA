@@ -1,4 +1,4 @@
-"""Testlauf: Klassifikation der ersten 5 Hauptbaugruppen mit Gemini.
+"""Testlauf: Klassifikation der ersten 10 Hauptbaugruppen mit Gemini.
 
 Der Test verwendet:
   - den Baugruppennamen aus all_HBG_random_no_label.xlsx
@@ -53,7 +53,7 @@ CLASSES_EXCEL_PATH = INPUT_DIR / "Functional_classes.xlsx"
 INVENTORY_SHEET = "file_inventory"
 PREFERRED_CLASSES_SHEET = "Funktionsklassen_v3"
 
-TEST_LIMIT = 5
+TEST_LIMIT = 10
 RUN_API = True  # False = nur Matching und Dateipruefung, kein Gemini-Aufruf
 
 MODEL_NAME = "gemini-2.5-pro"
@@ -83,10 +83,10 @@ PRIORITY_1_VALUE = "priority_1_candidate"
 FUNCTIONAL_CLASS_COL = "Funktionsklasse"
 
 RUN_TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
-LOG_PATH = LOG_DIR / f"gemini_first5_test_{RUN_TIMESTAMP}.log"
-RESULT_PATH = RESULTS_DIR / f"gemini_first5_test_{RUN_TIMESTAMP}.xlsx"
+LOG_PATH = LOG_DIR / f"gemini_first10_test_{RUN_TIMESTAMP}.log"
+RESULT_PATH = RESULTS_DIR / f"gemini_first10_test_{RUN_TIMESTAMP}.xlsx"
 RAW_RESPONSES_PATH = (
-    RESPONSES_DIR / f"gemini_first5_responses_{RUN_TIMESTAMP}.jsonl"
+    RESPONSES_DIR / f"gemini_first10_responses_{RUN_TIMESTAMP}.jsonl"
 )
 
 
@@ -520,12 +520,12 @@ def export_excel(
 # TESTABLAUF
 # =============================================================================
 
-def prepare_first_five_cases(
+def prepare_test_cases(
     hbg_df: pd.DataFrame,
     inventory_df: pd.DataFrame,
     classes: list[str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Fuehrt Matching und Pfadpruefung fuer exakt die ersten 5 HBG durch."""
+    """Fuehrt Matching und Pfadpruefung fuer die ersten TEST_LIMIT HBG durch."""
     del classes  # Klassen werden erst beim Promptbau benoetigt.
 
     test_df = hbg_df.head(TEST_LIMIT).copy()
@@ -643,7 +643,9 @@ def run_api_for_ready_cases(
         logging.info("RUN_API=False: Es wird nur der Precheck ausgefuehrt.")
         return
     if not ready_cases:
-        logging.warning("Keine der ersten 5 HBG ist fuer den API-Aufruf bereit.")
+        logging.warning(
+            "Keine der ersten %s HBG ist fuer den API-Aufruf bereit.", TEST_LIMIT
+        )
         return
 
     llm = create_llm_connector()
@@ -723,7 +725,7 @@ def main() -> None:
     logging.info("Testlauf gestartet: exakt die ersten %s HBG", TEST_LIMIT)
 
     hbg_df, inventory_df, classes = load_input_data()
-    cases, used_file_rows = prepare_first_five_cases(
+    cases, used_file_rows = prepare_test_cases(
         hbg_df,
         inventory_df,
         classes,
