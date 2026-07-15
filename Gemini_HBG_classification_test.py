@@ -37,9 +37,6 @@ elif (SCRIPT_DIR.parent / "input").is_dir():
 else:
     PROJECT_DIR = SCRIPT_DIR
 INPUT_DIR = PROJECT_DIR / "input"
-# 兼容两种结构：
-# 1) input/processed_HBG/<Baugruppe>/...（你之前截图中的结构）
-# 2) input/<Baugruppe>/...（如果 Baugruppe 文件夹直接放在 input 下）
 if (INPUT_DIR / "processed_HBG").is_dir():
     PROCESSED_HBG_DIR = INPUT_DIR / "processed_HBG"
 else:
@@ -76,10 +73,10 @@ TEAMCENTER_COL = "Teamcenter ID"
 NAME_COL = "Benennung (EN)"
 
 # Spalten im Sheet file_inventory
-INVENTORY_FOLDER_COL = "baugruppe"
+INVENTORY_FOLDER_COL = "folder_name"
 INVENTORY_SUBFOLDER_COL = "relative_subfolder"
-INVENTORY_FILENAME_COL = "original_filename"
-INVENTORY_FULL_PATH_COL = "full_path"
+INVENTORY_FILENAME_COL = "file_name"
+INVENTORY_FULL_PATH_COL = "file_path"
 INVENTORY_PRIORITY_COL = "use_for_gemini"
 PRIORITY_1_VALUE = "priority_1_candidate"
 
