@@ -331,15 +331,39 @@ def scan_dataset(root_path: Path) -> tuple[pd.DataFrame, list[Path]]:
     return dataframe, baugruppe_folders
 
 
-def save_inventory(dataframe: pd.DataFrame, output_path: Path) -> None:
+def save_inventory(
+    dataframe: pd.DataFrame,
+    output_path: Path,
+    baugruppe_folders: list[Path],
+) -> None:
+    priority_columns = [
+        "priority_1_candidate",
+        "priority_2_candidate",
+        "nein",
+    ]
+    folder_names = [folder.name for folder in baugruppe_folders]
+    summary = pd.crosstab(
+        dataframe["folder_name"],
+        dataframe["use_for_gemini"],
+    ).reindex(
+        index=folder_names,
+        columns=priority_columns,
+        fill_value=0,
+    )
+    summary.index.name = "folder_name"
+    summary.columns.name = None
+    summary = summary.astype(int).reset_index()
+
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         dataframe.to_excel(writer, sheet_name="file_inventory", index=False)
-        worksheet = writer.sheets["file_inventory"]
+        summary.to_excel(writer, sheet_name="baugruppe_summary", index=False)
 
+        header_fill = PatternFill("solid", fgColor="1F4E78")
+
+        worksheet = writer.sheets["file_inventory"]
         worksheet.freeze_panes = "A2"
         worksheet.auto_filter.ref = worksheet.dimensions
 
-        header_fill = PatternFill("solid", fgColor="1F4E78")
         for cell in worksheet[1]:
             cell.fill = header_fill
             cell.font = Font(color="FFFFFF", bold=True)
@@ -369,6 +393,19 @@ def save_inventory(dataframe: pd.DataFrame, output_path: Path) -> None:
         for cell in worksheet["F"][1:]:
             cell.number_format = "0.000"
 
+        summary_worksheet = writer.sheets["baugruppe_summary"]
+        summary_worksheet.freeze_panes = "A2"
+        summary_worksheet.auto_filter.ref = summary_worksheet.dimensions
+        summary_widths = (24, 22, 22, 14)
+        for column_number, width in enumerate(summary_widths, start=1):
+            column_letter = get_column_letter(column_number)
+            summary_worksheet.column_dimensions[column_letter].width = width
+            header_cell = summary_worksheet.cell(row=1, column=column_number)
+            header_cell.fill = header_fill
+            header_cell.font = Font(color="FFFFFF", bold=True)
+            header_cell.alignment = Alignment(
+                horizontal="center", vertical="center", wrap_text=True
+            )
 
 def print_statistics(dataframe: pd.DataFrame, baugruppe_folders: list[Path]) -> None:
     print(f"Baugruppe folders scanned: {len(baugruppe_folders)}")
@@ -393,7 +430,7 @@ def build_inventory(root_path: Path) -> Path:
     reports_path.mkdir(parents=True, exist_ok=True)
     output_path = reports_path / f"{OUTPUT_FILE_PREFIX}_{timestamp}.xlsx"
 
-    save_inventory(dataframe, output_path)
+    save_inventory(dataframe, output_path, baugruppe_folders)
     print_statistics(dataframe, baugruppe_folders)
     print(f"\nInventory created: {output_path}")
     return output_path
