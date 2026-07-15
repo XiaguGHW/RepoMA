@@ -39,14 +39,14 @@ TEAMCENTER_COLUMN = "Teamcenter ID"
 
 
 def normalize_id(value: object) -> str:
-    """编号标准化：去掉首尾空格并统一为大写。"""
+    """Normalize an ID by trimming whitespace and converting it to uppercase."""
     if pd.isna(value):
         return ""
     return str(value).strip().upper()
 
 
 def write_report(path: Path, rows: list[dict], columns: list[str]) -> None:
-    """即使没有记录，也创建带有列标题的Excel报告。"""
+    """Create an Excel report with column headers, even when there are no rows."""
     pd.DataFrame(rows, columns=columns).to_excel(path, index=False)
 
 
@@ -62,13 +62,13 @@ def project_paths() -> tuple[Path, Path, Path, Path]:
 
 def load_hbg_table(excel_path: Path) -> pd.DataFrame:
     if not excel_path.is_file():
-        raise FileNotFoundError(f"Excel文件不存在：{excel_path}")
+        raise FileNotFoundError(f"Excel file does not exist: {excel_path}")
 
     workbook = pd.ExcelFile(excel_path)
     if SHEET_NAME not in workbook.sheet_names:
         available = ", ".join(workbook.sheet_names)
         raise ValueError(
-            f"找不到工作表 '{SHEET_NAME}'。现有工作表：{available}"
+            f"Worksheet '{SHEET_NAME}' was not found. Available worksheets: {available}"
         )
 
     df = pd.read_excel(
@@ -85,9 +85,9 @@ def load_hbg_table(excel_path: Path) -> pd.DataFrame:
     ]
     if missing_columns:
         raise ValueError(
-            "Excel缺少列："
+            "The Excel file is missing the following columns: "
             + ", ".join(missing_columns)
-            + "。实际列名："
+            + ". Available columns: "
             + ", ".join(df.columns)
         )
 
@@ -120,7 +120,7 @@ def scan_folders(
     id_index: dict[str, list[dict]],
 ) -> tuple[list[dict], list[dict], list[dict]]:
     if not raw_data_dir.is_dir():
-        raise FileNotFoundError(f"raw_data文件夹不存在：{raw_data_dir}")
+        raise FileNotFoundError(f"The raw_data folder does not exist: {raw_data_dir}")
 
     matched: list[dict] = []
     not_matched: list[dict] = []
@@ -131,7 +131,7 @@ def scan_folders(
         key=lambda path: path.name.casefold(),
     )
     if not category_folders:
-        raise ValueError(f"raw_data中没有找到大类文件夹：{raw_data_dir}")
+        raise ValueError(f"No category folders were found in raw_data: {raw_data_dir}")
 
     for category_folder in category_folders:
         baugruppe_folders = sorted(
@@ -264,8 +264,8 @@ def copy_hbg_folders(
     existing_items = list(processed_dir.iterdir())
     if existing_items:
         raise RuntimeError(
-            "processed_hbg不是空文件夹。为防止覆盖或混合旧结果，"
-            "请先手动检查并清空该文件夹，然后重新运行 --copy。"
+            "The processed_hbg folder is not empty. To prevent overwriting or "
+            "mixing results, inspect and empty it manually before running --copy again."
         )
 
     copy_results = []
@@ -278,7 +278,7 @@ def copy_hbg_folders(
             shutil.copytree(source, destination)
             status = "kopiert"
             error = ""
-        except Exception as exc:  # 保留已经复制的内容，记录错误，不自动删除数据
+        except Exception as exc:  # Log the error without automatically deleting copied data.
             status = "Fehler"
             error = f"{type(exc).__name__}: {exc}"
             has_error = True
@@ -303,18 +303,18 @@ def copy_hbg_folders(
 
     if has_error:
         raise RuntimeError(
-            "部分文件夹复制失败。请查看 output/reports/Kopierbericht.xlsx。"
+            "Some folders could not be copied. See output/reports/Kopierbericht.xlsx."
         )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="根据SAP/Teamcenter编号识别HBG，并可选择复制。"
+        description="Identify HBG folders by SAP or Teamcenter ID and optionally copy them."
     )
     parser.add_argument(
         "--copy",
         action="store_true",
-        help="检查无冲突后，将HBG复制到output/processed_hbg。",
+        help="Copy HBG folders to output/processed_hbg after conflict checks pass.",
     )
     args = parser.parse_args()
 
@@ -398,3 +398,34 @@ def main() -> int:
             or ambiguous_excel_ids
             or duplicate_folder_names
             or multiple_folders_per_hbg
+        )
+
+        print("\nCheck completed (the source data was not modified)")
+        print(f"HBG rows in the Excel file: {len(df)}")
+        print(f"Successfully matched folders: {len(matched)}")
+        print(f"Unmatched source folders: {len(not_matched)}")
+        print(f"HBG entries without a matching folder: {len(missing_hbg)}")
+        print(f"Conflicts requiring review: {sum(map(len, [ambiguous_folder_matches, ambiguous_excel_ids, duplicate_folder_names, multiple_folders_per_hbg]))}")
+        print(f"Report location: {reports_dir}")
+
+        if args.copy:
+            if blocking_conflicts:
+                raise RuntimeError(
+                    "No folders were copied because ID or folder conflicts exist. "
+                    "Review the conflict reports first."
+                )
+            copy_hbg_folders(matched, processed_dir, reports_dir)
+            print(f"\nCopy completed: {processed_dir}")
+        else:
+            print("\nThe script ran in check mode; no folders were copied.")
+            print("After verifying the reports, run: python scripts/find_HBG.py --copy")
+
+        return 0
+
+    except Exception as exc:
+        print(f"\nError: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
