@@ -15,7 +15,7 @@ PROJECT_ROOT = (
 )
 
 ROOT_PATH = PROJECT_ROOT / "output" / "processed_hbg"
-REPORTS_PATH = PROJECT_ROOT / "output" / "reports"
+REPORTS_PATH = PROJECT_ROOT / "output" / "reports" / "generate_HBG_file_inventory"
 OUTPUT_FILE_PREFIX = "file_inventory_dfc"
 
 INVENTORY_COLUMNS = [
@@ -240,4 +240,5 @@ def build_inventory(root_path: Path) -> Path:
 
 if __name__ == "__main__":
     build_inventory(ROOT_PATH)
+
 
