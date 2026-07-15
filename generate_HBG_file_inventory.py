@@ -28,7 +28,6 @@ INVENTORY_COLUMNS = [
     "file_size_MB",
     "guessed_type",
     "cad_view",
-    "cad_selection_rank",
     "cad_selected",
     "use_for_gemini",
     "note",
@@ -172,9 +171,8 @@ def detect_cad_view(file_name: str) -> tuple[str, frozenset[str]]:
 
 
 def select_cad_screenshots(dataframe: pd.DataFrame) -> pd.DataFrame:
-    """Rank CAD screenshots per Baugruppe and select up to three useful views."""
+    """Select up to three useful CAD screenshot views per Baugruppe."""
     dataframe["cad_view"] = ""
-    dataframe["cad_selection_rank"] = ""
     dataframe["cad_selected"] = ""
 
     cad_rows = dataframe[dataframe["guessed_type"] == "CAD_screenshot"]
@@ -266,23 +264,9 @@ def select_cad_screenshots(dataframe: pd.DataFrame) -> pd.DataFrame:
             selected.append(remaining[0])
 
         selected_indices = {candidate["index"] for candidate in selected}
-        unselected = sorted(
-            (
-                candidate
-                for candidate in candidates
-                if candidate["index"] not in selected_indices
-            ),
-            key=lambda candidate: (
-                -len(candidate["directions"]),
-                -candidate["size"],
-                candidate["name"],
-            ),
-        )
-
-        for rank, candidate in enumerate(selected + unselected, start=1):
+        for candidate in candidates:
             index = candidate["index"]
-            dataframe.at[index, "cad_selection_rank"] = rank
-            is_selected = rank <= 3
+            is_selected = index in selected_indices
             dataframe.at[index, "cad_selected"] = "ja" if is_selected else "nein"
             dataframe.at[index, "use_for_gemini"] = (
                 "priority_1_candidate" if is_selected else "nein"
@@ -336,7 +320,6 @@ def scan_dataset(root_path: Path) -> tuple[pd.DataFrame, list[Path]]:
                     "file_size_MB": size_mb,
                     "guessed_type": guessed_type,
                     "cad_view": "",
-                    "cad_selection_rank": "",
                     "cad_selected": "",
                     "use_for_gemini": default_gemini_usage(guessed_type),
                     "note": "",
@@ -371,7 +354,6 @@ def save_inventory(dataframe: pd.DataFrame, output_path: Path) -> None:
             "file_size_MB": 14,
             "guessed_type": 26,
             "cad_view": 24,
-            "cad_selection_rank": 18,
             "cad_selected": 14,
             "use_for_gemini": 20,
             "note": 35,
