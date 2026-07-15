@@ -6,8 +6,16 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 
-# Change only this path before running the script.
-ROOT_PATH = Path(r"C:\path\to\your\dataset")
+# Resolve the project root whether this file is stored in the project root or scripts.
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = (
+    SCRIPT_DIR.parent
+    if SCRIPT_DIR.name.casefold() == "scripts"
+    else SCRIPT_DIR
+)
+
+ROOT_PATH = PROJECT_ROOT / "output" / "processed_hbg"
+REPORTS_PATH = PROJECT_ROOT / "output" / "reports"
 OUTPUT_FILE_PREFIX = "file_inventory_dfc"
 
 INVENTORY_COLUMNS = [
@@ -219,7 +227,11 @@ def build_inventory(root_path: Path) -> Path:
     root_path = root_path.expanduser().resolve()
     dataframe, baugruppe_folders = scan_dataset(root_path)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    output_path = root_path / f"{OUTPUT_FILE_PREFIX}_{timestamp}.xlsx"
+
+    reports_path = REPORTS_PATH.expanduser().resolve()
+    reports_path.mkdir(parents=True, exist_ok=True)
+    output_path = reports_path / f"{OUTPUT_FILE_PREFIX}_{timestamp}.xlsx"
+
     save_inventory(dataframe, output_path)
     print_statistics(dataframe, baugruppe_folders)
     print(f"\nInventory created: {output_path}")
@@ -228,3 +240,4 @@ def build_inventory(root_path: Path) -> Path:
 
 if __name__ == "__main__":
     build_inventory(ROOT_PATH)
+
