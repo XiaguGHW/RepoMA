@@ -16,7 +16,7 @@ PROJECT_ROOT = (
 
 ROOT_PATH = PROJECT_ROOT / "output" / "processed_hbg"
 REPORTS_PATH = PROJECT_ROOT / "output" / "reports" / "generate_HBG_file_inventory"
-OUTPUT_FILE_PREFIX = "file_inventory_dfc"
+OUTPUT_FILE_PREFIX = "file_inventory"
 
 INVENTORY_COLUMNS = [
     "folder_name",
@@ -107,15 +107,19 @@ def guess_file_type(file_path: Path, baugruppe_folder: Path) -> str:
 
 
 def default_gemini_usage(guessed_type: str) -> str:
-    if guessed_type in {"CAD_screenshot", "DFC_structure_screenshot", "BOM"}:
-        return "ja_candidate"
     if guessed_type in {
-        "Datenblatt",
         "Technische_Zeichnung",
+        "DFC_structure_screenshot",
+        "BOM",
+        "Datenblatt",
+    }:
+        return "priority_1_candidate"
+    if guessed_type in {
+        "CAD_screenshot",
         "Excel_unknown",
         "PDF_unknown",
     }:
-        return "maybe"
+        return "priority_2_candidate"
     return "nein"
 
 
@@ -240,5 +244,4 @@ def build_inventory(root_path: Path) -> Path:
 
 if __name__ == "__main__":
     build_inventory(ROOT_PATH)
-
 
