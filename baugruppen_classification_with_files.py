@@ -26,9 +26,9 @@ OUTPUT_ORDNER = SCRIPT_ORDNER / "output"
 ASSEMBLY_DATEI = INPUT_ORDNER / "all HBG random no label.xlsx"
 FUNCTIONAL_CLASSES_DATEI = INPUT_ORDNER / "Functional_classes.xlsx"
 
-# Diesen Pfad auf dem Firmenrechner anpassen.
-# In diesem Ordner liegen die einzelnen Baugruppenordner.
-BAUGRUPPEN_DATEN_PFAD = Path(r"C:\HIER\PFAD\ZU\BAUGRUPPEN_DATEN")
+# Der gemischte Datensatz liegt direkt im input-Ordner.
+# Darunter koennen die einzelnen Baugruppenordner in weiteren Unterordnern liegen.
+BAUGRUPPEN_DATEN_PFAD = INPUT_ORDNER / "Datensatz"
 
 SAP_SPALTE = "SAP-Nummer"
 TC_SPALTE = "Teamcenter ID"
