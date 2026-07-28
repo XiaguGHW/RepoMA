@@ -316,6 +316,78 @@ def convert_baugruppe_pdfs(
     return group_manifest
 
 
+def convert_many_baugruppen(
+    baugruppen_root: str | Path,
+    output_root: str | Path,
+    *,
+    recursive: bool = True,
+    dpi: int = 200,
+    image_format: ImageFormat = "png",
+    max_side_px: int | None = 3000,
+    force: bool = False,
+) -> dict:
+    """
+    Convert every direct child folder under one root as a separate Baugruppe.
+
+    Example:
+        baugruppen_root/
+        ├── HBG_001/
+        ├── HBG_002/
+        └── HBG_003/
+    """
+    baugruppen_root = Path(baugruppen_root).resolve()
+    output_root = Path(output_root).resolve()
+
+    if not baugruppen_root.exists() or not baugruppen_root.is_dir():
+        raise NotADirectoryError(f"Baugruppen root folder not found: {baugruppen_root}")
+
+    baugruppe_dirs = sorted(
+        [path for path in baugruppen_root.iterdir() if path.is_dir()],
+        key=lambda path: path.name.lower(),
+    )
+
+    results = []
+    for baugruppe_dir in baugruppe_dirs:
+        manifest = convert_baugruppe_pdfs(
+            baugruppe_dir,
+            output_root,
+            baugruppe_id=baugruppe_dir.name,
+            recursive=recursive,
+            dpi=dpi,
+            image_format=image_format,
+            max_side_px=max_side_px,
+            force=force,
+        )
+        results.append(
+            {
+                "baugruppe_id": manifest["baugruppe_id"],
+                "source_baugruppe_dir": manifest["source_baugruppe_dir"],
+                "output_dir": manifest["output_dir"],
+                "pdf_count": manifest["pdf_count"],
+                "total_pages": manifest["total_pages"],
+                "manifest": str(
+                    Path(_safe_name(manifest["baugruppe_id"]))
+                    / "baugruppe_manifest.json"
+                ),
+            }
+        )
+
+    batch_manifest = {
+        "source_baugruppen_root": str(baugruppen_root),
+        "output_root": str(output_root),
+        "baugruppe_count": len(results),
+        "total_pdfs": sum(item["pdf_count"] for item in results),
+        "total_pages": sum(item["total_pages"] for item in results),
+        "dpi": dpi,
+        "image_format": "jpg" if image_format == "jpeg" else image_format,
+        "max_side_px": max_side_px,
+        "converted_at_utc": datetime.now(timezone.utc).isoformat(),
+        "baugruppen": results,
+    }
+    _save_json(output_root / "batch_manifest.json", batch_manifest)
+    return batch_manifest
+
+
 def iter_llm_image_batches(
     baugruppe_manifest: dict,
     *,
@@ -350,6 +422,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--format", choices=["png", "jpg", "jpeg"], default="png")
     parser.add_argument("--max-side-px", type=int, default=3000)
     parser.add_argument("--no-recursive", action="store_true")
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Treat source as a root folder containing multiple Baugruppe folders.",
+    )
     parser.add_argument("--force", action="store_true")
     return parser
 
@@ -358,7 +435,18 @@ def main() -> None:
     args = _build_parser().parse_args()
     source = Path(args.source)
 
-    if source.is_file():
+    if args.batch:
+        manifest = convert_many_baugruppen(
+            source,
+            args.output,
+            recursive=not args.no_recursive,
+            dpi=args.dpi,
+            image_format=args.format,
+            max_side_px=args.max_side_px,
+            force=args.force,
+        )
+        print(json.dumps(manifest, ensure_ascii=False, indent=2))
+    elif source.is_file():
         manifest = convert_pdf_to_images(
             source,
             args.output,
@@ -384,4 +472,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
