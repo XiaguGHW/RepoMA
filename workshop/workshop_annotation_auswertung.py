@@ -262,8 +262,8 @@ def main() -> None:
 
     if len(groundtruth_files) != 1:
         raise FileNotFoundError(f"Erwartet genau eine Ground-Truth-Datei ({GROUNDTRUTH_PATTERN}), gefunden: {groundtruth_files}")
-    if len(participant_files) != 5:
-        raise FileNotFoundError(f"Erwartet genau 5 Teilnehmer-Dateien ({PARTICIPANT_PATTERN}), gefunden: {participant_files}")
+    if len(participant_files) < 2:
+        raise FileNotFoundError(f"Erwartet mindestens 2 Teilnehmer-Dateien ({PARTICIPANT_PATTERN}), gefunden: {participant_files}")
 
     gt_sheet, groundtruth, gt_cols = load_groundtruth(groundtruth_files[0])
 
