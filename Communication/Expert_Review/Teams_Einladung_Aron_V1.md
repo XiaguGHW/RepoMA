@@ -10,6 +10,6 @@ Im Rahmen meiner Masterarbeit arbeite ich aktuell an einem BMG-Projekt, dessen l
 
 Ein wichtiger Baustein dafür ist ein möglichst eindeutiges und praxisnahes Funktionsklassenschema. Deshalb möchte ich dieses gemeinsam mit erfahrenen Bosch-Ingenieurinnen und -Ingenieuren im Rahmen eines Expert Reviews überprüfen.
 
-Ich wollte dich deshalb fragen, ob du Zeit hättest, daran teilzunehmen. Die Aufgabe besteht darin, etwa 60 Baugruppen jeweils einer von sechs Funktionsklassen zuzuordnen.
+Ich wollte dich deshalb fragen, ob du Zeit hättest, daran teilzunehmen. Es geht im Grunde einfach darum, etwa 60 Baugruppen jeweils einer von sechs Funktionsklassen zuzuordnen.
 
 Gerade deine Erfahrung wäre dafür sehr wertvoll. Ich würde mich deshalb sehr freuen, wenn du dabei mitmachen könntest. Deine Teilnahme würde mir und dem Projekt sehr helfen. Wenn du im Moment allerdings wenig Zeit hast, ist das natürlich auch völlig in Ordnung. 😊
