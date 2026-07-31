@@ -55,3 +55,7 @@ Nach genauerer Betrachtung ist Rotationseinheit nachvollziehbarer. Die Hauptfunk
 ## 3. Was könnte man im Regelwerk ergänzen?
 
 Aus meiner Sicht ist hier keine grundsätzliche Änderung des Regelwerks notwendig.
+
+# BG: Unsichere Zuordnung Kombinierte Einheit vs. Rotationseinheit
+
+Ich habe das BG zunächst als Kombinierte Einheit eingeordnet, weil ich mir bei der Zuordnung nicht ganz sicher war. In der DFC-Struktur waren mehrere unterschiedliche Elemente sichtbar, z. B. Greiferbacken, Parallelgreifer, PN-Zylinder sowie Führungsschiene und Führungswagen, sodass es für mich zunächst nicht eindeutig wie eine reine Rotationseinheit wirkte.
