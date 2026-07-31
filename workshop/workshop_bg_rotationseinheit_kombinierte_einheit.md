@@ -27,3 +27,17 @@ Nach genauerer Betrachtung ist Kombinierte Einheit nachvollziehbarer. Die für G
 ## 3. Was könnte man im Regelwerk ergänzen?
 
 Aus meiner Sicht ist hier keine Änderung des Regelwerks notwendig.
+
+# BG: Portal/Gantry vs. Kombinierte Einheit
+
+## 1. Warum habe ich Gantry gewählt?
+
+Ich habe das BG zunächst als Gantry eingeordnet, weil die Benennung „Portal“ bzw. „gantry“ direkt darauf hingedeutet hat. Außerdem wirkte die Baugruppe im CAD auf den ersten Blick wie ein Portalaufbau mit mehreren Bewegungsachsen.
+
+## 2. Welche andere Klasse wäre auch denkbar?
+
+Nach genauerer Betrachtung ist Kombinierte Einheit nachvollziehbarer. Laut Regelwerk sind Baugruppen mit zwei überlagerten Linearbewegungen keine Gantries, wenn eine Richtung vertikal verläuft.
+
+## 3. Was könnte man im Regelwerk ergänzen?
+
+Aus meiner Sicht ist hier keine Änderung des Regelwerks notwendig. Der Fehler lag eher daran, dass ich dieses Merkmal mit der vertikalen Bewegungsrichtung nicht richtig berücksichtigt habe.
