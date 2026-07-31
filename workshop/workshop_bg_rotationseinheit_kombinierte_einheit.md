@@ -41,3 +41,17 @@ Nach genauerer Betrachtung ist Kombinierte Einheit nachvollziehbarer. Laut Regel
 ## 3. Was könnte man im Regelwerk ergänzen?
 
 Aus meiner Sicht ist hier keine Änderung des Regelwerks notwendig. Der Fehler lag eher daran, dass ich dieses Merkmal mit der vertikalen Bewegungsrichtung nicht richtig berücksichtigt habe.
+
+# BG: Kombinierte Einheit vs. Rotationseinheit
+
+## 1. Warum habe ich Kombinierte Einheit gewählt?
+
+Ich habe das BG zunächst als Kombinierte Einheit eingeordnet, weil ich das CAD-Bild anfangs falsch interpretiert habe. Ich dachte, dort sei ein schlittenähnliches Bauteil bzw. eine lineare Bewegung erkennbar, tatsächlich war aber kein solcher translatorischer Aktor vorhanden.
+
+## 2. Welche andere Klasse wäre auch denkbar?
+
+Nach genauerer Betrachtung ist Rotationseinheit nachvollziehbarer. Die Hauptfunktion der Baugruppe ist das Wenden bzw. Schwenken, und es ist kein klarer translatorischer Aktor wie Schlitten, Linearachse oder Kompaktschlitten erkennbar.
+
+## 3. Was könnte man im Regelwerk ergänzen?
+
+Aus meiner Sicht ist hier keine grundsätzliche Änderung des Regelwerks notwendig.
