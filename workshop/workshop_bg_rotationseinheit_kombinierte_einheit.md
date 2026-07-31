@@ -13,3 +13,17 @@ Nach dem Blick in die DFC-Struktur ist Kombinierte Einheit nachvollziehbarer. Do
 ## 3. Was könnte man im Regelwerk ergänzen?
 
 Aus meiner Sicht muss das Regelwerk hier nicht grundsätzlich geändert werden. Sinnvoll wäre nur eine kurze Ergänzung in der Einleitung, welche typischen Bauteile als translatorische Aktoren verstanden werden können, z. B. Schlitten, Kompaktschlitten, Linearschlitten, Linearachse, Hubzylinder, Führungszylinder oder klassische Pneumatikzylinder.
+
+# BG: Gantry vs. Kombinierte Einheit
+
+## 1. Warum habe ich Gantry gewählt?
+
+Ich habe das BG zunächst als Gantry eingeordnet, weil im CAD mehrere lineare Achsen bzw. Bewegungsrichtungen sichtbar waren. Dadurch wirkte die Baugruppe auf den ersten Blick wie ein System zur Bewegung in einem größeren Arbeitsbereich.
+
+## 2. Welche andere Klasse wäre auch denkbar?
+
+Nach genauerer Betrachtung ist Kombinierte Einheit nachvollziehbarer. Die für Gantry typische beidseitige Führung der ersten horizontalen Achse ist im CAD nicht eindeutig erkennbar.
+
+## 3. Was könnte man im Regelwerk ergänzen?
+
+Aus meiner Sicht ist hier keine Änderung des Regelwerks notwendig.
