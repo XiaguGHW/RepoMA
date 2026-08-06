@@ -1,19 +1,19 @@
 """
-主入口：用一个指定的 LLM 模型，对一批 Baugruppe 进行 Funktionsklasse 分类。
+Main entry point: classify a batch of Baugruppen into functional classes with a selected LLM model.
 
-对每个 Baugruppe，脚本会递归扫描其资料文件夹，并将所有支持的文件一起
-发送给模型；不再使用 Priorität 1 / Priorität 2 或 file inventory。
+For each Baugruppe, the script recursively scans its document folder and sends all supported files
+to the model together. Priority 1 / Priority 2 and a file inventory are no longer used.
 
-运行示例（先用 20 个 BG 做测试）：
+Example command (first test with 20 BGs):
     python run_classification.py \
         --input-excel input/all_HBG_random_no_label.xlsx \
         --classes-excel input/Functional_classes.xlsx \
         --data-root "processed HBG" \
         --max-rows 20
 
-它依赖同一文件夹内 Anja 的 llm_connector.py；该 connector 负责实际调用
-Gemini / Claude / GPT。本文件只负责：读取实验数据、扫描 BG 文件夹、构建分类 Prompt、
-保存结果。
+It depends on Anja's llm_connector.py in the same folder; that connector performs the actual calls to
+Gemini / Claude / GPT. This file only reads the experiment data, scans BG folders, builds the classification prompt, and
+saves the results.
 """
 
 import argparse
@@ -29,12 +29,12 @@ import pandas as pd
 try:
     from tqdm import tqdm
 except ImportError:
-    # 没有 tqdm 时仍可运行，只是不显示进度条。
+    # The script still runs without tqdm, but does not show a progress bar.
     def tqdm(iterable, **_kwargs):
         return iterable
 
 try:
-    # python-dotenv 只用于读取本地 .env；没有安装时仍可使用已设置好的系统环境变量。
+    # python-dotenv is only used to read the local .env file; without it, already configured environment variables can still be used.
     from dotenv import load_dotenv
 except ImportError:
     def load_dotenv() -> bool:
@@ -42,10 +42,10 @@ except ImportError:
         return False
 
 
-# 这些是 Anja 的 connector 能直接接收的文件类型。
+# These are the file types that Anja's connector can accept directly.
 SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 
-# 文件盘点表的真实列名可能略有不同。因此可用 CLI 参数指定，也会先在这些常见名字中自动找。
+# The actual column names may vary. They can be supplied through CLI parameters; otherwise these common names are detected automatically.
 ID_COLUMN_CANDIDATES = (
     "Baugruppennummer", "Baugruppen-ID", "Baugruppen_ID", "HBG", "ID",
     "SAP-Nummer", "SAP Nummer",
@@ -84,16 +84,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=Path("outputs"))
     parser.add_argument(
         "--data-root", required=True, type=Path,
-        help="包含各 Baugruppe 文件夹的根目录，例如 processed HBG。",
+        help="Root directory containing the Baugruppe folders, for example processed HBG.",
     )
     parser.add_argument("--max-rows", type=int, default=None,
-                        help="只处理输入 Excel 的前 N 行，适合 20 BG pilot。")
+                        help="Process only the first N rows of the input Excel, useful for a 20-BG pilot.")
 
-    # 默认列名可通过命令行覆盖，不需要修改源码。
+    # Default column names can be overridden on the command line; no source-code change is required.
     parser.add_argument("--id-column", default=None)
     parser.add_argument(
         "--teamcenter-column", default=None,
-        help="Excel 中 Teamcenter ID 所在的列。默认自动识别；若没有该列，可不填。",
+        help="Column containing the Teamcenter ID in the Excel file. Detected automatically by default; it may be omitted if absent.",
     )
     parser.add_argument("--name-column", default=None)
     parser.add_argument("--class-column", default=None)
@@ -101,7 +101,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def find_column(df: pd.DataFrame, requested: str | None, candidates: tuple[str, ...], label: str) -> str:
-    """找到用户指定列，或自动匹配常见列名；找不到时明确列出实际表头。"""
+    """Find a user-specified column or automatically match common column names; list the actual headers if no match is found."""
     if requested:
         if requested in df.columns:
             return requested
@@ -119,7 +119,7 @@ def find_column(df: pd.DataFrame, requested: str | None, candidates: tuple[str, 
 def find_optional_column(
     df: pd.DataFrame, requested: str | None, candidates: tuple[str, ...], label: str,
 ) -> str | None:
-    """与 find_column 相同，但 Teamcenter ID 是可选信息，缺少时不报错。"""
+    """Same as find_column, but Teamcenter ID is optional and its absence does not raise an error."""
     if requested:
         return find_column(df, requested, candidates, label)
     return next((candidate for candidate in candidates if candidate in df.columns), None)
@@ -129,14 +129,14 @@ def read_classes(classes_path: Path, requested_column: str | None) -> list[str]:
     df = pd.read_excel(classes_path)
     class_column = find_column(df, requested_column, CLASS_COLUMN_CANDIDATES, "class_column")
     classes = [str(value).strip() for value in df[class_column].dropna() if str(value).strip()]
-    classes = list(dict.fromkeys(classes))  # 保留 Excel 中的顺序，同时去除重复项。
+    classes = list(dict.fromkeys(classes))  # Preserve the Excel order while removing duplicates.
     if not classes:
         raise ValueError(f"No allowed classes found in '{classes_path}'.")
     return classes
 
 
 def assembly_id_variants(value: object) -> list[str]:
-    """生成可能的文件夹名，兼容 Excel 将 123 读成 123.0 的情况。"""
+    """Generate possible folder names, including the case where Excel reads 123 as 123.0."""
     raw = str(value).strip()
     variants = [raw]
     try:
@@ -149,7 +149,7 @@ def assembly_id_variants(value: object) -> list[str]:
 
 
 def normalize_identifier(value: object) -> str:
-    """用于比较 ID：忽略空格、连字符和 Excel 的数字 .0 显示差异。"""
+    """Normalize IDs for comparison: ignore spaces, hyphens, and Excel's numeric .0 display difference."""
     if pd.isna(value):
         return ""
     raw = str(value).strip()
@@ -165,7 +165,7 @@ def normalize_identifier(value: object) -> str:
 def unique_folder_match(
     folders: list[Path], predicate, status: str,
 ) -> tuple[Path | None, str | None]:
-    """只接受唯一候选；多个候选必须人工核对，避免把错误资料传给模型。"""
+    """Accept only a unique candidate; multiple candidates require manual review to avoid sending incorrect documents to the model."""
     matches = [folder for folder in folders if predicate(normalize_identifier(folder.name))]
     if len(matches) == 1:
         return matches[0], status
@@ -175,10 +175,10 @@ def unique_folder_match(
 
 
 def teamcenter_fragments(teamcenter_id: object, minimum_length: int = 6) -> list[str]:
-    """生成 Teamcenter ID 的长连续片段，例如 12345678 -> 12345678、1234567、...。
+    """Generate long contiguous Teamcenter ID fragments, e.g. 12345678 -> 12345678, 1234567, ...
 
-    有些文件夹只保留 Teamcenter ID 的一部分。为避免很短数字造成误匹配，只尝试
-    至少 6 个字符的片段，并且后续仍要求只匹配到一个文件夹。
+    Some folders retain only part of the Teamcenter ID. To avoid false matches from short numbers, try only
+    fragments of at least 6 characters and still require a unique folder match.
     """
     normalized = normalize_identifier(teamcenter_id)
     fragments: list[str] = []
@@ -191,27 +191,27 @@ def teamcenter_fragments(teamcenter_id: object, minimum_length: int = 6) -> list
 def find_assembly_folder(
     assembly_id: object, teamcenter_id: object | None, data_root: Path,
 ) -> tuple[Path | None, str]:
-    """按可靠性寻找 BG 文件夹，并返回匹配方式供结果 Excel 人工复核。"""
+    """Find the BG folder by reliability order and return the match method for manual review in the result Excel."""
     folders = sorted(path for path in data_root.iterdir() if path.is_dir())
     sap_id = normalize_identifier(assembly_id)
     tc_id = normalize_identifier(teamcenter_id)
 
-    # 1. 文件夹名与 Excel 中的某个编号完全相同：最可靠。
+    # 1. The folder name exactly matches an identifier in Excel: most reliable.
     for identifier, label in ((sap_id, "EXACT_ASSEMBLY_ID"), (tc_id, "EXACT_TEAMCENTER_ID")):
         if identifier:
             folder, status = unique_folder_match(folders, lambda name, x=identifier: name == x, label)
             if folder or status:
                 return folder, status
 
-    # 2. 完整编号出现在更长的文件夹名中，例如 HBG_123456_REV_A。
+    # 2. The full identifier appears in a longer folder name, e.g. HBG_123456_REV_A.
     for identifier, label in ((sap_id, "CONTAINS_ASSEMBLY_ID"), (tc_id, "CONTAINS_TEAMCENTER_ID")):
         if identifier:
             folder, status = unique_folder_match(folders, lambda name, x=identifier: x in name, label)
             if folder or status:
                 return folder, status
 
-    # 3. Teamcenter ID 的长片段出现在文件夹名中。例如 Teamcenter ID 为
-    #    ABCD12345678，而文件夹名仅保留 12345678。只接受唯一匹配。
+    # 3. A long Teamcenter ID fragment appears in the folder name. For example, when the Teamcenter ID is
+    #    ABCD12345678but the folder name retains only 12345678. Accept only a unique match.
     if tc_id:
         for fragment in teamcenter_fragments(tc_id):
             folder, status = unique_folder_match(
@@ -228,7 +228,7 @@ def find_assembly_folder(
 def collect_all_supported_files(
     assembly_id: object, teamcenter_id: object | None, data_root: Path,
 ) -> tuple[list[str], Path | None, str]:
-    """找到对应 BG 文件夹后，递归收集其全部可输入的 PDF/图片文件。"""
+    """After locating the matching BG folder, recursively collect all supported PDF and image files."""
     assembly_folder, match_status = find_assembly_folder(assembly_id, teamcenter_id, data_root)
     if not assembly_folder:
         logging.warning(
@@ -260,14 +260,14 @@ Wähle genau eine der folgenden Funktionsklassen:
 
 
 def extract_label(raw_response: object, allowed_classes: list[str]) -> str | None:
-    """仅接受一个确切标签；容忍模型偶尔输出的空格或 Markdown 代码框。"""
+    """Accept only one exact label; tolerate occasional extra spaces or Markdown code fences in the model response."""
     answer = str(raw_response).strip().strip("`").strip()
     allowed_with_fallback = allowed_classes + ["Nicht klassifizierbar"]
     exact_lookup = {name.casefold(): name for name in allowed_with_fallback}
     if answer.casefold() in exact_lookup:
         return exact_lookup[answer.casefold()]
 
-    # 如果模型无意中多加了一行说明，只在整段文字中恰好出现一个允许标签时才提取，避免猜测。
+    # If the model accidentally adds an explanation, extract a label only when exactly one allowed label occurs in the full response; do not guess.
     matches = [name for name in allowed_with_fallback if name.casefold() in answer.casefold()]
     unique_matches = list(dict.fromkeys(matches))
     return unique_matches[0] if len(unique_matches) == 1 else None
@@ -281,7 +281,7 @@ def make_output_path(args: argparse.Namespace) -> Path:
 
 
 def create_connector(model_name: str, api_key: str):
-    """延迟导入连接器，使 --help 和 Excel 参数检查不依赖公司连接器文件。"""
+    """Import the connector lazily so that --help and Excel-parameter validation do not depend on the company connector file."""
     try:
         from llm_connector import LLMConnector
     except ImportError as error:
@@ -293,7 +293,7 @@ def create_connector(model_name: str, api_key: str):
 
 
 def write_checkpoint(df: pd.DataFrame, output_path: Path) -> None:
-    """每处理一行都保存一次；中途网络失败时，已完成的结果也不会丢失。"""
+    """Save after every row so completed results are not lost if a network failure occurs."""
     df.to_excel(output_path, index=False, engine="openpyxl")
 
 
@@ -325,7 +325,7 @@ def run(args: argparse.Namespace) -> Path:
     allowed_classes = read_classes(args.classes_excel, args.class_column)
     output_path = make_output_path(args)
 
-    # 这一步只创建 connector 并识别模型家族；还没有真正请求 LLM。
+    # This step only creates the connector and detects the model family; it does not yet make an LLM request.
     llm = create_connector(args.model, os.environ["BOSCH_FARM_SUBSCRIPTION_KEY"])
 
     result_df = input_df.copy()
