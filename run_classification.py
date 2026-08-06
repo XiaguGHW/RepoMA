@@ -1,19 +1,15 @@
-"""
-Main entry point: classify a batch of Baugruppen into functional classes with a selected LLM model.
+"""Classify Baugruppen into functional classes with one selected LLM.
 
-For each Baugruppe, the script recursively scans its document folder and sends all supported files
-to the model together. Priority 1 / Priority 2 and a file inventory are no longer used.
+For every Baugruppe, the script recursively scans the matched document folder and
+sends all supported files to the model. It does not use Priority 1 / Priority 2 or
+a file inventory.
 
-Example command (first test with 20 BGs):
-    python run_classification.py \
-        --input-excel input/all_HBG_random_no_label.xlsx \
-        --classes-excel input/Functional_classes.xlsx \
-        --data-root "processed HBG" \
-        --max-rows 20
+The standard files below are resolved relative to this script, so the command can
+stay short. The only machine-specific setting is ``HBG_DATA_ROOT`` in ``.env``.
 
-It depends on Anja's llm_connector.py in the same folder; that connector performs the actual calls to
-Gemini / Claude / GPT. This file only reads the experiment data, scans BG folders, builds the classification prompt, and
-saves the results.
+This script requires Anja's ``llm_connector.py`` in the same folder. The connector
+performs the Gemini / Claude / GPT request; this file reads experiment data, finds
+BG folders, builds the classification prompt, and saves results.
 """
 
 import argparse
@@ -29,23 +25,30 @@ import pandas as pd
 try:
     from tqdm import tqdm
 except ImportError:
-    # The script still runs without tqdm, but does not show a progress bar.
+    # The script still works without tqdm, but no progress bar is shown.
     def tqdm(iterable, **_kwargs):
         return iterable
 
 try:
-    # python-dotenv is only used to read the local .env file; without it, already configured environment variables can still be used.
+    # python-dotenv only loads a local .env; system environment variables still work without it.
     from dotenv import load_dotenv
 except ImportError:
-    def load_dotenv() -> bool:
+    def load_dotenv(*_args, **_kwargs) -> bool:
         logging.warning("python-dotenv is not installed; .env will not be loaded.")
         return False
 
 
-# These are the file types that Anja's connector can accept directly.
+# Default project paths. They are independent of the terminal's current folder.
+PROJECT_DIR = Path(__file__).resolve().parent
+DEFAULT_INPUT_EXCEL = PROJECT_DIR / "input" / "all_HBG_random_no_label.xlsx"
+DEFAULT_CLASSES_EXCEL = PROJECT_DIR / "input" / "Functional_classes.xlsx"
+DEFAULT_OUTPUT_DIR = PROJECT_DIR / "outputs"
+
+# File types that Anja's connector can send directly to the LLM.
 SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 
-# The actual column names may vary. They can be supplied through CLI parameters; otherwise these common names are detected automatically.
+# The actual spreadsheet column names can vary. They can be passed via CLI; otherwise
+# the script attempts to detect one of these common names.
 ID_COLUMN_CANDIDATES = (
     "Baugruppennummer", "Baugruppen-ID", "Baugruppen_ID", "HBG", "ID",
     "SAP-Nummer", "SAP Nummer",
@@ -78,22 +81,27 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Classify Baugruppen with an LLM and save one timestamped Excel result."
     )
-    parser.add_argument("--input-excel", required=True, type=Path)
-    parser.add_argument("--classes-excel", required=True, type=Path)
+    data_root_from_env = os.getenv("HBG_DATA_ROOT")
+    parser.add_argument("--input-excel", type=Path, default=DEFAULT_INPUT_EXCEL)
+    parser.add_argument("--classes-excel", type=Path, default=DEFAULT_CLASSES_EXCEL)
     parser.add_argument("--model", default="gemini-2.5-pro")
-    parser.add_argument("--output-dir", type=Path, default=Path("outputs"))
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument(
-        "--data-root", required=True, type=Path,
-        help="Root directory containing the Baugruppe folders, for example processed HBG.",
+        "--data-root", type=Path,
+        default=Path(data_root_from_env).expanduser() if data_root_from_env else None,
+        help=(
+            "Absolute root folder containing all Baugruppe folders. Defaults to "
+            "HBG_DATA_ROOT from .env."
+        ),
     )
     parser.add_argument("--max-rows", type=int, default=None,
-                        help="Process only the first N rows of the input Excel, useful for a 20-BG pilot.")
+                        help="Process only the first N input rows; useful for a pilot run.")
 
-    # Default column names can be overridden on the command line; no source-code change is required.
+    # Default column detection can be overridden through CLI without editing the script.
     parser.add_argument("--id-column", default=None)
     parser.add_argument(
         "--teamcenter-column", default=None,
-        help="Column containing the Teamcenter ID in the Excel file. Detected automatically by default; it may be omitted if absent.",
+        help="Teamcenter ID column. Detected automatically by default; optional.",
     )
     parser.add_argument("--name-column", default=None)
     parser.add_argument("--class-column", default=None)
@@ -101,7 +109,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def find_column(df: pd.DataFrame, requested: str | None, candidates: tuple[str, ...], label: str) -> str:
-    """Find a user-specified column or automatically match common column names; list the actual headers if no match is found."""
+    """Use an explicitly requested column or detect a common name."""
     if requested:
         if requested in df.columns:
             return requested
@@ -119,7 +127,7 @@ def find_column(df: pd.DataFrame, requested: str | None, candidates: tuple[str, 
 def find_optional_column(
     df: pd.DataFrame, requested: str | None, candidates: tuple[str, ...], label: str,
 ) -> str | None:
-    """Same as find_column, but Teamcenter ID is optional and its absence does not raise an error."""
+    """Like find_column, except a Teamcenter ID is optional."""
     if requested:
         return find_column(df, requested, candidates, label)
     return next((candidate for candidate in candidates if candidate in df.columns), None)
@@ -129,14 +137,14 @@ def read_classes(classes_path: Path, requested_column: str | None) -> list[str]:
     df = pd.read_excel(classes_path)
     class_column = find_column(df, requested_column, CLASS_COLUMN_CANDIDATES, "class_column")
     classes = [str(value).strip() for value in df[class_column].dropna() if str(value).strip()]
-    classes = list(dict.fromkeys(classes))  # Preserve the Excel order while removing duplicates.
+    classes = list(dict.fromkeys(classes))  # Preserve Excel order while removing duplicates.
     if not classes:
         raise ValueError(f"No allowed classes found in '{classes_path}'.")
     return classes
 
 
 def assembly_id_variants(value: object) -> list[str]:
-    """Generate possible folder names, including the case where Excel reads 123 as 123.0."""
+    """Create possible folder names, including Excel's 123 versus 123.0 variation."""
     raw = str(value).strip()
     variants = [raw]
     try:
@@ -149,7 +157,7 @@ def assembly_id_variants(value: object) -> list[str]:
 
 
 def normalize_identifier(value: object) -> str:
-    """Normalize IDs for comparison: ignore spaces, hyphens, and Excel's numeric .0 display difference."""
+    """Normalize IDs for comparison by ignoring punctuation and Excel's .0 variation."""
     if pd.isna(value):
         return ""
     raw = str(value).strip()
@@ -165,7 +173,7 @@ def normalize_identifier(value: object) -> str:
 def unique_folder_match(
     folders: list[Path], predicate, status: str,
 ) -> tuple[Path | None, str | None]:
-    """Accept only a unique candidate; multiple candidates require manual review to avoid sending incorrect documents to the model."""
+    """Accept only one match; multiple candidates require manual review."""
     matches = [folder for folder in folders if predicate(normalize_identifier(folder.name))]
     if len(matches) == 1:
         return matches[0], status
@@ -175,10 +183,10 @@ def unique_folder_match(
 
 
 def teamcenter_fragments(teamcenter_id: object, minimum_length: int = 6) -> list[str]:
-    """Generate long contiguous Teamcenter ID fragments, e.g. 12345678 -> 12345678, 1234567, ...
+    """Create long contiguous Teamcenter ID fragments, e.g. 12345678 -> 12345678, 1234567.
 
-    Some folders retain only part of the Teamcenter ID. To avoid false matches from short numbers, try only
-    fragments of at least 6 characters and still require a unique folder match.
+    Some folders retain only part of a Teamcenter ID. To avoid accidental matches,
+    fragments shorter than six characters are excluded and matches must remain unique.
     """
     normalized = normalize_identifier(teamcenter_id)
     fragments: list[str] = []
@@ -191,27 +199,27 @@ def teamcenter_fragments(teamcenter_id: object, minimum_length: int = 6) -> list
 def find_assembly_folder(
     assembly_id: object, teamcenter_id: object | None, data_root: Path,
 ) -> tuple[Path | None, str]:
-    """Find the BG folder by reliability order and return the match method for manual review in the result Excel."""
+    """Find the BG folder by reliability order and return the matching method."""
     folders = sorted(path for path in data_root.iterdir() if path.is_dir())
     sap_id = normalize_identifier(assembly_id)
     tc_id = normalize_identifier(teamcenter_id)
 
-    # 1. The folder name exactly matches an identifier in Excel: most reliable.
+    # 1. An exact folder name match is the most reliable option.
     for identifier, label in ((sap_id, "EXACT_ASSEMBLY_ID"), (tc_id, "EXACT_TEAMCENTER_ID")):
         if identifier:
             folder, status = unique_folder_match(folders, lambda name, x=identifier: name == x, label)
             if folder or status:
                 return folder, status
 
-    # 2. The full identifier appears in a longer folder name, e.g. HBG_123456_REV_A.
+    # 2. The full ID appears in a longer folder name, e.g. HBG_123456_REV_A.
     for identifier, label in ((sap_id, "CONTAINS_ASSEMBLY_ID"), (tc_id, "CONTAINS_TEAMCENTER_ID")):
         if identifier:
             folder, status = unique_folder_match(folders, lambda name, x=identifier: x in name, label)
             if folder or status:
                 return folder, status
 
-    # 3. A long Teamcenter ID fragment appears in the folder name. For example, when the Teamcenter ID is
-    #    ABCD12345678but the folder name retains only 12345678. Accept only a unique match.
+    # 3. A long Teamcenter ID fragment appears in the folder name, e.g.
+    #    ABCD12345678 in Excel but only 12345678 in the folder. Matches must be unique.
     if tc_id:
         for fragment in teamcenter_fragments(tc_id):
             folder, status = unique_folder_match(
@@ -228,7 +236,7 @@ def find_assembly_folder(
 def collect_all_supported_files(
     assembly_id: object, teamcenter_id: object | None, data_root: Path,
 ) -> tuple[list[str], Path | None, str]:
-    """After locating the matching BG folder, recursively collect all supported PDF and image files."""
+    """Find the BG folder and recursively collect its supported PDF/image files."""
     assembly_folder, match_status = find_assembly_folder(assembly_id, teamcenter_id, data_root)
     if not assembly_folder:
         logging.warning(
@@ -260,14 +268,14 @@ Wähle genau eine der folgenden Funktionsklassen:
 
 
 def extract_label(raw_response: object, allowed_classes: list[str]) -> str | None:
-    """Accept only one exact label; tolerate occasional extra spaces or Markdown code fences in the model response."""
+    """Accept one exact label while tolerating extra whitespace or Markdown backticks."""
     answer = str(raw_response).strip().strip("`").strip()
     allowed_with_fallback = allowed_classes + ["Nicht klassifizierbar"]
     exact_lookup = {name.casefold(): name for name in allowed_with_fallback}
     if answer.casefold() in exact_lookup:
         return exact_lookup[answer.casefold()]
 
-    # If the model accidentally adds an explanation, extract a label only when exactly one allowed label occurs in the full response; do not guess.
+    # If the model adds an explanation, extract only when exactly one allowed label occurs.
     matches = [name for name in allowed_with_fallback if name.casefold() in answer.casefold()]
     unique_matches = list(dict.fromkeys(matches))
     return unique_matches[0] if len(unique_matches) == 1 else None
@@ -281,7 +289,7 @@ def make_output_path(args: argparse.Namespace) -> Path:
 
 
 def create_connector(model_name: str, api_key: str):
-    """Import the connector lazily so that --help and Excel-parameter validation do not depend on the company connector file."""
+    """Delay the connector import so --help and Excel validation do not need it."""
     try:
         from llm_connector import LLMConnector
     except ImportError as error:
@@ -293,7 +301,7 @@ def create_connector(model_name: str, api_key: str):
 
 
 def write_checkpoint(df: pd.DataFrame, output_path: Path) -> None:
-    """Save after every row so completed results are not lost if a network failure occurs."""
+    """Save after each row so completed results survive a network failure."""
     df.to_excel(output_path, index=False, engine="openpyxl")
 
 
@@ -302,6 +310,15 @@ def run(args: argparse.Namespace) -> Path:
         raise EnvironmentError("BOSCH_FARM_SUBSCRIPTION_KEY is not set in .env or the environment.")
     if args.max_rows is not None and args.max_rows <= 0:
         raise ValueError("--max-rows must be greater than 0.")
+    if args.data_root is None:
+        raise EnvironmentError(
+            "HBG_DATA_ROOT is not set. Add an absolute path to .env, for example: "
+            "HBG_DATA_ROOT=C:\\path\\to\\processed_HBG"
+        )
+    if not args.data_root.is_absolute():
+        raise ValueError(
+            f"--data-root must be an absolute local path, not: {args.data_root}"
+        )
 
     input_df = pd.read_excel(args.input_excel)
     input_id_column = find_column(input_df, args.id_column, ID_COLUMN_CANDIDATES, "id_column")
@@ -325,7 +342,7 @@ def run(args: argparse.Namespace) -> Path:
     allowed_classes = read_classes(args.classes_excel, args.class_column)
     output_path = make_output_path(args)
 
-    # This step only creates the connector and detects the model family; it does not yet make an LLM request.
+    # This only creates the connector and detects its model family; no LLM request yet.
     llm = create_connector(args.model, os.environ["BOSCH_FARM_SUBSCRIPTION_KEY"])
 
     result_df = input_df.copy()
@@ -389,7 +406,7 @@ def run(args: argparse.Namespace) -> Path:
 
 
 if __name__ == "__main__":
-    load_dotenv()
+    load_dotenv(PROJECT_DIR / ".env")
     arguments = parse_args()
     log_directory = arguments.output_dir / "logs"
     log_directory.mkdir(parents=True, exist_ok=True)
