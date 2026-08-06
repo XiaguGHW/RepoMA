@@ -46,8 +46,17 @@ except ImportError:
 SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 
 # 文件盘点表的真实列名可能略有不同。因此可用 CLI 参数指定，也会先在这些常见名字中自动找。
-ID_COLUMN_CANDIDATES = ("Baugruppennummer", "Baugruppen-ID", "Baugruppen_ID", "HBG")
-NAME_COLUMN_CANDIDATES = ("Benennung", "Baugruppenname", "Baugruppenbezeichnung")
+ID_COLUMN_CANDIDATES = (
+    "Baugruppennummer", "Baugruppen-ID", "Baugruppen_ID", "HBG", "ID",
+    "SAP-Nummer", "SAP Nummer",
+)
+TEAMCENTER_COLUMN_CANDIDATES = (
+    "Teamcenter ID", "Teamcenter-ID", "Teamcenter Nummer", "Teamcenter-Nummer",
+    "TC ID", "TC-ID",
+)
+NAME_COLUMN_CANDIDATES = (
+    "Benennung", "Benennung (EN)", "Baugruppenname", "Baugruppenbezeichnung",
+)
 CLASS_COLUMN_CANDIDATES = ("Funktionsklasse", "Functional class", "Functional_class")
 
 GENERATION_CONFIG = {
@@ -82,6 +91,10 @@ def parse_args() -> argparse.Namespace:
 
     # 默认列名可通过命令行覆盖，不需要修改源码。
     parser.add_argument("--id-column", default=None)
+    parser.add_argument(
+        "--teamcenter-column", default=None,
+        help="Excel 中 Teamcenter ID 所在的列。默认自动识别；若没有该列，可不填。",
+    )
     parser.add_argument("--name-column", default=None)
     parser.add_argument("--class-column", default=None)
     return parser.parse_args()
@@ -101,6 +114,15 @@ def find_column(df: pd.DataFrame, requested: str | None, candidates: tuple[str, 
         f"Could not detect the {label} column. Available: {list(df.columns)}. "
         f"Pass it explicitly, for example --{label.replace('_', '-')} COLUMN_NAME."
     )
+
+
+def find_optional_column(
+    df: pd.DataFrame, requested: str | None, candidates: tuple[str, ...], label: str,
+) -> str | None:
+    """与 find_column 相同，但 Teamcenter ID 是可选信息，缺少时不报错。"""
+    if requested:
+        return find_column(df, requested, candidates, label)
+    return next((candidate for candidate in candidates if candidate in df.columns), None)
 
 
 def read_classes(classes_path: Path, requested_column: str | None) -> list[str]:
@@ -126,23 +148,104 @@ def assembly_id_variants(value: object) -> list[str]:
     return list(dict.fromkeys(variants))
 
 
-def collect_all_supported_files(assembly_id: object, data_root: Path) -> list[str]:
-    """递归收集一个 BG 文件夹下所有可由 connector 输入的 PDF/图片文件。"""
-    for folder_name in assembly_id_variants(assembly_id):
-        assembly_folder = data_root / folder_name
-        if assembly_folder.is_dir():
-            files = sorted(
-                path for path in assembly_folder.rglob("*")
-                if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
-            )
-            logging.info(
-                "%d supported files found for BG %s in %s",
-                len(files), assembly_id, assembly_folder,
-            )
-            return [str(path) for path in files]
+def normalize_identifier(value: object) -> str:
+    """用于比较 ID：忽略空格、连字符和 Excel 的数字 .0 显示差异。"""
+    if pd.isna(value):
+        return ""
+    raw = str(value).strip()
+    try:
+        number = float(raw)
+        if number.is_integer():
+            raw = str(int(number))
+    except ValueError:
+        pass
+    return re.sub(r"[^A-Za-z0-9]+", "", raw).casefold()
 
-    logging.warning("Folder for BG %s was not found below %s", assembly_id, data_root)
-    return []
+
+def unique_folder_match(
+    folders: list[Path], predicate, status: str,
+) -> tuple[Path | None, str | None]:
+    """只接受唯一候选；多个候选必须人工核对，避免把错误资料传给模型。"""
+    matches = [folder for folder in folders if predicate(normalize_identifier(folder.name))]
+    if len(matches) == 1:
+        return matches[0], status
+    if len(matches) > 1:
+        return None, f"AMBIGUOUS_{status}"
+    return None, None
+
+
+def teamcenter_fragments(teamcenter_id: object, minimum_length: int = 6) -> list[str]:
+    """生成 Teamcenter ID 的长连续片段，例如 12345678 -> 12345678、1234567、...。
+
+    有些文件夹只保留 Teamcenter ID 的一部分。为避免很短数字造成误匹配，只尝试
+    至少 6 个字符的片段，并且后续仍要求只匹配到一个文件夹。
+    """
+    normalized = normalize_identifier(teamcenter_id)
+    fragments: list[str] = []
+    for length in range(len(normalized), minimum_length - 1, -1):
+        for start in range(len(normalized) - length + 1):
+            fragments.append(normalized[start:start + length])
+    return list(dict.fromkeys(fragments))
+
+
+def find_assembly_folder(
+    assembly_id: object, teamcenter_id: object | None, data_root: Path,
+) -> tuple[Path | None, str]:
+    """按可靠性寻找 BG 文件夹，并返回匹配方式供结果 Excel 人工复核。"""
+    folders = sorted(path for path in data_root.iterdir() if path.is_dir())
+    sap_id = normalize_identifier(assembly_id)
+    tc_id = normalize_identifier(teamcenter_id)
+
+    # 1. 文件夹名与 Excel 中的某个编号完全相同：最可靠。
+    for identifier, label in ((sap_id, "EXACT_ASSEMBLY_ID"), (tc_id, "EXACT_TEAMCENTER_ID")):
+        if identifier:
+            folder, status = unique_folder_match(folders, lambda name, x=identifier: name == x, label)
+            if folder or status:
+                return folder, status
+
+    # 2. 完整编号出现在更长的文件夹名中，例如 HBG_123456_REV_A。
+    for identifier, label in ((sap_id, "CONTAINS_ASSEMBLY_ID"), (tc_id, "CONTAINS_TEAMCENTER_ID")):
+        if identifier:
+            folder, status = unique_folder_match(folders, lambda name, x=identifier: x in name, label)
+            if folder or status:
+                return folder, status
+
+    # 3. Teamcenter ID 的长片段出现在文件夹名中。例如 Teamcenter ID 为
+    #    ABCD12345678，而文件夹名仅保留 12345678。只接受唯一匹配。
+    if tc_id:
+        for fragment in teamcenter_fragments(tc_id):
+            folder, status = unique_folder_match(
+                folders, lambda name, x=fragment: x in name, "TEAMCENTER_FRAGMENT",
+            )
+            if folder or status:
+                return folder, status
+
+    if not sap_id and not tc_id:
+        return None, "NO_IDENTIFIER"
+    return None, "NOT_FOUND"
+
+
+def collect_all_supported_files(
+    assembly_id: object, teamcenter_id: object | None, data_root: Path,
+) -> tuple[list[str], Path | None, str]:
+    """找到对应 BG 文件夹后，递归收集其全部可输入的 PDF/图片文件。"""
+    assembly_folder, match_status = find_assembly_folder(assembly_id, teamcenter_id, data_root)
+    if not assembly_folder:
+        logging.warning(
+            "Folder for BG %s (Teamcenter: %s) was not found: %s",
+            assembly_id, teamcenter_id, match_status,
+        )
+        return [], None, match_status
+
+    files = sorted(
+        path for path in assembly_folder.rglob("*")
+        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
+    )
+    logging.info(
+        "%d supported files found for BG %s in %s (%s)",
+        len(files), assembly_id, assembly_folder, match_status,
+    )
+    return [str(path) for path in files], assembly_folder, match_status
 
 
 def build_question(assembly_name: object, allowed_classes: list[str]) -> str:
@@ -202,7 +305,17 @@ def run(args: argparse.Namespace) -> Path:
 
     input_df = pd.read_excel(args.input_excel)
     input_id_column = find_column(input_df, args.id_column, ID_COLUMN_CANDIDATES, "id_column")
+    teamcenter_column = find_optional_column(
+        input_df, args.teamcenter_column, TEAMCENTER_COLUMN_CANDIDATES, "teamcenter_column",
+    )
     name_column = find_column(input_df, args.name_column, NAME_COLUMN_CANDIDATES, "name_column")
+    if teamcenter_column:
+        logging.info("Using Teamcenter ID column: %s", teamcenter_column)
+    else:
+        logging.warning(
+            "No Teamcenter ID column detected. Folder matching will use only '%s'.",
+            input_id_column,
+        )
     if args.max_rows:
         input_df = input_df.head(args.max_rows).copy()
 
@@ -218,13 +331,15 @@ def run(args: argparse.Namespace) -> Path:
     result_df = input_df.copy()
     for column in (
         "Predicted_Label", "Raw_Model_Response", "Processing_Status", "Files_Used",
-        "File_Count", "Run_Model", "Run_Mode", "Run_Timestamp", "Token_Usage_JSON",
+        "File_Count", "Matched_Folder", "Folder_Match_Status", "Run_Model", "Run_Mode",
+        "Run_Timestamp", "Token_Usage_JSON",
     ):
         result_df[column] = pd.NA
 
     run_timestamp = datetime.now().isoformat(timespec="seconds")
     for index, row in tqdm(result_df.iterrows(), total=len(result_df), desc="Classifying"):
         assembly_id = row[input_id_column]
+        teamcenter_id = row[teamcenter_column] if teamcenter_column else None
         assembly_name = row[name_column]
         if pd.isna(assembly_id) or pd.isna(assembly_name) or not str(assembly_name).strip():
             result_df.loc[index, "Processing_Status"] = "SKIPPED: missing ID or Benennung"
@@ -232,9 +347,15 @@ def run(args: argparse.Namespace) -> Path:
             continue
 
         try:
-            files = collect_all_supported_files(assembly_id, args.data_root)
+            files, matched_folder, match_status = collect_all_supported_files(
+                assembly_id, teamcenter_id, args.data_root,
+            )
+            result_df.loc[index, "Folder_Match_Status"] = match_status
+            result_df.loc[index, "Matched_Folder"] = str(matched_folder) if matched_folder else pd.NA
             if not files:
-                result_df.loc[index, "Processing_Status"] = "SKIPPED: no supported documents found"
+                result_df.loc[index, "Processing_Status"] = (
+                    f"SKIPPED: no supported documents found ({match_status})"
+                )
                 result_df.loc[index, "File_Count"] = 0
                 write_checkpoint(result_df, output_path)
                 continue
