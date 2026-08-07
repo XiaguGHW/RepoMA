@@ -1,311 +1,246 @@
+"""Create the overview workbook for the workshop classification results.
+
+How to use
+----------
+1. Set INPUT_DIR below to the absolute path of the folder containing all Excel
+   files from the workshop.
+2. Run:  python workshop_annotation_auswertung.py
+
+The script reads only the FIRST sheet of every workbook.
+It uses the column "ID" to match Baugruppen, so the reversed order in the
+TN_B forms is handled automatically.  The output order is taken from one
+TN_A form (all TN_A forms use the same order).
+"""
+
 from __future__ import annotations
 
-import argparse
-import math
 import re
+import sys
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
-import pandas as pd
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 
-GROUNDTRUTH_PATTERN = "ClassificationGroundTruth-Final*.xlsx"
-PARTICIPANT_PATTERN = "KlassifikationWorkshop_Template*TN_*.xlsx"
+# ---------------------------------------------------------------------------
+# Settings: only change INPUT_DIR if your folder is stored somewhere else.
+# ---------------------------------------------------------------------------
+INPUT_DIR = Path(r"C:\Users\YOUR_USERNAME\Documents\Workshop_06.08.2026")
+GROUND_TRUTH_FILENAME = "Liste_Workshop_70_Baugruppe_2.Versuch.xlsx"
+OUTPUT_FILENAME = "Workshop_Annotation_Auswertung_07.08.2026.xlsx"
+PARTICIPANT_PREFIX = "KlassifikationWorkshop_Template_06.08.26_"
 
 
-def norm_text(value: object) -> str:
-    if pd.isna(value):
+def normalise_header(value: Any) -> str:
+    """Make header comparisons robust against spaces, hyphens and capitals."""
+    text = "" if value is None else str(value)
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def normalise_id(value: Any) -> str:
+    """Return one stable ID representation, including Excel integer IDs."""
+    if value is None:
         return ""
-    text = str(value).strip()
-    text = re.sub(r"\s+", " ", text)
-    if text.endswith(".0"):
-        text = text[:-2]
-    return text
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
 
 
-def norm_key(value: object) -> str:
-    return norm_text(value).upper()
-
-
-def norm_label(value: object) -> str:
-    return norm_text(value)
-
-
-def find_column(columns: list[str], candidates: list[str], required: bool = True) -> str | None:
-    normalized = {re.sub(r"[^a-z0-9]+", "", c.lower()): c for c in columns}
-    for candidate in candidates:
-        key = re.sub(r"[^a-z0-9]+", "", candidate.lower())
-        if key in normalized:
-            return normalized[key]
-
-    for column in columns:
-        col_key = re.sub(r"[^a-z0-9]+", "", column.lower())
-        for candidate in candidates:
-            cand_key = re.sub(r"[^a-z0-9]+", "", candidate.lower())
-            if cand_key and cand_key in col_key:
-                return column
-
-    if required:
-        raise ValueError(f"Keine passende Spalte gefunden. Gesucht: {candidates}. Vorhanden: {columns}")
+def find_column(headers: dict[str, int], *possible_names: str) -> int | None:
+    for name in possible_names:
+        column = headers.get(normalise_header(name))
+        if column is not None:
+            return column
     return None
 
 
-def read_relevant_sheet(path: Path, required_columns: list[str]) -> tuple[str, pd.DataFrame]:
-    excel = pd.ExcelFile(path)
-    best_error = None
-    for sheet_name in excel.sheet_names:
-        df = pd.read_excel(path, sheet_name=sheet_name, dtype=object)
-        df.columns = [norm_text(c) for c in df.columns]
-        columns_joined = " | ".join(df.columns).lower()
-        if all(required.lower() in columns_joined for required in required_columns):
-            return sheet_name, df
-        try:
-            for required in required_columns:
-                find_column(df.columns.tolist(), [required])
-            return sheet_name, df
-        except ValueError as exc:
-            best_error = exc
-    raise ValueError(f"In {path.name} wurde kein passendes Sheet gefunden. Letzter Fehler: {best_error}")
+def read_first_sheet(path: Path) -> tuple[list[str], list[list[Any]]]:
+    """Read values from the first worksheet only (not any later sheets)."""
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        sheet = workbook.worksheets[0]
+        rows = list(sheet.iter_rows(values_only=True))
+    finally:
+        workbook.close()
+
+    if not rows:
+        raise ValueError(f"The first sheet of '{path.name}' is empty.")
+
+    headers = ["" if value is None else str(value).strip() for value in rows[0]]
+    return headers, [list(row) for row in rows[1:] if any(value is not None for value in row)]
 
 
-def load_groundtruth(path: Path) -> tuple[str, pd.DataFrame, dict[str, str]]:
-    sheet_name, df = read_relevant_sheet(path, ["SAP", "Label"])
-
-    columns = df.columns.tolist()
-    col_sap = find_column(columns, ["SAP-Nummer", "SAP Nummer", "SAP"])
-    col_tc = find_column(columns, ["Teamcenter", "Teamcenter ID", "TC"], required=False)
-    col_label = find_column(columns, ["Label", "Ground Truth", "GroundTruth", "Funktionsklasse"])
-    col_name_e = find_column(columns, ["Benennung (E)", "Benennung E", "Benennung"], required=False)
-    col_name_d = find_column(columns, ["Benennung (D)", "Benennung D"], required=False)
-    col_level = find_column(columns, ["Baugruppenebene", "Ebene"], required=False)
-
-    out = pd.DataFrame()
-    out["SAP-Nummer"] = df[col_sap].map(norm_text)
-    out["Teamcenter"] = df[col_tc].map(norm_text) if col_tc else ""
-    if col_name_e:
-        out["Benennung (E)"] = df[col_name_e].map(norm_text)
-    if col_name_d:
-        out["Benennung (D)"] = df[col_name_d].map(norm_text)
-    if col_level:
-        out["Baugruppenebene"] = df[col_level].map(norm_text)
-    out["Ground Truth"] = df[col_label].map(norm_label)
-
-    out = out[out["Ground Truth"] != ""].copy()
-    column_map = {"sap": col_sap, "teamcenter": col_tc or "", "label": col_label}
-    return sheet_name, out.reset_index(drop=True), column_map
+def participant_name_from_filename(path: Path) -> str:
+    """Use a short, readable participant label as the result-column header."""
+    stem = path.stem
+    suffix = stem.removeprefix(PARTICIPANT_PREFIX).strip(" _-")
+    return suffix or stem
 
 
-def participant_name(path: Path) -> str:
-    match = re.search(r"TN_([A-Z])", path.stem, flags=re.IGNORECASE)
-    if match:
-        return f"TN_{match.group(1).upper()}"
-    return path.stem
-
-
-def load_participant(path: Path) -> tuple[str, str, pd.DataFrame, dict[str, str]]:
-    sheet_name, df = read_relevant_sheet(path, ["Baugruppen", "Klasse"])
-    columns = df.columns.tolist()
-
-    col_sap = find_column(columns, ["SAP-Nummer", "SAP Nummer", "SAP"], required=False)
-    col_tc = find_column(columns, ["Teamcenter", "Teamcenter ID", "TC"], required=False)
-    col_label = find_column(columns, ["Baugruppen-Klasse", "Baugruppen Klasse", "Klasse", "Funktionsklasse"])
-
-    if not col_sap and not col_tc:
-        raise ValueError(f"{path.name}: Weder SAP-Nummer noch Teamcenter gefunden.")
-
-    out = pd.DataFrame()
-    out["SAP-Nummer"] = df[col_sap].map(norm_text) if col_sap else ""
-    out["Teamcenter"] = df[col_tc].map(norm_text) if col_tc else ""
-    out["Annotation"] = df[col_label].map(norm_label)
-    out = out[out["Annotation"] != ""].copy()
-
-    column_map = {"sap": col_sap or "", "teamcenter": col_tc or "", "label": col_label}
-    return participant_name(path), sheet_name, out.reset_index(drop=True), column_map
-
-
-def build_lookup(df: pd.DataFrame) -> tuple[dict[str, str], dict[str, str]]:
-    sap_lookup: dict[str, str] = {}
-    tc_lookup: dict[str, str] = {}
-
-    for _, row in df.iterrows():
-        label = norm_label(row["Annotation"])
-        sap = norm_key(row.get("SAP-Nummer", ""))
-        tc = norm_key(row.get("Teamcenter", ""))
-        if sap:
-            sap_lookup[sap] = label
-        if tc:
-            tc_lookup[tc] = label
-    return sap_lookup, tc_lookup
-
-
-def merge_annotations(groundtruth: pd.DataFrame, participants: list[tuple[str, pd.DataFrame]]) -> pd.DataFrame:
-    overview = groundtruth.copy()
-    overview["_SAP_KEY"] = overview["SAP-Nummer"].map(norm_key)
-    overview["_TC_KEY"] = overview["Teamcenter"].map(norm_key)
-
-    for name, participant_df in participants:
-        sap_lookup, tc_lookup = build_lookup(participant_df)
-        values = []
-        for _, row in overview.iterrows():
-            label = sap_lookup.get(row["_SAP_KEY"], "")
-            if not label:
-                label = tc_lookup.get(row["_TC_KEY"], "")
-            values.append(label)
-        overview[name] = values
-
-    return overview.drop(columns=["_SAP_KEY", "_TC_KEY"])
-
-
-def krippendorff_alpha_nominal(matrix: pd.DataFrame) -> float:
-    items = matrix.values.tolist()
-    coincidence: Counter[tuple[str, str]] = Counter()
-    labels: list[str] = []
-
-    for row in items:
-        values = [norm_label(v) for v in row if norm_label(v)]
-        labels.extend(values)
-        n = len(values)
-        if n < 2:
-            continue
-        for i in range(n):
-            for j in range(n):
-                if i != j:
-                    coincidence[(values[i], values[j])] += 1
-
-    total = sum(coincidence.values())
-    if total == 0:
-        return math.nan
-
-    do = sum(count for (a, b), count in coincidence.items() if a != b) / total
-    label_counts = Counter(labels)
-    n_total = sum(label_counts.values())
-    if n_total <= 1:
-        return math.nan
-
-    de = 1 - sum(count * (count - 1) for count in label_counts.values()) / (n_total * (n_total - 1))
-    if de == 0:
-        return 1.0 if do == 0 else math.nan
-    return 1 - do / de
-
-
-def confusion_matrix(overview: pd.DataFrame, participant_cols: list[str]) -> pd.DataFrame:
-    labels = sorted(
-        {
-            norm_label(v)
-            for v in pd.concat([overview["Ground Truth"], overview[participant_cols].stack()], ignore_index=True)
-            if norm_label(v)
-        }
-    )
-    matrix = pd.DataFrame(0, index=labels, columns=labels)
-    matrix.index.name = "Ground Truth \\ Annotation"
-
-    for _, row in overview.iterrows():
-        gt = norm_label(row["Ground Truth"])
-        if not gt:
-            continue
-        for col in participant_cols:
-            pred = norm_label(row[col])
-            if pred:
-                matrix.loc[gt, pred] += 1
-    return matrix
-
-
-def write_output(
-    output_path: Path,
-    overview: pd.DataFrame,
-    alpha: float,
-    matrix: pd.DataFrame,
-    source_info: pd.DataFrame,
-) -> None:
-    participant_cols = [c for c in overview.columns if c.startswith("TN_")]
-    missing_rows = []
-    for col in participant_cols:
-        missing_rows.append({"Teilnehmer": col, "Fehlende Zuordnungen": int((overview[col] == "").sum())})
-
-    alpha_df = pd.DataFrame(
-        [
-            {
-                "Metrik": "Krippendorff's Alpha",
-                "Wert": alpha,
-                "Hinweis": "Nominal alpha; berechnet nur aus den Teilnehmer-Labels, ohne Ground Truth.",
-            }
-        ]
-    )
-
-    check_df = pd.DataFrame(missing_rows)
-    check_df.loc[len(check_df)] = {
-        "Teilnehmer": "Confusion Matrix Summe",
-        "Fehlende Zuordnungen": int(matrix.to_numpy().sum()),
-    }
-
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        overview.to_excel(writer, index=False, sheet_name="Uebersicht")
-        alpha_df.to_excel(writer, index=False, sheet_name="Krippendorff_Alpha")
-        matrix.to_excel(writer, sheet_name="Confusion_Matrix")
-        check_df.to_excel(writer, index=False, sheet_name="Checks")
-        source_info.to_excel(writer, index=False, sheet_name="Quellen")
+def column_value(row: list[Any], column: int | None) -> Any:
+    return row[column] if column is not None and column < len(row) else None
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Workshop-Auswertung: Teilnehmerlabels, Alpha, Confusion Matrix.")
-    parser.add_argument("--input-dir", default=".", help="Ordner mit Ground Truth und Teilnehmer-Excel-Dateien.")
-    parser.add_argument("--output", default="Workshop_Annotation_Auswertung.xlsx", help="Ausgabe-Excel-Datei.")
-    args = parser.parse_args()
-
-    input_dir = Path(args.input_dir).resolve()
-    output_path = Path(args.output)
-    if not output_path.is_absolute():
-        output_path = input_dir / output_path
-
-    groundtruth_files = sorted(input_dir.glob(GROUNDTRUTH_PATTERN))
-    participant_files = sorted(input_dir.glob(PARTICIPANT_PATTERN))
-
-    if len(groundtruth_files) != 1:
-        raise FileNotFoundError(f"Erwartet genau eine Ground-Truth-Datei ({GROUNDTRUTH_PATTERN}), gefunden: {groundtruth_files}")
-    if len(participant_files) < 2:
-        raise FileNotFoundError(f"Erwartet mindestens 2 Teilnehmer-Dateien ({PARTICIPANT_PATTERN}), gefunden: {participant_files}")
-
-    gt_sheet, groundtruth, gt_cols = load_groundtruth(groundtruth_files[0])
-
-    participants: list[tuple[str, pd.DataFrame]] = []
-    source_rows = [
-        {
-            "Datei": groundtruth_files[0].name,
-            "Typ": "Ground Truth",
-            "Sheet": gt_sheet,
-            "SAP-Spalte": gt_cols["sap"],
-            "Teamcenter-Spalte": gt_cols["teamcenter"],
-            "Label-Spalte": gt_cols["label"],
-        }
-    ]
-
-    for file in participant_files:
-        name, sheet, df, cols = load_participant(file)
-        participants.append((name, df))
-        source_rows.append(
-            {
-                "Datei": file.name,
-                "Typ": name,
-                "Sheet": sheet,
-                "SAP-Spalte": cols["sap"],
-                "Teamcenter-Spalte": cols["teamcenter"],
-                "Label-Spalte": cols["label"],
-            }
+    if not INPUT_DIR.is_dir():
+        raise FileNotFoundError(
+            "INPUT_DIR does not exist. Please enter the absolute path of your "
+            f"workshop folder at the top of this script. Current value: {INPUT_DIR}"
         )
 
-    overview = merge_annotations(groundtruth, participants)
-    participant_cols = [name for name, _ in participants]
-    alpha = krippendorff_alpha_nominal(overview[participant_cols])
-    matrix = confusion_matrix(overview, participant_cols)
+    ground_truth_path = INPUT_DIR / GROUND_TRUTH_FILENAME
+    if not ground_truth_path.is_file():
+        raise FileNotFoundError(
+            f"Ground-truth file not found: '{GROUND_TRUTH_FILENAME}' in {INPUT_DIR}"
+        )
 
-    write_output(output_path, overview, alpha, matrix, pd.DataFrame(source_rows))
+    participant_files = sorted(
+        path
+        for path in INPUT_DIR.glob(f"{PARTICIPANT_PREFIX}*.xlsx")
+        if not path.name.startswith("~$")
+    )
+    if not participant_files:
+        raise FileNotFoundError(
+            f"No participant files beginning with '{PARTICIPANT_PREFIX}' were found."
+        )
 
-    print(f"Fertig: {output_path}")
-    print(f"Zeilen in Uebersicht: {len(overview)}")
-    print(f"Teilnehmer-Spalten: {', '.join(participant_cols)}")
-    print(f"Krippendorff's Alpha: {alpha:.4f}")
-    print(f"Confusion-Matrix Summe: {int(matrix.to_numpy().sum())}")
+    tn_a_files = [path for path in participant_files if "TN_A_" in path.name]
+    if not tn_a_files:
+        raise ValueError("No TN_A file was found. At least one TN_A form is needed for the output order.")
+    order_source_path = tn_a_files[0]
+
+    # Read the ground-truth sheet. The ID remains an internal matching key and
+    # is intentionally not written to the overview, matching the old format.
+    gt_headers, gt_rows = read_first_sheet(ground_truth_path)
+    gt_header_map = {normalise_header(header): index for index, header in enumerate(gt_headers)}
+    gt_id_col = find_column(gt_header_map, "ID")
+    gt_truth_col = find_column(gt_header_map, "Ground Truth", "GroundTruth")
+    if gt_id_col is None or gt_truth_col is None:
+        raise ValueError(
+            f"'{ground_truth_path.name}' must contain the columns 'ID' and 'Ground Truth' in its first sheet."
+        )
+
+    gt_by_id: dict[str, list[Any]] = {}
+    for row in gt_rows:
+        bg_id = normalise_id(column_value(row, gt_id_col))
+        if not bg_id:
+            continue
+        if bg_id in gt_by_id:
+            raise ValueError(f"Duplicate ID '{bg_id}' in '{ground_truth_path.name}'.")
+        gt_by_id[bg_id] = row
+
+    # The first TN_A form determines the required display order.
+    order_headers, order_rows = read_first_sheet(order_source_path)
+    order_header_map = {normalise_header(header): index for index, header in enumerate(order_headers)}
+    order_id_col = find_column(order_header_map, "ID")
+    if order_id_col is None:
+        raise ValueError(f"'{order_source_path.name}' has no 'ID' column in its first sheet.")
+
+    ordered_ids = [normalise_id(column_value(row, order_id_col)) for row in order_rows]
+    ordered_ids = [bg_id for bg_id in ordered_ids if bg_id]
+    duplicates = [bg_id for bg_id, count in Counter(ordered_ids).items() if count > 1]
+    if duplicates:
+        raise ValueError(f"Duplicate ID(s) in TN_A order source: {', '.join(duplicates[:10])}")
+    if len(ordered_ids) != 70:
+        print(f"Warning: TN_A form contains {len(ordered_ids)} non-empty IDs (70 were expected).")
+
+    missing_gt = [bg_id for bg_id in ordered_ids if bg_id not in gt_by_id]
+    if missing_gt:
+        raise ValueError(
+            "The following TN_A IDs are missing from the ground-truth file: "
+            + ", ".join(missing_gt[:10])
+        )
+
+    # Read each participant's Baugruppen-Klasse column into an ID -> answer map.
+    participant_results: list[tuple[str, dict[str, Any]]] = []
+    for participant_path in participant_files:
+        headers, rows = read_first_sheet(participant_path)
+        header_map = {normalise_header(header): index for index, header in enumerate(headers)}
+        id_col = find_column(header_map, "ID")
+        class_col = find_column(header_map, "Baugruppen-Klasse", "Baugruppen Klasse")
+        if id_col is None or class_col is None:
+            raise ValueError(
+                f"'{participant_path.name}' must contain 'ID' and 'Baugruppen-Klasse' in its first sheet."
+            )
+
+        answers: dict[str, Any] = {}
+        for row in rows:
+            bg_id = normalise_id(column_value(row, id_col))
+            if not bg_id:
+                continue
+            if bg_id in answers:
+                raise ValueError(f"Duplicate ID '{bg_id}' in '{participant_path.name}'.")
+            answers[bg_id] = column_value(row, class_col)
+
+        unknown_ids = sorted(set(answers) - set(ordered_ids))
+        if unknown_ids:
+            print(
+                f"Warning: '{participant_path.name}' contains IDs not present in the TN_A order: "
+                + ", ".join(unknown_ids[:10])
+            )
+        participant_results.append((participant_name_from_filename(participant_path), answers))
+
+    # These five information columns reproduce the old Übersicht format.
+    # If Baugruppenebene is absent in the new ground-truth file, the column is
+    # kept empty so that Ground Truth remains in column F.
+    info_columns = [
+        ("SAP-Nummer", ("SAP-Nummer", "SAP Nummer")),
+        ("Teamcenter ID", ("Teamcenter ID",)),
+        ("Benennung (EN)", ("Benennung (EN)", "Benennung EN")),
+        ("Benennung (DE)", ("Benennung (DE)", "Benennung DE")),
+        ("Baugruppenebene", ("Baugruppenebene",)),
+    ]
+    info_source_columns = [find_column(gt_header_map, *names) for _, names in info_columns]
+
+    output_path = INPUT_DIR / OUTPUT_FILENAME
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Übersicht"
+
+    output_headers = [name for name, _ in info_columns] + ["Ground Truth"]
+    output_headers.extend(name for name, _ in participant_results)
+    sheet.append(output_headers)
+
+    for bg_id in ordered_ids:
+        gt_row = gt_by_id[bg_id]
+        row_values = [column_value(gt_row, source_col) for source_col in info_source_columns]
+        row_values.append(column_value(gt_row, gt_truth_col))
+        row_values.extend(answers.get(bg_id) for _, answers in participant_results)
+        sheet.append(row_values)
+
+    # Simple, readable formatting for the generated overview.
+    header_fill = PatternFill("solid", fgColor="1F4E78")
+    header_font = Font(color="FFFFFF", bold=True)
+    for cell in sheet[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    sheet.freeze_panes = "G2"
+    sheet.auto_filter.ref = sheet.dimensions
+    sheet.row_dimensions[1].height = 34
+
+    preferred_widths = [18, 20, 32, 32, 18, 24] + [28] * len(participant_results)
+    for index, width in enumerate(preferred_widths, start=1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    for row in sheet.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+    workbook.save(output_path)
+
+    print("Finished successfully.")
+    print(f"TN_A order source: {order_source_path.name}")
+    print(f"Participants included ({len(participant_results)}): " + ", ".join(name for name, _ in participant_results))
+    print(f"Output file: {output_path}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(1)
