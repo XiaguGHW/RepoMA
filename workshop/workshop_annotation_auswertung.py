@@ -7,16 +7,16 @@ How to use
 2. Run:  python workshop_annotation_auswertung.py
 
 The script reads only the FIRST sheet of every workbook.
-It uses the column "ID" to match Baugruppen, so the reversed order in the
-TN_B forms is handled automatically.  The output order is taken from one
-TN_A form (all TN_A forms use the same order).
+It does NOT use the "ID" column, because IDs can occur more than once.
+Instead, it matches Baugruppen using "SAP-Nummer" first and, if necessary,
+"Teamcenter ID". The output order is taken from one TN_A form (all TN_A
+forms use the same order).
 """
 
 from __future__ import annotations
 
 import re
 import sys
-from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -40,8 +40,8 @@ def normalise_header(value: Any) -> str:
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
-def normalise_id(value: Any) -> str:
-    """Return one stable ID representation, including Excel integer IDs."""
+def normalise_key(value: Any) -> str:
+    """Return one stable representation for SAP and Teamcenter identifiers."""
     if value is None:
         return ""
     if isinstance(value, float) and value.is_integer():
@@ -84,6 +84,66 @@ def column_value(row: list[Any], column: int | None) -> Any:
     return row[column] if column is not None and column < len(row) else None
 
 
+def get_identifier_columns(header_map: dict[str, int], file_name: str) -> tuple[int | None, int | None]:
+    """Find the two allowed matching columns in a workshop worksheet."""
+    sap_col = find_column(header_map, "SAP-Nummer", "SAP Nummer")
+    teamcenter_col = find_column(header_map, "Teamcenter ID")
+    if sap_col is None and teamcenter_col is None:
+        raise ValueError(
+            f"'{file_name}' must contain at least 'SAP-Nummer' or 'Teamcenter ID' "
+            "in its first sheet."
+        )
+    return sap_col, teamcenter_col
+
+
+def find_matching_row(
+    target_row: list[Any],
+    target_sap_col: int | None,
+    target_teamcenter_col: int | None,
+    source_rows: list[list[Any]],
+    source_sap_col: int | None,
+    source_teamcenter_col: int | None,
+    source_name: str,
+) -> list[Any] | None:
+    """Find one row by SAP number, with Teamcenter ID as fallback/check.
+
+    SAP is the preferred identifier. If it is absent or not unique, Teamcenter
+    ID is used. If both identifiers are present, they also disambiguate a
+    duplicate SAP or Teamcenter value.
+    """
+    sap = normalise_key(column_value(target_row, target_sap_col))
+    teamcenter = normalise_key(column_value(target_row, target_teamcenter_col))
+
+    sap_matches = [
+        row for row in source_rows
+        if sap and normalise_key(column_value(row, source_sap_col)) == sap
+    ]
+    teamcenter_matches = [
+        row for row in source_rows
+        if teamcenter and normalise_key(column_value(row, source_teamcenter_col)) == teamcenter
+    ]
+
+    # With both identifiers, use their intersection when that identifies exactly one row.
+    if sap_matches and teamcenter_matches:
+        common_matches = [row for row in sap_matches if row in teamcenter_matches]
+        if len(common_matches) == 1:
+            return common_matches[0]
+
+    if len(sap_matches) == 1:
+        return sap_matches[0]
+    if len(teamcenter_matches) == 1:
+        return teamcenter_matches[0]
+
+    if not sap_matches and not teamcenter_matches:
+        return None
+
+    identifiers = f"SAP-Nummer='{sap}' / Teamcenter ID='{teamcenter}'"
+    raise ValueError(
+        f"More than one matching row was found in '{source_name}' for {identifiers}. "
+        "Please check whether SAP-Nummer and Teamcenter ID are filled in consistently."
+    )
+
+
 def main() -> None:
     if not INPUT_DIR.is_dir():
         raise FileNotFoundError(
@@ -112,76 +172,59 @@ def main() -> None:
         raise ValueError("No TN_A file was found. At least one TN_A form is needed for the output order.")
     order_source_path = tn_a_files[0]
 
-    # Read the ground-truth sheet. The ID remains an internal matching key and
-    # is intentionally not written to the overview, matching the old format.
+    # Read ground truth. Matching intentionally uses SAP-Nummer / Teamcenter ID,
+    # never the ID column.
     gt_headers, gt_rows = read_first_sheet(ground_truth_path)
     gt_header_map = {normalise_header(header): index for index, header in enumerate(gt_headers)}
-    gt_id_col = find_column(gt_header_map, "ID")
+    gt_sap_col, gt_teamcenter_col = get_identifier_columns(gt_header_map, ground_truth_path.name)
     gt_truth_col = find_column(gt_header_map, "Ground Truth", "GroundTruth")
-    if gt_id_col is None or gt_truth_col is None:
+    if gt_truth_col is None:
         raise ValueError(
-            f"'{ground_truth_path.name}' must contain the columns 'ID' and 'Ground Truth' in its first sheet."
+            f"'{ground_truth_path.name}' must contain the column 'Ground Truth' in its first sheet."
         )
-
-    gt_by_id: dict[str, list[Any]] = {}
-    for row in gt_rows:
-        bg_id = normalise_id(column_value(row, gt_id_col))
-        if not bg_id:
-            continue
-        if bg_id in gt_by_id:
-            raise ValueError(f"Duplicate ID '{bg_id}' in '{ground_truth_path.name}'.")
-        gt_by_id[bg_id] = row
 
     # The first TN_A form determines the required display order.
     order_headers, order_rows = read_first_sheet(order_source_path)
     order_header_map = {normalise_header(header): index for index, header in enumerate(order_headers)}
-    order_id_col = find_column(order_header_map, "ID")
-    if order_id_col is None:
-        raise ValueError(f"'{order_source_path.name}' has no 'ID' column in its first sheet.")
+    order_sap_col, order_teamcenter_col = get_identifier_columns(order_header_map, order_source_path.name)
+    order_rows = [
+        row for row in order_rows
+        if normalise_key(column_value(row, order_sap_col))
+        or normalise_key(column_value(row, order_teamcenter_col))
+    ]
+    if len(order_rows) != 70:
+        print(f"Warning: TN_A form contains {len(order_rows)} non-empty BG rows (70 were expected).")
 
-    ordered_ids = [normalise_id(column_value(row, order_id_col)) for row in order_rows]
-    ordered_ids = [bg_id for bg_id in ordered_ids if bg_id]
-    duplicates = [bg_id for bg_id, count in Counter(ordered_ids).items() if count > 1]
-    if duplicates:
-        raise ValueError(f"Duplicate ID(s) in TN_A order source: {', '.join(duplicates[:10])}")
-    if len(ordered_ids) != 70:
-        print(f"Warning: TN_A form contains {len(ordered_ids)} non-empty IDs (70 were expected).")
-
-    missing_gt = [bg_id for bg_id in ordered_ids if bg_id not in gt_by_id]
-    if missing_gt:
-        raise ValueError(
-            "The following TN_A IDs are missing from the ground-truth file: "
-            + ", ".join(missing_gt[:10])
+    ground_truth_rows: list[list[Any]] = []
+    for row_number, order_row in enumerate(order_rows, start=2):
+        gt_row = find_matching_row(
+            order_row, order_sap_col, order_teamcenter_col,
+            gt_rows, gt_sap_col, gt_teamcenter_col, ground_truth_path.name,
         )
+        if gt_row is None:
+            sap = normalise_key(column_value(order_row, order_sap_col))
+            teamcenter = normalise_key(column_value(order_row, order_teamcenter_col))
+            raise ValueError(
+                f"No Ground Truth row was found for row {row_number} in '{order_source_path.name}' "
+                f"(SAP-Nummer='{sap}', Teamcenter ID='{teamcenter}')."
+            )
+        ground_truth_rows.append(gt_row)
 
-    # Read each participant's Baugruppen-Klasse column into an ID -> answer map.
-    participant_results: list[tuple[str, dict[str, Any]]] = []
+    # Keep every participant's rows. Later, each TN_A row is searched via
+    # SAP-Nummer / Teamcenter ID, so TN_B's reversed display order is irrelevant.
+    participant_results: list[tuple[str, list[list[Any]], int | None, int | None, int]] = []
     for participant_path in participant_files:
         headers, rows = read_first_sheet(participant_path)
         header_map = {normalise_header(header): index for index, header in enumerate(headers)}
-        id_col = find_column(header_map, "ID")
+        sap_col, teamcenter_col = get_identifier_columns(header_map, participant_path.name)
         class_col = find_column(header_map, "Baugruppen-Klasse", "Baugruppen Klasse")
-        if id_col is None or class_col is None:
+        if class_col is None:
             raise ValueError(
-                f"'{participant_path.name}' must contain 'ID' and 'Baugruppen-Klasse' in its first sheet."
+                f"'{participant_path.name}' must contain 'Baugruppen-Klasse' in its first sheet."
             )
-
-        answers: dict[str, Any] = {}
-        for row in rows:
-            bg_id = normalise_id(column_value(row, id_col))
-            if not bg_id:
-                continue
-            if bg_id in answers:
-                raise ValueError(f"Duplicate ID '{bg_id}' in '{participant_path.name}'.")
-            answers[bg_id] = column_value(row, class_col)
-
-        unknown_ids = sorted(set(answers) - set(ordered_ids))
-        if unknown_ids:
-            print(
-                f"Warning: '{participant_path.name}' contains IDs not present in the TN_A order: "
-                + ", ".join(unknown_ids[:10])
-            )
-        participant_results.append((participant_name_from_filename(participant_path), answers))
+        participant_results.append(
+            (participant_name_from_filename(participant_path), rows, sap_col, teamcenter_col, class_col)
+        )
 
     # These five information columns reproduce the old Übersicht format.
     # If Baugruppenebene is absent in the new ground-truth file, the column is
@@ -201,14 +244,18 @@ def main() -> None:
     sheet.title = "Übersicht"
 
     output_headers = [name for name, _ in info_columns] + ["Ground Truth"]
-    output_headers.extend(name for name, _ in participant_results)
+    output_headers.extend(name for name, *_ in participant_results)
     sheet.append(output_headers)
 
-    for bg_id in ordered_ids:
-        gt_row = gt_by_id[bg_id]
+    for order_row, gt_row in zip(order_rows, ground_truth_rows):
         row_values = [column_value(gt_row, source_col) for source_col in info_source_columns]
         row_values.append(column_value(gt_row, gt_truth_col))
-        row_values.extend(answers.get(bg_id) for _, answers in participant_results)
+        for participant_name, participant_rows, sap_col, teamcenter_col, class_col in participant_results:
+            participant_row = find_matching_row(
+                order_row, order_sap_col, order_teamcenter_col,
+                participant_rows, sap_col, teamcenter_col, participant_name,
+            )
+            row_values.append(column_value(participant_row, class_col) if participant_row else None)
         sheet.append(row_values)
 
     # Simple, readable formatting for the generated overview.
@@ -234,7 +281,7 @@ def main() -> None:
 
     print("Finished successfully.")
     print(f"TN_A order source: {order_source_path.name}")
-    print(f"Participants included ({len(participant_results)}): " + ", ".join(name for name, _ in participant_results))
+    print(f"Participants included ({len(participant_results)}): " + ", ".join(name for name, *_ in participant_results))
     print(f"Output file: {output_path}")
 
 
