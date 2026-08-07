@@ -128,6 +128,11 @@ def find_matching_row(
         common_matches = [row for row in sap_matches if row in teamcenter_matches]
         if len(common_matches) == 1:
             return common_matches[0]
+        if not common_matches:
+            raise ValueError(
+                f"SAP-Nummer='{sap}' and Teamcenter ID='{teamcenter}' point to different "
+                f"rows in '{source_name}'. Please check the source data."
+            )
 
     if len(sap_matches) == 1:
         return sap_matches[0]
