@@ -1,0 +1,6 @@
+pandas
+openpyxl
+tqdm
+python-dotenv
+pymupdf
+Pillow

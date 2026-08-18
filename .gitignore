@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project-local thesis data and generated results
+input/
+output/
+outputs/
