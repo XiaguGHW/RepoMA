@@ -4,10 +4,9 @@ Arbeitsrepository für die Masterarbeit zur Aufbereitung und Klassifikation von 
 
 ## Ordner
 
-- `scripts/`: alle Python-Skripte – Hauptprogramm, Hilfsskripte, Tests und ältere Versuche
+- `scripts/`: alle Python-Skripte sowie zugehörige Code-Erklärungen und Notizen
 - `messages/`: alle E-Mails, Teams-Nachrichten und Einladungen
 - `workshop/`: Workshop-Unterlagen
-- `notes/`: Erklärungen und Code-Notizen
 - `presentations/`: Präsentationen
 
 Das aktuelle Hauptprogramm ist `scripts/run_classification.py`.
