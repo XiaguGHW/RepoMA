@@ -4,15 +4,13 @@ Arbeitsrepository für die Masterarbeit zur Aufbereitung und Klassifikation von 
 
 ## Ordner
 
+- `scripts/`: alle Python-Skripte – Hauptprogramm, Hilfsskripte, Tests und ältere Versuche
 - `messages/`: alle E-Mails, Teams-Nachrichten und Einladungen
-- `workshop/`: Klassendefinition und Workshop-Auswertung
-- `scripts/`: aktuelle Hilfsskripte
-- `experiments/`: verschiedene Klassifikationstests
-- `notes/`: ergänzende Erklärungen und Code-Notizen
+- `workshop/`: Workshop-Unterlagen
+- `notes/`: Erklärungen und Code-Notizen
 - `presentations/`: Präsentationen
-- `old/`: ältere, nicht mehr aktive Skripte
 
-Das aktuelle Hauptprogramm `run_classification.py` liegt direkt im Hauptordner.
+Das aktuelle Hauptprogramm ist `scripts/run_classification.py`.
 
 ## Start
 
@@ -24,11 +22,11 @@ Das aktuelle Hauptprogramm `run_classification.py` liegt direkt im Hauptordner.
 
 2. `.env.example` nach `.env` kopieren und Zugangsdaten sowie `HBG_DATA_ROOT` eintragen.
 3. Die Excel-Eingabedateien lokal unter `input/` ablegen.
-4. Die intern bereitgestellte `llm_connector.py` neben `run_classification.py` ablegen.
+4. Die intern bereitgestellte `llm_connector.py` ebenfalls unter `scripts/` ablegen.
 5. Testlauf starten:
 
    ```bash
-   python run_classification.py --max-rows 10
+   python scripts/run_classification.py --max-rows 10
    ```
 
 `input/`, `output/`, `outputs/` und `.env` werden nicht auf GitHub hochgeladen.
