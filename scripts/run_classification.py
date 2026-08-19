@@ -5,7 +5,7 @@ sends all supported files to the model. It does not use Priority 1 / Priority 2 
 a file inventory.
 
 The standard files below are resolved relative to this script, so the command can
-stay short. The only machine-specific setting is ``HBG_DATA_ROOT`` in ``.env``.
+stay short. The only machine-specific setting is ``BG_DATA_ROOT`` in ``.env``.
 
 This script requires Anja's ``llm_connector.py`` in the same folder. The connector
 performs the Gemini / Claude / GPT request; this file reads experiment data, finds
@@ -42,7 +42,7 @@ except ImportError:
 # All Python files live in scripts/, while .env, input/ and outputs/ stay in the repo root.
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent if SCRIPT_DIR.name.casefold() == "scripts" else SCRIPT_DIR
-DEFAULT_INPUT_EXCEL = PROJECT_DIR / "input" / "all_HBG_random_no_label.xlsx"
+DEFAULT_INPUT_EXCEL = PROJECT_DIR / "input" / "60_BG_random_no_label.xlsx"
 DEFAULT_CLASSES_EXCEL = PROJECT_DIR / "input" / "Functional_classes.xlsx"
 DEFAULT_OUTPUT_DIR = PROJECT_DIR / "outputs"
 
@@ -52,7 +52,7 @@ SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 # The actual spreadsheet column names can vary. They can be passed via CLI; otherwise
 # the script attempts to detect one of these common names.
 ID_COLUMN_CANDIDATES = (
-    "Baugruppennummer", "Baugruppen-ID", "Baugruppen_ID", "HBG", "ID",
+    "Baugruppennummer", "Baugruppen-ID", "Baugruppen_ID", "BG", "ID",
     "SAP-Nummer", "SAP Nummer",
 )
 TEAMCENTER_COLUMN_CANDIDATES = (
@@ -83,7 +83,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Classify Baugruppen with an LLM and save one timestamped Excel result."
     )
-    data_root_from_env = os.getenv("HBG_DATA_ROOT")
+    data_root_from_env = os.getenv("BG_DATA_ROOT")
     parser.add_argument("--input-excel", type=Path, default=DEFAULT_INPUT_EXCEL)
     parser.add_argument("--classes-excel", type=Path, default=DEFAULT_CLASSES_EXCEL)
     parser.add_argument("--model", default="gemini-2.5-pro")
@@ -93,7 +93,7 @@ def parse_args() -> argparse.Namespace:
         default=Path(data_root_from_env).expanduser() if data_root_from_env else None,
         help=(
             "Absolute root folder containing all Baugruppe folders. Defaults to "
-            "HBG_DATA_ROOT from .env."
+            "BG_DATA_ROOT from .env."
         ),
     )
     parser.add_argument("--max-rows", type=int, default=None,
@@ -213,7 +213,7 @@ def find_assembly_folder(
             if folder or status:
                 return folder, status
 
-    # 2. The full ID appears in a longer folder name, e.g. HBG_123456_REV_A.
+    # 2. The full ID appears in a longer folder name, e.g. BG_123456_REV_A.
     for identifier, label in ((sap_id, "CONTAINS_ASSEMBLY_ID"), (tc_id, "CONTAINS_TEAMCENTER_ID")):
         if identifier:
             folder, status = unique_folder_match(folders, lambda name, x=identifier: x in name, label)
@@ -314,8 +314,8 @@ def run(args: argparse.Namespace) -> Path:
         raise ValueError("--max-rows must be greater than 0.")
     if args.data_root is None:
         raise EnvironmentError(
-            "HBG_DATA_ROOT is not set. Add an absolute path to .env, for example: "
-            "HBG_DATA_ROOT=C:\\path\\to\\processed_HBG"
+            "BG_DATA_ROOT is not set. Add an absolute path to .env, for example: "
+            "BG_DATA_ROOT=C:\\path\\to\\processed_BG"
         )
     if not args.data_root.is_absolute():
         raise ValueError(

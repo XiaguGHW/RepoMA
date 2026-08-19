@@ -24,7 +24,7 @@ sends all supported files to the model. It does not use Priority 1 / Priority 2 
 a file inventory.
 
 The standard files below are resolved relative to this script, so the command can
-stay short. The only machine-specific setting is ``HBG_DATA_ROOT`` in ``.env``.
+stay short. The only machine-specific setting is ``BG_DATA_ROOT`` in ``.env``.
 
 This script requires Anja's ``llm_connector.py`` in the same folder. The connector
 performs the Gemini / Claude / GPT request; this file reads experiment data, finds
@@ -65,7 +65,7 @@ PROJECT_DIR 是当前脚本所在目录，所以默认 input、outputs 不依赖
 ```python
 # Default project paths. They are independent of the terminal's current folder.
 PROJECT_DIR = Path(__file__).resolve().parent
-DEFAULT_INPUT_EXCEL = PROJECT_DIR / "input" / "all_HBG_random_no_label.xlsx"
+DEFAULT_INPUT_EXCEL = PROJECT_DIR / "input" / "60_BG_random_no_label.xlsx"
 DEFAULT_CLASSES_EXCEL = PROJECT_DIR / "input" / "Functional_classes.xlsx"
 DEFAULT_OUTPUT_DIR = PROJECT_DIR / "outputs"
 
@@ -75,7 +75,7 @@ SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 # The actual spreadsheet column names can vary. They can be passed via CLI; otherwise
 # the script attempts to detect one of these common names.
 ID_COLUMN_CANDIDATES = (
-    "Baugruppennummer", "Baugruppen-ID", "Baugruppen_ID", "HBG", "ID",
+    "Baugruppennummer", "Baugruppen-ID", "Baugruppen_ID", "BG", "ID",
     "SAP-Nummer", "SAP Nummer",
 )
 TEAMCENTER_COLUMN_CANDIDATES = (
@@ -110,14 +110,14 @@ Wenn die Informationen für eine belastbare Zuordnung nicht reichen, gib ausschl
 
 ## ④ parse_args()：读取命令行参数
 
-函数把运行命令转为 args 对象。data-root 默认值来自已读取的 HBG_DATA_ROOT；传入 --data-root 时可覆盖。--max-rows 适合只测试前 N 行。四个列名参数用于自动检测无法匹配的 Excel。
+函数把运行命令转为 args 对象。data-root 默认值来自已读取的 BG_DATA_ROOT；传入 --data-root 时可覆盖。--max-rows 适合只测试前 N 行。四个列名参数用于自动检测无法匹配的 Excel。
 
 ```python
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Classify Baugruppen with an LLM and save one timestamped Excel result."
     )
-    data_root_from_env = os.getenv("HBG_DATA_ROOT")
+    data_root_from_env = os.getenv("BG_DATA_ROOT")
     parser.add_argument("--input-excel", type=Path, default=DEFAULT_INPUT_EXCEL)
     parser.add_argument("--classes-excel", type=Path, default=DEFAULT_CLASSES_EXCEL)
     parser.add_argument("--model", default="gemini-2.5-pro")
@@ -127,7 +127,7 @@ def parse_args() -> argparse.Namespace:
         default=Path(data_root_from_env).expanduser() if data_root_from_env else None,
         help=(
             "Absolute root folder containing all Baugruppe folders. Defaults to "
-            "HBG_DATA_ROOT from .env."
+            "BG_DATA_ROOT from .env."
         ),
     )
     parser.add_argument("--max-rows", type=int, default=None,
@@ -257,7 +257,7 @@ def find_assembly_folder(
             if folder or status:
                 return folder, status
 
-    # 2. The full ID appears in a longer folder name, e.g. HBG_123456_REV_A.
+    # 2. The full ID appears in a longer folder name, e.g. BG_123456_REV_A.
     for identifier, label in ((sap_id, "CONTAINS_ASSEMBLY_ID"), (tc_id, "CONTAINS_TEAMCENTER_ID")):
         if identifier:
             folder, status = unique_folder_match(folders, lambda name, x=identifier: x in name, label)
@@ -373,8 +373,8 @@ def run(args: argparse.Namespace) -> Path:
         raise ValueError("--max-rows must be greater than 0.")
     if args.data_root is None:
         raise EnvironmentError(
-            "HBG_DATA_ROOT is not set. Add an absolute path to .env, for example: "
-            "HBG_DATA_ROOT=C:\\path\\to\\processed_HBG"
+            "BG_DATA_ROOT is not set. Add an absolute path to .env, for example: "
+            "BG_DATA_ROOT=C:\\path\\to\\processed_BG"
         )
     if not args.data_root.is_absolute():
         raise ValueError(
@@ -514,7 +514,7 @@ if __name__ == "__main__":
 
 ```text
 load_dotenv(PROJECT_DIR / .env)
-→ parse_args()：HBG_DATA_ROOT 可作默认 data-root
+→ parse_args()：BG_DATA_ROOT 可作默认 data-root
 → run()：检查输入、读取 Excel
 → create_connector()：此时才 from llm_connector import LLMConnector
 → ask_about_files()：真正向模型发送每个 BG 的文件和问题
@@ -528,11 +528,11 @@ load_dotenv(PROJECT_DIR / .env)
 ├── llm_connector.py          # 必须含 LLMConnector 类
 ├── .env                      # 不上传 GitHub
 ├── input/
-│   ├── all_HBG_random_no_label.xlsx
+│   ├── 60_BG_random_no_label.xlsx
 │   └── Functional_classes.xlsx
 └── outputs/                  # 自动创建
     └── logs/                 # 自动创建
 ```
 
-.env 至少需要 BOSCH_FARM_SUBSCRIPTION_KEY 和 HBG_DATA_ROOT。若 Connector 需要，另加 BOSCH_FARM_BASE_URL。真实 key 和 Bosch 内部地址都不要写入 Python 文件或公开仓库。
+.env 至少需要 BOSCH_FARM_SUBSCRIPTION_KEY 和 BG_DATA_ROOT。若 Connector 需要，另加 BOSCH_FARM_BASE_URL。真实 key 和 Bosch 内部地址都不要写入 Python 文件或公开仓库。
 

@@ -4,22 +4,22 @@ Erwartete Projektstruktur (dieses Skript liegt später unter ``scripts``)::
 
     Baugruppen_Datenvorverarbeitung/
     ├─ input/
-    │  ├─ all_HBG_random_no_label.xlsx
+    │  ├─ all_BG_random_no_label.xlsx
     │  └─ raw_data/
     │     ├─ Datensatz - Gantry_Achssysteme/
     │     └─ ... weitere Kategorien
     ├─ output/
-    │  ├─ processed_hbg/
+    │  ├─ processed_bg/
     │  └─ reports/
-    │     └─ collect_HBG/
+    │     └─ collect_BG/
     └─ scripts/
-       └─ collect_HBG.py
+       └─ collect_BG.py
 
 Normaler Aufruf erstellt nur Prüfberichte (keine Daten werden kopiert):
-    python scripts/collect_HBG.py
+    python scripts/collect_BG.py
 
 Erst nach Prüfung der Berichte kopieren:
-    python scripts/collect_HBG.py --copy
+    python scripts/collect_BG.py --copy
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ from pathlib import Path
 import pandas as pd
 
 
-EXCEL_FILENAME = "all_HBG_random_no_label.xlsx"
-SHEET_NAME = "all_HBG_random_no_label"
+EXCEL_FILENAME = "all_BG_random_no_label.xlsx"
+SHEET_NAME = "all_BG_random_no_label"
 SAP_COLUMN = "SAP-Nummer"
 TEAMCENTER_COLUMN = "Teamcenter ID"
 ID_PATTERN = re.compile(r"(?<![A-Z0-9])[A-Z0-9]{10}(?![A-Z0-9])")
@@ -64,12 +64,12 @@ def project_paths() -> tuple[Path, Path, Path, Path]:
     project_root = script_dir.parent
     input_dir = project_root / "input"
     raw_data_dir = input_dir / "raw_data"
-    processed_dir = project_root / "output" / "processed_hbg"
-    reports_dir = project_root / "output" / "reports" / "collect_HBG"
+    processed_dir = project_root / "output" / "processed_bg"
+    reports_dir = project_root / "output" / "reports" / "collect_BG"
     return input_dir, raw_data_dir, processed_dir, reports_dir
 
 
-def load_hbg_table(excel_path: Path) -> pd.DataFrame:
+def load_bg_table(excel_path: Path) -> pd.DataFrame:
     if not excel_path.is_file():
         raise FileNotFoundError(f"Excel file does not exist: {excel_path}")
 
@@ -251,10 +251,10 @@ def find_conflicts(
                 }
             )
 
-    multiple_folders_per_hbg = []
+    multiple_folders_per_bg = []
     for excel_row, rows in sorted(by_excel_row.items()):
         if len(rows) > 1:
-            multiple_folders_per_hbg.append(
+            multiple_folders_per_bg.append(
                 {
                     "Excel_Zeile": excel_row,
                     SAP_COLUMN: rows[0][SAP_COLUMN],
@@ -266,10 +266,10 @@ def find_conflicts(
             )
 
     matched_excel_rows = {int(row["Excel_Zeile"]) for row in matched}
-    missing_hbg = []
+    missing_bg = []
     for row in df.to_dict("records"):
         if int(row["Excel_Zeile"]) not in matched_excel_rows:
-            missing_hbg.append(
+            missing_bg.append(
                 {
                     "Excel_Zeile": row["Excel_Zeile"],
                     SAP_COLUMN: row[SAP_COLUMN],
@@ -280,12 +280,12 @@ def find_conflicts(
     return (
         ambiguous_excel_ids,
         duplicate_folder_names,
-        multiple_folders_per_hbg,
-        missing_hbg,
+        multiple_folders_per_bg,
+        missing_bg,
     )
 
 
-def copy_hbg_folders(
+def copy_bg_folders(
     matched: list[dict],
     processed_dir: Path,
     reports_dir: Path,
@@ -293,7 +293,7 @@ def copy_hbg_folders(
     existing_items = list(processed_dir.iterdir())
     if existing_items:
         raise RuntimeError(
-            "The processed_hbg folder is not empty. To prevent overwriting or "
+            "The processed_bg folder is not empty. To prevent overwriting or "
             "mixing results, inspect and empty it manually before running --copy again."
         )
 
@@ -332,18 +332,18 @@ def copy_hbg_folders(
 
     if has_error:
         raise RuntimeError(
-            "Some folders could not be copied. See output/reports/collect_HBG/Kopierbericht.xlsx."
+            "Some folders could not be copied. See output/reports/collect_BG/Kopierbericht.xlsx."
         )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Identify HBG folders by SAP or Teamcenter ID and optionally copy them."
+        description="Identify BG folders by SAP or Teamcenter ID and optionally copy them."
     )
     parser.add_argument(
         "--copy",
         action="store_true",
-        help="Copy HBG folders to output/processed_hbg after conflict checks pass.",
+        help="Copy BG folders to output/processed_bg after conflict checks pass.",
     )
     args = parser.parse_args()
 
@@ -353,7 +353,7 @@ def main() -> int:
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        df = load_hbg_table(excel_path)
+        df = load_bg_table(excel_path)
         id_index = build_id_index(df)
         matched, not_matched, ambiguous_folder_matches = scan_folders(
             raw_data_dir, id_index
@@ -361,12 +361,12 @@ def main() -> int:
         (
             ambiguous_excel_ids,
             duplicate_folder_names,
-            multiple_folders_per_hbg,
-            missing_hbg,
+            multiple_folders_per_bg,
+            missing_bg,
         ) = find_conflicts(df, id_index, matched)
 
         write_report(
-            reports_dir / "HBG_Ordnerliste.xlsx",
+            reports_dir / "BG_Ordnerliste.xlsx",
             matched,
             [
                 "Ordnername",
@@ -408,8 +408,8 @@ def main() -> int:
             ["Ordnername", "Anzahl_Quellordner", "Kategorien", "Quellpfade"],
         )
         write_report(
-            reports_dir / "mehrere_Ordner_pro_HBG.xlsx",
-            multiple_folders_per_hbg,
+            reports_dir / "mehrere_Ordner_pro_BG.xlsx",
+            multiple_folders_per_bg,
             [
                 "Excel_Zeile",
                 SAP_COLUMN,
@@ -420,8 +420,8 @@ def main() -> int:
             ],
         )
         write_report(
-            reports_dir / "fehlende_HBG.xlsx",
-            missing_hbg,
+            reports_dir / "fehlende_BG.xlsx",
+            missing_bg,
             ["Excel_Zeile", SAP_COLUMN, TEAMCENTER_COLUMN],
         )
 
@@ -429,15 +429,15 @@ def main() -> int:
             ambiguous_folder_matches
             or ambiguous_excel_ids
             or duplicate_folder_names
-            or multiple_folders_per_hbg
+            or multiple_folders_per_bg
         )
 
         print("\nCheck completed (the source data was not modified)")
-        print(f"HBG rows in the Excel file: {len(df)}")
+        print(f"BG rows in the Excel file: {len(df)}")
         print(f"Successfully matched folders: {len(matched)}")
         print(f"Unmatched source folders: {len(not_matched)}")
-        print(f"HBG entries without a matching folder: {len(missing_hbg)}")
-        print(f"Conflicts requiring review: {sum(map(len, [ambiguous_folder_matches, ambiguous_excel_ids, duplicate_folder_names, multiple_folders_per_hbg]))}")
+        print(f"BG entries without a matching folder: {len(missing_bg)}")
+        print(f"Conflicts requiring review: {sum(map(len, [ambiguous_folder_matches, ambiguous_excel_ids, duplicate_folder_names, multiple_folders_per_bg]))}")
         print(f"Report location: {reports_dir}")
 
         if args.copy:
@@ -446,11 +446,11 @@ def main() -> int:
                     "No folders were copied because ID or folder conflicts exist. "
                     "Review the conflict reports first."
                 )
-            copy_hbg_folders(matched, processed_dir, reports_dir)
+            copy_bg_folders(matched, processed_dir, reports_dir)
             print(f"\nCopy completed: {processed_dir}")
         else:
             print("\nThe script ran in check mode; no folders were copied.")
-            print("After verifying the reports, run: python scripts/collect_HBG.py --copy")
+            print("After verifying the reports, run: python scripts/collect_BG.py --copy")
 
         return 0
 

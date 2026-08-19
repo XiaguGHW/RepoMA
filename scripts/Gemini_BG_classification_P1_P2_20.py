@@ -1,7 +1,7 @@
 """Testlauf: Klassifikation der ersten 20 Hauptbaugruppen mit Gemini.
 
 Der Test verwendet:
-  - den Baugruppennamen aus all_HBG_random_no_label.xlsx
+  - den Baugruppennamen aus all_BG_random_no_label.xlsx
   - alle Dateien mit use_for_gemini = priority_1_candidate oder priority_2_candidate
   - die erlaubten Klassen aus Functional_classes.xlsx
 
@@ -37,16 +37,16 @@ elif (SCRIPT_DIR.parent / "input").is_dir():
 else:
     PROJECT_DIR = SCRIPT_DIR
 INPUT_DIR = PROJECT_DIR / "input"
-if (INPUT_DIR / "processed_HBG").is_dir():
-    PROCESSED_HBG_DIR = INPUT_DIR / "processed_HBG"
+if (INPUT_DIR / "processed_BG").is_dir():
+    PROCESSED_BG_DIR = INPUT_DIR / "processed_BG"
 else:
-    PROCESSED_HBG_DIR = INPUT_DIR
+    PROCESSED_BG_DIR = INPUT_DIR
 OUTPUT_DIR = PROJECT_DIR / "output"
 LOG_DIR = OUTPUT_DIR / "logs"
 RESPONSES_DIR = OUTPUT_DIR / "responses"
 RESULTS_DIR = OUTPUT_DIR / "results"
 
-HBG_EXCEL_PATH = INPUT_DIR / "all_HBG_random_no_label.xlsx"
+BG_EXCEL_PATH = INPUT_DIR / "all_BG_random_no_label.xlsx"
 INVENTORY_EXCEL_PATH = INPUT_DIR / "file_inventory.xlsx"
 CLASSES_EXCEL_PATH = INPUT_DIR / "Functional_classes.xlsx"
 
@@ -66,7 +66,7 @@ GENERATION_CONFIG = {
 }
 API_RETRIES = 2
 
-# Spalten in all_HBG_random_no_label.xlsx
+# Spalten in all_BG_random_no_label.xlsx
 ID_COL = "ID"
 SAP_COL = "SAP-Nummer"
 TEAMCENTER_COL = "Teamcenter ID"
@@ -195,15 +195,15 @@ def load_classes_with_detected_header(
 
 def load_input_data() -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
     """Laedt und validiert die drei Eingabetabellen."""
-    for path in (HBG_EXCEL_PATH, INVENTORY_EXCEL_PATH, CLASSES_EXCEL_PATH):
+    for path in (BG_EXCEL_PATH, INVENTORY_EXCEL_PATH, CLASSES_EXCEL_PATH):
         if not path.is_file():
             raise FileNotFoundError(f"Eingabedatei nicht gefunden: {path}")
-    if not PROCESSED_HBG_DIR.is_dir():
+    if not PROCESSED_BG_DIR.is_dir():
         raise FileNotFoundError(
-            f"Ordner mit den Baugruppendaten nicht gefunden: {PROCESSED_HBG_DIR}"
+            f"Ordner mit den Baugruppendaten nicht gefunden: {PROCESSED_BG_DIR}"
         )
 
-    hbg_df = pd.read_excel(HBG_EXCEL_PATH, dtype=str).fillna("")
+    bg_df = pd.read_excel(BG_EXCEL_PATH, dtype=str).fillna("")
     inventory_df = pd.read_excel(
         INVENTORY_EXCEL_PATH,
         sheet_name=INVENTORY_SHEET,
@@ -211,9 +211,9 @@ def load_input_data() -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
     ).fillna("")
 
     require_columns(
-        hbg_df,
+        bg_df,
         [ID_COL, SAP_COL, TEAMCENTER_COL, NAME_COL],
-        HBG_EXCEL_PATH.name,
+        BG_EXCEL_PATH.name,
     )
     require_columns(
         inventory_df,
@@ -230,7 +230,7 @@ def load_input_data() -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
         CLASSES_EXCEL_PATH
     )
 
-    logging.info("HBG-Tabelle geladen: %s Zeilen", len(hbg_df))
+    logging.info("BG-Tabelle geladen: %s Zeilen", len(bg_df))
     logging.info("File Inventory geladen: %s Dateien", len(inventory_df))
     logging.info(
         "Funktionsklassen geladen: %s Klassen aus Sheet '%s', Excel-Zeile %s",
@@ -238,7 +238,7 @@ def load_input_data() -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
         class_sheet,
         header_index + 1,
     )
-    return hbg_df, inventory_df, classes
+    return bg_df, inventory_df, classes
 
 
 def match_baugruppe_folder(
@@ -246,7 +246,7 @@ def match_baugruppe_folder(
     teamcenter_id: str,
     folder_names: list[str],
 ) -> tuple[str | None, str, str]:
-    """Ordnet eine HBG eindeutig einem Inventory-Baugruppenordner zu.
+    """Ordnet eine BG eindeutig einem Inventory-Baugruppenordner zu.
 
     Reihenfolge:
       1. Ordnername entspricht exakt SAP oder Teamcenter ID.
@@ -319,7 +319,7 @@ def build_current_file_path(inventory_row: pd.Series, folder_name: str) -> Path:
     subfolder = clean_cell(inventory_row[INVENTORY_SUBFOLDER_COL])
     filename = clean_cell(inventory_row[INVENTORY_FILENAME_COL])
 
-    path = PROCESSED_HBG_DIR / folder_name
+    path = PROCESSED_BG_DIR / folder_name
     if subfolder not in {"", ".", "./", ".\\"}:
         path = path / Path(subfolder)
     return path / filename
@@ -351,7 +351,7 @@ def select_priority_1_and_2_files(
 
     for _, inventory_row in selected_rows.iterrows():
         current_path = build_current_file_path(inventory_row, folder_name)
-        path_source = "current_processed_HBG"
+        path_source = "current_processed_BG"
         selected_path = current_path
 
         # Nur als Rueckfall: alter absoluter Inventory-Pfad, falls er noch gilt.
@@ -528,14 +528,14 @@ def export_excel(
 # =============================================================================
 
 def prepare_test_cases(
-    hbg_df: pd.DataFrame,
+    bg_df: pd.DataFrame,
     inventory_df: pd.DataFrame,
     classes: list[str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Fuehrt Matching und Pfadpruefung fuer die ersten TEST_LIMIT HBG durch."""
+    """Fuehrt Matching und Pfadpruefung fuer die ersten TEST_LIMIT BG durch."""
     del classes  # Klassen werden erst beim Promptbau benoetigt.
 
-    test_df = hbg_df.head(TEST_LIMIT).copy()
+    test_df = bg_df.head(TEST_LIMIT).copy()
     folder_names = (
         inventory_df[INVENTORY_FOLDER_COL]
         .map(clean_cell)
@@ -548,7 +548,7 @@ def prepare_test_cases(
     used_file_rows: list[dict[str, Any]] = []
 
     for position, (source_index, row) in enumerate(test_df.iterrows(), start=1):
-        hbg_id = clean_cell(row[ID_COL])
+        bg_id = clean_cell(row[ID_COL])
         sap_number = clean_cell(row[SAP_COL])
         teamcenter_id = clean_cell(row[TEAMCENTER_COL])
         baugruppenname = clean_cell(row[NAME_COL])
@@ -557,7 +557,7 @@ def prepare_test_cases(
             "Precheck %s/%s: ID=%s, Name=%s",
             position,
             len(test_df),
-            hbg_id,
+            bg_id,
             baugruppenname,
         )
 
@@ -570,7 +570,7 @@ def prepare_test_cases(
         case: dict[str, Any] = {
             "Test_Position": position,
             "Source_DataFrame_Index": int(source_index),
-            "ID": hbg_id,
+            "ID": bg_id,
             "SAP-Nummer": sap_number,
             "Teamcenter ID": teamcenter_id,
             "Benennung (EN)": baugruppenname,
@@ -605,7 +605,7 @@ def prepare_test_cases(
         for detail in file_details:
             used_file_rows.append(
                 {
-                    "ID": hbg_id,
+                    "ID": bg_id,
                     "SAP-Nummer": sap_number,
                     "Teamcenter ID": teamcenter_id,
                     **detail,
@@ -651,7 +651,7 @@ def run_api_for_ready_cases(
         return
     if not ready_cases:
         logging.warning(
-            "Keine der ersten %s HBG ist fuer den API-Aufruf bereit.", TEST_LIMIT
+            "Keine der ersten %s BG ist fuer den API-Aufruf bereit.", TEST_LIMIT
         )
         return
 
@@ -729,11 +729,11 @@ def run_api_for_ready_cases(
 def main() -> None:
     ensure_directories()
     configure_logging()
-    logging.info("Testlauf gestartet: exakt die ersten %s HBG", TEST_LIMIT)
+    logging.info("Testlauf gestartet: exakt die ersten %s BG", TEST_LIMIT)
 
-    hbg_df, inventory_df, classes = load_input_data()
+    bg_df, inventory_df, classes = load_input_data()
     cases, used_file_rows = prepare_test_cases(
-        hbg_df,
+        bg_df,
         inventory_df,
         classes,
     )

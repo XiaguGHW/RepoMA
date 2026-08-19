@@ -331,9 +331,9 @@ def convert_many_baugruppen(
 
     Example:
         baugruppen_root/
-        ├── HBG_001/
-        ├── HBG_002/
-        └── HBG_003/
+        ├── BG_001/
+        ├── BG_002/
+        └── BG_003/
     """
     baugruppen_root = Path(baugruppen_root).resolve()
     output_root = Path(output_root).resolve()
