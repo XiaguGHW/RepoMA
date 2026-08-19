@@ -15,8 +15,8 @@ PROJECT_ROOT = (
     else SCRIPT_DIR
 )
 
-ROOT_PATH = PROJECT_ROOT / "output" / "processed_bg"
-REPORTS_PATH = PROJECT_ROOT / "output" / "reports" / "generate_BG_file_inventory"
+ROOT_PATH = PROJECT_ROOT / "output" / "processed_hbg"
+REPORTS_PATH = PROJECT_ROOT / "output" / "reports" / "generate_HBG_file_inventory"
 OUTPUT_FILE_PREFIX = "file_inventory"
 
 INVENTORY_COLUMNS = [

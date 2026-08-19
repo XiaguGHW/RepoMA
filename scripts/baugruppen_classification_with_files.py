@@ -23,7 +23,7 @@ SCRIPT_ORDNER = Path(__file__).resolve().parent
 INPUT_ORDNER = SCRIPT_ORDNER / "input"
 OUTPUT_ORDNER = SCRIPT_ORDNER / "output"
 
-ASSEMBLY_DATEI = INPUT_ORDNER / "all BG random no label.xlsx"
+ASSEMBLY_DATEI = INPUT_ORDNER / "all HBG random no label.xlsx"
 FUNCTIONAL_CLASSES_DATEI = INPUT_ORDNER / "Functional_classes.xlsx"
 
 # Der gemischte Datensatz liegt direkt im input-Ordner.

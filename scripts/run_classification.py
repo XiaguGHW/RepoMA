@@ -42,7 +42,7 @@ except ImportError:
 # All Python files live in scripts/, while .env, input/ and outputs/ stay in the repo root.
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent if SCRIPT_DIR.name.casefold() == "scripts" else SCRIPT_DIR
-DEFAULT_INPUT_EXCEL = PROJECT_DIR / "input" / "60_BG_random_no_label.xlsx"
+DEFAULT_INPUT_EXCEL = PROJECT_DIR / "input" / "all_BG_random_no_label.xlsx"
 DEFAULT_CLASSES_EXCEL = PROJECT_DIR / "input" / "Functional_classes.xlsx"
 DEFAULT_OUTPUT_DIR = PROJECT_DIR / "outputs"
 
