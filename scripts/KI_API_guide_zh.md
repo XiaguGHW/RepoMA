@@ -248,6 +248,54 @@ GPT-4o 的完整 Bosch 内部 deployment 前缀和内部文档地址没有写入
 | Llama 3.3 70B | 精确 ID 未从现有截图确认 | 不猜测，使用前查内部 Model Endpoint Reference |
 | GLM-5 | 精确 ID 未从现有截图确认 | 不猜测，使用前查内部 Model Endpoint Reference |
 
+##### 各模型可处理的文件类型
+
+先区分两个概念：
+
+- **原生PDF**：PDF文件直接发送给模型；
+- **转换后支持**：脚本先用 PyMuPDF 把PDF页面转换为JPEG，再发给视觉模型，并不等于模型原生读取PDF。
+
+当前 `run_classification.py` 和 Extraction Pipeline 只扫描以下扩展名：
+
+```text
+.pdf  .png  .jpg  .jpeg
+```
+
+Word、Excel、PowerPoint、STEP、JT、DWG、DXF 等文件不会被当前脚本直接读取。所谓“CAD文件”指的是 CAD **截图**，不是原始 CAD 模型。
+
+| 模型 | 纯文本 | PNG/JPG | PDF | 多文件一起分析 | 当前统一connector |
+|---|---|---|---|---|---|
+| Gemini 2.5 Pro | ✅ | ✅ 原生 | ✅ 原生PDF | ✅ | ✅ |
+| Gemini 2.5 Flash | ✅ | ✅ 原生 | ✅ 原生PDF | ✅ | ✅ |
+| Claude Opus 4.8 | ✅ | ✅ 原生 | ✅ 原生PDF | ✅ | ✅ |
+| Claude Opus 4.7 | ✅ | ✅ 原生 | ✅ 原生PDF | ✅ | ✅ |
+| Claude Opus 4.6 | ✅ | ✅ 原生 | ✅ 原生PDF | ✅ | ✅ |
+| Claude Opus 4.5 | ✅ | ✅ 原生 | ✅ 原生PDF | ✅ | ✅ |
+| Claude Opus 4.1 | ✅ | ✅ 原生 | ✅ 原生PDF | ✅ | ✅ |
+| Claude Sonnet 5 | ✅ | ✅ 原生 | ✅ 原生PDF | ✅ | ✅ |
+| Claude Sonnet 4.6 | ✅ | ✅ 原生 | ✅ 原生PDF | ✅ | ✅ |
+| Claude Sonnet 4.5 | ✅ | ✅ 原生 | ✅ 原生PDF | ✅ | ✅ |
+| Claude Sonnet 4 | ✅ | ✅ 原生 | ✅ 原生PDF | ✅ | ✅ |
+| Claude Haiku 4.5 | ✅ | ✅ 原生 | ✅ 原生PDF | ✅ | ✅ |
+| GPT-5.5 | ✅ | ✅ 视觉输入 | 🔄 转成JPEG页面 | ✅，作为多张图片 | ✅ |
+| GPT-5 Nano | ✅ | ✅ 视觉输入 | 🔄 转成JPEG页面 | ✅，作为多张图片 | ✅ |
+| GPT-4o 2024-05-13 | ✅ | ✅ 视觉输入 | 🔄 转成JPEG页面 | ✅，作为多张图片 | ✅，需完整deployment名称 |
+| GPT-4o 2024-08-06 | ✅ | ✅ 视觉输入 | 🔄 转成JPEG页面 | ✅，作为多张图片 | ✅，需完整deployment名称 |
+| GPT-4o 2024-11-20 | ✅ | ✅ 视觉输入 | 🔄 转成JPEG页面 | ✅，作为多张图片 | ✅，需完整deployment名称 |
+| GPT-4o Mini 2024-07-18 | ✅ | ✅ 视觉输入 | 🔄 转成JPEG页面 | ✅，作为多张图片 | ✅，需完整deployment名称 |
+| DeepSeek R1 | ✅ 文本推理 | ❌ | ❌ | ❌ | ❌ |
+| Mistral OCR 2505 | OCR模型本身面向文档 | ⚠️ 理论能力 | ⚠️ 理论能力 | 未验证 | ❌ 当前端点返回不可用 |
+| Mistral Document AI 2512 | 输出文本/JSON/Markdown | ⚠️ 内部文档称支持图片 | ⚠️ 内部文档称支持PDF，有限制 | 未验证 | ❌ |
+| Llama 3.3 70B | ✅ 文本/代码 | ❌ 未确认视觉能力 | ❌ | ❌ | ❌ |
+| GLM-5 | ✅ 文本 | 未确认 | ❌ 内部文档标记不支持PDF | ❌ | ❌ |
+
+注意：
+
+- 当前版本中 GPT 的 PDF 页面转换数量有限，长PDF后面的页面可能没有发送，应检查 `llm_connector.py` 中的页数限制。
+- “模型能力支持”不代表 Bosch Farm 当前 deployment、账号权限和代理请求格式一定支持。
+- Mistral OCR/Document AI 即使理论上能处理文档，当前统一 connector 没有对应路由，不能直接在 `run_classification.py` 中使用。
+- DeepSeek R1 测试中会忽略图片，只根据文本问题生成通用回答，因此不能把“返回了答案”误判为“成功读取PDF”。
+
 ##### 填写位置和测试命令
 
 在元数据提取 Pipeline 中：
