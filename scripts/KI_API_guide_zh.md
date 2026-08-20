@@ -196,6 +196,85 @@ python main.py gemini-2.5-pro
 
 这里没有使用复杂的 `argparse`；只读取第一个位置参数。路径不能通过当前命令行接口覆盖。
 
+#### 5.2.1 模型调用名称速查表
+
+下面列出当前 README、`test.md` 和测试截图中能够确认的模型名称。测试记录日期为 **2026-07-21**；名称存在不代表当前 API Key 一定有权限，批量运行前仍需先测试。
+
+##### Gemini
+
+| 显示名称 | `MODEL_NAME` 填写值 | 统一连接器 | PDF |
+|---|---|---|---|
+| Gemini 2.5 Pro | `gemini-2.5-pro` | 支持 | 原生PDF/多文件 |
+| Gemini 2.5 Flash | `gemini-2.5-flash` | 支持 | 原生PDF/多文件 |
+
+##### Claude
+
+| 显示名称 | `MODEL_NAME` 填写值 | 测试说明 |
+|---|---|---|
+| Claude Opus 4.8 | `claude-opus-4-8` | 可用；大文件可能触发代理超时 |
+| Claude Opus 4.7 | `claude-opus-4-7` | 测试成功 |
+| Claude Opus 4.6 | `claude-opus-4-6` | 测试成功 |
+| Claude Opus 4.5 | `claude-opus-4-5@20251101` | 带日期版本 |
+| Claude Opus 4.1 | `claude-opus-4-1@20250805` | 原脚本曾使用错误日期 |
+| Claude Sonnet 5 | `claude-sonnet-5` | 新命名方式，不带日期 |
+| Claude Sonnet 4.6 | `claude-sonnet-4-6` | 新命名方式，不带日期 |
+| Claude Sonnet 4.5 | `claude-sonnet-4-5@20250929` | 不要误写成 `@20251001` |
+| Claude Sonnet 4 | `claude-sonnet-4@20250514` | 带日期版本 |
+| Claude Haiku 4.5 | `claude-haiku-4-5@20251001` | 测试成功 |
+| Claude 3.5 Haiku | 不再使用 | 测试记录显示已退役 |
+
+Claude 模型在统一连接器中支持原生 PDF。较新的 Opus 4.6/4.7/4.8、Sonnet 4.6/5 使用不带 `@日期` 的新命名方式；较旧版本仍必须填写日期。
+
+##### GPT / Azure OpenAI
+
+| 显示名称 | 调用时填写值 | 说明 |
+|---|---|---|
+| GPT-5.5 | `gpt-5.5-2026-04-24` | 统一连接器支持；PDF需转成页面图片 |
+| GPT-5 Nano | `gpt-5-nano-2025-08-07` | 小模型；应给推理和输出预留足够 token |
+| GPT-4o 2024-05-13 | Bosch Farm **完整 deployment 名称**，版本结尾为 `gpt-4o-2024-05-13` | 不能只填写短名称；内部前缀未写入公开仓库 |
+| GPT-4o 2024-08-06 | Bosch Farm **完整 deployment 名称**，版本结尾为 `gpt-4o-2024-08-06` | 较高输出上限 |
+| GPT-4o 2024-11-20 | Bosch Farm **完整 deployment 名称**，版本结尾为 `gpt-4o-2024-11-20` | 较高输出上限 |
+| GPT-4o Mini 2024-07-18 | Bosch Farm **完整 deployment 名称**，版本结尾为 `gpt-4o-mini-2024-07-18` | 较快、较便宜 |
+
+GPT-4o 的完整 Bosch 内部 deployment 前缀和内部文档地址没有写入本公开仓库。请从本地 `Extraction-Pipeline/README.md` 或 Bosch Model Farm 内部文档复制完整值。
+
+##### 其他模型
+
+| 显示名称 | 调用名称 | 当前结论 |
+|---|---|---|
+| DeepSeek R1 | `deepseek-ai/deepseek-r1-0528-maas` | 文本推理可用，但测试中不支持真实 PDF/图片输入；统一连接器当前不支持 |
+| Mistral OCR 2505 | `mistral-ocr-2505` | 当前 ChatCompletion 测试返回模型不可用；统一连接器当前不支持 |
+| Mistral Document AI 2512 | `mistral-document-ai-2512` | 内部能力文档中出现，当前 Pipeline 未验证 |
+| Llama 3.3 70B | 精确 ID 未从现有截图确认 | 不猜测，使用前查内部 Model Endpoint Reference |
+| GLM-5 | 精确 ID 未从现有截图确认 | 不猜测，使用前查内部 Model Endpoint Reference |
+
+##### 填写位置和测试命令
+
+在元数据提取 Pipeline 中：
+
+```python
+MODEL_NAME = "gemini-2.5-pro"
+```
+
+或者：
+
+```bash
+python main.py "claude-opus-4-8"
+```
+
+在功能分类脚本中先只测试一行：
+
+```bash
+python scripts/run_classification.py --model "gemini-2.5-pro" --max-rows 1
+```
+
+建议把“可用”分成两次验证：
+
+1. **Hello测试**：确认模型名称、权限和文本API正常；
+2. **小PDF测试**：确认该模型能通过当前连接器真正读取文件。
+
+出现 `404` 通常代表模型名/日期错误或模型已下线；`403` 多为权限问题；`429` 是限流；timeout 表示请求过慢、文档过大或内部代理中断。
+
 ### 5.3 装配文件夹匹配
 
 程序要求文件夹名与 Excel 中的值完全一致：
