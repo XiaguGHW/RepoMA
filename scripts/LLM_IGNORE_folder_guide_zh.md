@@ -169,3 +169,87 @@ python run_classification.py --model "claude-sonnet-5" --max-rows 1
 - 如果所有支持文件都被移入 `_LLM_IGNORE`，该 BG 会被记为“没有找到可发送的支持文件”并跳过模型调用。
 - 对 GPT 模型而言，该功能能减小请求体积，但不能保证一定消除 413；PDF 转成 JPEG 后仍可能过大。
 - 建议优先保留 BOM、主要技术图纸和最能反映总成结构的资料。
+
+
+---
+
+## 7. 常见错误：修改后出现多个红色 Problems
+
+如果修改文件收集逻辑后，VS Code 同时显示以下错误：
+
+```text
+Unexpected indentation
+"return" can be used only within a function
+"assembly_id" is not defined
+"assembly_folder" is not defined
+"match_status" is not defined
+```
+
+通常并不是五个独立问题，而是前面的一处缩进、括号或逗号错误导致的连锁报错。  
+其中最先出现的 `Unexpected indentation` 通常是根本原因。
+
+最安全的修复方式是：从 `def collect_all_supported_files(...)` 开始，到下一个 `def build_question(...)` 之前，整体替换为下面的完整函数：
+
+```python
+def collect_all_supported_files(
+    assembly_id: object,
+    teamcenter_id: object | None,
+    data_root: Path,
+) -> tuple[list[str], Path | None, str]:
+    """Locate the BG folder and collect all supported files except ignored files."""
+
+    assembly_folder, match_status = find_assembly_folder(
+        assembly_id,
+        teamcenter_id,
+        data_root,
+    )
+
+    if not assembly_folder:
+        logging.warning(
+            "Folder for BG %s (Teamcenter: %s) was not found: %s",
+            assembly_id,
+            teamcenter_id,
+            match_status,
+        )
+        return [], None, match_status
+
+    supported_candidates = [
+        path
+        for path in assembly_folder.rglob("*")
+        if path.is_file()
+        and path.suffix.lower() in SUPPORTED_EXTENSIONS
+    ]
+
+    files = sorted(
+        path
+        for path in supported_candidates
+        if not any(
+            folder_name.casefold() in IGNORED_FOLDER_NAMES
+            for folder_name in path.relative_to(assembly_folder).parts[:-1]
+        )
+    )
+
+    ignored_count = len(supported_candidates) - len(files)
+
+    logging.info(
+        "%d supported files selected for BG %s in %s (%s); "
+        "%d file(s) ignored under _LLM_IGNORE.",
+        len(files),
+        assembly_id,
+        assembly_folder,
+        match_status,
+        ignored_count,
+    )
+
+    return [str(path) for path in files], assembly_folder, match_status
+```
+
+替换后还应确认：
+
+- `IGNORED_FOLDER_NAMES = {"_llm_ignore"}` 位于函数外，并放在 `SUPPORTED_EXTENSIONS` 附近；
+- 函数内部统一使用四个空格缩进，不混用 Tab；
+- 不再保留旧的 `files = sorted(...)`、`logging.info(...)` 和 `return ...`；
+- `def build_question(...)` 必须顶格书写，不能缩进到该函数内部；
+- `return [str(path) ...]` 必须保留，否则调用方无法获得文件列表、匹配文件夹和匹配状态。
+
+保存文件后，先处理 Problems 列表中的第一条红色错误。根本错误修复后，其余由语法分析产生的连锁错误通常会一起消失。
