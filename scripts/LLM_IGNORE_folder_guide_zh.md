@@ -253,3 +253,83 @@ def collect_all_supported_files(
 - `return [str(path) ...]` 必须保留，否则调用方无法获得文件列表、匹配文件夹和匹配状态。
 
 保存文件后，先处理 Problems 列表中的第一条红色错误。根本错误修复后，其余由语法分析产生的连锁错误通常会一起消失。
+
+---
+
+## 8. 模型与 `temperature` 参数兼容性
+
+`temperature` 不是必填参数。它用于控制输出的随机性，但并非所有模型都接受非默认值。对于本项目的单标签分类任务，在模型支持时通常使用 `temperature = 0.0`；对推理或 Thinking 模型，应根据接口兼容性省略该参数。
+
+| 模型 | 是否发送 `temperature` | 本项目建议 |
+|---|---|---|
+| GPT-4o / GPT-4o mini | 可以 | `temperature = 0.0` |
+| GPT-4.1 系列 | 可以 | `temperature = 0.0` |
+| Gemini 2.0 / 2.5 Pro / 2.5 Flash | 可以 | `temperature = 0.0` |
+| Claude 3.x | 未开启 Thinking 时可以 | 可使用 `temperature = 0.0` |
+| Claude Sonnet 4 / Opus 4，开启 Thinking | 不要发送 | 省略该参数 |
+| Claude Opus 4.7 / 4.8 | 不要发送 | 省略该参数 |
+| Claude Sonnet 5 / Opus 5 | 不要发送 | 非默认值可能返回 HTTP 400 |
+| GPT-5、o1、o3、o4 等推理模型 | 通常不要发送 | 使用 `reasoning_effort` 等推理参数 |
+
+对于当前实验中已经使用的模型，可以记住下面这条简化规则：
+
+```text
+GPT-4o、Gemini 2.5 → temperature = 0.0
+Claude Opus 4.8、Claude Sonnet 5 → 不发送 temperature
+```
+
+### 8.1 Connector 中的推荐判断
+
+可以在建立请求体时，根据模型名称决定是否加入 `temperature`：
+
+```python
+_no_temperature_prefixes = (
+    "claude-opus-4",
+    "claude-opus-5",
+    "claude-sonnet-4",
+    "claude-sonnet-5",
+    "gpt-5",
+    "o1",
+    "o3",
+    "o4",
+)
+
+if not self.model.lower().startswith(_no_temperature_prefixes):
+    payload["temperature"] = 0.0
+```
+
+这里的逻辑是：
+
+- 模型名称命中 `_no_temperature_prefixes`：请求体中完全不加入 `temperature`；
+- 其他当前使用的普通生成模型：加入 `temperature = 0.0`；
+- “不加入参数”和“发送 `temperature = None`”不是一回事，正确做法是不要创建该字段。
+
+### 8.2 与 HTTP 400 的关系
+
+如果模型接口不支持非默认 `temperature`，但 connector 仍发送：
+
+```python
+"temperature": 0.0
+```
+
+服务器可能返回：
+
+```text
+HTTP 400 Bad Request
+```
+
+这表示请求已到达模型端点，但请求参数不被接受。进度条仍可能显示 100%，因为它只表示 Excel 行已经遍历完成；是否真正分类成功，应检查输出 Excel 中的：
+
+- `Processing_Status = SUCCESS`
+- `Raw_Model_Response` 中没有 HTTP 400
+- `Predicted_Label` 为允许的功能类别
+
+### 8.3 官方参考
+
+- Anthropic：Claude Sonnet 5 对非默认 `temperature`、`top_p` 和 `top_k` 返回 400，应省略这些参数：  
+  <https://platform.claude.com/docs/en/about-claude/models/whats-new-sonnet-5>
+- OpenAI：GPT-5 系列是否支持 `temperature` 与 reasoning effort 和具体模型版本有关；推理模式下通常应省略：  
+  <https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.2>
+- Google：Gemini 的 `temperature` 位于 `generationConfig` 中，属于可选生成参数：  
+  <https://ai.google.dev/api/generate-content>
+
