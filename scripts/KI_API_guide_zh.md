@@ -262,10 +262,64 @@ MODEL_NAME = "gemini-2.5-pro"
 python main.py "claude-opus-4-8"
 ```
 
-在功能分类脚本中先只测试一行：
+在功能分类脚本中，首次切换模型时都建议只测试一行。以下命令可以直接复制。
+
+###### Gemini 测试命令
 
 ```bash
 python scripts/run_classification.py --model "gemini-2.5-pro" --max-rows 1
+python scripts/run_classification.py --model "gemini-2.5-flash" --max-rows 1
+```
+
+###### Claude Opus 测试命令
+
+```bash
+python scripts/run_classification.py --model "claude-opus-4-8" --max-rows 1
+python scripts/run_classification.py --model "claude-opus-4-7" --max-rows 1
+python scripts/run_classification.py --model "claude-opus-4-6" --max-rows 1
+python scripts/run_classification.py --model "claude-opus-4-5@20251101" --max-rows 1
+python scripts/run_classification.py --model "claude-opus-4-1@20250805" --max-rows 1
+```
+
+###### Claude Sonnet 测试命令
+
+```bash
+python scripts/run_classification.py --model "claude-sonnet-5" --max-rows 1
+python scripts/run_classification.py --model "claude-sonnet-4-6" --max-rows 1
+python scripts/run_classification.py --model "claude-sonnet-4-5@20250929" --max-rows 1
+python scripts/run_classification.py --model "claude-sonnet-4@20250514" --max-rows 1
+```
+
+###### Claude Haiku 测试命令
+
+```bash
+python scripts/run_classification.py --model "claude-haiku-4-5@20251001" --max-rows 1
+```
+
+###### GPT 测试命令
+
+```bash
+python scripts/run_classification.py --model "gpt-5.5-2026-04-24" --max-rows 1
+python scripts/run_classification.py --model "gpt-5-nano-2025-08-07" --max-rows 1
+```
+
+GPT-4o 系列必须把下面的占位符替换成 Bosch 内部文档中的**完整 deployment 名称**：
+
+```bash
+python scripts/run_classification.py --model "<完整GPT-4o-2024-05-13-deployment-name>" --max-rows 1
+python scripts/run_classification.py --model "<完整GPT-4o-2024-08-06-deployment-name>" --max-rows 1
+python scripts/run_classification.py --model "<完整GPT-4o-2024-11-20-deployment-name>" --max-rows 1
+python scripts/run_classification.py --model "<完整GPT-4o-mini-2024-07-18-deployment-name>" --max-rows 1
+```
+
+以上命令中的 GPT-4o 占位符不能原样运行。公开文档不记录 Bosch 内部 deployment 前缀，应从本地 `Extraction-Pipeline/README.md` 或内部 Model Endpoint Reference 复制完整值。
+
+DeepSeek R1、Mistral OCR、Mistral Document AI、Llama 和 GLM 当前不能直接使用这些 `run_classification.py --model ...` 命令，因为现有统一 `llm_connector.py` 尚未实现对应模型族。只有在 connector 增加对应路由和请求格式后才能加入本列表。
+
+测试成功后，删除末尾的 `--max-rows 1` 即可处理 Excel 全部行。例如：
+
+```bash
+python scripts/run_classification.py --model "gemini-2.5-pro"
 ```
 
 建议把“可用”分成两次验证：
