@@ -296,68 +296,114 @@ Word、Excel、PowerPoint、STEP、JT、DWG、DXF 等文件不会被当前脚本
 - Mistral OCR/Document AI 即使理论上能处理文档，当前统一 connector 没有对应路由，不能直接在 `run_classification.py` 中使用。
 - DeepSeek R1 测试中会忽略图片，只根据文本问题生成通用回答，因此不能把“返回了答案”误判为“成功读取PDF”。
 
-##### 填写位置和测试命令
+##### 填写位置和测试命令：先区分两个入口
 
-在元数据提取 Pipeline 中：
+这里是两个互相独立的实验，不需要先运行 `Extraction-Pipeline/main.py`。
+
+###### A. 元数据提取实验
+
+只有在运行 `Extraction-Pipeline/main.py` 时，才使用：
 
 ```python
 MODEL_NAME = "gemini-2.5-pro"
 ```
 
-或者：
+或者在 `Extraction-Pipeline` 文件夹中执行：
 
 ```bash
 python main.py "claude-opus-4-8"
 ```
 
-在功能分类脚本中，首次切换模型时都建议只测试一行。以下命令可以直接复制。
+它负责回答 Excel 各个元数据问题，不是功能分类。
+
+###### B. 功能分类实验（当前使用）
+
+如果本地实验文件夹结构类似：
+
+```text
+Multiple_Model_classification/
+├── .env
+├── .gitignore
+├── input/
+├── outputs/
+├── llm_connector.py
+└── run_classification.py
+```
+
+就应该先在终端进入这个文件夹：
+
+```powershell
+cd "你的实际路径\Multiple_Model_classification"
+```
+
+然后直接执行：
+
+```powershell
+python run_classification.py --model "gemini-2.5-pro" --max-rows 1
+```
+
+各文件的作用：
+
+- `.env`：提供 `BOSCH_FARM_SUBSCRIPTION_KEY` 和 `BG_DATA_ROOT`；
+- `input/`：放待分类BG表和功能类别表；
+- `outputs/`：保存分类结果；
+- `llm_connector.py`：由 `run_classification.py` 自动导入，不需要单独运行；
+- `.gitignore`：只控制哪些文件不上传Git，与程序运行无关。
+
+如果终端位于 RepoMA 仓库根目录，才需要写成：
+
+```powershell
+python scripts/run_classification.py --model "gemini-2.5-pro" --max-rows 1
+```
+
+下面的完整模型命令采用“终端已经位于本地实验文件夹”的写法。首次切换模型时都建议只测试一行。
 
 ###### Gemini 测试命令
 
 ```bash
-python scripts/run_classification.py --model "gemini-2.5-pro" --max-rows 1
-python scripts/run_classification.py --model "gemini-2.5-flash" --max-rows 1
+python run_classification.py --model "gemini-2.5-pro" --max-rows 1
+python run_classification.py --model "gemini-2.5-flash" --max-rows 1
 ```
 
 ###### Claude Opus 测试命令
 
 ```bash
-python scripts/run_classification.py --model "claude-opus-4-8" --max-rows 1
-python scripts/run_classification.py --model "claude-opus-4-7" --max-rows 1
-python scripts/run_classification.py --model "claude-opus-4-6" --max-rows 1
-python scripts/run_classification.py --model "claude-opus-4-5@20251101" --max-rows 1
-python scripts/run_classification.py --model "claude-opus-4-1@20250805" --max-rows 1
+python run_classification.py --model "claude-opus-4-8" --max-rows 1
+python run_classification.py --model "claude-opus-4-7" --max-rows 1
+python run_classification.py --model "claude-opus-4-6" --max-rows 1
+python run_classification.py --model "claude-opus-4-5@20251101" --max-rows 1
+python run_classification.py --model "claude-opus-4-1@20250805" --max-rows 1
 ```
 
 ###### Claude Sonnet 测试命令
 
 ```bash
-python scripts/run_classification.py --model "claude-sonnet-5" --max-rows 1
-python scripts/run_classification.py --model "claude-sonnet-4-6" --max-rows 1
-python scripts/run_classification.py --model "claude-sonnet-4-5@20250929" --max-rows 1
-python scripts/run_classification.py --model "claude-sonnet-4@20250514" --max-rows 1
+python run_classification.py --model "claude-sonnet-5" --max-rows 1
+python run_classification.py --model "claude-sonnet-4-6" --max-rows 1
+python run_classification.py --model "claude-sonnet-4-5@20250929" --max-rows 1
+python run_classification.py --model "claude-sonnet-4@20250514" --max-rows 1
 ```
 
 ###### Claude Haiku 测试命令
 
 ```bash
-python scripts/run_classification.py --model "claude-haiku-4-5@20251001" --max-rows 1
+python run_classification.py --model "claude-haiku-4-5@20251001" --max-rows 1
 ```
 
 ###### GPT 测试命令
 
 ```bash
-python scripts/run_classification.py --model "gpt-5.5-2026-04-24" --max-rows 1
-python scripts/run_classification.py --model "gpt-5-nano-2025-08-07" --max-rows 1
+python run_classification.py --model "gpt-5.5-2026-04-24" --max-rows 1
+python run_classification.py --model "gpt-5-nano-2025-08-07" --max-rows 1
 ```
 
 GPT-4o 系列必须把下面的占位符替换成 Bosch 内部文档中的**完整 deployment 名称**：
 
 ```bash
-python scripts/run_classification.py --model "<完整GPT-4o-2024-05-13-deployment-name>" --max-rows 1
-python scripts/run_classification.py --model "<完整GPT-4o-2024-08-06-deployment-name>" --max-rows 1
-python scripts/run_classification.py --model "<完整GPT-4o-2024-11-20-deployment-name>" --max-rows 1
-python scripts/run_classification.py --model "<完整GPT-4o-mini-2024-07-18-deployment-name>" --max-rows 1
+python run_classification.py --model "<完整GPT-4o-2024-05-13-deployment-name>" --max-rows 1
+python run_classification.py --model "<完整GPT-4o-2024-08-06-deployment-name>" --max-rows 1
+python run_classification.py --model "<完整GPT-4o-2024-11-20-deployment-name>" --max-rows 1
+python run_classification.py --model "<完整GPT-4o-mini-2024-07-18-deployment-name>" --max-rows 1
 ```
 
 以上命令中的 GPT-4o 占位符不能原样运行。公开文档不记录 Bosch 内部 deployment 前缀，应从本地 `Extraction-Pipeline/README.md` 或内部 Model Endpoint Reference 复制完整值。
@@ -367,7 +413,7 @@ DeepSeek R1、Mistral OCR、Mistral Document AI、Llama 和 GLM 当前不能直�
 测试成功后，删除末尾的 `--max-rows 1` 即可处理 Excel 全部行。例如：
 
 ```bash
-python scripts/run_classification.py --model "gemini-2.5-pro"
+python run_classification.py --model "gemini-2.5-pro"
 ```
 
 建议把“可用”分成两次验证：
