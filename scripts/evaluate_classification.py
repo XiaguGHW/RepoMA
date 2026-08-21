@@ -1,22 +1,25 @@
-"""Evaluate one or more LLM classification Excel files against a Ground Truth Excel.
+"""Evaluate LLM classification results against a Ground Truth Excel file.
 
-The script is designed for the output of ``run_classification.py``. It matches each
-Baugruppe to Ground Truth by SAP number first and Teamcenter number second, then
-calculates multiclass Accuracy, Precision, Recall, F1 and a confusion matrix.
+This script is intended to stay next to ``run_classification.py`` in ``scripts/``.
+With no command-line arguments it uses the fixed project structure:
 
-Typical usage:
+    RepoMA/
+    ├─ input/              Ground Truth Excel
+    ├─ outputs/            run_classification.py model results
+    ├─ 评估结果/            evaluation outputs created by this script
+    └─ scripts/
+       ├─ run_classification.py
+       └─ evaluate_classification.py
 
-    python .\scripts\evaluate_classification.py \
-        --predictions-dir .\outputs \
-        --ground-truth .\input\ground_truth.xlsx
+Matching priority: SAP number first, Teamcenter/TC number second.
+Metrics: Accuracy, macro/weighted Precision, Recall, F1, per-class metrics,
+and confusion matrix.
 
-A single result file can also be evaluated:
+Normal usage from the scripts folder:
 
-    python .\scripts\evaluate_classification.py \
-        --prediction-file .\outputs\classification_all_files_gpt-5_....xlsx \
-        --ground-truth .\input\ground_truth.xlsx
+    python evaluate_classification.py
 
-No scikit-learn dependency is required; the metrics are calculated with pandas.
+No scikit-learn dependency is required; metrics are calculated with pandas.
 """
 
 from __future__ import annotations
@@ -31,121 +34,71 @@ import pandas as pd
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent if SCRIPT_DIR.name.casefold() == "scripts" else SCRIPT_DIR
+DEFAULT_INPUT_DIR = PROJECT_DIR / "input"
 DEFAULT_PREDICTIONS_DIR = PROJECT_DIR / "outputs"
-DEFAULT_GROUND_TRUTH = PROJECT_DIR / "input" / "ground_truth.xlsx"
-DEFAULT_OUTPUT_DIR = PROJECT_DIR / "outputs" / "evaluation"
+DEFAULT_OUTPUT_DIR = PROJECT_DIR / "评估结果"
 
 PREDICTION_COLUMN_CANDIDATES = (
-    "Predicted_Label",
-    "Predicted Label",
-    "Prediction",
-    "Vorhersage",
+    "Predicted_Label", "Predicted Label", "Prediction", "Vorhersage",
 )
-
 GROUND_TRUTH_LABEL_CANDIDATES = (
-    "Ground Truth",
-    "Ground_Truth",
-    "GroundTruth",
-    "ground truth",
-    "Funktionsklasse",
-    "Functional class",
-    "Functional_class",
-    "Label_Full",
+    "Ground Truth", "Ground_Truth", "GroundTruth", "ground truth",
+    "Funktionsklasse", "Functional class", "Functional_class", "Label_Full",
 )
-
 SAP_COLUMN_CANDIDATES = (
-    "SAP-Nummer",
-    "SAP Nummer",
-    "SAP_Nummer",
-    "Baugruppennummer",
-    "Baugruppen-ID",
-    "Baugruppen_ID",
-    "BG",
-    "ID",
+    "SAP-Nummer", "SAP Nummer", "SAP_Nummer", "Baugruppennummer",
+    "Baugruppen-ID", "Baugruppen_ID", "BG", "ID",
 )
-
 TEAMCENTER_COLUMN_CANDIDATES = (
-    "Teamcenter ID",
-    "Teamcenter-ID",
-    "Teamcenter Nummer",
-    "Teamcenter-Nummer",
-    "Teamcenter_ID",
-    "TC ID",
-    "TC-ID",
-    "TC Nummer",
-    "TC-Nummer",
+    "Teamcenter ID", "Teamcenter-ID", "Teamcenter Nummer", "Teamcenter-Nummer",
+    "Teamcenter_ID", "TC ID", "TC-ID", "TC Nummer", "TC-Nummer",
 )
-
-SPECIAL_ERROR_LABELS = {
-    "UNRECOGNISED_RESPONSE",
-    "ERROR",
-    "API_ERROR",
-}
+SPECIAL_ERROR_LABELS = {"UNRECOGNISED_RESPONSE", "ERROR", "API_ERROR"}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Evaluate LLM classification Excel results against Ground Truth using "
-            "SAP/Teamcenter matching."
-        )
+        description="Evaluate run_classification.py Excel outputs against Ground Truth."
     )
     source_group = parser.add_mutually_exclusive_group(required=False)
-    source_group.add_argument(
-        "--prediction-file",
-        type=Path,
-        default=None,
-        help="Evaluate one classification result Excel file.",
-    )
-    source_group.add_argument(
-        "--predictions-dir",
-        type=Path,
-        default=None,
-        help=(
-            "Evaluate all classification_all_files_*.xlsx files in this folder. "
-            "Defaults to the project's outputs folder."
-        ),
-    )
+    source_group.add_argument("--prediction-file", type=Path, default=None)
+    source_group.add_argument("--predictions-dir", type=Path, default=None)
     parser.add_argument(
         "--ground-truth",
         type=Path,
-        default=DEFAULT_GROUND_TRUTH,
-        help="Ground Truth Excel file. Default: input/ground_truth.xlsx",
+        default=None,
+        help=(
+            "Ground Truth Excel. If omitted, the script looks in input/ for "
+            "ground_truth.xlsx or one Excel filename containing 'ground' and 'truth'."
+        ),
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
-        help="Folder for evaluation workbooks. Default: outputs/evaluation",
+        help="Evaluation output folder. Default: project/评估结果",
     )
     parser.add_argument("--prediction-column", default=None)
     parser.add_argument("--ground-truth-label-column", default=None)
     parser.add_argument("--sap-column", default=None)
     parser.add_argument("--teamcenter-column", default=None)
-    parser.add_argument(
-        "--sheet-name",
-        default=0,
-        help="Excel sheet name or index. Default: first sheet.",
-    )
+    parser.add_argument("--sheet-name", default=0)
     return parser.parse_args()
 
 
 def normalize_identifier(value: object) -> str:
-    """Normalize SAP/TC IDs for safe comparison, including Excel's 123 vs 123.0."""
+    """Normalize IDs, including Excel's 123 versus 123.0 variation."""
     if pd.isna(value):
         return ""
-
     raw = str(value).strip()
     if not raw:
         return ""
-
     try:
         number = float(raw)
         if number.is_integer():
             raw = str(int(number))
     except ValueError:
         pass
-
     return re.sub(r"[^A-Za-z0-9]+", "", raw).casefold()
 
 
@@ -170,11 +123,9 @@ def find_column(
             f"Requested {label} column '{requested}' was not found. "
             f"Available columns: {list(df.columns)}"
         )
-
     for candidate in candidates:
         if candidate in df.columns:
             return candidate
-
     if required:
         raise ValueError(
             f"Could not detect {label} column. Available columns: {list(df.columns)}"
@@ -185,12 +136,40 @@ def find_column(
 def read_excel(path: Path, sheet_name: str | int) -> pd.DataFrame:
     if not path.is_file():
         raise FileNotFoundError(f"Excel file not found: {path}")
-
     resolved_sheet: str | int = sheet_name
     if isinstance(sheet_name, str) and sheet_name.isdigit():
         resolved_sheet = int(sheet_name)
-
     return pd.read_excel(path, sheet_name=resolved_sheet)
+
+
+def find_ground_truth_path(requested: Path | None) -> Path:
+    if requested:
+        if not requested.is_file():
+            raise FileNotFoundError(f"Ground Truth file not found: {requested}")
+        return requested
+
+    standard = DEFAULT_INPUT_DIR / "ground_truth.xlsx"
+    if standard.is_file():
+        return standard
+
+    if not DEFAULT_INPUT_DIR.is_dir():
+        raise FileNotFoundError(f"Input folder not found: {DEFAULT_INPUT_DIR}")
+
+    candidates = [
+        path for path in DEFAULT_INPUT_DIR.glob("*.xlsx")
+        if "ground" in path.stem.casefold() and "truth" in path.stem.casefold()
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
+    if not candidates:
+        raise FileNotFoundError(
+            "No Ground Truth Excel detected in input/. Name it 'ground_truth.xlsx' "
+            "or include both 'ground' and 'truth' in the filename."
+        )
+    raise ValueError(
+        "More than one Ground Truth candidate found in input/: "
+        + ", ".join(path.name for path in candidates)
+    )
 
 
 def build_ground_truth_lookup(
@@ -199,16 +178,15 @@ def build_ground_truth_lookup(
     sap_col: str | None,
     tc_col: str | None,
 ) -> tuple[dict[str, tuple[str, int]], dict[str, tuple[str, int]]]:
-    """Build unique SAP and TC lookups. Duplicate IDs with conflicting labels fail loudly."""
     sap_lookup: dict[str, tuple[str, int]] = {}
     tc_lookup: dict[str, tuple[str, int]] = {}
 
     for idx, row in gt_df.iterrows():
-        label = normalize_label(row[gt_label_col])
-        if not label:
+        true_label = normalize_label(row[gt_label_col])
+        if not true_label:
             continue
 
-        for column, lookup, identifier_name in (
+        for column, lookup, id_name in (
             (sap_col, sap_lookup, "SAP"),
             (tc_col, tc_lookup, "Teamcenter"),
         ):
@@ -217,14 +195,13 @@ def build_ground_truth_lookup(
             identifier = normalize_identifier(row[column])
             if not identifier:
                 continue
-
-            if identifier in lookup and lookup[identifier][0] != label:
-                previous_label, previous_row = lookup[identifier]
+            if identifier in lookup and lookup[identifier][0] != true_label:
+                old_label, old_idx = lookup[identifier]
                 raise ValueError(
-                    f"Conflicting Ground Truth for {identifier_name} ID '{row[column]}': "
-                    f"row {previous_row + 2}='{previous_label}', row {idx + 2}='{label}'."
+                    f"Conflicting Ground Truth for {id_name} ID '{row[column]}': "
+                    f"row {old_idx + 2}='{old_label}', row {idx + 2}='{true_label}'."
                 )
-            lookup[identifier] = (label, idx)
+            lookup[identifier] = (true_label, idx)
 
     return sap_lookup, tc_lookup
 
@@ -250,12 +227,9 @@ def match_prediction_rows(
         gt_idx: int | None = None
         match_method = "NOT_MATCHED"
 
-        # Priority 1: exact normalized SAP number.
         if sap_id and sap_id in sap_lookup:
             true_label, gt_idx = sap_lookup[sap_id]
             match_method = "SAP"
-
-        # Priority 2: Teamcenter number as fallback.
         elif tc_id and tc_id in tc_lookup:
             true_label, gt_idx = tc_lookup[tc_id]
             match_method = "TEAMCENTER"
@@ -276,12 +250,12 @@ def match_prediction_rows(
     return pd.DataFrame(rows)
 
 
-def compute_metrics(matched_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float | int]]:
-    """Return per-class metrics, confusion matrix, and overall summary metrics."""
+def compute_metrics(
+    matched_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float | int]]:
     eval_df = matched_df[
         matched_df["Ground_Truth"].notna() & matched_df["Predicted_Label"].notna()
     ].copy()
-
     if eval_df.empty:
         raise ValueError("No matched rows with both Ground Truth and prediction were found.")
 
@@ -289,17 +263,17 @@ def compute_metrics(matched_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
     y_pred = eval_df["Predicted_Label"].astype(str)
 
     true_labels = list(dict.fromkeys(y_true.tolist()))
-    predicted_only_labels = [label for label in dict.fromkeys(y_pred.tolist()) if label not in true_labels]
-    labels = true_labels + predicted_only_labels
+    predicted_only = [x for x in dict.fromkeys(y_pred.tolist()) if x not in true_labels]
+    labels = true_labels + predicted_only
 
     confusion = pd.crosstab(y_true, y_pred, dropna=False)
     confusion = confusion.reindex(index=labels, columns=labels, fill_value=0)
     confusion.index.name = "Ground Truth"
     confusion.columns.name = "Predicted"
 
-    metric_rows: list[dict[str, object]] = []
     total = len(eval_df)
     correct = int((y_true == y_pred).sum())
+    metric_rows: list[dict[str, object]] = []
 
     for label in labels:
         tp = int(((y_true == label) & (y_pred == label)).sum())
@@ -307,11 +281,9 @@ def compute_metrics(matched_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
         fn = int(((y_true == label) & (y_pred != label)).sum())
         tn = total - tp - fp - fn
         support = int((y_true == label).sum())
-
         precision = tp / (tp + fp) if (tp + fp) else 0.0
         recall = tp / (tp + fn) if (tp + fn) else 0.0
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
-
         metric_rows.append(
             {
                 "Class": label,
@@ -327,38 +299,26 @@ def compute_metrics(matched_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
         )
 
     per_class = pd.DataFrame(metric_rows)
-
-    # For macro/weighted averages, use actual Ground Truth classes only. A pure prediction
-    # error label such as UNRECOGNISED_RESPONSE has support 0 and should not become a new
-    # functional class in the macro average.
-    averaging_df = per_class[per_class["Support"] > 0].copy()
-    macro_precision = float(averaging_df["Precision"].mean())
-    macro_recall = float(averaging_df["Recall"].mean())
-    macro_f1 = float(averaging_df["F1"].mean())
-
-    support_sum = int(averaging_df["Support"].sum())
-    weighted_precision = float(
-        (averaging_df["Precision"] * averaging_df["Support"]).sum() / support_sum
-    )
-    weighted_recall = float(
-        (averaging_df["Recall"] * averaging_df["Support"]).sum() / support_sum
-    )
-    weighted_f1 = float(
-        (averaging_df["F1"] * averaging_df["Support"]).sum() / support_sum
-    )
+    average_df = per_class[per_class["Support"] > 0].copy()
+    support_sum = int(average_df["Support"].sum())
 
     summary: dict[str, float | int] = {
         "Evaluated_Rows": total,
         "Correct_Rows": correct,
         "Accuracy": correct / total,
-        "Macro_Precision": macro_precision,
-        "Macro_Recall": macro_recall,
-        "Macro_F1": macro_f1,
-        "Weighted_Precision": weighted_precision,
-        "Weighted_Recall": weighted_recall,
-        "Weighted_F1": weighted_f1,
+        "Macro_Precision": float(average_df["Precision"].mean()),
+        "Macro_Recall": float(average_df["Recall"].mean()),
+        "Macro_F1": float(average_df["F1"].mean()),
+        "Weighted_Precision": float(
+            (average_df["Precision"] * average_df["Support"]).sum() / support_sum
+        ),
+        "Weighted_Recall": float(
+            (average_df["Recall"] * average_df["Support"]).sum() / support_sum
+        ),
+        "Weighted_F1": float(
+            (average_df["F1"] * average_df["Support"]).sum() / support_sum
+        ),
     }
-
     return per_class, confusion, summary
 
 
@@ -372,7 +332,6 @@ def model_name_from_file(path: Path, pred_df: pd.DataFrame) -> str:
     prefix = "classification_all_files_"
     if stem.startswith(prefix):
         remainder = stem[len(prefix):]
-        # Remove the timestamp produced by run_classification.py.
         return re.sub(r"_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$", "", remainder)
     return stem
 
@@ -381,29 +340,36 @@ def safe_filename(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", text).strip("_") or "model"
 
 
+def collect_prediction_files(args: argparse.Namespace) -> list[Path]:
+    if args.prediction_file:
+        if not args.prediction_file.is_file():
+            raise FileNotFoundError(f"Prediction file not found: {args.prediction_file}")
+        return [args.prediction_file]
+
+    directory = args.predictions_dir or DEFAULT_PREDICTIONS_DIR
+    if not directory.is_dir():
+        raise FileNotFoundError(f"Predictions folder not found: {directory}")
+
+    files = sorted(directory.glob("classification_all_files_*.xlsx"))
+    if not files:
+        raise FileNotFoundError(
+            f"No classification_all_files_*.xlsx files found in: {directory}"
+        )
+    return files
+
+
 def evaluate_file(
     prediction_path: Path,
-    gt_df: pd.DataFrame,
-    gt_label_col: str,
-    gt_sap_col: str | None,
-    gt_tc_col: str | None,
     args: argparse.Namespace,
     sap_lookup: dict[str, tuple[str, int]],
     tc_lookup: dict[str, tuple[str, int]],
 ) -> tuple[Path, dict[str, object]]:
     pred_df = read_excel(prediction_path, args.sheet_name)
     prediction_col = find_column(
-        pred_df,
-        args.prediction_column,
-        PREDICTION_COLUMN_CANDIDATES,
-        "prediction",
+        pred_df, args.prediction_column, PREDICTION_COLUMN_CANDIDATES, "prediction"
     )
     pred_sap_col = find_column(
-        pred_df,
-        args.sap_column,
-        SAP_COLUMN_CANDIDATES,
-        "SAP",
-        required=False,
+        pred_df, args.sap_column, SAP_COLUMN_CANDIDATES, "SAP", required=False
     )
     pred_tc_col = find_column(
         pred_df,
@@ -412,7 +378,6 @@ def evaluate_file(
         "Teamcenter",
         required=False,
     )
-
     if not pred_sap_col and not pred_tc_col:
         raise ValueError(
             f"'{prediction_path.name}' has neither a detectable SAP nor Teamcenter column."
@@ -426,34 +391,28 @@ def evaluate_file(
         sap_lookup,
         tc_lookup,
     )
-
     per_class, confusion, metrics = compute_metrics(matched)
     model_name = model_name_from_file(prediction_path, pred_df)
-
-    matched_count = int((matched["Match_Method"] != "NOT_MATCHED").sum())
-    unmatched_count = int((matched["Match_Method"] == "NOT_MATCHED").sum())
-    missing_prediction_count = int(matched["Predicted_Label"].isna().sum())
-    unrecognised_count = int(
-        matched["Predicted_Label"].astype(str).isin(SPECIAL_ERROR_LABELS).sum()
-    )
 
     summary_row: dict[str, object] = {
         "Model": model_name,
         "Prediction_File": prediction_path.name,
         "Prediction_Rows": len(matched),
-        "Matched_Rows": matched_count,
-        "Unmatched_Rows": unmatched_count,
-        "Missing_Prediction_Rows": missing_prediction_count,
-        "Unrecognised_or_Error_Rows": unrecognised_count,
+        "Matched_Rows": int((matched["Match_Method"] != "NOT_MATCHED").sum()),
+        "Unmatched_Rows": int((matched["Match_Method"] == "NOT_MATCHED").sum()),
+        "Missing_Prediction_Rows": int(matched["Predicted_Label"].isna().sum()),
+        "Unrecognised_or_Error_Rows": int(
+            matched["Predicted_Label"].astype(str).isin(SPECIAL_ERROR_LABELS).sum()
+        ),
         **metrics,
     }
 
-    summary_df = pd.DataFrame([summary_row])
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = args.output_dir / f"evaluation_{safe_filename(model_name)}_{prediction_path.stem}.xlsx"
-
+    output_path = args.output_dir / (
+        f"evaluation_{safe_filename(model_name)}_{prediction_path.stem}.xlsx"
+    )
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        summary_df.to_excel(writer, sheet_name="Summary", index=False)
+        pd.DataFrame([summary_row]).to_excel(writer, sheet_name="Summary", index=False)
         per_class.to_excel(writer, sheet_name="Per_Class", index=False)
         confusion.to_excel(writer, sheet_name="Confusion_Matrix")
         matched.to_excel(writer, sheet_name="Matched_Rows", index=False)
@@ -461,28 +420,11 @@ def evaluate_file(
     return output_path, summary_row
 
 
-def collect_prediction_files(args: argparse.Namespace) -> list[Path]:
-    if args.prediction_file:
-        if not args.prediction_file.is_file():
-            raise FileNotFoundError(f"Prediction file not found: {args.prediction_file}")
-        return [args.prediction_file]
-
-    directory = args.predictions_dir or DEFAULT_PREDICTIONS_DIR
-    if not directory.is_dir():
-        raise FileNotFoundError(f"Predictions directory not found: {directory}")
-
-    files = sorted(directory.glob("classification_all_files_*.xlsx"))
-    if not files:
-        raise FileNotFoundError(
-            f"No 'classification_all_files_*.xlsx' files found in: {directory}"
-        )
-    return files
-
-
 def main() -> None:
     args = parse_args()
     prediction_files = collect_prediction_files(args)
-    gt_df = read_excel(args.ground_truth, args.sheet_name)
+    ground_truth_path = find_ground_truth_path(args.ground_truth)
+    gt_df = read_excel(ground_truth_path, args.sheet_name)
 
     gt_label_col = find_column(
         gt_df,
@@ -491,11 +433,7 @@ def main() -> None:
         "Ground Truth label",
     )
     gt_sap_col = find_column(
-        gt_df,
-        args.sap_column,
-        SAP_COLUMN_CANDIDATES,
-        "SAP",
-        required=False,
+        gt_df, args.sap_column, SAP_COLUMN_CANDIDATES, "SAP", required=False
     )
     gt_tc_col = find_column(
         gt_df,
@@ -504,49 +442,40 @@ def main() -> None:
         "Teamcenter",
         required=False,
     )
-
     if not gt_sap_col and not gt_tc_col:
         raise ValueError("Ground Truth has neither a detectable SAP nor Teamcenter column.")
 
     sap_lookup, tc_lookup = build_ground_truth_lookup(
-        gt_df,
-        gt_label_col,
-        gt_sap_col,
-        gt_tc_col,
+        gt_df, gt_label_col, gt_sap_col, gt_tc_col
     )
 
-    all_summaries: list[dict[str, object]] = []
+    print(f"Ground Truth: {ground_truth_path}")
+    print(f"Model results: {DEFAULT_PREDICTIONS_DIR}")
+    print(f"Evaluation output: {args.output_dir}\n")
+
+    summaries: list[dict[str, object]] = []
     created_files: list[Path] = []
 
     for prediction_path in prediction_files:
-        output_path, summary_row = evaluate_file(
-            prediction_path,
-            gt_df,
-            gt_label_col,
-            gt_sap_col,
-            gt_tc_col,
-            args,
-            sap_lookup,
-            tc_lookup,
+        output_path, summary = evaluate_file(
+            prediction_path, args, sap_lookup, tc_lookup
         )
+        summaries.append(summary)
         created_files.append(output_path)
-        all_summaries.append(summary_row)
         print(
-            f"{summary_row['Model']}: "
-            f"Accuracy={summary_row['Accuracy']:.4f}, "
-            f"Macro-F1={summary_row['Macro_F1']:.4f} -> {output_path}"
+            f"{summary['Model']}: Accuracy={summary['Accuracy']:.4f}, "
+            f"Macro-F1={summary['Macro_F1']:.4f}"
         )
 
-    if len(all_summaries) > 1:
+    if len(summaries) > 1:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         comparison_path = args.output_dir / f"model_comparison_{timestamp}.xlsx"
-        comparison_df = pd.DataFrame(all_summaries).sort_values(
+        comparison_df = pd.DataFrame(summaries).sort_values(
             by=["Macro_F1", "Accuracy"], ascending=False
         )
         with pd.ExcelWriter(comparison_path, engine="openpyxl") as writer:
             comparison_df.to_excel(writer, sheet_name="Model_Comparison", index=False)
         created_files.append(comparison_path)
-        print(f"Combined model comparison -> {comparison_path}")
 
     print("\nCreated evaluation files:")
     for path in created_files:
