@@ -259,7 +259,12 @@ else:
 if temperature is not None and not is_reasoning_model:
     request_kwargs["temperature"] = temperature
 
-r = client.chat.completions.create(**request_kwargs)
+try:
+    r = client.chat.completions.create(**request_kwargs)
+    return r.choices[0].message.content.strip()
+except Exception as e:
+    logging.error(f"OpenAI call failed: {e}")
+    return f"Error: {e}"
 ```
 
 ### 结果
