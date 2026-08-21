@@ -200,7 +200,7 @@ Keine Abkürzung, keine Umformulierung und keine Erklärung.
 
 最重要的格式要求放在类别列表之后，让模型在生成答案前再次看到输出限制。
 
-## 6. 修改四：GPT-5 使用 max_completion_tokens
+## 6. 修改四：按模型使用正确的 token 参数（GPT-5 / o1 / o3）
 
 文件：
 
@@ -208,47 +208,68 @@ Keine Abkürzung, keine Umformulierung und keine Erklärung.
 llm_connector.py
 ```
 
-在 `_call_openai()` 中找到：
+### 为什么需要这一项
+
+OpenAI 的模型接口并不都接受相同的参数：
+
+- `gpt-5`、`o1`、`o3`：使用 `max_completion_tokens`；
+- `gpt-4o`、`gpt-4o-mini` 等普通 GPT 模型：继续使用 `max_tokens`；
+- 对 `gpt-5`、`o1`、`o3`，不要传入通用的 `temperature=0.0`。
+
+否则可能导致接口报参数错误，或不同模型的调用行为不一致。
+
+### 在实际的 `call_openai()` 中如何改
+
+当前版本的函数末尾直接调用：
 
 ```python
-kwargs = {
-    "model": self.model_name,
-    "messages": messages,
-    "max_tokens": max_tokens,
-    "timeout": 300,
-}
-if temperature is not None:
-    kwargs["temperature"] = temperature
+r = client.chat.completions.create(
+    model=self.model_name,
+    messages=messages,
+    max_completion_tokens=max_tokens,
+    timeout=300,
+    extra_query={"api-version": "2024-08-01-preview"},
+)
 ```
 
-替换为：
+不要只把 `max_completion_tokens` 直接传给所有 GPT 模型。请从原来计算 `max_tokens` 的位置开始，到上面整段 `client.chat.completions.create(...)` 为止，替换为：
 
 ```python
-is_reasoning_model = self.model_name.lower().startswith(("gpt-5", "o1", "o3"))
+is_reasoning_model = self.model_name.lower().startswith(
+    ("gpt-5", "o1", "o3")
+)
 
-kwargs = {
+max_tokens = int(
+    (generation_config or {}).get("maxOutputTokens", 4096)
+)
+temperature = (generation_config or {}).get("temperature")
+
+request_kwargs = {
     "model": self.model_name,
     "messages": messages,
     "timeout": 300,
+    "extra_query": {"api-version": "2024-08-01-preview"},
 }
 
 if is_reasoning_model:
-    kwargs["max_completion_tokens"] = max_tokens
+    request_kwargs["max_completion_tokens"] = max_tokens
 else:
-    kwargs["max_tokens"] = max_tokens
+    request_kwargs["max_tokens"] = max_tokens
 
 if temperature is not None and not is_reasoning_model:
-    kwargs["temperature"] = temperature
+    request_kwargs["temperature"] = temperature
+
+r = client.chat.completions.create(**request_kwargs)
 ```
 
-作用：
+### 结果
 
-- GPT-5、o1、o3 使用 `max_completion_tokens`；
-- GPT-4o 等普通 GPT 模型继续使用 `max_tokens`；
-- 不再把通用的 `temperature=0.0` 强行发送给 GPT-5、o1、o3；
-- Gemini 的 `temperature=0.0` 不受此处修改影响。
+- 使用 `gpt-5` 时：请求中包含 `max_completion_tokens`，不含 `temperature`；
+- 使用 `gpt-4o` 时：请求中包含 `max_tokens`，并可继续使用 `temperature=0.0`；
+- `generation_config["maxOutputTokens"]` 仍然是统一的预算来源；它会根据当前模型自动转换为正确的 API 参数；
+- Gemini 和 Claude 的调用不受此处影响。
 
-如果公司 Bosch Model Farm 的特定 GPT-5 部署明确只接受 `max_tokens`，应以该内部接口要求为准。但当前连接器应至少记录接口返回的具体错误，不能把错误静默处理为空白。
+> 注意：之前说明中的旧版 `kwargs = {..., "max_tokens": max_tokens}` 示例不适用于你截图中当前这个直接调用 `client.chat.completions.create(...)` 的版本；应以本节这一版为准。
 
 ## 7. 修改五：记录 GPT-5 的空响应原因和 token usage
 
