@@ -4,9 +4,9 @@ This script is intended to stay next to ``run_classification.py`` in ``scripts/`
 With no command-line arguments it uses the fixed project structure:
 
     RepoMA/
-    ├─ input/              Ground Truth Excel
-    ├─ outputs/            run_classification.py model results
-    ├─ 评估结果/            evaluation outputs created by this script
+    ├─ input/               Ground Truth Excel
+    ├─ outputs/             run_classification.py model results
+    ├─ evaluation_results/  evaluation outputs created by this script
     └─ scripts/
        ├─ run_classification.py
        └─ evaluate_classification.py
@@ -36,7 +36,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent if SCRIPT_DIR.name.casefold() == "scripts" else SCRIPT_DIR
 DEFAULT_INPUT_DIR = PROJECT_DIR / "input"
 DEFAULT_PREDICTIONS_DIR = PROJECT_DIR / "outputs"
-DEFAULT_OUTPUT_DIR = PROJECT_DIR / "评估结果"
+DEFAULT_OUTPUT_DIR = PROJECT_DIR / "evaluation_results"
 
 PREDICTION_COLUMN_CANDIDATES = (
     "Predicted_Label", "Predicted Label", "Prediction", "Vorhersage",
@@ -76,7 +76,7 @@ def parse_args() -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
-        help="Evaluation output folder. Default: project/评估结果",
+        help="Evaluation output folder. Default: project/evaluation_results",
     )
     parser.add_argument("--prediction-column", default=None)
     parser.add_argument("--ground-truth-label-column", default=None)
