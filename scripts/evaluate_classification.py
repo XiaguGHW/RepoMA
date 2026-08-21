@@ -1,21 +1,22 @@
 """Evaluate LLM classification results against a Ground Truth Excel file.
 
-This script is intended to stay next to ``run_classification.py`` in ``scripts/``.
-With no command-line arguments it uses the fixed project structure:
+This script is intended to stay in the same project folder as ``run_classification.py``.
+With no command-line arguments it uses the fixed local project structure:
 
-    RepoMA/
-    ├─ input/               Ground Truth Excel
-    ├─ outputs/             run_classification.py model results
-    ├─ evaluation_results/  evaluation outputs created by this script
-    └─ scripts/
-       ├─ run_classification.py
-       └─ evaluate_classification.py
+    Multiple_Models/
+    ├─ input/                 Ground Truth Excel
+    ├─ outputs/
+    │  ├─ valid_results/      only these model results are evaluated
+    │  └─ test_outputs/       ignored by this script
+    ├─ evaluation_results/    evaluation outputs created by this script
+    ├─ run_classification.py
+    └─ evaluate_classification.py
 
 Matching priority: SAP number first, Teamcenter/TC number second.
 Metrics: Accuracy, macro/weighted Precision, Recall, F1, per-class metrics,
 and confusion matrix.
 
-Normal usage from the scripts folder:
+Normal usage from the project folder:
 
     python evaluate_classification.py
 
@@ -32,10 +33,9 @@ from pathlib import Path
 import pandas as pd
 
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = SCRIPT_DIR.parent if SCRIPT_DIR.name.casefold() == "scripts" else SCRIPT_DIR
+PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_INPUT_DIR = PROJECT_DIR / "input"
-DEFAULT_PREDICTIONS_DIR = PROJECT_DIR / "outputs"
+DEFAULT_PREDICTIONS_DIR = PROJECT_DIR / "outputs" / "valid_results"
 DEFAULT_OUTPUT_DIR = PROJECT_DIR / "evaluation_results"
 
 PREDICTION_COLUMN_CANDIDATES = (
@@ -348,12 +348,15 @@ def collect_prediction_files(args: argparse.Namespace) -> list[Path]:
 
     directory = args.predictions_dir or DEFAULT_PREDICTIONS_DIR
     if not directory.is_dir():
-        raise FileNotFoundError(f"Predictions folder not found: {directory}")
+        raise FileNotFoundError(
+            f"Valid results folder not found: {directory}. "
+            "Create outputs/valid_results and place the final model result Excel files there."
+        )
 
     files = sorted(directory.glob("classification_all_files_*.xlsx"))
     if not files:
         raise FileNotFoundError(
-            f"No classification_all_files_*.xlsx files found in: {directory}"
+            f"No classification_all_files_*.xlsx files found in valid results folder: {directory}"
         )
     return files
 
@@ -450,7 +453,7 @@ def main() -> None:
     )
 
     print(f"Ground Truth: {ground_truth_path}")
-    print(f"Model results: {DEFAULT_PREDICTIONS_DIR}")
+    print(f"Valid model results: {DEFAULT_PREDICTIONS_DIR}")
     print(f"Evaluation output: {args.output_dir}\n")
 
     summaries: list[dict[str, object]] = []
