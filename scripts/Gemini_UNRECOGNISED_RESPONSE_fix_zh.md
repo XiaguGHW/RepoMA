@@ -334,6 +334,132 @@ return content
 
 同时，GPT 的 token usage 会进入现有的 `Token_Usage_JSON` 列，便于后续比较成本和输出状态。
 
+## 7.1 补充修改：Gemini / Bosch Model Farm 的临时连接失败自动重试
+
+### 现象与判断
+
+如果 Excel 的 `Raw_Model_Response` 显示类似：
+
+```text
+Error: HTTPSConnectionPool(host='aoai-farm.bosch-temp.com', port=443):
+Max retries exceeded with url: /api/google/v1/publishers/...
+```
+
+这不是 Gemini 输出了错误类别，也不是 `maxOutputTokens` 不够。请求在获得 Gemini 回答之前，就因为 Bosch Model Farm 的临时网络连接或服务负载失败。
+
+当前 `run_classification.py` 会把这个错误字符串交给 `extract_label()`，因此显示：
+
+```text
+CHECK: response is not one valid label
+```
+
+该状态仅是后续检查错误字符串的结果，不能作为模型分类错误计入评价。应先用以下修改自动重试；如果连续重试仍失败，只重新运行失败的 BG。
+
+### 修改位置
+
+文件：
+
+```text
+llm_connector.py
+```
+
+先在文件顶部的 import 区域，找到：
+
+```python
+import logging
+```
+
+紧接着增加：
+
+```python
+import time
+```
+
+然后搜索：
+
+```python
+def _http_post
+```
+
+用以下完整函数替换原来的 `_http_post()`。函数定义前有 4 个空格，因为它属于 `LLMConnector` 类；直接从代码块复制时不要额外添加 Tab：
+
+```python
+    def _http_post(self, url: str, headers: dict, payload: dict, extractor) -> str:
+        logging.info(f"POST → {url}")
+
+        max_attempts = 4
+        retryable_status_codes = {429, 500, 502, 503, 504}
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                r = requests.post(
+                    url,
+                    headers=headers,
+                    data=json.dumps(payload),
+                    timeout=300,
+                )
+                r.raise_for_status()
+
+                rj = r.json()
+                if "usageMetadata" in rj:
+                    self.last_usage = rj["usageMetadata"]
+
+                return extractor(rj)
+
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                if attempt == max_attempts:
+                    logging.error(
+                        "Request failed after %s attempts: %s",
+                        max_attempts,
+                        e,
+                    )
+                    return f"Error after {max_attempts} attempts: {e}"
+
+                wait_seconds = 2 ** attempt
+                logging.warning(
+                    "Connection error on attempt %s/%s: %s. Retry in %s s.",
+                    attempt,
+                    max_attempts,
+                    e,
+                    wait_seconds,
+                )
+                time.sleep(wait_seconds)
+
+            except requests.exceptions.HTTPError as e:
+                status_code = e.response.status_code if e.response else None
+
+                if (
+                    status_code in retryable_status_codes
+                    and attempt < max_attempts
+                ):
+                    wait_seconds = 2 ** attempt
+                    logging.warning(
+                        "HTTP %s on attempt %s/%s. Retry in %s s.",
+                        status_code,
+                        attempt,
+                        max_attempts,
+                        wait_seconds,
+                    )
+                    time.sleep(wait_seconds)
+                    continue
+
+                body = e.response.text[:500] if e.response else str(e)
+                logging.error("HTTP %s: %s", status_code, body)
+                return f"HTTP error {status_code}: {body}"
+
+            except Exception as e:
+                logging.error("Unexpected error: %s", e, exc_info=True)
+                return f"Error: {e}"
+```
+
+### 重试行为
+
+- `ConnectionError` 或 `Timeout`：最多尝试 4 次；
+- HTTP `429`、`500`、`502`、`503`、`504`：最多尝试 4 次；
+- 等待时间为 2 秒、4 秒、8 秒；
+- 其他 HTTP 错误（例如参数或鉴权错误）不会盲目重试，而是立即写入详细错误；
+- 该修改同样覆盖 Claude 的 HTTP 调用，但不影响 Gemini/GPT/Claude 的提示词、token 参数或分类逻辑。
+
 ## 8. 可选诊断：在 run_classification.py 中记录原始回答
 
 为了让日志中也能看见空字符串、空格和换行，可在以下代码后面：
