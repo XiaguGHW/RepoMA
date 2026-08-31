@@ -266,10 +266,11 @@ def build_report(
             )
         else:
             summaries = [folder_file_summary(match["folder_path"]) for match in matches]
-            status = "found" if len(matches) == 1 else "multiple_matches"
             report_row.update(
                 {
-                    "Folder_Status": status,
+                    # A BG counts as found as soon as any matching folder exists.
+                    # Several matching folders are kept only as information.
+                    "Folder_Status": "found",
                     "Match_Count": len(matches),
                     "Match_Type": " | ".join(match["match_type"] for match in matches),
                     "Found_By": " | ".join(match["matched_identifier"] for match in matches),
@@ -329,12 +330,9 @@ def write_excel_report(
     output_path: Path,
 ) -> None:
     not_found = report[report["Folder_Status"].isin(["not_found", "missing_identifier"])].copy()
-    multiple_matches = report[report["Folder_Status"] == "multiple_matches"].copy()
-
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         report.to_excel(writer, sheet_name="all_BG_check", index=False)
         not_found.to_excel(writer, sheet_name="not_found", index=False)
-        multiple_matches.to_excel(writer, sheet_name="multiple_matches", index=False)
         matches.to_excel(writer, sheet_name="folder_matches", index=False)
         pd.DataFrame(invalid_roots).to_excel(
             writer, sheet_name="invalid_search_paths", index=False
@@ -423,8 +421,13 @@ def main() -> None:
     output_path = output_dir / f"129BG_folder_coverage_{timestamp}.xlsx"
     write_excel_report(report, matches, invalid_roots, output_path)
 
-    status_counts = report["Folder_Status"].value_counts().to_dict()
-    print(f"Status counts: {status_counts}")
+    found_count = int((report["Folder_Status"] == "found").sum())
+    not_found_count = int((report["Folder_Status"] == "not_found").sum())
+    missing_identifier_count = int((report["Folder_Status"] == "missing_identifier").sum())
+    print(f"BGs with at least one matching folder: {found_count}")
+    print(f"BGs without a matching folder: {not_found_count}")
+    if missing_identifier_count:
+        print(f"BGs without SAP and Teamcenter identifiers: {missing_identifier_count}")
     print(f"Report written: {output_path}")
 
 
