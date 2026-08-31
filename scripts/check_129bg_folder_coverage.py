@@ -25,7 +25,6 @@ from openpyxl.utils import get_column_letter
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent
 
 # ---------------------------------------------------------------------------
 # Configuration: paste every folder that should be searched here.
@@ -38,8 +37,8 @@ SEARCH_ROOTS: list[str] = [
     # r"C:\\path\\to\\your\\synced_Bosch_OneDrive_folder",
 ]
 
-DEFAULT_INPUT_EXCEL = PROJECT_ROOT / "input" / "129BG.xlsx"
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "output" / "reports" / "129BG_folder_coverage"
+DEFAULT_INPUT_EXCEL = SCRIPT_DIR / "129BG.xlsx"
+DEFAULT_OUTPUT_DIR = SCRIPT_DIR
 
 SAP_COLUMN_CANDIDATES = (
     "SAP-Nummer",
@@ -351,13 +350,13 @@ def parse_arguments() -> argparse.Namespace:
         "--input-excel",
         type=Path,
         default=DEFAULT_INPUT_EXCEL,
-        help=f"Excel file; first sheet is used (default: {DEFAULT_INPUT_EXCEL})",
+        help=f"Excel file; first sheet is used (default: same folder as script: {DEFAULT_INPUT_EXCEL.name})",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
-        help=f"Report folder (default: {DEFAULT_OUTPUT_DIR})",
+        help="Report folder (default: same folder as the script)",
     )
     parser.add_argument(
         "--search-root",
