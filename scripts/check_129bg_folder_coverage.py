@@ -109,7 +109,9 @@ def validate_search_roots(raw_roots: Iterable[str]) -> tuple[list[Path], list[di
         root = Path(raw_root).expanduser()
         if root.is_dir():
             valid_roots.append(root)
+            print(f"[accessible] {root}")
         else:
+            print(f"[not accessible] {raw_root}")
             invalid_roots.append(
                 {
                     "configured_path": raw_root,
@@ -385,6 +387,7 @@ def main() -> None:
 
     # A repeated --search-root can be used temporarily without editing SEARCH_ROOTS.
     raw_roots = [*SEARCH_ROOTS, *(args.search_root or [])]
+    print(f"Configured search roots: {len(raw_roots)}")
     valid_roots, invalid_roots = validate_search_roots(raw_roots)
     if not valid_roots:
         raise ValueError(
