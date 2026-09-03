@@ -1,9 +1,10 @@
 """Print BGs from neuBG.xlsx that already occur in 129BG.xlsx.
 
-Both workbooks are read from their first worksheet.  A row counts as a duplicate
+Both workbooks are read from their first worksheet. A row counts as a duplicate
 when either its SAP number or its Teamcenter ID occurs in the other workbook.
-The script only reads Excel files and prints the result; it does not create or
-modify any files.
+The summary shows, for every category in neuBG.xlsx, how many new BGs were
+entered and how many of them already occur in 129BG.xlsx. The script only reads
+Excel files and prints the result; it does not create or modify any files.
 """
 
 from __future__ import annotations
@@ -124,7 +125,6 @@ def main() -> None:
     reference_sap = find_column(reference_data.columns, SAP_COLUMN_CANDIDATES)
     reference_tc = find_column(reference_data.columns, TEAMCENTER_COLUMN_CANDIDATES)
     new_class = find_column(new_data.columns, CLASS_COLUMN_CANDIDATES)
-    reference_class = find_column(reference_data.columns, CLASS_COLUMN_CANDIDATES)
 
     if not (new_sap or new_tc):
         raise ValueError(
@@ -136,6 +136,11 @@ def main() -> None:
             f"No SAP or Teamcenter column found in {reference_excel.name}. "
             f"Columns: {list(reference_data.columns)}"
         )
+    if not new_class:
+        raise ValueError(
+            f"No category column found in {new_excel.name}. Add a column named "
+            "'Baugruppen-Klasse', 'Baugruppenklasse', 'Funktionsklasse', or 'Klasse'."
+        )
 
     reference_sap_index = index_identifiers(reference_data, reference_sap)
     reference_tc_index = index_identifiers(reference_data, reference_tc)
@@ -144,14 +149,17 @@ def main() -> None:
     print(f"Reference BG file: {reference_excel}")
     print(f"New columns: SAP={new_sap or '-'}, Teamcenter={new_tc or '-'}")
     print(f"Reference columns: SAP={reference_sap or '-'}, Teamcenter={reference_tc or '-'}")
-    print(f"Category column used for summary: {reference_class or new_class or '-'}")
+    print(f"Category column used for summary: {new_class}")
     print()
 
     duplicate_count = 0
     duplicates_by_category: dict[str, set[int]] = defaultdict(set)
+    new_by_category: dict[str, set[int]] = defaultdict(set)
     for new_row_number, (_, row) in enumerate(new_data.iterrows(), start=2):
         sap = display_identifier(row, new_sap)
         teamcenter = display_identifier(row, new_tc)
+        category = clean_identifier(row[new_class]) or "(empty category)"
+        new_by_category[category].add(new_row_number)
         sap_rows = reference_sap_index.get(identifier_key(sap), []) if sap else []
         tc_rows = reference_tc_index.get(identifier_key(teamcenter), []) if teamcenter else []
 
@@ -167,38 +175,25 @@ def main() -> None:
                 f"Teamcenter {teamcenter} (129BG Excel row(s): {', '.join(map(str, tc_rows))})"
             )
 
-        # The 129BG category is preferred because it is the established class of
-        # the already existing BG.  If it is absent, use the category in neuBG.
-        categories: set[str] = set()
-        if reference_class:
-            for reference_row in set(sap_rows + tc_rows):
-                category = clean_identifier(reference_data.iloc[reference_row - 2][reference_class])
-                if category:
-                    categories.add(category)
-        if not categories and new_class:
-            category = clean_identifier(row[new_class])
-            if category:
-                categories.add(category)
-        for category in categories:
-            duplicates_by_category[category].add(new_row_number)
+        duplicates_by_category[category].add(new_row_number)
 
         identifiers = ", ".join(
             item for item in (f"SAP={sap}" if sap else "", f"TC={teamcenter}" if teamcenter else "") if item
         )
         print(f"Duplicate — neuBG Excel row {new_row_number}: {identifiers}")
         print(f"  Match: {'; '.join(matched_by)}")
-        if categories:
-            print(f"  Category: {' / '.join(sorted(categories))}")
+        print(f"  Category in neuBG: {category}")
 
+    print()
+    print("Category summary (neuBG):")
+    for category in sorted(new_by_category, key=str.casefold):
+        print(
+            f"  {category}: new BGs = {len(new_by_category[category])}, "
+            f"duplicates = {len(duplicates_by_category[category])}"
+        )
     print()
     if duplicate_count:
         print(f"Result: {duplicate_count} duplicate BG row(s) found.")
-        if duplicates_by_category:
-            print("Duplicates by category:")
-            for category in sorted(duplicates_by_category, key=str.casefold):
-                print(f"  {category}: {len(duplicates_by_category[category])}")
-        else:
-            print("No category column was available for a category summary.")
     else:
         print("Result: no duplicates found.")
 
