@@ -251,7 +251,11 @@ def main() -> None:
         worksheet.column_dimensions[get_column_letter(column_index)].width = widths[header]
 
     workbook.save(args.output)
-    print(f"Created {args.output.resolve()} with {len(output)} Ground-Truth rows.")
+    selected_count = output["prompt_engineering"].str.casefold().eq("yes").sum()
+    print(
+        f"Created {args.output.resolve()} with {len(output)} Ground-Truth rows "
+        f"and {selected_count} prompt-engineering rows."
+    )
 
 
 if __name__ == "__main__":
