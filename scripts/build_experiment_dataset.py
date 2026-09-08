@@ -71,6 +71,24 @@ def add_matching_key(frame: pd.DataFrame, sap_column: object | None, tc_column: 
     return result
 
 
+def identifier_key(value: object) -> str:
+    """Normalise an SAP or Teamcenter identifier for reliable Excel joins."""
+    return "".join(clean_text(value).split()).casefold()
+
+
+def make_marker_lookup(frame: pd.DataFrame, identifier_column: object | None, marker_column: object | None) -> dict[str, str]:
+    """Return the non-empty prompt-engineering marker for each identifier."""
+    if identifier_column is None or marker_column is None:
+        return {}
+    lookup: dict[str, str] = {}
+    for identifier, marker in zip(frame[identifier_column], frame[marker_column]):
+        key = identifier_key(identifier)
+        value = clean_text(marker)
+        if key and value:
+            lookup[key] = value
+    return lookup
+
+
 def source_register_fills(workbook_path: Path, sheet_name: str, register_header: object) -> dict[str, PatternFill]:
     """Copy the original E1/E2/M cell fills so the new sheet matches it exactly."""
     workbook = load_workbook(workbook_path, read_only=False, data_only=False)
@@ -143,7 +161,7 @@ def main() -> None:
     ground_truth = add_matching_key(ground_truth, gt_sap, gt_tc)
     folder_matches = add_matching_key(folder_matches, match_sap, match_tc)
 
-    # The manual prompt-engineering selection is made in all_BG_check.  Carry
+    # The manual prompt-engineering selection is made in all_BG_check. Carry
     # its yes/no marker into the generated experiment dataset.
     check_sap = locate_column(all_bg_check.columns.tolist(), ("SAP-Nummer", "SAP Nummer"), required=False)
     check_tc = locate_column(all_bg_check.columns.tolist(), ("Teamcenter", "Teamcenter ID", "Teamcenter-ID"), required=False)
@@ -152,19 +170,22 @@ def main() -> None:
     )
     if check_sap is None and check_tc is None:
         raise ValueError("The all_BG_check sheet needs SAP-Nummer or Teamcenter for matching.")
-    all_bg_check = add_matching_key(all_bg_check, check_sap, check_tc)
-    prompt_markers = (
-        all_bg_check.loc[all_bg_check["_match_key"].ne("")]
-        .drop_duplicates("_match_key", keep="first")
-        .set_index("_match_key")[check_prompt_engineering]
-        if check_prompt_engineering is not None
-        else pd.Series(dtype=str)
-    )
+
+    # Do not join only on SAP. A row can have an SAP number in one workbook
+    # and only the Teamcenter number in another. Check both identifiers.
+    prompt_by_sap = make_marker_lookup(all_bg_check, check_sap, check_prompt_engineering)
+    prompt_by_tc = make_marker_lookup(all_bg_check, check_tc, check_prompt_engineering)
+
+    def prompt_marker_for_row(row: pd.Series) -> str:
+        sap_marker = prompt_by_sap.get(identifier_key(row[gt_sap])) if gt_sap is not None else None
+        tc_marker = prompt_by_tc.get(identifier_key(row[gt_tc])) if gt_tc is not None else None
+        return sap_marker or tc_marker or ""
+
     folder_matches["_file_count"] = pd.to_numeric(
         folder_matches[match_file_count], errors="coerce"
     ).fillna(-1) if match_file_count is not None else -1
 
-    # Multiple copies can exist under different source roots.  Pick the one
+    # Multiple copies can exist under different source roots. Pick the one
     # containing most files as the path used by the classifier.
     best_paths = (
         folder_matches.loc[folder_matches["_match_key"].ne("")]
@@ -180,7 +201,7 @@ def main() -> None:
 
     output = pd.DataFrame(
         {
-            "prompt_engineering": ground_truth["_match_key"].map(prompt_markers).fillna("").map(clean_text),
+            "prompt_engineering": ground_truth.apply(prompt_marker_for_row, axis=1),
             "SAP-Nummer": gt_value(gt_sap),
             "Teamcenter": gt_value(gt_tc),
             "Benennung (E)": gt_value(gt_english),
