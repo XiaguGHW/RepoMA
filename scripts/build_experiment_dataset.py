@@ -130,10 +130,14 @@ def main() -> None:
     if match_sap is None and match_tc is None:
         raise ValueError("The folder_matches sheet needs SAP-Nummer or Teamcenter for matching.")
     match_path = locate_column(
-        folder_matches.columns.tolist(), ("Found_Folder_Paths", "Found Folder Paths"), required=True
+        folder_matches.columns.tolist(),
+        ("Found_Folder_Paths", "Found Folder Paths", "folder_path", "folder path"),
+        required=True,
     )
     match_file_count = locate_column(
-        folder_matches.columns.tolist(), ("Total_File_Count", "Total File Count"), required=False
+        folder_matches.columns.tolist(),
+        ("Total_File_Count", "Total File Count", "file_count", "file count"),
+        required=False,
     )
 
     ground_truth = add_matching_key(ground_truth, gt_sap, gt_tc)
