@@ -26,6 +26,7 @@ from openpyxl.utils import get_column_letter
 
 GROUND_TRUTH_SHEET = "Final_Ground_Truth"
 FOLDER_MATCHES_SHEET = "folder_matches"
+ALL_BG_CHECK_SHEET = "all_BG_check"
 DEFAULT_OUTPUT = "classification_experiment_dataset.xlsx"
 
 
@@ -103,11 +104,13 @@ def main() -> None:
     parser.add_argument("--coverage-excel", type=Path, required=True)
     parser.add_argument("--ground-truth-sheet", default=GROUND_TRUTH_SHEET)
     parser.add_argument("--folder-matches-sheet", default=FOLDER_MATCHES_SHEET)
+    parser.add_argument("--all-bg-check-sheet", default=ALL_BG_CHECK_SHEET)
     parser.add_argument("--output", type=Path, default=Path(DEFAULT_OUTPUT))
     args = parser.parse_args()
 
     ground_truth = pd.read_excel(args.ground_truth_excel, sheet_name=args.ground_truth_sheet, dtype=str)
     folder_matches = pd.read_excel(args.coverage_excel, sheet_name=args.folder_matches_sheet, dtype=str)
+    all_bg_check = pd.read_excel(args.coverage_excel, sheet_name=args.all_bg_check_sheet, dtype=str)
 
     gt_sap = locate_column(ground_truth.columns.tolist(), ("SAP-Nummer", "SAP Nummer"), required=False)
     gt_tc = locate_column(ground_truth.columns.tolist(), ("Teamcenter", "Teamcenter ID", "Teamcenter-ID"), required=False)
@@ -135,6 +138,24 @@ def main() -> None:
 
     ground_truth = add_matching_key(ground_truth, gt_sap, gt_tc)
     folder_matches = add_matching_key(folder_matches, match_sap, match_tc)
+
+    # The manual prompt-engineering selection is made in all_BG_check.  Carry
+    # its yes/no marker into the generated experiment dataset.
+    check_sap = locate_column(all_bg_check.columns.tolist(), ("SAP-Nummer", "SAP Nummer"), required=False)
+    check_tc = locate_column(all_bg_check.columns.tolist(), ("Teamcenter", "Teamcenter ID", "Teamcenter-ID"), required=False)
+    check_prompt_engineering = locate_column(
+        all_bg_check.columns.tolist(), ("prompt_engineering", "prompt engineering"), required=False
+    )
+    if check_sap is None and check_tc is None:
+        raise ValueError("The all_BG_check sheet needs SAP-Nummer or Teamcenter for matching.")
+    all_bg_check = add_matching_key(all_bg_check, check_sap, check_tc)
+    prompt_markers = (
+        all_bg_check.loc[all_bg_check["_match_key"].ne("")]
+        .drop_duplicates("_match_key", keep="first")
+        .set_index("_match_key")[check_prompt_engineering]
+        if check_prompt_engineering is not None
+        else pd.Series(dtype=str)
+    )
     folder_matches["_file_count"] = pd.to_numeric(
         folder_matches[match_file_count], errors="coerce"
     ).fillna(-1) if match_file_count is not None else -1
@@ -155,6 +176,7 @@ def main() -> None:
 
     output = pd.DataFrame(
         {
+            "prompt_engineering": ground_truth["_match_key"].map(prompt_markers).fillna("").map(clean_text),
             "SAP-Nummer": gt_value(gt_sap),
             "Teamcenter": gt_value(gt_tc),
             "Benennung (E)": gt_value(gt_english),
@@ -190,6 +212,7 @@ def main() -> None:
         register_cell.alignment = Alignment(horizontal="center")
 
     widths = {
+        "prompt_engineering": 20,
         "SAP-Nummer": 18,
         "Teamcenter": 18,
         "Benennung (E)": 24,
