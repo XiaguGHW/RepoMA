@@ -56,6 +56,31 @@ DEFAULT_PROMPT_DIR = PROJECT_DIR / "prompts"
 DEFAULT_OUTPUT_DIR = PROJECT_DIR / "outputs"
 SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 
+# The Ground Truth workbook still contains two older label names.  Evaluation
+# maps them to the Codebook V2 labels used by P1/P2/P3 before comparing.
+CANONICAL_CLASS_ORDER = (
+    "Lineareinheit",
+    "Gantry",
+    "Greifer",
+    "Umsetzeinheit",
+    "Roboter",
+    "Rotationseinheit",
+    "Keine der verfügbaren Klassen",
+)
+LABEL_ALIASES = {
+    "lineareinheit": "Lineareinheit",
+    "gantry": "Gantry",
+    "multi achs system gantry": "Gantry",
+    "greifer": "Greifer",
+    "umsetzeinheit": "Umsetzeinheit",
+    "kombinierte einheit": "Umsetzeinheit",
+    "umsetzeinheit kombinierte einheit": "Umsetzeinheit",
+    "roboter": "Roboter",
+    "rotationseinheit": "Rotationseinheit",
+    "keine der verfügbaren klassen": "Keine der verfügbaren Klassen",
+    "keine der verfugbaren klassen": "Keine der verfügbaren Klassen",
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -223,6 +248,171 @@ def make_output_path(args: argparse.Namespace) -> Path:
     return args.output_dir / f"prompt_development_{args.prompt_config}_{model}_{timestamp}.xlsx"
 
 
+def clean_cell_text(value: object) -> str:
+    """Return a safe, stripped string for a spreadsheet cell."""
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def canonical_class_label(value: object) -> str:
+    """Map legacy and Codebook V2 label spellings to one comparison label."""
+    key = re.sub(r"[^a-z0-9äöüß]+", " ", clean_cell_text(value).casefold())
+    return LABEL_ALIASES.get(" ".join(key.split()), "")
+
+
+def write_prompt_evaluation_sheet(workbook, frame: pd.DataFrame) -> None:
+    """Add a compact E1 prompt-development evaluation to the result workbook."""
+    if "Prompt_Evaluation" in workbook.sheetnames:
+        del workbook["Prompt_Evaluation"]
+    sheet = workbook.create_sheet("Prompt_Evaluation")
+    sheet.sheet_view.showGridLines = False
+
+    marker = frame.get("prompt_engineering", pd.Series("", index=frame.index))
+    selected = frame.loc[
+        marker.fillna("").astype(str).str.strip().str.casefold().eq("yes")
+    ].copy()
+
+    cases: list[dict[str, object]] = []
+    for _, row in selected.iterrows():
+        ground_truth = clean_cell_text(row.get("Ground Truth"))
+        predicted = clean_cell_text(row.get("Predicted_Label"))
+        canonical_ground_truth = canonical_class_label(ground_truth)
+        canonical_prediction = canonical_class_label(predicted)
+
+        if not predicted:
+            evaluation_status = "NOT_EVALUABLE: no parsed prediction"
+        elif not canonical_ground_truth:
+            evaluation_status = "NOT_EVALUABLE: unknown Ground Truth label"
+        elif not canonical_prediction:
+            evaluation_status = "NOT_EVALUABLE: unknown predicted label"
+        elif canonical_prediction == canonical_ground_truth:
+            evaluation_status = "CORRECT"
+        else:
+            evaluation_status = "INCORRECT"
+
+        cases.append(
+            {
+                "SAP-Nummer": clean_cell_text(row.get("SAP-Nummer")),
+                "Teamcenter": clean_cell_text(row.get("Teamcenter")),
+                "Ground Truth": ground_truth,
+                "Predicted_Label": predicted,
+                "Evaluation_Status": evaluation_status,
+                "Processing_Status": clean_cell_text(row.get("Processing_Status")),
+                "JSON_Parse_Status": clean_cell_text(row.get("JSON_Parse_Status")),
+                "_ground_truth": canonical_ground_truth,
+            }
+        )
+
+    case_frame = pd.DataFrame(cases)
+    comparable = case_frame["Evaluation_Status"].isin(("CORRECT", "INCORRECT")) if not case_frame.empty else pd.Series(dtype=bool)
+    correct_count = int((case_frame["Evaluation_Status"] == "CORRECT").sum()) if not case_frame.empty else 0
+    comparable_count = int(comparable.sum()) if not case_frame.empty else 0
+    successful_count = int(
+        case_frame["Processing_Status"].eq("SUCCESS").sum()
+    ) if not case_frame.empty else 0
+    registers = sorted(
+        {
+            clean_cell_text(value)
+            for value in selected.get("Register", pd.Series("", index=selected.index))
+            if clean_cell_text(value)
+        }
+    )
+
+    title_fill = PatternFill("solid", fgColor="1F4E78")
+    section_fill = PatternFill("solid", fgColor="D9EAF7")
+    header_fill = PatternFill("solid", fgColor="2F75B5")
+    correct_fill = PatternFill("solid", fgColor="C6EFCE")
+    incorrect_fill = PatternFill("solid", fgColor="FFC7CE")
+    neutral_fill = PatternFill("solid", fgColor="FFEB9C")
+
+    sheet["A1"] = "Prompt Development Evaluation"
+    sheet["A1"].fill = title_fill
+    sheet["A1"].font = Font(color="FFFFFF", bold=True, size=14)
+    sheet.merge_cells("A1:D1")
+
+    summary_rows = [
+        ("Prompt configuration", clean_cell_text(selected.get("Prompt_Config", pd.Series([""])).iloc[0]) if not selected.empty else ""),
+        ("Model", clean_cell_text(selected.get("Run_Model", pd.Series([""])).iloc[0]) if not selected.empty else ""),
+        ("Evaluation scope", "Rows marked prompt_engineering = yes"),
+        ("Register(s)", ", ".join(registers) or "not specified"),
+        ("Selected BGs", len(case_frame)),
+        ("Parsed and comparable", comparable_count),
+        ("Correct predictions", correct_count),
+        ("Overall Accuracy", correct_count / comparable_count if comparable_count else None),
+        ("Not evaluable", len(case_frame) - comparable_count),
+        ("Processing_Status = SUCCESS", successful_count),
+    ]
+    sheet["A3"] = "Overall result"
+    sheet["A3"].fill = section_fill
+    sheet["A3"].font = Font(bold=True)
+    for row_number, (metric, value) in enumerate(summary_rows, start=4):
+        sheet.cell(row=row_number, column=1, value=metric)
+        value_cell = sheet.cell(row=row_number, column=2, value=value)
+        if metric == "Overall Accuracy" and value is not None:
+            value_cell.number_format = "0.0%"
+        if metric in {"Correct predictions", "Overall Accuracy"}:
+            value_cell.fill = correct_fill
+
+    class_header_row = 16
+    sheet.cell(row=class_header_row, column=1, value="Class-wise result").fill = section_fill
+    sheet.cell(row=class_header_row, column=1).font = Font(bold=True)
+    class_headers = ("Class", "Ground Truth rows", "Correct predictions", "Accuracy")
+    for column, header in enumerate(class_headers, start=1):
+        cell = sheet.cell(row=class_header_row + 1, column=column, value=header)
+        cell.fill = header_fill
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    for row_number, class_label in enumerate(CANONICAL_CLASS_ORDER, start=class_header_row + 2):
+        class_cases = case_frame.loc[case_frame["_ground_truth"].eq(class_label)] if not case_frame.empty else case_frame
+        class_correct = int(class_cases["Evaluation_Status"].eq("CORRECT").sum()) if not class_cases.empty else 0
+        class_total = len(class_cases)
+        sheet.cell(row=row_number, column=1, value=class_label)
+        sheet.cell(row=row_number, column=2, value=class_total)
+        sheet.cell(row=row_number, column=3, value=class_correct)
+        accuracy_cell = sheet.cell(
+            row=row_number,
+            column=4,
+            value=class_correct / class_total if class_total else None,
+        )
+        if class_total:
+            accuracy_cell.number_format = "0.0%"
+
+    details_header_row = class_header_row + 11
+    sheet.cell(row=details_header_row, column=1, value="Case-by-case comparison").fill = section_fill
+    sheet.cell(row=details_header_row, column=1).font = Font(bold=True)
+    detail_headers = (
+        "SAP-Nummer", "Teamcenter", "Ground Truth", "Predicted_Label",
+        "Evaluation_Status", "Processing_Status", "JSON_Parse_Status",
+    )
+    for column, header in enumerate(detail_headers, start=1):
+        cell = sheet.cell(row=details_header_row + 1, column=column, value=header)
+        cell.fill = header_fill
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    for output_row, (_, case) in enumerate(case_frame.iterrows(), start=details_header_row + 2):
+        for column, header in enumerate(detail_headers, start=1):
+            cell = sheet.cell(row=output_row, column=column, value=case[header])
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+            if header == "Evaluation_Status":
+                if case[header] == "CORRECT":
+                    cell.fill = correct_fill
+                elif case[header] == "INCORRECT":
+                    cell.fill = incorrect_fill
+                else:
+                    cell.fill = neutral_fill
+
+    widths = {"A": 28, "B": 24, "C": 30, "D": 30, "E": 34, "F": 32, "G": 22}
+    for column, width in widths.items():
+        sheet.column_dimensions[column].width = width
+    sheet.row_dimensions[1].height = 24
+    sheet.freeze_panes = f"A{details_header_row + 2}"
+    if len(case_frame):
+        sheet.auto_filter.ref = f"A{details_header_row + 1}:G{details_header_row + 1 + len(case_frame)}"
+
+
 def write_checkpoint(frame: pd.DataFrame, output_path: Path) -> None:
     # Keep human-readable experiment results on the left.  Long technical
     # paths stay at the far right, where they cannot cover result cells.
@@ -281,6 +471,7 @@ def write_checkpoint(frame: pd.DataFrame, output_path: Path) -> None:
                     vertical="top", wrap_text=True
                 )
 
+    write_prompt_evaluation_sheet(workbook, frame)
     workbook.save(output_path)
 
 
