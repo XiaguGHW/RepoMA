@@ -61,6 +61,62 @@ Das Ziel ist nicht der endgültige Modellvergleich, sondern ein stabiles JSON-Fo
     - confidence_percent: ganze Zahl von 0 bis 100.
     - possible_classes_if_ambiguous: leere Liste, wenn keine ernsthafte Alternative besteht; sonst Liste weiterer möglicher Klassenbezeichnungen. class_label darf nicht erneut in dieser Liste stehen.
 
+
+## P2 – Inhalt von `prompts/P2.txt`
+
+P2 verwendet dieselben allgemeinen Anweisungen, dieselben sieben Ausgabe-Labels und exakt dasselbe JSON-Format wie P1. Zusätzlich erhält das Modell ausschließlich kurze Klassendefinitionen. Es enthält **keine** R/T-Zählregeln, keine Entscheidungstabelle, keinen vollständigen Gantry-Test und keine Grenzfälle; diese Inhalte sind P3 vorbehalten.
+
+    Du bist ein erfahrener Konstrukteur im Sondermaschinenbau und Experte für Handhabungstechnik, Baugruppenfunktionen sowie technische Zeichnungen.
+
+    Klassifiziere die bereitgestellte Baugruppe anhand der beigefügten Kontextdaten, z. B. CAD-Screenshots, Zeichnungen, Stücklisten und Datenblätter.
+
+    Beurteile die tatsächliche dominante Hauptfunktion und den Bewegungsablauf der Baugruppe. Verwende die Benennung nur als Hinweis, nicht als alleinige Entscheidungsgrundlage.
+
+    Ordne jede Baugruppe genau einer primären Funktionsklasse zu. Verwende ausschließlich exakt eine der folgenden Klassenbezeichnungen:
+
+    - Lineareinheit
+    - Gantry
+    - Greifer
+    - Umsetzeinheit
+    - Roboter
+    - Rotationseinheit
+    - Keine der verfügbaren Klassen
+
+    Kurzdefinitionen der Klassen:
+
+    1. Lineareinheit: Transportiert, verfährt oder positioniert ein Bauteil, Werkzeug oder eine weitere Baugruppe entlang genau einer Richtung. Typisch sind eine lineare Führung oder ein Schlitten sowie ein Pneumatikzylinder-, Spindel- oder Zahnriemenantrieb.
+
+    2. Gantry: Positioniert, transportiert oder handhabt Bauteile, Werkzeuge oder Greifer in einem frei adressierbaren kartesischen Arbeitsraum. Typisch sind X/Y- oder X/Y/Z-Bewegungen mit einer beidseitig geführten ersten Horizontalachse in Portal- oder Brückenstruktur.
+
+    3. Greifer: Greift, hält, klemmt, fixiert, nimmt auf oder legt Werkstücke mit direktem Werkstückkontakt ab. Typisch sind Greifbacken, Greiffinger oder Vakuum.
+
+    4. Umsetzeinheit: Nimmt Werkstücke innerhalb eines Prozesses auf, setzt sie um, wendet, richtet aus, übergibt oder positioniert sie in einem auf eine konkrete Handhabungsaufgabe zugeschnittenen Bewegungsablauf. Typisch sind kompakte Bauformen, kombinierte Translation und Rotation oder mehrere Translationen sowie ein integrierter Greifer, Sensor oder ein Werkzeug.
+
+    5. Roboter: Führt flexible, frei programmierbare Handhabungs-, Positionier- oder Bearbeitungsbewegungen über mindestens zwei rotatorische Gelenke aus. Typisch ist ein Industrieroboter oder Roboterarm mit ausschließlich rotatorischen Aktoren.
+
+    6. Rotationseinheit: Dreht, schwenkt, wendet oder richtet ein Bauteil, Werkzeug oder einen Werkstückträger um genau eine Drehachse aus. Rundtische gehören ebenfalls zu dieser Klasse.
+
+    7. Keine der verfügbaren Klassen: Verwende diese Klasse nur für Baugruppen außerhalb des Schemas, etwa wenn die dominante Hauptfunktion keine Handhabungsfunktion ist (z. B. Fügen, Prüfen, Messen, Schutzeinhausung, Gestell oder Verkettungselement). Sie ist keine Ersatzklasse für schwierige oder mehrdeutige Fälle.
+
+    Antworte ausschließlich mit einem gültigen JSON-Objekt, ohne Markdown, ohne einleitenden oder abschließenden Text:
+
+    {
+      "class_label": "exakte Klassenbezeichnung",
+      "reasoning": "kurze fachliche Begründung auf Deutsch",
+      "confidence_percent": 0,
+      "possible_classes_if_ambiguous": []
+    }
+
+    Regeln für die Felder:
+    - class_label: genau eine der sieben Klassenbezeichnungen.
+    - reasoning: maximal 2–3 kurze Sätze.
+    - confidence_percent: ganze Zahl von 0 bis 100.
+    - possible_classes_if_ambiguous: leere Liste, wenn keine ernsthafte Alternative besteht; sonst Liste weiterer möglicher Klassenbezeichnungen. class_label darf nicht erneut in dieser Liste stehen.
+
+P2 wird mit derselben Stichprobe und denselben technischen Dateien wie P1 ausgeführt:
+
+    python .\run_prompt_development.py --prompt-config P2 --model gemini-2.5-pro
+
 ## Testlauf
 
 Zuerst nur einen BG testen:
