@@ -183,7 +183,7 @@ def write_checkpoint(frame: pd.DataFrame, output_path: Path) -> None:
         "prompt_engineering": 18, "SAP-Nummer": 16, "Teamcenter": 16,
         "Benennung (E)": 22, "Benennung (D)": 22, "Ground Truth": 26,
         "Register": 10, "Weitere zulässige Ground Truth": 30,
-        "Data_Folder_Path": 38, "Predicted_Label": 24, "Reasoning": 55,
+        "Data_Folder_Path": 22, "Predicted_Label": 24, "Reasoning": 55,
         "Confidence_Percent": 18, "Possible_Classes_If_Ambiguous": 32,
         "Raw_Model_Response": 55, "JSON_Parse_Status": 20, "Processing_Status": 30,
         "Files_Used": 55, "File_Count": 12, "Run_Model": 22, "Prompt_Config": 14,
@@ -202,7 +202,7 @@ def write_checkpoint(frame: pd.DataFrame, output_path: Path) -> None:
         sheet.column_dimensions[get_column_letter(column_index)].width = widths.get(header, 20)
 
     sheet.row_dimensions[1].height = 36
-    wrap_headers = {"Data_Folder_Path", "Reasoning", "Possible_Classes_If_Ambiguous", "Raw_Model_Response", "Files_Used", "Processing_Status"}
+    wrap_headers = {"Reasoning", "Possible_Classes_If_Ambiguous", "Raw_Model_Response", "Files_Used", "Processing_Status"}
     header_positions = {str(cell.value): cell.column for cell in sheet[1]}
     for row_index in range(2, sheet.max_row + 1):
         sheet.row_dimensions[row_index].height = 75
