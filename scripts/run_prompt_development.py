@@ -86,7 +86,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-excel", type=Path, default=DEFAULT_INPUT_EXCEL)
     parser.add_argument("--sheet-name", default="Experiment_Dataset")
-    parser.add_argument("--prompt-config", choices=("P1", "P2", "P3"), required=True)
+    parser.add_argument("--prompt-config", choices=("P1", "P2", "P3"), required=False)
+    parser.add_argument(
+        "--evaluate-existing",
+        type=Path,
+        default=None,
+        help="Add or refresh Prompt_Evaluation in an existing result workbook without calling an LLM.",
+    )
     parser.add_argument("--prompt-file", type=Path, default=None)
     parser.add_argument("--model", default="gemini-2.5-pro")
     parser.add_argument("--temperature", type=float, default=0.0)
@@ -475,6 +481,17 @@ def write_checkpoint(frame: pd.DataFrame, output_path: Path) -> None:
     workbook.save(output_path)
 
 
+def evaluate_existing_workbook(output_path: Path) -> Path:
+    """Add the evaluation sheet to a completed P1/P2/P3 result file without rerunning it."""
+    if not output_path.is_file():
+        raise FileNotFoundError(f"Result workbook not found: {output_path}")
+    frame = pd.read_excel(output_path, sheet_name=0, dtype=str)
+    workbook = load_workbook(output_path)
+    write_prompt_evaluation_sheet(workbook, frame)
+    workbook.save(output_path)
+    return output_path
+
+
 def run(args: argparse.Namespace) -> Path:
     if not 0 <= args.temperature <= 2:
         raise ValueError("--temperature must be between 0 and 2.")
@@ -608,8 +625,14 @@ if __name__ == "__main__":
         force=True,
     )
     try:
-        result_path = run(arguments)
-        print(f"Done: {result_path.resolve()}")
+        if arguments.evaluate_existing is not None:
+            result_path = evaluate_existing_workbook(arguments.evaluate_existing)
+            print(f"Evaluation sheet updated: {result_path.resolve()}")
+        else:
+            if not arguments.prompt_config:
+                raise ValueError("--prompt-config is required unless --evaluate-existing is used.")
+            result_path = run(arguments)
+            print(f"Done: {result_path.resolve()}")
     except Exception as error:
         logging.error("Classification did not start: %s", error)
         sys.exit(1)
@@ -617,3 +640,7 @@ if __name__ == "__main__":
 
 # PowerShell command: Run P1 for all rows marked prompt_engineering = yes.
 # python .\run_prompt_development.py --prompt-config P1 --model gemini-2.5-pro
+#
+# PowerShell command: Add/refresh Prompt_Evaluation in an existing result file
+# without calling the LLM again.
+# python .\run_prompt_development.py --evaluate-existing ".\outputs\prompt_development_P1_gemini-2.5-pro_YYYY-MM-DD_HH-MM-SS.xlsx"
