@@ -69,10 +69,6 @@ def parse_args() -> argparse.Namespace:
         "--max-output-tokens", type=int, default=4096,
         help="Maximum generated tokens per response. Default: 4096.",
     )
-    parser.add_argument(
-        "--max-input-mb", type=float, default=4.0,
-        help="Prepared Base64 input-size cap in MiB. Default: 4.0.",
-    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--max-rows", type=int, default=None)
     parser.add_argument(
@@ -119,7 +115,7 @@ def prepared_base64_size(connector, file_path: str) -> int:
         converter = getattr(connector, "_file_to_openai_images", None)
     if not callable(converter):
         raise AttributeError(
-            "llm_connector.py must provide _file_to_openai_images() for input-size limiting."
+            "llm_connector.py must provide _file_to_openai_images() for HTTP 413 retries."
         )
     return sum(len(str(image)) for image in converter(file_path))
 
@@ -137,42 +133,28 @@ def write_short_pdf(source: Path, target: Path, page_count: int) -> None:
         original.close()
 
 
-def apply_input_size_cap(
-    connector, files: list[str], max_input_bytes: int, temp_dir: Path
-) -> tuple[list[str], int, str, list[str]]:
-    """Reduce only the largest PDF from four to three, then two pages if needed."""
-    sizes = {file_path: prepared_base64_size(connector, file_path) for file_path in files}
-    total = sum(sizes.values())
-    display_files = list(files)
-    if total <= max_input_bytes:
-        return files, total, "No page reduction required.", display_files
+def request_is_too_large(response: object) -> bool:
+    text = str(response).casefold()
+    return "413" in text or "request entity too large" in text
 
+
+def prepare_reduced_largest_pdf(
+    connector, files: list[str], pages: int, temp_dir: Path
+) -> tuple[list[str], list[str], str]:
+    """Replace only the largest prepared PDF by a temporary first-N-pages copy."""
     pdf_paths = [Path(file_path) for file_path in files if Path(file_path).suffix.casefold() == ".pdf"]
     if not pdf_paths:
-        raise ValueError(f"Estimated input is {total / 1024 / 1024:.2f} MiB and no PDF can be reduced.")
-    largest_pdf = max(pdf_paths, key=lambda path: sizes[str(path)])
-    original_size = sizes[str(largest_pdf)]
-    for pages in (3, 2):
-        reduced_pdf = temp_dir / f"{largest_pdf.stem}_first_{pages}_pages.pdf"
-        write_short_pdf(largest_pdf, reduced_pdf, pages)
-        reduced_size = prepared_base64_size(connector, str(reduced_pdf))
-        candidate_total = total - original_size + reduced_size
-        if candidate_total <= max_input_bytes:
-            sent_files = [str(reduced_pdf) if Path(file_path) == largest_pdf else file_path for file_path in files]
-            display_files = [
-                f"{largest_pdf} [first {pages} pages used instead of first 4]"
-                if Path(file_path) == largest_pdf else file_path
-                for file_path in files
-            ]
-            note = (
-                f"Input cap applied: largest PDF reduced from first 4 pages to first {pages} pages."
-            )
-            return sent_files, candidate_total, note, display_files
-
-    raise ValueError(
-        f"Estimated input remains above {max_input_bytes / 1024 / 1024:.2f} MiB after reducing "
-        f"the largest PDF to its first 2 pages."
-    )
+        raise ValueError("The request was too large, but this BG contains no PDF that can be reduced.")
+    largest_pdf = max(pdf_paths, key=lambda path: prepared_base64_size(connector, str(path)))
+    reduced_pdf = temp_dir / f"{largest_pdf.stem}_first_{pages}_pages.pdf"
+    write_short_pdf(largest_pdf, reduced_pdf, pages)
+    sent_files = [str(reduced_pdf) if Path(file_path) == largest_pdf else file_path for file_path in files]
+    display_files = [
+        f"{largest_pdf} [first {pages} pages used instead of first 4]"
+        if Path(file_path) == largest_pdf else file_path
+        for file_path in files
+    ]
+    return sent_files, display_files, f"HTTP 413 retry: largest PDF reduced to first {pages} pages."
 
 
 def build_question(row: pd.Series) -> str:
@@ -264,7 +246,7 @@ def write_checkpoint(frame: pd.DataFrame, output_path: Path) -> None:
     }
     technical_columns = {
         "Data_Folder_Path", "Files_Used", "Raw_Model_Response", "Token_Usage_JSON",
-        "Prompt_File", "Run_Timestamp", "Input_Prepared_MB", "Input_Adjustment",
+        "Prompt_File", "Run_Timestamp",
     }
     widths = {
         "prompt_engineering": 18, "SAP-Nummer": 16, "Teamcenter": 16,
@@ -275,7 +257,7 @@ def write_checkpoint(frame: pd.DataFrame, output_path: Path) -> None:
         "Raw_Model_Response": 55, "JSON_Parse_Status": 20, "Processing_Status": 30,
         "Files_Used": 55, "File_Count": 12, "Run_Model": 22, "Prompt_Config": 14,
         "Prompt_File": 32, "Temperature": 14, "Run_Timestamp": 22,
-        "Token_Usage_JSON": 26, "Input_Prepared_MB": 18, "Input_Adjustment": 48,
+        "Token_Usage_JSON": 26,
     }
     header_fill = PatternFill("solid", fgColor="1F4E78")
     result_fill = PatternFill("solid", fgColor="2F75B5")
@@ -289,7 +271,7 @@ def write_checkpoint(frame: pd.DataFrame, output_path: Path) -> None:
         sheet.column_dimensions[get_column_letter(column_index)].width = widths.get(header, 20)
 
     sheet.row_dimensions[1].height = 36
-    wrap_headers = {"Reasoning", "Possible_Classes_If_Ambiguous", "Raw_Model_Response", "Files_Used", "Processing_Status", "Input_Adjustment"}
+    wrap_headers = {"Reasoning", "Possible_Classes_If_Ambiguous", "Raw_Model_Response", "Files_Used", "Processing_Status"}
     header_positions = {str(cell.value): cell.column for cell in sheet[1]}
     for row_index in range(2, sheet.max_row + 1):
         sheet.row_dimensions[row_index].height = 75
@@ -309,8 +291,6 @@ def run(args: argparse.Namespace) -> Path:
         raise ValueError("--max-rows must be greater than 0.")
     if args.max_output_tokens <= 0:
         raise ValueError("--max-output-tokens must be greater than 0.")
-    if args.max_input_mb <= 0:
-        raise ValueError("--max-input-mb must be greater than 0.")
     api_key = os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY")
     if not api_key:
         raise EnvironmentError("BOSCH_FARM_SUBSCRIPTION_KEY is not set in .env.")
@@ -344,7 +324,6 @@ def run(args: argparse.Namespace) -> Path:
         "Possible_Classes_If_Ambiguous", "Raw_Model_Response", "JSON_Parse_Status",
         "Processing_Status", "Files_Used", "File_Count", "Run_Model", "Prompt_Config",
         "Prompt_File", "Temperature", "Run_Timestamp", "Token_Usage_JSON",
-        "Input_Prepared_MB", "Input_Adjustment",
     ):
         result[column] = pd.NA
 
@@ -365,20 +344,28 @@ def run(args: argparse.Namespace) -> Path:
                 write_checkpoint(result, output_path)
                 continue
 
-            with tempfile.TemporaryDirectory(prefix="prompt_development_") as temp_dir_name:
-                sent_files, prepared_size, adjustment, display_files = apply_input_size_cap(
-                    llm, files, int(args.max_input_mb * 1024 * 1024), Path(temp_dir_name)
-                )
-                logging.info(
-                    "Row %s prepared input: %.2f MiB. %s",
-                    index + 2, prepared_size / 1024 / 1024, adjustment,
-                )
-                response = llm.ask_about_files(
-                    file_paths=sent_files,
-                    question=build_question(row),
-                    system_prompt=system_prompt,
-                    generation_config=generation_config,
-                )
+            display_files = list(files)
+            response = llm.ask_about_files(
+                file_paths=files,
+                question=build_question(row),
+                system_prompt=system_prompt,
+                generation_config=generation_config,
+            )
+            if request_is_too_large(response):
+                with tempfile.TemporaryDirectory(prefix="prompt_development_retry_") as temp_dir_name:
+                    for pages in (3, 2):
+                        sent_files, display_files, retry_note = prepare_reduced_largest_pdf(
+                            llm, files, pages, Path(temp_dir_name)
+                        )
+                        logging.info("Row %s: %s", index + 2, retry_note)
+                        response = llm.ask_about_files(
+                            file_paths=sent_files,
+                            question=build_question(row),
+                            system_prompt=system_prompt,
+                            generation_config=generation_config,
+                        )
+                        if not request_is_too_large(response):
+                            break
             payload, parse_status = parse_json_response(response)
             result.loc[index, "Raw_Model_Response"] = str(response)
             result.loc[index, "JSON_Parse_Status"] = parse_status
@@ -392,8 +379,6 @@ def run(args: argparse.Namespace) -> Path:
             )
             result.loc[index, "Files_Used"] = "\n".join(display_files)
             result.loc[index, "File_Count"] = len(files)
-            result.loc[index, "Input_Prepared_MB"] = round(prepared_size / 1024 / 1024, 2)
-            result.loc[index, "Input_Adjustment"] = adjustment
             result.loc[index, "Run_Model"] = args.model
             result.loc[index, "Prompt_Config"] = args.prompt_config
             result.loc[index, "Prompt_File"] = str(prompt_path)
@@ -402,7 +387,11 @@ def run(args: argparse.Namespace) -> Path:
             result.loc[index, "Token_Usage_JSON"] = json.dumps(
                 llm.get_last_token_usage() or {}, ensure_ascii=False
             )
-            result.loc[index, "Processing_Status"] = "SUCCESS" if payload else "CHECK: invalid JSON response"
+            if request_is_too_large(response):
+                result.loc[index, "Processing_Status"] = "ERROR: HTTP 413 after retries with 3 and 2 PDF pages"
+                result.loc[index, "JSON_Parse_Status"] = "REQUEST_TOO_LARGE"
+            else:
+                result.loc[index, "Processing_Status"] = "SUCCESS" if payload else "CHECK: invalid JSON response"
         except Exception as error:
             logging.exception("Failed row %s", index + 2)
             result.loc[index, "Processing_Status"] = f"ERROR: {error}"
