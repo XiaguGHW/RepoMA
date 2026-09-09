@@ -165,7 +165,17 @@ def make_output_path(args: argparse.Namespace) -> Path:
 
 
 def write_checkpoint(frame: pd.DataFrame, output_path: Path) -> None:
-    frame.to_excel(output_path, index=False, engine="openpyxl")
+    # Keep human-readable experiment results on the left.  Long technical
+    # paths stay at the far right, where they cannot cover result cells.
+    preferred_order = [
+        "prompt_engineering", "SAP-Nummer", "Teamcenter", "Benennung (E)",
+        "Benennung (D)", "Ground Truth", "Register", "Weitere zulässige Ground Truth",
+        "Predicted_Label", "Reasoning", "Confidence_Percent",
+        "Possible_Classes_If_Ambiguous", "Processing_Status", "JSON_Parse_Status",
+    ]
+    ordered_columns = [column for column in preferred_order if column in frame.columns]
+    ordered_columns.extend(column for column in frame.columns if column not in ordered_columns)
+    frame.loc[:, ordered_columns].to_excel(output_path, index=False, engine="openpyxl")
     workbook = load_workbook(output_path)
     sheet = workbook.active
     sheet.freeze_panes = "A2"
@@ -183,7 +193,7 @@ def write_checkpoint(frame: pd.DataFrame, output_path: Path) -> None:
         "prompt_engineering": 18, "SAP-Nummer": 16, "Teamcenter": 16,
         "Benennung (E)": 22, "Benennung (D)": 22, "Ground Truth": 26,
         "Register": 10, "Weitere zulässige Ground Truth": 30,
-        "Data_Folder_Path": 22, "Predicted_Label": 24, "Reasoning": 55,
+        "Data_Folder_Path": 12, "Predicted_Label": 24, "Reasoning": 55,
         "Confidence_Percent": 18, "Possible_Classes_If_Ambiguous": 32,
         "Raw_Model_Response": 55, "JSON_Parse_Status": 20, "Processing_Status": 30,
         "Files_Used": 55, "File_Count": 12, "Run_Model": 22, "Prompt_Config": 14,
