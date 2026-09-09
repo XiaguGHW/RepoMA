@@ -60,8 +60,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default="gemini-2.5-pro")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument(
-        "--max-output-tokens", type=int, default=1024,
-        help="Maximum generated tokens per response. Default: 1024.",
+        "--max-output-tokens", type=int, default=4096,
+        help="Maximum generated tokens per response. Default: 4096.",
     )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--max-rows", type=int, default=None)
