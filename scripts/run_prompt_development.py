@@ -116,8 +116,10 @@ def prepared_base64_size(connector, file_path: str) -> int:
     """Return the size after the connector has rendered and Base64-encoded a file."""
     converter = getattr(connector, "file_to_openai_images", None)
     if not callable(converter):
+        converter = getattr(connector, "_file_to_openai_images", None)
+    if not callable(converter):
         raise AttributeError(
-            "llm_connector.py must provide file_to_openai_images() for input-size limiting."
+            "llm_connector.py must provide _file_to_openai_images() for input-size limiting."
         )
     return sum(len(str(image)) for image in converter(file_path))
 
