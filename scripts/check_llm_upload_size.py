@@ -246,9 +246,18 @@ if __name__ == "__main__":
         print(f"ERROR: {error}", file=sys.stderr)
         sys.exit(1)
 
-# PowerShell examples (replace the path with the actual BG folder):
-# Estimate only; no API request is sent:
-# python .\check_llm_upload_size.py "C:\\path\\to\\BG_folder"
+# =============================================================================
+# PowerShell test commands (replace the placeholder path)
+# =============================================================================
 #
-# Probe actual API request-size behavior, adding the largest files first:
-# python .\check_llm_upload_size.py "C:\\path\\to\\BG_folder" --probe
+# 1) Estimate the prepared upload size for every PDF/image in one BG folder.
+#    No API request and no LLM call:
+# python .\check_llm_upload_size.py "C:\path\to\BG_folder"
+#
+# 2) Send progressively larger real requests, adding the largest files first.
+#    This calls the LLM API, up to 12 requests:
+# python .\check_llm_upload_size.py "C:\path\to\BG_folder" --probe
+#
+# 3) Test one large PDF page by page: page 1, then pages 1-2, 1-3 and 1-4.
+#    This calls the LLM API:
+# python .\check_llm_upload_size.py "C:\path\to\large.pdf" --probe-pdf-pages
