@@ -27,6 +27,9 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 try:
     from dotenv import load_dotenv
@@ -163,6 +166,53 @@ def make_output_path(args: argparse.Namespace) -> Path:
 
 def write_checkpoint(frame: pd.DataFrame, output_path: Path) -> None:
     frame.to_excel(output_path, index=False, engine="openpyxl")
+    workbook = load_workbook(output_path)
+    sheet = workbook.active
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+
+    result_columns = {
+        "Predicted_Label", "Reasoning", "Confidence_Percent",
+        "Possible_Classes_If_Ambiguous", "JSON_Parse_Status", "Processing_Status",
+    }
+    technical_columns = {
+        "Data_Folder_Path", "Files_Used", "Raw_Model_Response", "Token_Usage_JSON",
+        "Prompt_File", "Run_Timestamp",
+    }
+    widths = {
+        "prompt_engineering": 18, "SAP-Nummer": 16, "Teamcenter": 16,
+        "Benennung (E)": 22, "Benennung (D)": 22, "Ground Truth": 26,
+        "Register": 10, "Weitere zulässige Ground Truth": 30,
+        "Data_Folder_Path": 38, "Predicted_Label": 24, "Reasoning": 55,
+        "Confidence_Percent": 18, "Possible_Classes_If_Ambiguous": 32,
+        "Raw_Model_Response": 55, "JSON_Parse_Status": 20, "Processing_Status": 30,
+        "Files_Used": 55, "File_Count": 12, "Run_Model": 22, "Prompt_Config": 14,
+        "Prompt_File": 32, "Temperature": 14, "Run_Timestamp": 22,
+        "Token_Usage_JSON": 26,
+    }
+    header_fill = PatternFill("solid", fgColor="1F4E78")
+    result_fill = PatternFill("solid", fgColor="2F75B5")
+    technical_fill = PatternFill("solid", fgColor="7F8C8D")
+
+    for column_index, cell in enumerate(sheet[1], start=1):
+        header = str(cell.value)
+        cell.fill = result_fill if header in result_columns else technical_fill if header in technical_columns else header_fill
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        sheet.column_dimensions[get_column_letter(column_index)].width = widths.get(header, 20)
+
+    sheet.row_dimensions[1].height = 36
+    wrap_headers = {"Data_Folder_Path", "Reasoning", "Possible_Classes_If_Ambiguous", "Raw_Model_Response", "Files_Used", "Processing_Status"}
+    header_positions = {str(cell.value): cell.column for cell in sheet[1]}
+    for row_index in range(2, sheet.max_row + 1):
+        sheet.row_dimensions[row_index].height = 75
+        for header in wrap_headers:
+            if header in header_positions:
+                sheet.cell(row=row_index, column=header_positions[header]).alignment = Alignment(
+                    vertical="top", wrap_text=True
+                )
+
+    workbook.save(output_path)
 
 
 def run(args: argparse.Namespace) -> Path:
