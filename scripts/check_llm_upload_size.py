@@ -179,3 +179,10 @@ if __name__ == "__main__":
     except Exception as error:
         print(f"ERROR: {error}", file=sys.stderr)
         sys.exit(1)
+
+# PowerShell examples (replace the path with the actual BG folder):
+# Estimate only; no API request is sent:
+# python .\check_llm_upload_size.py "C:\\path\\to\\BG_folder"
+#
+# Probe actual API request-size behavior, adding the largest files first:
+# python .\check_llm_upload_size.py "C:\\path\\to\\BG_folder" --probe
