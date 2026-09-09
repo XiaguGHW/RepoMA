@@ -431,3 +431,7 @@ if __name__ == "__main__":
     except Exception as error:
         logging.error("Classification did not start: %s", error)
         sys.exit(1)
+
+
+# PowerShell command: Run P1 for all rows marked prompt_engineering = yes.
+# python .\run_prompt_development.py --prompt-config P1 --model gemini-2.5-pro
