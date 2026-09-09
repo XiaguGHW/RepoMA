@@ -13,6 +13,9 @@ Estimate only (no API request):
 
 Probe the largest files cumulatively against the currently configured API:
     python .\\check_llm_upload_size.py "C:\\data\\one_BG" --probe
+
+Probe one PDF page-by-page (up to the same four-page connector limit):
+    python .\\check_llm_upload_size.py "C:\\data\\large.pdf" --probe-pdf-pages
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -57,6 +61,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--probe", action="store_true",
         help="Actually send progressively larger file batches to the LLM API.",
+    )
+    parser.add_argument(
+        "--probe-pdf-pages", action="store_true",
+        help="For one PDF, probe page 1, then pages 1-2, 1-3 and 1-4.",
     )
     parser.add_argument("--model", default="gemini-2.5-pro")
     parser.add_argument(
@@ -117,9 +125,13 @@ def display_report(estimates: list[FileEstimate]) -> None:
     print(f"Files: {len(estimates)}")
 
 
-def looks_like_request_error(response: object) -> bool:
+def request_failure_kind(response: object) -> str | None:
     text = str(response).casefold()
-    return any(marker in text for marker in ("413", "request entity too large", "max retries exceeded", "proxyerror"))
+    if "413" in text or "request entity too large" in text:
+        return "REQUEST_TOO_LARGE"
+    if any(marker in text for marker in ("max retries exceeded", "proxyerror", "remotedisconnected")):
+        return "CONNECTION_ERROR"
+    return None
 
 
 def probe(estimates: list[FileEstimate], model: str, max_probes: int) -> None:
@@ -147,12 +159,62 @@ def probe(estimates: list[FileEstimate], model: str, max_probes: int) -> None:
             generation_config={"temperature": 0.0, "maxOutputTokens": 256},
         )
         estimated = sum(entry.prepared_bytes for entry in largest_first[:number])
-        if looks_like_request_error(response):
-            print(f"FAIL at {number} file(s), estimated {mib(estimated)}")
+        failure = request_failure_kind(response)
+        if failure:
+            print(f"{failure} at {number} file(s), estimated {mib(estimated)}")
             print(f"Response: {str(response)[:300]}")
             return
         print(f"OK   at {number} file(s), estimated {mib(estimated)}")
     print("No request-size failure in the probed files.")
+
+
+def probe_pdf_pages(pdf_path: Path, model: str, pages_per_pdf: int, dpi: int) -> None:
+    """Probe cumulative rendered PDF pages using temporary JPEG files.
+
+    The connector receives JPEG paths rather than the original PDF, but each
+    JPEG is produced with the same conversion settings as the connector.
+    """
+    if pdf_path.suffix.casefold() != ".pdf" or not pdf_path.is_file():
+        raise ValueError("--probe-pdf-pages requires a path to one existing PDF file.")
+    if fitz is None:
+        raise ImportError("PyMuPDF (fitz) is required. Run: pip install pymupdf")
+    api_key = os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY")
+    if not api_key:
+        raise EnvironmentError("BOSCH_FARM_SUBSCRIPTION_KEY is not set in .env.")
+    try:
+        from llm_connector import LLMConnector
+    except ImportError as error:
+        raise ImportError("Place llm_connector.py beside this script.") from error
+
+    connector = LLMConnector(model, api_key)
+    matrix = fitz.Matrix(dpi / 72, dpi / 72)
+    selected: list[str] = []
+    total_prepared = 0
+    with tempfile.TemporaryDirectory(prefix="llm_pdf_page_probe_") as temp_dir:
+        document = fitz.open(pdf_path)
+        page_total = min(len(document), pages_per_pdf)
+        print(f"\nPDF page probe: {pdf_path} ({page_total} page(s) tested)")
+        for index in range(page_total):
+            jpeg_path = Path(temp_dir) / f"page_{index + 1}.jpg"
+            jpeg_bytes = document[index].get_pixmap(matrix=matrix).tobytes("jpeg")
+            jpeg_path.write_bytes(jpeg_bytes)
+            selected.append(str(jpeg_path))
+            total_prepared += int(len(jpeg_bytes) * BASE64_FACTOR)
+            response = connector.ask_about_files(
+                file_paths=selected,
+                question="Antworte ausschließlich mit OK.",
+                system_prompt="Antworte ausschließlich mit OK.",
+                generation_config={"temperature": 0.0, "maxOutputTokens": 256},
+            )
+            failure = request_failure_kind(response)
+            if failure:
+                print(f"{failure} with pages 1-{index + 1}, estimated {mib(total_prepared)}")
+                print(f"Response: {str(response)[:300]}")
+                document.close()
+                return
+            print(f"OK with pages 1-{index + 1}, estimated {mib(total_prepared)}")
+        document.close()
+    print("No request-size failure for the tested PDF pages.")
 
 
 def main() -> None:
@@ -168,7 +230,11 @@ def main() -> None:
         reverse=True,
     )
     display_report(estimates)
-    if args.probe:
+    if args.probe and args.probe_pdf_pages:
+        raise ValueError("Use either --probe or --probe-pdf-pages, not both.")
+    if args.probe_pdf_pages:
+        probe_pdf_pages(args.path, args.model, args.pages_per_pdf, args.dpi)
+    elif args.probe:
         probe(estimates, args.model, args.max_probes)
 
 
