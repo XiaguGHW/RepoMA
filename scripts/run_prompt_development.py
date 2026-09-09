@@ -59,6 +59,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt-file", type=Path, default=None)
     parser.add_argument("--model", default="gemini-2.5-pro")
     parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument(
+        "--max-output-tokens", type=int, default=1024,
+        help="Maximum generated tokens per response. Default: 1024.",
+    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--max-rows", type=int, default=None)
     parser.add_argument(
@@ -230,6 +234,8 @@ def run(args: argparse.Namespace) -> Path:
         raise ValueError("--temperature must be between 0 and 2.")
     if args.max_rows is not None and args.max_rows <= 0:
         raise ValueError("--max-rows must be greater than 0.")
+    if args.max_output_tokens <= 0:
+        raise ValueError("--max-output-tokens must be greater than 0.")
     api_key = os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY")
     if not api_key:
         raise EnvironmentError("BOSCH_FARM_SUBSCRIPTION_KEY is not set in .env.")
@@ -271,7 +277,7 @@ def run(args: argparse.Namespace) -> Path:
         "temperature": args.temperature,
         "topP": 0.95,
         "candidateCount": 1,
-        "maxOutputTokens": 800,
+        "maxOutputTokens": args.max_output_tokens,
     }
 
     for index, row in tqdm(result.iterrows(), total=len(result), desc="Classifying"):
