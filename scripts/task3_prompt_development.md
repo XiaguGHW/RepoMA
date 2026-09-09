@@ -141,6 +141,24 @@ Die Ergebnisdatei enthält unter anderem:
 - `Raw_Model_Response` und `JSON_Parse_Status`,
 - Modell, Prompt-Konfiguration, Temperatur sowie die verwendeten Dateien.
 
+## Prompt-Evaluation (E1-Stichprobe)
+
+Jede neu erzeugte Ergebnisdatei enthält zusätzlich das Sheet `Prompt_Evaluation`. Es bewertet nur die Zeilen mit `prompt_engineering = yes`. Für die aktuelle Stichprobe sind dies 14 E1-Fälle mit eindeutiger Ground Truth.
+
+Das Sheet enthält:
+
+- `Overall Accuracy`: richtige Vorhersagen geteilt durch alle auswertbaren Vorhersagen,
+- eine klassenweise Übersicht mit Ground-Truth-Anzahl, richtigen Vorhersagen und Accuracy,
+- eine Fallübersicht mit `CORRECT`, `INCORRECT` oder `NOT_EVALUABLE`.
+
+Für den Vergleich werden die älteren Ground-Truth-Namen automatisch vereinheitlicht: `Multi-Achs-System (Gantry)` wird als `Gantry` und `Kombinierte Einheit` als `Umsetzeinheit` gezählt. E2- und M-spezifische Regeln sind bewusst nicht Bestandteil dieser kleinen E1-Prompt-Stichprobe.
+
+Die bereits fertig ausgeführte P1-Datei kann ohne erneute LLM-Abfrage nachträglich ergänzt werden:
+
+    python .\run_prompt_development.py --evaluate-existing ".\outputs\prompt_development_P1_gemini-2.5-pro_YYYY-MM-DD_HH-MM-SS.xlsx"
+
+Für P2 und P3 wird das Sheet automatisch beim normalen Lauf erstellt.
+
 ## Wichtige Label-Konsistenz
 
 Codebook V2 verwendet `Gantry` und `Umsetzeinheit`. Die bestehende Ground Truth enthält teilweise noch die älteren Namen `Multi-Achs-System (Gantry)` und `Kombinierte Einheit`. Vor der automatischen formalen Auswertung muss diese Bezeichnung per Mapping vereinheitlicht werden.
