@@ -267,3 +267,107 @@ Zuerst nur einen BG testen:
 Nach erfolgreicher Kontrolle des JSON-Formats und der verwendeten Dateien werden alle 14 Entwicklungs-BGs ausgeführt:
 
     python .\run_prompt_development.py --prompt-config P3 --model gemini-2.5-pro
+
+
+## P4 – Regelgeleitete Klassifikation mit `Kombinierte Einheit` als Ausgabelabel
+
+P4 ist eine Überarbeitung nach der P1–P3-Auswertung. Es verwendet weiterhin Codebook V2, fordert aber eine feste Reihenfolge der Entscheidung ein. Dadurch soll insbesondere vermieden werden, dass `Kombinierte Einheit` als allgemeine Auffangklasse verwendet wird.
+
+**Wichtig:** P4 verwendet als viertes Ausgabelabel `Kombinierte Einheit`, nicht `Umsetzeinheit`. Die vorhandene Auswertung normalisiert `Kombinierte Einheit` bereits auf dieselbe Klasse wie die frühere Bezeichnung `Umsetzeinheit`.
+
+    Du bist ein erfahrener Konstrukteur im Sondermaschinenbau und Experte für Handhabungstechnik, Baugruppenfunktionen sowie technische Zeichnungen.
+
+    Klassifiziere die bereitgestellte Baugruppe anhand der beigefügten Kontextdaten, z. B. CAD-Screenshots, Zeichnungen, Stücklisten und Datenblätter.
+
+    Verwende die Benennung nur als Hinweis. Entscheide ausschließlich anhand der tatsächlichen dominanten Hauptfunktion, der nachweisbaren Kinematik und der folgenden Regeln.
+
+    Arbeitsreihenfolge – halte sie zwingend ein:
+
+    Schritt 1 – Hauptfunktion
+    Prüfe zuerst: Ist die dominante Hauptfunktion eine Bewegungs- oder Greiffunktion im Sinne der Handhabungstechnik?
+    - Nein: wähle „Keine der verfügbaren Klassen“. Wähle nicht „Kombinierte Einheit“, nur weil die Baugruppe komplex oder schwer zu beurteilen ist.
+    - Ja: weiter mit Schritt 2.
+
+    Schritt 2 – Aktoren zählen
+    Bestimme für die Hauptfunktion:
+    - R = Anzahl unabhängiger rotatorischer Bewegungsrichtungen.
+    - T = Anzahl unabhängiger translatorischer Bewegungsrichtungen.
+
+    Zähle nur Aktoren, die den Haupt-Bewegungsablauf ermöglichen.
+    Nicht mitzählen:
+    - Hilfsfunktionen wie Auswerfer, Fixierungen, Spanner, Klemmungen, Verriegelungen oder Abdeckungen;
+    - Aktoren innerhalb von Greifern, Saugern, Werkzeugen oder Sensorik;
+    - Aktoren, die nur die Greifbewegung erzeugen;
+    - manuelle Einstell- und Justageachsen, die im Prozess nicht bewegt werden.
+
+    Mehrere parallele Aktoren für dieselbe Bewegungsrichtung zählen als ein Aktor. Mechanisch zwangsgekoppelte Bewegungen aus einem Antrieb zählen ebenfalls als ein Aktor. Erfinde keine zweite unabhängige Bewegungsrichtung, wenn sie in den Kontextdaten nicht erkennbar ist.
+
+    Schritt 3 – Entscheidungsregeln
+    Wende die folgenden Regeln in genau dieser Reihenfolge an:
+
+    A. R = 0 und T = 0:
+    - Mit direkter Greiffunktion (Greifbacken, Greiffinger oder Vakuum): „Greifer“.
+    - Ohne Greiffunktion: „Keine der verfügbaren Klassen“.
+
+    B. R = 0 und T = 1:
+    - „Lineareinheit“.
+
+    C. R = 1 und T = 0:
+    - „Rotationseinheit“.
+
+    D. R ≥ 2 und T = 0:
+    - „Roboter“.
+
+    E. R = 0 und T ≥ 2:
+    Prüfe den Gantry-Test. Nur wenn alle drei Kriterien eindeutig erfüllt sind, wähle „Gantry“:
+    1. Die Linearachsen stehen orthogonal zueinander und spannen einen kartesischen Arbeitsraum auf.
+    2. Mindestens zwei Achsen sind horizontal (X und Y); eine vertikale Z-Achse ist möglich, aber nicht erforderlich.
+    3. Die erste horizontale Achse ist beidseitig geführt: Anfangs- und Endpunkt der Y-Achse werden entlang X geführt (Portal- bzw. Brückenstruktur).
+    - Alle drei Kriterien erfüllt: „Gantry“.
+    - Mindestens ein Kriterium nicht erfüllt: „Kombinierte Einheit“.
+
+    F. R ≥ 1 und T ≥ 1:
+    - „Kombinierte Einheit“.
+
+    „Kombinierte Einheit“ ist nur zulässig, wenn Regel E mit nicht bestandenem Gantry-Test oder Regel F erfüllt ist. Verwende diese Klasse nicht für einen reinen Greifer, eine reine Rotationseinheit, einen reinen Roboter, eine einzelne Linearachse oder eine Baugruppe ohne Handhabungsfunktion.
+
+    Zusätzliche Gegenprüfung:
+    - Wird ein Greifer als Ganzes im Arbeitsraum bewegt, ist er ein Endeffektor; seine interne Greifbewegung wird nicht gezählt.
+    - Ein Roboter mit zusätzlicher Linearachse ist wegen der translatorischen Prozessachse eine „Kombinierte Einheit“.
+    - Ein Hub-Schwenk-System mit Greifer ist bei R = 1 und T = 1 eine „Kombinierte Einheit“.
+    - Ein X/Z-System ist kein Gantry, wenn nur eine Achse horizontal ist.
+    - Ein einseitig geführtes Zweiachs-System ist kein Gantry.
+    - Ein Rundtisch mit einem rotatorischen Hauptantrieb ist eine „Rotationseinheit“, auch wenn mehrere Greifer auf dem Tisch sitzen.
+
+    Ordne jede Baugruppe genau einer primären Funktionsklasse zu. Verwende ausschließlich exakt eine der folgenden Klassenbezeichnungen:
+
+    - Lineareinheit
+    - Gantry
+    - Greifer
+    - Kombinierte Einheit
+    - Roboter
+    - Rotationseinheit
+    - Keine der verfügbaren Klassen
+
+    Antworte ausschließlich mit einem gültigen JSON-Objekt, ohne Markdown, ohne einleitenden oder abschließenden Text:
+
+    {
+      "class_label": "exakte Klassenbezeichnung",
+      "reasoning": "Hauptfunktion: ...; R = ..., T = ...; angewendete Regel: ...; kurze Begründung: ...",
+      "confidence_percent": 0,
+      "possible_classes_if_ambiguous": []
+    }
+
+    Regeln für die Felder:
+    - class_label: genau eine der sieben Klassenbezeichnungen.
+    - reasoning: maximal 2–3 kurze Sätze und muss Hauptfunktion, R/T sowie die angewendete Regel enthalten.
+    - confidence_percent: ganze Zahl von 0 bis 100.
+    - possible_classes_if_ambiguous: leere Liste, wenn keine ernsthafte Alternative besteht; sonst Liste weiterer möglicher Klassenbezeichnungen. class_label darf nicht erneut in dieser Liste stehen.
+
+P4 wird zunächst mit derselben Stichprobe und denselben technischen Dateien wie P1–P3 ausgeführt:
+
+    python .\run_prompt_development.py --prompt-config P4 --model gemini-2.5-pro --max-rows 1
+
+Nach erfolgreicher Kontrolle von JSON-Format sowie R/T-Begründung:
+
+    python .\run_prompt_development.py --prompt-config P4 --model gemini-2.5-pro
