@@ -644,3 +644,8 @@ if __name__ == "__main__":
 # PowerShell command: Add/refresh Prompt_Evaluation in an existing result file
 # without calling the LLM again.
 # python .\run_prompt_development.py --evaluate-existing ".\outputs\prompt_development_P1_gemini-2.5-pro_YYYY-MM-DD_HH-MM-SS.xlsx"
+#
+# PowerShell commands: Add evaluation sheets to the two completed valid results
+# without calling Gemini again.
+# python .\run_prompt_development.py --evaluate-existing ".\outputs\valid_results\prompt_development_P1_gemini-2.5-pro_2026-09-09_17-29-42.xlsx"
+# python .\run_prompt_development.py --evaluate-existing ".\outputs\valid_results\prompt_development_P2_gemini-2.5-pro_2026-09-09_18-40-47.xlsx"
