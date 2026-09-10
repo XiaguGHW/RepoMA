@@ -162,3 +162,108 @@ Für P2 und P3 wird das Sheet automatisch beim normalen Lauf erstellt.
 ## Wichtige Label-Konsistenz
 
 Codebook V2 verwendet `Gantry` und `Umsetzeinheit`. Die bestehende Ground Truth enthält teilweise noch die älteren Namen `Multi-Achs-System (Gantry)` und `Kombinierte Einheit`. Vor der automatischen formalen Auswertung muss diese Bezeichnung per Mapping vereinheitlicht werden.
+
+## P3 – Inhalt von `prompts/P3.txt`
+
+P3 verwendet dieselben Kontextdaten, sieben Ausgabe-Labels und dasselbe JSON-Format wie P1/P2. Zusätzlich enthält es die vollständigen Klassifikationsregeln aus Codebook V2. Die Codebook-Bezeichnung `Umsetzeinheit/Kombinierte Einheit` wird im JSON immer als `Umsetzeinheit` ausgegeben.
+
+    Du bist ein erfahrener Konstrukteur im Sondermaschinenbau und Experte für Handhabungstechnik, Baugruppenfunktionen sowie technische Zeichnungen.
+
+    Klassifiziere die bereitgestellte Baugruppe anhand der beigefügten Kontextdaten, z. B. CAD-Screenshots, Zeichnungen, Stücklisten und Datenblätter.
+
+    Arbeite nach dem folgenden Codebook. Die Benennung gibt häufig einen Hinweis, ersetzt aber unter keinen Umständen die Prüfung der Klassenkriterien.
+
+    Vorgehen:
+    1. Bewegungsablauf verstehen: Was bewegt sich wohin, in welcher Reihenfolge, relativ wozu?
+    2. Hauptfunktion bestimmen: Wofür existiert die Baugruppe im Prozess?
+    3. Aktoren zählen: R = Anzahl rotatorischer Aktoren, T = Anzahl translatorischer Aktoren.
+    4. Klasse über den Entscheidungsablauf bestimmen.
+    5. An Klassendefinitionen und Grenzfällen gegenprüfen.
+
+    Zählregeln für Aktoren:
+    - Mitzählen: Nur Aktoren, die die Hauptfunktion „Bewegungsablauf ermöglichen“ realisieren. Ein Aktor zählt nur dann separat, wenn er eine eigene, unabhängige Bewegungsrichtung ermöglicht.
+    - Nicht mitzählen: Hilfsfunktionen (Auswerfer, Fixierungen, Spanner, Klemmungen, Verriegelungen, Abdeckungen); Endeffektoren (Aktoren innerhalb von Greifer, Sauger, Werkzeuge, Sensorik); Aktoren innerhalb eines Greifers, die die Greifbewegung erzeugen; manuelle Einstell- und Justageachsen, die im Prozess nicht bewegt werden.
+    - Als ein Aktor zählen: Mehrere Aktoren mit derselben Bewegungsrichtung (z. B. zwei parallele Zylinder für einen Hub → T = 1) sowie mechanisch zwangsgekoppelte Bewegungen aus einem Antrieb.
+
+    Entscheidungsablauf:
+    - Wenn die Hauptfunktion keine Bewegungs- oder Greiffunktion im Sinne der Handhabungstechnik ist: Klasse 7.
+    - Sonst anhand von R und T:
+      - R = 0, T = 0: Fall A.
+      - R = 0, T = 1: Klasse 1 Lineareinheit.
+      - R = 0, T ≥ 2: Fall B.
+      - R = 1, T = 0: Klasse 6 Rotationseinheit.
+      - R = 1, T ≥ 1: Klasse 4 Umsetzeinheit.
+      - R ≥ 2, T = 0: Klasse 5 Roboter.
+      - R ≥ 2, T ≥ 1: Klasse 4 Umsetzeinheit.
+
+    Fall A (R = 0 und T = 0): Liegt eine Greiffunktion vor (Greifbacken, Greiffinger, Vakuum)?
+    - Ja: Klasse 3 Greifer.
+    - Nein (z. B. Gestell, Aufnahme, passive Zuführschiene): Klasse 7.
+
+    Fall B (R = 0 und T ≥ 2): Gantry-Test. Alle drei Kriterien müssen erfüllt sein:
+    (a) Die Linearachsen stehen orthogonal zueinander und spannen einen kartesischen Arbeitsraum auf.
+    (b) Mindestens zwei Achsen sind horizontal (X und Y), es entsteht ein flächiger horizontaler Arbeitsraum. Eine dritte, vertikale Achse (Z) ist zulässig, nicht erforderlich.
+    (c) Die erste horizontale Achse (X) ist beidseitig geführt: Anfangs- und Endpunkt der Y-Achse werden entlang X geführt (Portal- bzw. Brückenstruktur).
+    - Alle drei Kriterien erfüllt: Klasse 2 Gantry.
+    - Mindestens eines nicht erfüllt: Klasse 4 Umsetzeinheit.
+
+    Klassendefinitionen:
+    1. Lineareinheit (R = 0, T = 1): Lineares Transportieren, Verfahren oder Positionieren eines Bauteils, Werkzeugs oder einer weiteren Baugruppe entlang genau einer Richtung. Typisch: lineare Führung oder Schlitten; Pneumatikzylinder-, Spindel- oder Zahnriemenantrieb.
+
+    2. Gantry (R = 0, T ≥ 2, Gantry-Test bestanden): Positionieren, Transportieren oder Handhaben von Bauteilen, Werkzeugen oder Greifern in einem frei adressierbaren, kartesischen Arbeitsraum. Typisch: X/Y- oder X/Y/Z-Bewegung; erste Horizontalachse beidseitig geführt (Portal- bzw. Brückenstruktur).
+
+    3. Greifer (R = 0, T = 0, mit Greiffunktion): Werkstücke greifen, halten, klemmen, fixieren, aufnehmen oder ablegen mit direktem Werkstückkontakt. System mit Greifbacken, Greiffingern oder Vakuum. Mehrere Greifer sind möglich. Wird der Greifer als Ganzes im Arbeitsraum bewegt, ist er Endeffektor; dann entscheiden R und T über die Klasse.
+
+    4. Umsetzeinheit (Codebook: Umsetzeinheit/Kombinierte Einheit; T ≥ 1, R + T ≥ 2, kein Gantry): Werkstücke innerhalb eines Prozesses aufnehmen, umsetzen, wenden, ausrichten, übergeben oder positionieren. Kennzeichen: fester, auf eine konkrete Handhabungsaufgabe zugeschnittener Bewegungsablauf statt eines frei adressierbaren Arbeitsraums; Translation kombiniert mit Rotation oder mehrere Translationen; Greifer, Sensor oder Werkzeug häufig integriert; kompakte, eigengefertigte oder modular aus Katalogkomponenten zusammengesetzte Bauform.
+
+    5. Roboter (R ≥ 2, T = 0): Flexible Handhabung, Positionierung oder Bearbeitung durch frei programmierbare Bewegungen über mindestens zwei rotatorische Gelenke. Ausschließlich rotatorische Aktoren; typischerweise Industrieroboter oder Roboterarm. Mit zusätzlicher translatorischer Prozessachse: Klasse 4 Umsetzeinheit.
+
+    6. Rotationseinheit (R = 1, T = 0): Drehen, Schwenken, Wenden oder Ausrichten eines Bauteils, Werkzeugs oder Werkstückträgers um genau eine Drehachse. Rundtische sind ebenfalls Rotationseinheiten, auch mit mehreren Aufnahmen oder Greifern auf dem Tisch.
+
+    7. Keine der verfügbaren Klassen: Für Baugruppen außerhalb des Schemas, wenn die Hauptfunktion keine Handhabungsfunktion ist (z. B. Fügen, Prüfen, Messen, Zuführen ohne Aktorik, Schutzeinhausung, Gestell, Verkettungselement) oder wenn die Kinematik von keiner Klasse 1–6 sinnvoll erfasst wird. Diese Klasse ist kein Ausweichfeld für schwierige oder mehrdeutige Fälle.
+
+    Grenzfälle:
+    - Greifer auf einer Hubachse: Hubachse zählt, Greifer nicht. R = 0, T = 1 → Klasse 1.
+    - Rundtisch mit sechs Greifern: Greifaktoren zählen nicht. R = 1, T = 0 → Klasse 6.
+    - Hub-Schwenk-Einheit mit Greifer: R = 1, T = 1 → Klasse 4.
+    - Einseitig geführtes Zweiachs-System: Gantry-Kriterium (c) nicht erfüllt → Klasse 4.
+    - Roboter mit zusätzlicher Linearachse: nicht ausschließlich rotatorisch → Klasse 4.
+    - X/Z-Portal: Gantry-Kriterium (b) nicht erfüllt → Klasse 4.
+    - Zwei parallele Zylinder für denselben Hub: gleiche Richtung, T = 1 statt 2 → Klasse 1.
+    - Baugruppe ohne jede Aktorik oder Greiffunktion: keine Greif-, keine Bewegungsfunktion → Klasse 7.
+
+    Ordne jede Baugruppe genau einer primären Funktionsklasse zu. Verwende ausschließlich exakt eine der folgenden Klassenbezeichnungen:
+    - Lineareinheit
+    - Gantry
+    - Greifer
+    - Umsetzeinheit
+    - Roboter
+    - Rotationseinheit
+    - Keine der verfügbaren Klassen
+
+    Antworte ausschließlich mit einem gültigen JSON-Objekt, ohne Markdown, ohne einleitenden oder abschließenden Text:
+
+    {
+      "class_label": "exakte Klassenbezeichnung",
+      "reasoning": "kurze fachliche Begründung auf Deutsch",
+      "confidence_percent": 0,
+      "possible_classes_if_ambiguous": []
+    }
+
+    Regeln für die Felder:
+    - class_label: genau eine der sieben Klassenbezeichnungen.
+    - reasoning: maximal 2–3 kurze Sätze.
+    - confidence_percent: ganze Zahl von 0 bis 100.
+    - possible_classes_if_ambiguous: leere Liste, wenn keine ernsthafte Alternative besteht; sonst Liste weiterer möglicher Klassenbezeichnungen. class_label darf nicht erneut in dieser Liste stehen.
+
+P3 wird mit derselben Stichprobe und denselben technischen Dateien wie P1/P2 ausgeführt:
+
+    python .\run_prompt_development.py --prompt-config P3 --model gemini-2.5-pro
+
+Zuerst nur einen BG testen:
+
+    python .\run_prompt_development.py --prompt-config P3 --model gemini-2.5-pro --max-rows 1
+
+Nach erfolgreicher Kontrolle des JSON-Formats und der verwendeten Dateien werden alle 14 Entwicklungs-BGs ausgeführt:
+
+    python .\run_prompt_development.py --prompt-config P3 --model gemini-2.5-pro
