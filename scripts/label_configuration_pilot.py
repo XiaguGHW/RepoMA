@@ -55,7 +55,7 @@ def args():
     p.add_argument("--sheet-name", default="Experiment_Dataset")
     p.add_argument("--prompt-file", type=Path, required=False, help="Base prompt, normally your final P3/P3_optimized prompt.")
     p.add_argument("--label-config", choices=(*CONFIGS, "all"), default="all")
-    p.add_argument("--repetitions", type=int, default=3)
+    p.add_argument("--repetitions", type=int, default=1, help="Runs per L configuration. Default: 1, so L1-L4 total 56 requests for 14 BGs.")
     p.add_argument("--model", default="gemini-2.5-pro")
     p.add_argument("--temperature", type=float, default=0.0)
     p.add_argument("--max-output-tokens", type=int, default=4096)
@@ -200,7 +200,7 @@ if __name__=="__main__":
 # PowerShell: first test only L1 once (recommended before the full pilot).
 # python .\label_configuration_pilot.py --prompt-file .\prompts\P3_original.txt --label-config L1 --repetitions 1
 #
-# PowerShell: run all four label configurations, three repetitions each.
+# PowerShell: run all four label configurations once each (4 × 14 = 56 requests).
 # python .\label_configuration_pilot.py --prompt-file .\prompts\P3_original.txt
 # PowerShell: evaluate existing pilot results only (no LLM/API calls).
 # python .\label_configuration_pilot.py --evaluate-only
