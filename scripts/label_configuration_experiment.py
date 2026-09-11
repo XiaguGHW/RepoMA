@@ -7,11 +7,15 @@ It never writes to the input workbook.
 """
 from __future__ import annotations
 
-import argparse, json, os, re, sys
+import argparse, json, os, re, sys, tempfile
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+try:
+    import fitz
+except ImportError:
+    fitz = None
 from dotenv import load_dotenv
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -72,6 +76,44 @@ def schema_prompt(config):
 
 def files(folder):
     root=Path(clean(folder)); return [str(p) for p in sorted(root.rglob("*")) if p.is_file() and p.suffix.casefold() in SUPPORTED] if root.is_dir() else []
+def request_too_large(response):
+    text=clean(response).casefold()
+    return "413" in text or "request entity too large" in text
+def write_short_pdf(source, target, pages):
+    if fitz is None:
+        raise ImportError("PyMuPDF (fitz) is required for PDF page-reduction retries.")
+    original=fitz.open(source); reduced=fitz.open()
+    try:
+        reduced.insert_pdf(original,from_page=0,to_page=min(pages,len(original))-1)
+        reduced.save(target)
+    finally:
+        reduced.close(); original.close()
+def ask_with_pdf_fallback(llm, file_paths, question_text, system_prompt, generation_config):
+    """Start with connector-default first 4 PDF pages; on HTTP 413 reduce 3→2→1, then drop that PDF."""
+    active=list(file_paths); display=list(file_paths)
+    response=llm.ask_about_files(file_paths=active,question=question_text,system_prompt=system_prompt,generation_config=generation_config)
+    if not request_too_large(response):
+        return response, display
+    pdfs=sorted((Path(p) for p in file_paths if Path(p).suffix.casefold()==".pdf"),key=lambda p:p.stat().st_size,reverse=True)
+    with tempfile.TemporaryDirectory(prefix="label_experiment_pdf_retry_") as temp_name:
+        temp=Path(temp_name)
+        for pdf in pdfs:
+            for pages in (3,2,1):
+                reduced=temp/f"{pdf.stem}_first_{pages}_pages.pdf"
+                write_short_pdf(pdf,reduced,pages)
+                trial=[str(reduced) if Path(p)==pdf else p for p in active]
+                response=llm.ask_about_files(file_paths=trial,question=question_text,system_prompt=system_prompt,generation_config=generation_config)
+                if not request_too_large(response):
+                    shown=[f"{pdf} [first {pages} pages used]" if Path(p)==pdf else p for p in active]
+                    return response, shown
+            active=[p for p in active if Path(p)!=pdf]
+            display=[p for p in display if Path(p)!=pdf]+[f"{pdf} [discarded after 4→3→2→1-page HTTP 413 retries]"]
+            if not active:
+                raise ValueError("All files were removed after HTTP 413 size retries.")
+            response=llm.ask_about_files(file_paths=active,question=question_text,system_prompt=system_prompt,generation_config=generation_config)
+            if not request_too_large(response):
+                return response, display
+    return response, display
 def parse_json(raw):
     raw=clean(raw); candidates=[raw]
     a,b=raw.find("{"),raw.rfind("}")
@@ -119,7 +161,8 @@ def run_one(a, dataset, base_prompt, config, repetition):
         try:
             used=files(row.get("Data_Folder_Path")); result.loc[i,"Files_Used"]="\n".join(used); result.loc[i,"File_Count"]=len(used)
             if not used: result.loc[i,"Processing_Status"]="SKIPPED: no supported PDF/image files"; save_result(result,path); continue
-            raw=llm.ask_about_files(file_paths=used,question=question(row),system_prompt=prompt,generation_config=generation)
+            raw,display_used=ask_with_pdf_fallback(llm,used,question(row),prompt,generation)
+            result.loc[i,"Files_Used"]="\n".join(display_used)
             data,status=parse_json(raw); result.loc[i,"Raw_Model_Response"]=clean(raw); result.loc[i,"JSON_Parse_Status"]=status
             result.loc[i,"Predicted_Label"]=value(data,"primary_label","class_label","class")
             result.loc[i,"Is_Ambiguous"]=value(data,"is_ambiguous")
