@@ -606,3 +606,15 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# PowerShell command (run from the Task3_Prompt_Development project folder).
+# Close all result Excel files first.  Add the two missing Gemini P1/P2 result
+# files to outputs\pdf_cross_model before running, so this folder contains 16
+# workbooks in total.
+#
+# python .\scripts\batch_evaluate_experiments.py `
+#   --repeatability-dir ".\outputs\valid_results_10_runs\gemini-2.5-pro_pdf_P3_optimized_10_runs" `
+#   --cross-model-dir ".\outputs\pdf_cross_model" `
+#   --output-dir ".\evaluation_results\batch" `
+#   --in-place
