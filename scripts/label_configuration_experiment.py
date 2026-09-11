@@ -7,11 +7,16 @@ It never writes to the input workbook.
 """
 from __future__ import annotations
 
-import argparse, json, os, re, sys, tempfile
+import argparse, json, os, re, sys, tempfile, time
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+try:
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(iterable, **_kwargs):
+        return iterable
 try:
     import fitz
 except ImportError:
@@ -79,6 +84,11 @@ def files(folder):
 def request_too_large(response):
     text=clean(response).casefold()
     return "413" in text or "request entity too large" in text
+def call_model(llm, file_paths, question_text, system_prompt, generation_config):
+    try:
+        return llm.ask_about_files(file_paths=file_paths,question=question_text,system_prompt=system_prompt,generation_config=generation_config)
+    except Exception as error:
+        return error
 def write_short_pdf(source, target, pages):
     if fitz is None:
         raise ImportError("PyMuPDF (fitz) is required for PDF page-reduction retries.")
@@ -89,9 +99,9 @@ def write_short_pdf(source, target, pages):
     finally:
         reduced.close(); original.close()
 def ask_with_pdf_fallback(llm, file_paths, question_text, system_prompt, generation_config):
-    """Start with connector-default first 4 PDF pages; on HTTP 413 reduce 3→2→1, then drop that PDF."""
+    """Use default 4 pages, then 3→2→1. On repeated 413 discard only that PDF."""
     active=list(file_paths); display=list(file_paths)
-    response=llm.ask_about_files(file_paths=active,question=question_text,system_prompt=system_prompt,generation_config=generation_config)
+    response=call_model(llm,active,question_text,system_prompt,generation_config)
     if not request_too_large(response):
         return response, display
     pdfs=sorted((Path(p) for p in file_paths if Path(p).suffix.casefold()==".pdf"),key=lambda p:p.stat().st_size,reverse=True)
@@ -102,18 +112,35 @@ def ask_with_pdf_fallback(llm, file_paths, question_text, system_prompt, generat
                 reduced=temp/f"{pdf.stem}_first_{pages}_pages.pdf"
                 write_short_pdf(pdf,reduced,pages)
                 trial=[str(reduced) if Path(p)==pdf else p for p in active]
-                response=llm.ask_about_files(file_paths=trial,question=question_text,system_prompt=system_prompt,generation_config=generation_config)
+                response=call_model(llm,trial,question_text,system_prompt,generation_config)
                 if not request_too_large(response):
                     shown=[f"{pdf} [first {pages} pages used]" if Path(p)==pdf else p for p in active]
                     return response, shown
             active=[p for p in active if Path(p)!=pdf]
             display=[p for p in display if Path(p)!=pdf]+[f"{pdf} [discarded after 4→3→2→1-page HTTP 413 retries]"]
             if not active:
-                raise ValueError("All files were removed after HTTP 413 size retries.")
-            response=llm.ask_about_files(file_paths=active,question=question_text,system_prompt=system_prompt,generation_config=generation_config)
+                return RuntimeError("All files were removed after HTTP 413 size retries."), display
+            response=call_model(llm,active,question_text,system_prompt,generation_config)
             if not request_too_large(response):
                 return response, display
     return response, display
+def ask_parse_with_retries(llm, file_paths, question_text, system_prompt, generation_config, attempts=3):
+    """Retry malformed model output with an explicit JSON-only correction instruction."""
+    latest_display=list(file_paths)
+    for attempt in range(1, attempts+1):
+        raw, latest_display=ask_with_pdf_fallback(llm,file_paths,question_text,system_prompt,generation_config)
+        if isinstance(raw, Exception):
+            if attempt == attempts or request_too_large(raw):
+                return None, raw, "REQUEST_TOO_LARGE" if request_too_large(raw) else "API_ERROR", latest_display
+            time.sleep(2)
+            continue
+        payload, status=parse_json(raw)
+        if payload:
+            return payload, raw, status if attempt == 1 else "SUCCESS_AFTER_JSON_RETRY", latest_display
+        if attempt < attempts:
+            question_text = question_text + "\nYour previous answer was not valid JSON. Return exactly one valid JSON object and no Markdown, prose, or code fence."
+            time.sleep(1)
+    return None, raw, "INVALID_JSON_AFTER_3_ATTEMPTS", latest_display
 def parse_json(raw):
     raw=clean(raw); candidates=[raw]
     a,b=raw.find("{"),raw.rfind("}")
@@ -156,14 +183,17 @@ def run_one(a, dataset, base_prompt, config, repetition):
     result=dataset.copy()
     for col in ("Predicted_Label","Is_Ambiguous","Alternative_Labels","Is_Not_Decidable","Confidence_Percent","Reasoning","Raw_Model_Response","JSON_Parse_Status","Processing_Status","Files_Used","File_Count","Run_Model","Label_Config","Configuration_Repetition","Run_Timestamp"): result[col]=pd.NA
     prompt=base_prompt+schema_prompt(config); generation={"temperature":a.temperature,"topP":0.95,"candidateCount":1,"maxOutputTokens":a.max_output_tokens}
-    for i,row in result.iterrows():
+    progress=tqdm(result.iterrows(),total=len(result),desc=f"{config} run {repetition}",unit="BG")
+    for number,(i,row) in enumerate(progress,start=1):
+        if hasattr(progress,"set_postfix_str"):
+            progress.set_postfix_str(f"{number}/{len(result)} | {clean(row.get('SAP-Nummer'))}")
         result.loc[i,["Run_Model","Label_Config","Configuration_Repetition","Run_Timestamp"]]=[a.model,config,repetition,datetime.now().isoformat(timespec="seconds")]
         try:
             used=files(row.get("Data_Folder_Path")); result.loc[i,"Files_Used"]="\n".join(used); result.loc[i,"File_Count"]=len(used)
             if not used: result.loc[i,"Processing_Status"]="SKIPPED: no supported PDF/image files"; save_result(result,path); continue
-            raw,display_used=ask_with_pdf_fallback(llm,used,question(row),prompt,generation)
+            data,raw,status,display_used=ask_parse_with_retries(llm,used,question(row),prompt,generation)
             result.loc[i,"Files_Used"]="\n".join(display_used)
-            data,status=parse_json(raw); result.loc[i,"Raw_Model_Response"]=clean(raw); result.loc[i,"JSON_Parse_Status"]=status
+            result.loc[i,"Raw_Model_Response"]=clean(raw); result.loc[i,"JSON_Parse_Status"]=status
             result.loc[i,"Predicted_Label"]=value(data,"primary_label","class_label","class")
             result.loc[i,"Is_Ambiguous"]=value(data,"is_ambiguous")
             alts=value(data,"alternative_labels","possible_classes_if_ambiguous","possible_classes")
@@ -171,7 +201,7 @@ def run_one(a, dataset, base_prompt, config, repetition):
             result.loc[i,"Is_Not_Decidable"]=value(data,"is_not_decidable")
             result.loc[i,"Confidence_Percent"]=value(data,"confidence_percent","confidence")
             result.loc[i,"Reasoning"]=value(data,"reasoning","begründung","begruendung")
-            result.loc[i,"Processing_Status"]="SUCCESS" if data else "CHECK: invalid JSON"
+            result.loc[i,"Processing_Status"]="SUCCESS" if data else ("ERROR: request too large after PDF fallback" if status=="REQUEST_TOO_LARGE" else "ERROR: API/proxy request failed" if status=="API_ERROR" else "ERROR: invalid JSON after 3 model attempts")
         except Exception as e: result.loc[i,"Processing_Status"]=f"ERROR: {e}"
         save_result(result,path)
     return path
