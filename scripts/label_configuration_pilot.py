@@ -195,6 +195,9 @@ if __name__=="__main__":
     try: main()
     except Exception as e: print(f"ERROR: {e}",file=sys.stderr); sys.exit(1)
 
+# PowerShell: first test only L1 once (recommended before the full pilot).
+# python .\label_configuration_pilot.py --prompt-file .\prompts\P3_optimized.txt --label-config L1 --repetitions 1
+#
 # PowerShell: run all four label configurations, three repetitions each.
 # python .\label_configuration_pilot.py --prompt-file .\prompts\P3_optimized.txt
 # PowerShell: evaluate existing pilot results only (no LLM/API calls).
