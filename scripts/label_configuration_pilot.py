@@ -140,17 +140,55 @@ def truth(row, config):
         allowed.add(MERGED if CONFIGS[config]["merge"] and x in {"Gantry","Umsetzeinheit"} else x)
     return primary,allowed,clean(row.get("Register"))
 def yes(v): return clean(v).casefold() in {"true","yes","1","ja"}
+def config_labels(config):
+    labels=set(BASE)
+    return (labels-{"Gantry","Umsetzeinheit"})|{MERGED} if CONFIGS[config]["merge"] else labels
+def parse_output_labels(value, config):
+    raw=clean(value)
+    if not raw: return []
+    try:
+        decoded=json.loads(raw)
+        values=decoded if isinstance(decoded,list) else [decoded]
+    except (json.JSONDecodeError, TypeError):
+        values=re.split(r"[,;\\n]",raw)
+    return [canon(v) for v in values if canon(v)]
 def evaluate_frame(frame, config):
     rows=[]
+    valid_labels=config_labels(config)
     for _,r in frame.iterrows():
-        gt,allowed,reg=truth(r,config); pred=mapped(r.get("Predicted_Label"),config); nd=yes(r.get("Is_Not_Decidable")); amb=yes(r.get("Is_Ambiguous")); gt_amb=reg=="M"
+        gt,allowed,reg=truth(r,config)
+        raw_primary=canon(r.get("Predicted_Label"))
+        pred=mapped(r.get("Predicted_Label"),config)
+        raw_alts=parse_output_labels(r.get("Alternative_Labels"),config)
+        alts=[MERGED if CONFIGS[config]["merge"] and a in {"Gantry","Umsetzeinheit"} else a for a in raw_alts]
+        nd=yes(r.get("Is_Not_Decidable")); amb=yes(r.get("Is_Ambiguous"))
+        gt_amb=reg=="M" and len(allowed)>1
         evaluable=clean(r.get("Processing_Status"))=="SUCCESS" and bool(gt)
+        primary_schema_valid=raw_primary in valid_labels
+        alternatives_schema_valid=all(a in valid_labels and a != pred for a in alts)
+        if config=="L1":
+            schema=primary_schema_valid and not amb and not nd and not alts
+        elif config=="L2":
+            schema=primary_schema_valid and not nd and alternatives_schema_valid and (bool(alts) if amb else not alts)
+        else:
+            schema=(nd and not raw_primary and not alts and not amb) or (not nd and primary_schema_valid and alternatives_schema_valid and (bool(alts) if amb else not alts))
         strict=evaluable and not nd and pred==gt
         accepted=evaluable and not nd and pred in allowed
-        # A correct operational decision must jointly get the functional label and the regime signal right.
-        joint = (accepted and amb) if gt_amb else (strict and not amb)
-        rows.append({"Label_Config":config,"SAP-Nummer":clean(r.get("SAP-Nummer")),"Teamcenter":clean(r.get("Teamcenter")),"Register":reg,"Ground_Truth":gt,"Accepted_Labels":", ".join(sorted(allowed)),"Prediction":pred,"Is_Ambiguous":amb,"GT_Is_Ambiguous":gt_amb,"Is_Not_Decidable":nd,"Strict_Correct":strict,"Accepted_Correct":accepted,"Joint_Decision_Correct":joint,"Evaluable":evaluable,"Processing_Status":clean(r.get("Processing_Status"))})
+        expected_alts=allowed-{pred} if accepted else set()
+        alternative_correct=(set(alts)==expected_alts) if gt_amb and accepted else False
+        joint=(schema and strict and not amb and not alts) if not gt_amb else (schema and accepted and amb and alternative_correct)
+        rows.append({"Label_Config":config,"SAP-Nummer":clean(r.get("SAP-Nummer")),"Teamcenter":clean(r.get("Teamcenter")),"Register":reg,"Ground_Truth":gt,"Accepted_Labels":", ".join(sorted(allowed)),"Prediction":pred,"Alternative_Labels":", ".join(alts),"Expected_Alternative_Labels":", ".join(sorted(expected_alts)),"Is_Ambiguous":amb,"GT_Is_Ambiguous":gt_amb,"Is_Not_Decidable":nd,"Schema_Compliant":schema,"Alternative_Labels_Correct":alternative_correct,"Strict_Correct":strict,"Accepted_Correct":accepted,"Joint_Decision_Correct":joint,"Evaluable":evaluable,"Processing_Status":clean(r.get("Processing_Status"))})
     return pd.DataFrame(rows)
+def class_metrics(cases, config):
+    data=cases[(cases.Label_Config==config)&cases.Evaluable&~cases.Is_Not_Decidable&cases.Prediction.ne("")].copy()
+    labels=sorted(config_labels(config)); rows=[]; n=len(data)
+    for label in labels:
+        tp=int(((data.Ground_Truth==label)&(data.Prediction==label)).sum()); tn=int(((data.Ground_Truth!=label)&(data.Prediction!=label)).sum())
+        fp=int(((data.Ground_Truth!=label)&(data.Prediction==label)).sum()); fn=int(((data.Ground_Truth==label)&(data.Prediction!=label)).sum())
+        precision=tp/(tp+fp) if tp+fp else None; recall=tp/(tp+fn) if tp+fn else None
+        rows.append({"Class":label,"TP":tp,"TN":tn,"FP":fp,"FN":fn,"Accuracy_(TP+TN)/N":(tp+tn)/n if n else None,"Precision":precision,"Recall":recall,"F1":2*precision*recall/(precision+recall) if precision is not None and recall is not None and precision+recall else None})
+    return pd.DataFrame(rows)
+
 def rate(x): return x.mean() if len(x) else None
 def summary(cases):
     out=[]
@@ -158,7 +196,7 @@ def summary(cases):
         ev=g[g.Evaluable]; e=ev[ev.Register.isin(["E1","E2"])]; m=ev[ev.Register.eq("M")]
         tp=int((g.Is_Ambiguous & g.GT_Is_Ambiguous).sum()); fp=int((g.Is_Ambiguous & ~g.GT_Is_Ambiguous).sum()); fn=int((~g.Is_Ambiguous & g.GT_Is_Ambiguous).sum())
         prec=tp/(tp+fp) if tp+fp else None; rec=tp/(tp+fn) if tp+fn else None
-        out.append({"Label_Config":config,"Rows":len(g),"Evaluable":len(ev),"Strict_Accuracy":rate(ev.Strict_Correct),"E1_E2_Strict_Accuracy":rate(e.Strict_Correct),"M_Accepted_Set_Accuracy":rate(m.Accepted_Correct),"Joint_Decision_Accuracy":rate(ev.Joint_Decision_Correct),"E1_E2_Joint_Decision_Accuracy":rate(e.Joint_Decision_Correct),"M_Joint_Decision_Accuracy":rate(m.Joint_Decision_Correct),"Ambiguity_Precision":prec,"Ambiguity_Recall":rec,"Ambiguity_F1":2*prec*rec/(prec+rec) if prec is not None and rec is not None and prec+rec else None,"Not_Decidable_Count":int(g.Is_Not_Decidable.sum()),"Invalid_JSON_or_Error":int((~g.Evaluable).sum())})
+        out.append({"Label_Config":config,"Rows":len(g),"Evaluable":len(ev),"Strict_Accuracy":rate(ev.Strict_Correct),"E1_E2_Strict_Accuracy":rate(e.Strict_Correct),"M_Accepted_Set_Accuracy":rate(m.Accepted_Correct),"Joint_Decision_Accuracy":rate(ev.Joint_Decision_Correct),"E1_E2_Joint_Decision_Accuracy":rate(e.Joint_Decision_Correct),"M_Joint_Decision_Accuracy":rate(m.Joint_Decision_Correct),"Ambiguity_Precision":prec,"Ambiguity_Recall":rec,"Ambiguity_F1":2*prec*rec/(prec+rec) if prec is not None and rec is not None and prec+rec else None,"Schema_Compliance_Rate":rate(ev.Schema_Compliant),"M_Alternative_Label_Accuracy":rate(m.Alternative_Labels_Correct),"Unexpected_E1_E2_Alternatives":int((e.Alternative_Labels.ne("")).sum()),"Not_Decidable_Count":int(g.Is_Not_Decidable.sum()),"Invalid_JSON_or_Error":int((~g.Evaluable).sum())})
     return pd.DataFrame(out)
 def evaluate(a):
     books=list(a.output_dir.glob("L*/label_pilot_*.xlsx"))
@@ -173,6 +211,11 @@ def evaluate(a):
         cases.to_excel(w,sheet_name="Per_BG_Comparison",index=False)
         cases[cases.Is_Not_Decidable].to_excel(w,sheet_name="Not_Decidable_Cases",index=False)
         cases[(cases.Ground_Truth.isin(["Gantry","Umsetzeinheit",MERGED])) | (cases.Prediction.isin(["Gantry","Umsetzeinheit",MERGED]))].to_excel(w,sheet_name="Gantry_Kombi_Analysis",index=False)
+        for config in sorted(cases.Label_Config.unique()):
+            class_metrics(cases,config).to_excel(w,sheet_name=f"Class_Metrics_{config}",index=False)
+            data=cases[(cases.Label_Config==config)&cases.Evaluable&~cases.Is_Not_Decidable&cases.Prediction.ne("")]
+            pd.crosstab(data.Ground_Truth,data.Prediction,margins=True).to_excel(w,sheet_name=f"Confusion_{config}")
+        cases.groupby(["Label_Config","Register"],dropna=False).agg(Rows=("Evaluable","size"),Strict_Accuracy=("Strict_Correct","mean"),Accepted_Set_Accuracy=("Accepted_Correct","mean"),Joint_Decision_Accuracy=("Joint_Decision_Correct","mean")).reset_index().to_excel(w,sheet_name="Regime_Metrics",index=False)
     wb=load_workbook(report)
     for ws in wb.worksheets: style(ws)
     wb.save(report); return report
