@@ -575,7 +575,7 @@ def write_cross_model_summary(results: list[dict[str, Any]], output_dir: Path) -
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Batch-evaluate completed PDF classification Excel workbooks.")
     parser.add_argument("--repeatability-dir", type=Path, required=True, help="Folder with exactly the 10 Gemini P3-optimized result .xlsx files.")
-    parser.add_argument("--cross-model-dir", type=Path, required=True, help="Folder with the 16 cross-model/configuration result .xlsx files.")
+    parser.add_argument("--cross-model-dir", type=Path, default=None, help="Optional folder with the 16 cross-model/configuration result .xlsx files.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--data-sheet", default=None, help="Optional explicit name of the raw result sheet.")
     parser.add_argument("--in-place", action="store_true", help="Add/replace Class_Metrics directly in the source workbooks. Without it, annotated copies are created under output-dir.")
@@ -588,20 +588,22 @@ def main() -> None:
     args = parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     repeatability_files = discover_workbooks(args.repeatability_dir)
-    cross_model_files = discover_workbooks(args.cross_model_dir)
+    cross_model_files = discover_workbooks(args.cross_model_dir) if args.cross_model_dir else []
     if len(repeatability_files) != args.expected_repeatability_files:
         print(f"WARNING: expected {args.expected_repeatability_files} repeatability workbooks, found {len(repeatability_files)}")
-    if len(cross_model_files) != args.expected_cross_model_files:
+    if args.cross_model_dir and len(cross_model_files) != args.expected_cross_model_files:
         print(f"WARNING: expected {args.expected_cross_model_files} cross-model workbooks, found {len(cross_model_files)}")
     repeatability = evaluate_directory(args.repeatability_dir, args.data_sheet, args.output_dir, args.in_place)
-    cross_model = evaluate_directory(args.cross_model_dir, args.data_sheet, args.output_dir, args.in_place)
+    cross_model = evaluate_directory(args.cross_model_dir, args.data_sheet, args.output_dir, args.in_place) if args.cross_model_dir else []
     repeatability_summary = write_repeatability_summary(repeatability, args.output_dir)
-    cross_model_summary = write_cross_model_summary(cross_model, args.output_dir)
+    cross_model_summary = write_cross_model_summary(cross_model, args.output_dir) if args.cross_model_dir else None
     print("\nFinished")
     print(f"Repeatability: {sum(item['ok'] for item in repeatability)}/{len(repeatability)} files succeeded")
-    print(f"Cross-model: {sum(item['ok'] for item in cross_model)}/{len(cross_model)} files succeeded")
+    if args.cross_model_dir:
+        print(f"Cross-model: {sum(item['ok'] for item in cross_model)}/{len(cross_model)} files succeeded")
     print(f"Repeatability summary: {repeatability_summary}")
-    print(f"Cross-model summary: {cross_model_summary}")
+    if cross_model_summary:
+        print(f"Cross-model summary: {cross_model_summary}")
 
 
 if __name__ == "__main__":
@@ -618,3 +620,8 @@ if __name__ == "__main__":
 #   --cross-model-dir ".\outputs\pdf_cross_model" `
 #   --output-dir ".\evaluation_results\batch" `
 #   --in-place
+
+
+# Only process the 10 Gemini repeatability workbooks and write the summary into
+# the same folder:
+# python .\scripts\batch_evaluate_experiments.py --repeatability-dir ".\outputs\valid_results_10_runs\gemini-2.5-pro_pdf_P3_optimized_10_runs" --output-dir ".\outputs\valid_results_10_runs\gemini-2.5-pro_pdf_P3_optimized_10_runs" --in-place
