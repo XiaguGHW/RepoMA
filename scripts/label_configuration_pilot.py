@@ -147,7 +147,9 @@ def evaluate_frame(frame, config):
         evaluable=clean(r.get("Processing_Status"))=="SUCCESS" and bool(gt)
         strict=evaluable and not nd and pred==gt
         accepted=evaluable and not nd and pred in allowed
-        rows.append({"Label_Config":config,"SAP-Nummer":clean(r.get("SAP-Nummer")),"Teamcenter":clean(r.get("Teamcenter")),"Register":reg,"Ground_Truth":gt,"Accepted_Labels":", ".join(sorted(allowed)),"Prediction":pred,"Is_Ambiguous":amb,"GT_Is_Ambiguous":gt_amb,"Is_Not_Decidable":nd,"Strict_Correct":strict,"Accepted_Correct":accepted,"Evaluable":evaluable,"Processing_Status":clean(r.get("Processing_Status"))})
+        # A correct operational decision must jointly get the functional label and the regime signal right.
+        joint = (accepted and amb) if gt_amb else (strict and not amb)
+        rows.append({"Label_Config":config,"SAP-Nummer":clean(r.get("SAP-Nummer")),"Teamcenter":clean(r.get("Teamcenter")),"Register":reg,"Ground_Truth":gt,"Accepted_Labels":", ".join(sorted(allowed)),"Prediction":pred,"Is_Ambiguous":amb,"GT_Is_Ambiguous":gt_amb,"Is_Not_Decidable":nd,"Strict_Correct":strict,"Accepted_Correct":accepted,"Joint_Decision_Correct":joint,"Evaluable":evaluable,"Processing_Status":clean(r.get("Processing_Status"))})
     return pd.DataFrame(rows)
 def rate(x): return x.mean() if len(x) else None
 def summary(cases):
@@ -156,7 +158,7 @@ def summary(cases):
         ev=g[g.Evaluable]; e=ev[ev.Register.isin(["E1","E2"])]; m=ev[ev.Register.eq("M")]
         tp=int((g.Is_Ambiguous & g.GT_Is_Ambiguous).sum()); fp=int((g.Is_Ambiguous & ~g.GT_Is_Ambiguous).sum()); fn=int((~g.Is_Ambiguous & g.GT_Is_Ambiguous).sum())
         prec=tp/(tp+fp) if tp+fp else None; rec=tp/(tp+fn) if tp+fn else None
-        out.append({"Label_Config":config,"Rows":len(g),"Evaluable":len(ev),"Strict_Accuracy":rate(ev.Strict_Correct),"E1_E2_Strict_Accuracy":rate(e.Strict_Correct),"M_Accepted_Set_Accuracy":rate(m.Accepted_Correct),"Ambiguity_Precision":prec,"Ambiguity_Recall":rec,"Ambiguity_F1":2*prec*rec/(prec+rec) if prec is not None and rec is not None and prec+rec else None,"Not_Decidable_Count":int(g.Is_Not_Decidable.sum()),"Invalid_JSON_or_Error":int((~g.Evaluable).sum())})
+        out.append({"Label_Config":config,"Rows":len(g),"Evaluable":len(ev),"Strict_Accuracy":rate(ev.Strict_Correct),"E1_E2_Strict_Accuracy":rate(e.Strict_Correct),"M_Accepted_Set_Accuracy":rate(m.Accepted_Correct),"Joint_Decision_Accuracy":rate(ev.Joint_Decision_Correct),"E1_E2_Joint_Decision_Accuracy":rate(e.Joint_Decision_Correct),"M_Joint_Decision_Accuracy":rate(m.Joint_Decision_Correct),"Ambiguity_Precision":prec,"Ambiguity_Recall":rec,"Ambiguity_F1":2*prec*rec/(prec+rec) if prec is not None and rec is not None and prec+rec else None,"Not_Decidable_Count":int(g.Is_Not_Decidable.sum()),"Invalid_JSON_or_Error":int((~g.Evaluable).sum())})
     return pd.DataFrame(out)
 def evaluate(a):
     books=list(a.output_dir.glob("L*/label_pilot_*.xlsx"))
