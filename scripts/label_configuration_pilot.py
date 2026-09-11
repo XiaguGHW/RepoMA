@@ -180,7 +180,7 @@ def main():
     if a.repetitions<1: raise ValueError("--repetitions must be at least 1")
     if a.evaluate_only: print("Evaluation:",evaluate(a).resolve()); return
     if not a.input_excel.is_file(): raise FileNotFoundError(f"Input Excel not found: {a.input_excel}")
-    if not a.prompt_file or not a.prompt_file.is_file(): raise FileNotFoundError("Provide your fixed base prompt with --prompt-file, e.g. prompts/P3_optimized.txt")
+    if not a.prompt_file or not a.prompt_file.is_file(): raise FileNotFoundError("Provide your fixed base prompt with --prompt-file, e.g. prompts/P3_original.txt")
     df=pd.read_excel(a.input_excel,sheet_name=a.sheet_name,dtype=str)
     needed={"prompt_engineering","Data_Folder_Path","Ground Truth","Register"}; missing=needed-set(df.columns)
     if missing: raise ValueError(f"Missing Excel columns: {sorted(missing)}")
@@ -196,9 +196,9 @@ if __name__=="__main__":
     except Exception as e: print(f"ERROR: {e}",file=sys.stderr); sys.exit(1)
 
 # PowerShell: first test only L1 once (recommended before the full pilot).
-# python .\label_configuration_pilot.py --prompt-file .\prompts\P3_optimized.txt --label-config L1 --repetitions 1
+# python .\label_configuration_pilot.py --prompt-file .\prompts\P3_original.txt --label-config L1 --repetitions 1
 #
 # PowerShell: run all four label configurations, three repetitions each.
-# python .\label_configuration_pilot.py --prompt-file .\prompts\P3_optimized.txt
+# python .\label_configuration_pilot.py --prompt-file .\prompts\P3_original.txt
 # PowerShell: evaluate existing pilot results only (no LLM/API calls).
 # python .\label_configuration_pilot.py --evaluate-only
