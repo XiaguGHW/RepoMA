@@ -320,3 +320,6 @@ if __name__=="__main__":
 # python .\label_configuration_experiment.py --prompt-file .\prompts\P3_original.txt
 # PowerShell: evaluate existing experiment results only (no LLM/API calls).
 # python .\label_configuration_experiment.py --evaluate-only
+
+# PowerShell command: Complete label-configuration experiment (L1-L4, each 14 BGs, total 56 requests).
+# python .\label_configuration_experiment.py --prompt-file .\prompts\P3_original.txt
