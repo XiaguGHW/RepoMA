@@ -70,6 +70,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pdf-pages-per-chunk", type=int, default=2)
     parser.add_argument("--excel-rows-per-chunk", type=int, default=150)
     parser.add_argument("--max-text-chars", type=int, default=12000)
+    parser.add_argument(
+        "--max-output-tokens",
+        type=int,
+        default=4000,
+        help="Maximum LLM output tokens for each fact-extraction chunk; default 4000.",
+    )
     parser.add_argument("--image-max-px", type=int, default=1600)
     parser.add_argument("--datasheet-triage-pages", type=int, default=2)
     parser.add_argument("--max-datasheet-evidence-pages", type=int, default=4)
@@ -382,7 +388,12 @@ def call_chunk(llm: Any, doc_type: str, relative_path: str, chunk: dict[str, Any
             file_paths=chunk["attachments"],
             question=fact_prompt(doc_type, relative_path, chunk["location"], chunk["text"]),
             system_prompt=SYSTEM_PROMPT,
-            generation_config={"temperature": 0.0, "topP": 0.95, "candidateCount": 1, "maxOutputTokens": 1400},
+            generation_config={
+                "temperature": 0.0,
+                "topP": 0.95,
+                "candidateCount": 1,
+                "maxOutputTokens": args.max_output_tokens,
+            },
         )
         parsed = extract_json(str(response))
         if parsed is not None and isinstance(parsed.get("facts", []), list):
@@ -431,6 +442,8 @@ def run(args: argparse.Namespace) -> Path:
         raise ValueError("--max-attachment-mb must be positive.")
     if args.max_workers <= 0:
         raise ValueError("--max-workers must be positive.")
+    if args.max_output_tokens <= 0:
+        raise ValueError("--max-output-tokens must be positive.")
     inventory = pd.read_excel(args.inventory_excel, sheet_name="file_classification", dtype=str).fillna("")
     required = {"BG_Folder", "Data_Folder_Path", "Relative_Path", "Primary_Type", "Manual_Type"}
     missing = required.difference(inventory.columns)
@@ -571,10 +584,10 @@ if __name__ == "__main__":
 
 # Final text-only pipeline commands (run after reviewing Step 1's inventory Excel):
 # Step 2a) Check fact extraction for the first 5 final-test BG folders:
-# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --max-bgs 5 --max-workers 8
+# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --model gemini-2.5-pro --max-output-tokens 4000 --max-bgs 5 --max-workers 8
 # Step 2b) Extract facts for all final-test BG folders:
-# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --max-workers 8
+# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --model gemini-2.5-pro --max-output-tokens 4000 --max-workers 8
 # Copy the output directory printed after "Done:"; its \facts subfolder is Step 3's --facts-dir.
 # Optional conservative scanned-PDF mode (one page and 0.8 MiB per image):
-# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --pdf-pages-per-chunk 1 --max-attachment-mb 0.8 --max-workers 8
+# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --model gemini-2.5-pro --max-output-tokens 4000 --pdf-pages-per-chunk 1 --max-attachment-mb 0.8 --max-workers 8
 
