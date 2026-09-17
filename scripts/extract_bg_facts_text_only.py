@@ -163,6 +163,19 @@ def create_connector(model: str, api_key: str):
         from llm_connector_with_prompt_caching import LLMConnector
     except ImportError as error:
         raise ImportError("Place llm_connector_with_prompt_caching.py next to this script.") from error
+    # Compatibility for the current cached connector: its file-upload helper
+    # calls _get_mime_type(), but that helper is absent in the supplied file.
+    if not hasattr(LLMConnector, "_get_mime_type"):
+        def _get_mime_type(file_path: str) -> str:
+            mime_types = {
+                ".pdf": "application/pdf",
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+            }
+            return mime_types.get(Path(file_path).suffix.casefold(), "application/octet-stream")
+        LLMConnector._get_mime_type = staticmethod(_get_mime_type)
+        logging.warning("Applied MIME-type compatibility patch for llm_connector_with_prompt_caching.py")
     return LLMConnector(model, api_key)
 
 
