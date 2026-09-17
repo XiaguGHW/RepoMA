@@ -129,6 +129,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pdf-preview-pages", type=int, default=2)
     parser.add_argument("--max-preview-chars", type=int, default=5000)
     parser.add_argument("--retries", type=int, default=1)
+    parser.add_argument(
+        "--no-filename-rules",
+        action="store_false",
+        dest="use_filename_rules",
+        help="Disable high-confidence local filename/path rules and send every readable file to the LLM.",
+    )
+    parser.set_defaults(use_filename_rules=True)
     return parser.parse_args()
 
 
@@ -301,6 +308,29 @@ def normalize_result(payload: dict[str, Any] | None) -> tuple[str, str, float | 
     return primary, "; ".join(dict.fromkeys(secondary)), confidence, evidence, review
 
 
+def local_filename_rule(bg_folder: Path, file_path: Path) -> tuple[str, str] | None:
+    """Return only high-confidence document-role rules; leave all other files to the LLM."""
+    relative = str(file_path.relative_to(bg_folder)).replace("\\", "/").casefold()
+    stem = file_path.stem.casefold()
+
+    rules = [
+        ("bom", ("stückliste", "stueckliste", "bom", "partslist", "parts_list", "teileliste")),
+        ("component_datasheet", ("datenblatt", "data_sheet", "datasheet", "katalog", "catalog")),
+        ("assembly_structure_or_dfc", ("strukturbaum", "baugruppenstruktur", "dfc_structure", "dfc-struktur", "dfc_struktur")),
+        ("assembly_drawing", ("zeichnung", "drawing", "montageplan")),
+        ("cad_screenshot_or_visual_context", ("screenshot", "screen_shot", "cad_view", "cad-view", "3d_view", "3d-view")),
+    ]
+    for document_type, keywords in rules:
+        for keyword in keywords:
+            if keyword in relative:
+                return document_type, f"Local filename/path rule matched '{keyword}' in '{relative}'."
+    if "dfc" in stem or "/dfc/" in f"/{relative}/":
+        return "assembly_structure_or_dfc", f"Local filename/path rule matched 'dfc' in '{relative}'."
+    if re.match(r"^dr\d{5,}", stem):
+        return "assembly_drawing", f"Local drawing-number rule matched '{file_path.name}'."
+    return None
+
+
 def create_connector(model_name: str, api_key: str):
     try:
         from llm_connector_with_prompt_caching import LLMConnector
@@ -355,6 +385,21 @@ def classify_one_file(llm: Any, bg_folder: Path, file_path: Path, cache_dir: Pat
         base["Preview_Mode"] = "unsupported_local_format"
         base["Processing_Status"] = "SKIPPED_UNSUPPORTED_FORMAT"
         return base
+
+    if args.use_filename_rules:
+        rule = local_filename_rule(bg_folder, file_path)
+        if rule:
+            document_type, evidence = rule
+            base.update({
+                "Preview_Mode": "local_filename_rule",
+                "Primary_Type": document_type,
+                "Confidence": 0.99,
+                "Evidence": evidence,
+                "Needs_Review": "no",
+                "Processing_Status": "SUCCESS_LOCAL_FILENAME_RULE",
+                "Run_Model": "local_filename_rule",
+            })
+            return base
 
     attachments, preview_text, preview_mode, has_usable_content = prepare_file_for_llm(file_path, cache_dir, args)
     base["Preview_Mode"] = preview_mode
