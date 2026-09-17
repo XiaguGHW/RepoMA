@@ -122,7 +122,7 @@ def parse_args() -> argparse.Namespace:
         help="Existing Task3 dataset Excel containing Data_Folder_Path for every BG.",
     )
     parser.add_argument("--output-dir", type=Path, default=PROJECT_DIR / "outputs" / "text_only_preprocessing")
-    parser.add_argument("--model", default="gemini-2.5-pro")
+    parser.add_argument("--model", default="gemini-2.5-flash")
     parser.add_argument("--max-bgs", type=int, default=None, help="Process only the first N BG folders.")
     parser.add_argument("--max-workers", type=int, default=1, help="Concurrent file workers; default 1.")
     parser.add_argument(
@@ -298,6 +298,32 @@ def extract_json(raw: str) -> dict[str, Any] | None:
     return None
 
 
+def recover_primary_type_from_malformed_json(raw: str) -> dict[str, Any] | None:
+    """Recover only a valid primary_type from an otherwise malformed LLM response.
+
+    A response such as a nearly complete JSON object with one stray character
+    should not discard a clearly stated document role.  The result remains
+    marked for review because strict JSON parsing did not succeed.
+    """
+    match = re.search(
+        r"[\"']primary_type[\"']\s*:\s*[\"']([^\"']+)[\"']",
+        str(raw),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    primary = match.group(1).strip().casefold()
+    if primary not in DOCUMENT_TYPES:
+        return None
+    return {
+        "primary_type": primary,
+        "secondary_types": [],
+        "confidence": None,
+        "evidence": "Recovered primary_type from malformed model JSON; inspect Raw_Model_Response.",
+        "needs_review": True,
+    }
+
+
 def normalize_result(payload: dict[str, Any] | None) -> tuple[str, str, float | None, str, str]:
     if not payload:
         return "", "", None, "", "yes"
@@ -450,6 +476,10 @@ def classify_one_file(llm: Any, bg_folder: Path, file_path: Path, cache_dir: Pat
             generation_config={"temperature": 0.0, "topP": 0.95, "candidateCount": 1, "maxOutputTokens": 600},
         )
         payload = extract_json(str(response))
+        recovered_from_malformed_json = False
+        if payload is None:
+            payload = recover_primary_type_from_malformed_json(str(response))
+            recovered_from_malformed_json = payload is not None
         primary, secondary, confidence, evidence, needs_review = normalize_result(payload)
         if primary:
             base.update({
@@ -458,7 +488,11 @@ def classify_one_file(llm: Any, bg_folder: Path, file_path: Path, cache_dir: Pat
                 "Confidence": confidence,
                 "Evidence": evidence,
                 "Needs_Review": needs_review,
-                "Processing_Status": "SUCCESS" if attempt == 0 else "SUCCESS_AFTER_RETRY",
+                "Processing_Status": (
+                    "SUCCESS_RECOVERED_FROM_MALFORMED_JSON"
+                    if recovered_from_malformed_json
+                    else "SUCCESS" if attempt == 0 else "SUCCESS_AFTER_RETRY"
+                ),
                 "Raw_Model_Response": str(response),
             })
             return base
@@ -682,10 +716,10 @@ if __name__ == "__main__":
 
 # Final text-only pipeline commands (run from Task3_Prompt_Development):
 # Step 1a) Check the first 5 final-test BG folders. Rows with prompt_engineering = yes are excluded:
-# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --max-bgs 5 --max-workers 8
+# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --model gemini-2.5-flash --max-bgs 5 --max-workers 8
 # Step 1b) Create the complete final-test inventory after the check:
-# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --max-workers 8
+# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --model gemini-2.5-flash --max-workers 8
 # Copy the timestamped .xlsx path printed after "Done:" into Step 2 below.
 # Only when explicitly preparing the 14 prompt-development BGs as well:
-# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --include-prompt-engineering --max-workers 8
+# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --model gemini-2.5-flash --include-prompt-engineering --max-workers 8
 
