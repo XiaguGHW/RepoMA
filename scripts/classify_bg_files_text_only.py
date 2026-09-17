@@ -14,6 +14,7 @@ provide ``LLMConnector(...).ask_about_files(...)`` as used by
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 import logging
@@ -123,6 +124,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=PROJECT_DIR / "outputs" / "text_only_preprocessing")
     parser.add_argument("--model", default="gemini-2.5-pro")
     parser.add_argument("--max-bgs", type=int, default=None, help="Process only the first N BG folders.")
+    parser.add_argument("--max-workers", type=int, default=1, help="Concurrent file workers; default 1.")
     parser.add_argument("--max-file-mb", type=float, default=5.0, help="Largest original PDF/image attachment in MiB.")
     parser.add_argument("--max-preview-px", type=int, default=1600, help="Maximum long edge for generated image previews.")
     parser.add_argument("--excel-preview-rows", type=int, default=20)
@@ -500,6 +502,8 @@ def run(args: argparse.Namespace) -> Path:
         raise EnvironmentError("BOSCH_FARM_SUBSCRIPTION_KEY is not set in .env or the environment.")
     if args.max_bgs is not None and args.max_bgs <= 0:
         raise ValueError("--max-bgs must be positive.")
+    if args.max_workers <= 0:
+        raise ValueError("--max-workers must be positive.")
 
     dataset = pd.read_excel(args.dataset_excel, dtype=str).fillna("")
     if "Data_Folder_Path" not in dataset.columns:
@@ -539,7 +543,35 @@ def run(args: argparse.Namespace) -> Path:
             continue
         files = list(iter_source_files(bg_folder))
         logging.info("BG %s: %d file(s)", bg_folder.name, len(files))
-        for file_path in files:
+        with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+            future_to_file = {
+                executor.submit(classify_one_file, llm, bg_folder, file_path, cache_dir, args): file_path
+                for file_path in files
+            }
+            for future in as_completed(future_to_file):
+                file_path = future_to_file[future]
+                try:
+                    record = future.result()
+                    record["Dataset_Row"] = dataset_index
+                    rows.append(record)
+                except Exception as error:
+                    logging.exception("Failed to classify %s", file_path)
+                    rows.append({
+                        "Dataset_Row": dataset_index, "BG_Folder": bg_folder.name, "Data_Folder_Path": str(bg_folder), "Relative_Path": str(file_path.relative_to(bg_folder)),
+                        "File_Name": file_path.name, "Extension": file_path.suffix.casefold(),
+                        "File_Size_MB": round(file_path.stat().st_size / (1024 * 1024), 3),
+                        "Readable_By_Pipeline": "yes" if file_path.suffix.casefold() in READABLE_EXTENSIONS else "no",
+                        "Preview_Mode": "", "Primary_Type": "", "Secondary_Types": "", "Confidence": None,
+                        "Evidence": "", "Needs_Review": "yes", "Processing_Status": f"ERROR: {error}",
+                        "Manual_Type": "", "Manual_Secondary_Types": "", "Review_Status": "not_reviewed",
+                        "Raw_Model_Response": "", "Run_Model": args.model,
+                        "Run_Timestamp": datetime.now().isoformat(timespec="seconds"),
+                    })
+                save_workbook(rows, output_path)  # checkpoint after every completed file
+        """
+        Legacy sequential loop retained below only as source context.
+        """
+        for file_path in []:
             try:
                 record = classify_one_file(llm, bg_folder, file_path, cache_dir, args)
                 record["Dataset_Row"] = dataset_index
@@ -588,6 +620,6 @@ if __name__ == "__main__":
 
 # Command examples (run from Task3_Prompt_Development; place this script beside the connector):
 # 1) Check the first 5 BG folders:
-# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --max-bgs 5
+# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --max-bgs 5 --max-workers 8
 # 2) Process all BG folders after the check:
-# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx"
+# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --max-workers 8
