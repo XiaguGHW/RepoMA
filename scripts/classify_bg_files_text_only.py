@@ -214,33 +214,33 @@ def image_preview(path: Path, target: Path, max_px: int) -> tuple[Path | None, s
         return None, f"Image preview failed: {error}"
 
 
-def prepare_file_for_llm(path: Path, cache_dir: Path, args: argparse.Namespace) -> tuple[list[str], str, str]:
-    """Return attachment paths, preview text and a reproducible preview-mode description."""
+def prepare_file_for_llm(path: Path, cache_dir: Path, args: argparse.Namespace) -> tuple[list[str], str, str, bool]:
+    """Return LLM context and whether it contains actual readable file content."""
     extension = path.suffix.casefold()
     size_mib = path.stat().st_size / (1024 * 1024)
     cache_base = cache_dir / f"{sha256_short(path)}_{safe_name(path.stem)}"
 
     if extension in EXCEL_EXTENSIONS:
         text, status = excel_text_preview(path, args.excel_preview_sheets, args.excel_preview_rows, args.max_preview_chars)
-        return [], text, f"excel_text_preview ({status})"
+        return [], text, f"excel_text_preview ({status})", bool(text.strip())
 
     if extension == ".pdf":
         text, page_total, status = pdf_text_preview(path, args.pdf_preview_pages, args.max_preview_chars)
         metadata = f"PDF pages: {page_total}. Native text preview status: {status}.\n{text}"
         if size_mib <= args.max_file_mb:
-            return [str(path)], metadata, "original_pdf_attachment + native_text_preview"
+            return [str(path)], metadata, "original_pdf_attachment + native_text_preview", True
         preview, preview_status = render_pdf_first_page(path, cache_base.with_suffix(".jpg"), args.max_preview_px)
         attachments = [str(preview)] if preview else []
-        return attachments, metadata, f"large_pdf_first_page_preview ({preview_status}) + native_text_preview"
+        return attachments, metadata, f"large_pdf_first_page_preview ({preview_status}) + native_text_preview", bool(text.strip() or attachments)
 
     if extension in IMAGE_EXTENSIONS:
         if size_mib <= args.max_file_mb:
-            return [str(path)], "", "original_image_attachment"
+            return [str(path)], "", "original_image_attachment", True
         preview, preview_status = image_preview(path, cache_base.with_suffix(".jpg"), args.max_preview_px)
         attachments = [str(preview)] if preview else []
-        return attachments, "", f"large_image_preview ({preview_status})"
+        return attachments, "", f"large_image_preview ({preview_status})", bool(attachments)
 
-    return [], "", "unsupported"
+    return [], "", "unsupported", False
 
 
 def build_question(relative_path: str, path: Path, preview_text: str) -> str:
@@ -343,8 +343,15 @@ def classify_one_file(llm: Any, bg_folder: Path, file_path: Path, cache_dir: Pat
         base["Processing_Status"] = "SKIPPED_UNSUPPORTED_FORMAT"
         return base
 
-    attachments, preview_text, preview_mode = prepare_file_for_llm(file_path, cache_dir, args)
+    attachments, preview_text, preview_mode, has_usable_content = prepare_file_for_llm(file_path, cache_dir, args)
     base["Preview_Mode"] = preview_mode
+    if not has_usable_content:
+        base.update({
+            "Processing_Status": "SKIPPED_NO_USABLE_CONTENT",
+            "Evidence": "No extractable text and no usable file preview were available; no LLM request was made.",
+            "Needs_Review": "yes",
+        })
+        return base
     question = build_question(relative_path, file_path, preview_text)
     response = ""
     for attempt in range(args.retries + 1):
