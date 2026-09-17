@@ -432,9 +432,23 @@ def create_connector(model_name: str, api_key: str):
     return LLMConnector(model_name, api_key)
 
 
+def safe_file_size_mib(file_path: Path) -> float | None:
+    """Return a size when the file is locally accessible, otherwise None.
+
+    OneDrive may list a cloud-only file during directory traversal and then make
+    it unavailable before a worker accesses it.  That is a skip condition, not
+    a reason to terminate the complete BG run.
+    """
+    try:
+        return round(file_path.stat().st_size / (1024 * 1024), 3)
+    except OSError:
+        return None
+
+
 def classify_one_file(llm: Any, bg_folder: Path, file_path: Path, cache_dir: Path, args: argparse.Namespace) -> dict[str, Any]:
     relative_path = str(file_path.relative_to(bg_folder))
     extension = file_path.suffix.casefold()
+    file_size_mib = safe_file_size_mib(file_path)
     base = {
         "Dataset_Row": pd.NA,
         "BG_Folder": bg_folder.name,
@@ -442,7 +456,7 @@ def classify_one_file(llm: Any, bg_folder: Path, file_path: Path, cache_dir: Pat
         "Relative_Path": relative_path,
         "File_Name": file_path.name,
         "Extension": extension,
-        "File_Size_MB": round(file_path.stat().st_size / (1024 * 1024), 3),
+        "File_Size_MB": file_size_mib,
         "Readable_By_Pipeline": "yes" if extension in READABLE_EXTENSIONS else "no",
         "Preview_Mode": "",
         "Primary_Type": "",
@@ -458,6 +472,14 @@ def classify_one_file(llm: Any, bg_folder: Path, file_path: Path, cache_dir: Pat
         "Run_Model": args.model,
         "Run_Timestamp": datetime.now().isoformat(timespec="seconds"),
     }
+    if file_size_mib is None:
+        base.update({
+            "Preview_Mode": "unavailable_local_file",
+            "Processing_Status": "SKIPPED_UNAVAILABLE_LOCAL_FILE",
+            "Evidence": "File was listed during folder scan but was unavailable locally when processed (for example cloud-only OneDrive content).",
+        })
+        logging.warning("Skipping locally unavailable file: %s", file_path)
+        return base
     if extension not in READABLE_EXTENSIONS:
         base["Preview_Mode"] = "unsupported_local_format"
         base["Processing_Status"] = "SKIPPED_UNSUPPORTED_FORMAT"
@@ -678,12 +700,26 @@ def run(args: argparse.Namespace) -> Path:
                     record = future.result()
                     record["Dataset_Row"] = dataset_index
                     rows.append(record)
+                except OSError as error:
+                    logging.warning("Skipping unavailable local file %s: %s", file_path, error)
+                    rows.append({
+                        "Dataset_Row": dataset_index, "BG_Folder": bg_folder.name, "Data_Folder_Path": str(bg_folder), "Relative_Path": str(file_path.relative_to(bg_folder)),
+                        "File_Name": file_path.name, "Extension": file_path.suffix.casefold(),
+                        "File_Size_MB": safe_file_size_mib(file_path),
+                        "Readable_By_Pipeline": "yes" if file_path.suffix.casefold() in READABLE_EXTENSIONS else "no",
+                        "Preview_Mode": "unavailable_local_file", "Primary_Type": "", "Secondary_Types": "", "Confidence": None,
+                        "Evidence": f"File became unavailable locally during processing: {error}", "Needs_Review": "yes",
+                        "Processing_Status": "SKIPPED_UNAVAILABLE_LOCAL_FILE",
+                        "Manual_Type": "", "Manual_Secondary_Types": "", "Review_Status": "not_reviewed",
+                        "Raw_Model_Response": "", "Run_Model": args.model,
+                        "Run_Timestamp": datetime.now().isoformat(timespec="seconds"),
+                    })
                 except Exception as error:
                     logging.exception("Failed to classify %s", file_path)
                     rows.append({
                         "Dataset_Row": dataset_index, "BG_Folder": bg_folder.name, "Data_Folder_Path": str(bg_folder), "Relative_Path": str(file_path.relative_to(bg_folder)),
                         "File_Name": file_path.name, "Extension": file_path.suffix.casefold(),
-                        "File_Size_MB": round(file_path.stat().st_size / (1024 * 1024), 3),
+                        "File_Size_MB": safe_file_size_mib(file_path),
                         "Readable_By_Pipeline": "yes" if file_path.suffix.casefold() in READABLE_EXTENSIONS else "no",
                         "Preview_Mode": "", "Primary_Type": "", "Secondary_Types": "", "Confidence": None,
                         "Evidence": "", "Needs_Review": "yes", "Processing_Status": f"ERROR: {error}",
