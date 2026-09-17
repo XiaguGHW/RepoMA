@@ -369,6 +369,21 @@ def local_filename_rule(bg_folder: Path, file_path: Path) -> tuple[str, str] | N
                 return document_type, f"Local filename/path rule matched '{keyword}' in '{relative}'."
     if "dfc" in stem or "/dfc/" in f"/{relative}/":
         return "assembly_structure_or_dfc", f"Local filename/path rule matched 'dfc' in '{relative}'."
+    # A root-level PDF named exactly like the BG folder is the exported main
+    # assembly drawing in the supplied DFC/Teamcenter folder convention.  This
+    # covers cases where the native .idw file was not downloaded alongside it.
+    normalized_stem = re.sub(r"[^a-z0-9]+", "", stem)
+    normalized_bg_name = re.sub(r"[^a-z0-9]+", "", bg_folder.name.casefold())
+    if (
+        file_path.suffix.casefold() == ".pdf"
+        and file_path.parent == bg_folder
+        and normalized_stem
+        and normalized_stem == normalized_bg_name
+    ):
+        return (
+            "assembly_drawing",
+            f"Local main-BG drawing rule matched root PDF '{file_path.name}' to BG folder '{bg_folder.name}'.",
+        )
     # Engineering-drawing PDFs are often named only with a part/drawing number.
     # When an exported PDF shares its stem with a native drawing file, this is a
     # strong, deterministic signal and avoids an unnecessary LLM call.
