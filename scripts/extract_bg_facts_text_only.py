@@ -544,5 +544,10 @@ if __name__ == "__main__":
         logging.error("Fact extraction did not finish: %s", error)
         sys.exit(1)
 
-# Example command (run from RepoMA root):
-# python scripts\extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_....xlsx" --max-bgs 5
+# Command examples (run after reviewing the inventory Excel from step 1):
+# 1) Extract facts for the same first 5 BG folders:
+# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --max-bgs 5
+# 2) Extract facts for all BG folders:
+# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx"
+# 3) More conservative scanned-PDF mode (one page and 0.8 MiB per image):
+# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --pdf-pages-per-chunk 1 --max-attachment-mb 0.8
