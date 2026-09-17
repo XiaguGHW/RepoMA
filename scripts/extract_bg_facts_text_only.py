@@ -102,9 +102,9 @@ def extract_json(raw: str) -> dict[str, Any] | None:
 
 def create_connector(model: str, api_key: str):
     try:
-        from llm_connector import LLMConnector
+        from llm_connector_with_prompt_caching import LLMConnector
     except ImportError as error:
-        raise ImportError("Place the actual Bosch llm_connector.py next to this script.") from error
+        raise ImportError("Place llm_connector_with_prompt_caching.py next to this script.") from error
     return LLMConnector(model, api_key)
 
 
