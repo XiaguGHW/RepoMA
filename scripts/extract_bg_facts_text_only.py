@@ -64,6 +64,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-text-chars", type=int, default=12000)
     parser.add_argument("--image-max-px", type=int, default=1600)
     parser.add_argument(
+        "--max-attachment-mb", type=float, default=1.5,
+        help="Maximum size of each rendered/converted image attachment in MiB.",
+    )
+    parser.add_argument(
         "--attach-pdf-visuals", action="store_true",
         help="Also attach rendered PDF pages when native text exists; useful for drawings/DFC PDFs.",
     )
@@ -140,24 +144,33 @@ def render_page_image(pdf_path: Path, page_number: int, target: Path, max_px: in
     return target
 
 
-def image_attachment(image_path: Path, cache_dir: Path, max_px: int) -> Path:
+def image_attachment(image_path: Path, cache_dir: Path, max_px: int, max_attachment_mb: float) -> Path | None:
+    """Return an upload-safe image, or None when no safe preview can be made."""
+    byte_limit = int(max_attachment_mb * 1024 * 1024)
     if Image is None:
-        return image_path
+        return image_path if image_path.stat().st_size <= byte_limit else None
     try:
         with Image.open(image_path) as image:
-            if max(image.size) <= max_px:
+            if max(image.size) <= max_px and image_path.stat().st_size <= byte_limit:
                 return image_path
-            digest = hashlib.sha256(str(image_path).encode("utf-8")).hexdigest()[:16]
-            output = cache_dir / f"{digest}_{safe_name(image_path.stem)}.jpg"
-            if output.exists():
-                return output
-            image = image.convert("RGB")
-            image.thumbnail((max_px, max_px))
-            output.parent.mkdir(parents=True, exist_ok=True)
-            image.save(output, "JPEG", quality=88, optimize=True)
-            return output
-    except Exception:
-        return image_path
+            base_image = image.convert("RGB")
+            digest = hashlib.sha256(
+                f"{image_path}:{max_px}:{max_attachment_mb}".encode("utf-8")
+            ).hexdigest()[:16]
+            for edge in (max_px, int(max_px * 0.75), int(max_px * 0.5)):
+                for quality in (88, 76, 64, 52):
+                    output = cache_dir / f"{digest}_{edge}_{quality}.jpg"
+                    if output.exists() and output.stat().st_size <= byte_limit:
+                        return output
+                    preview = base_image.copy()
+                    preview.thumbnail((edge, edge))
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    preview.save(output, "JPEG", quality=quality, optimize=True)
+                    if output.stat().st_size <= byte_limit:
+                        return output
+    except Exception as error:
+        logging.warning("Could not prepare image attachment %s: %s", image_path, error)
+    return None
 
 
 def pdf_chunks(path: Path, cache_dir: Path, args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -178,7 +191,14 @@ def pdf_chunks(path: Path, cache_dir: Path, args: argparse.Namespace) -> list[di
                 image_path = cache_dir / "pdf_pages" / f"{digest}_page_{page}.jpg"
                 if not image_path.exists():
                     render_page_image(path, page, image_path, args.image_max_px)
-                attachments.append(str(image_path))
+                attachment = image_attachment(
+                    image_path,
+                    cache_dir / "pdf_upload_safe",
+                    args.image_max_px,
+                    args.max_attachment_mb,
+                )
+                if attachment:
+                    attachments.append(str(attachment))
         chunks.append({"location": f"pages {pages[0]}-{pages[-1]}", "text": text[:args.max_text_chars], "attachments": attachments})
     document.close()
     return chunks
@@ -210,7 +230,8 @@ def document_chunks(path: Path, doc_type: str, cache_dir: Path, args: argparse.N
     if extension in EXCEL_EXTENSIONS:
         return excel_chunks(path, args)
     if extension in IMAGE_EXTENSIONS:
-        return [{"location": "image", "text": "", "attachments": [str(image_attachment(path, cache_dir / "images", args.image_max_px))]}]
+        attachment = image_attachment(path, cache_dir / "images", args.image_max_px, args.max_attachment_mb)
+        return [{"location": "image", "text": "", "attachments": [str(attachment)] if attachment else []}]
     raise ValueError(f"Unsupported extension: {extension}")
 
 
@@ -256,6 +277,12 @@ def call_chunk(llm: Any, doc_type: str, relative_path: str, chunk: dict[str, Any
     return None, str(response)
 
 
+def chunk_has_usable_content(chunk: dict[str, Any]) -> bool:
+    if str(chunk.get("text", "")).strip():
+        return True
+    return any(Path(str(path)).is_file() for path in chunk.get("attachments", []))
+
+
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -270,6 +297,8 @@ def run(args: argparse.Namespace) -> Path:
         raise EnvironmentError("BOSCH_FARM_SUBSCRIPTION_KEY is not set in .env or environment.")
     if args.pdf_pages_per_chunk <= 0 or args.excel_rows_per_chunk <= 0:
         raise ValueError("Chunk sizes must be positive.")
+    if args.max_attachment_mb <= 0:
+        raise ValueError("--max-attachment-mb must be positive.")
     inventory = pd.read_excel(args.inventory_excel, sheet_name="file_classification", dtype=str).fillna("")
     required = {"BG_Folder", "Data_Folder_Path", "Relative_Path", "Primary_Type", "Manual_Type"}
     missing = required.difference(inventory.columns)
@@ -318,13 +347,20 @@ def run(args: argparse.Namespace) -> Path:
                 manifest_rows.append({"BG_Folder": bg_folder, "Relative_Path": relative, "Document_Type": doc_type, "Chunk": "", "Status": f"PREPARATION_ERROR: {error}", "Fact_Count": 0})
                 continue
             for index, chunk in enumerate(chunks, start=1):
-                parsed, raw = call_chunk(llm, doc_type, relative, chunk, args)
+                if not chunk_has_usable_content(chunk):
+                    parsed, raw = None, ""
+                    status = "SKIPPED_NO_USABLE_CONTENT"
+                    limitations = ["No extractable text and no upload-safe page/image preview were available; no LLM request was made."]
+                else:
+                    parsed, raw = call_chunk(llm, doc_type, relative, chunk, args)
+                    status = "SUCCESS" if parsed else "CHECK_INVALID_JSON_OR_RESPONSE"
+                    limitations = parsed.get("missing_or_uncertain", []) if parsed else []
                 facts = parsed.get("facts", []) if parsed else []
                 chunk_record = {
                     "chunk_index": index, "source_location": chunk["location"],
-                    "status": "SUCCESS" if parsed else "CHECK_INVALID_JSON_OR_RESPONSE",
+                    "status": status,
                     "facts": facts,
-                    "missing_or_uncertain": parsed.get("missing_or_uncertain", []) if parsed else [],
+                    "missing_or_uncertain": limitations,
                     "raw_model_response": raw,
                 }
                 record["chunks"].append(chunk_record)
