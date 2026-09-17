@@ -67,7 +67,9 @@ DOCUMENT_TYPES = {
 }
 
 OUTPUT_COLUMNS = [
+    "Dataset_Row",
     "BG_Folder",
+    "Data_Folder_Path",
     "Relative_Path",
     "File_Name",
     "Extension",
@@ -113,12 +115,9 @@ Nutze nur sichtbare bzw. im Text enthaltene Hinweise. Antworte ausschließlich a
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    env_root = os.getenv("BG_DATA_ROOT")
     parser.add_argument(
-        "--data-root",
-        type=Path,
-        default=Path(env_root).expanduser() if env_root else None,
-        help="Root whose first-level folders are Baugruppen. Default: BG_DATA_ROOT from .env.",
+        "--dataset-excel", type=Path, required=True,
+        help="Existing Task3 dataset Excel containing Data_Folder_Path for every BG.",
     )
     parser.add_argument("--output-dir", type=Path, default=PROJECT_DIR / "outputs" / "text_preprocessing")
     parser.add_argument("--model", default="gemini-2.5-pro")
@@ -317,7 +316,9 @@ def classify_one_file(llm: Any, bg_folder: Path, file_path: Path, cache_dir: Pat
     relative_path = str(file_path.relative_to(bg_folder))
     extension = file_path.suffix.casefold()
     base = {
+        "Dataset_Row": pd.NA,
         "BG_Folder": bg_folder.name,
+        "Data_Folder_Path": str(bg_folder),
         "Relative_Path": relative_path,
         "File_Name": file_path.name,
         "Extension": extension,
@@ -400,19 +401,23 @@ def save_workbook(rows: list[dict[str, Any]], output_path: Path) -> None:
 def run(args: argparse.Namespace) -> Path:
     if not os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY"):
         raise EnvironmentError("BOSCH_FARM_SUBSCRIPTION_KEY is not set in .env or the environment.")
-    if args.data_root is None:
-        raise EnvironmentError("--data-root is required, or set BG_DATA_ROOT in .env.")
-    data_root = args.data_root.expanduser().resolve()
-    if not data_root.is_dir():
-        raise NotADirectoryError(f"Data root does not exist or is not a directory: {data_root}")
     if args.max_bgs is not None and args.max_bgs <= 0:
         raise ValueError("--max-bgs must be positive.")
 
-    bg_folders = sorted((path for path in data_root.iterdir() if path.is_dir()), key=lambda path: path.name.casefold())
+    dataset = pd.read_excel(args.dataset_excel, dtype=str).fillna("")
+    if "Data_Folder_Path" not in dataset.columns:
+        raise ValueError("Dataset Excel must contain the column 'Data_Folder_Path'.")
+    bg_entries = []
+    for index, row in dataset.iterrows():
+        raw_path = str(row["Data_Folder_Path"]).strip()
+        if not raw_path:
+            logging.warning("Dataset row %s has an empty Data_Folder_Path and will be skipped.", index)
+            continue
+        bg_entries.append((index, Path(raw_path).expanduser()))
     if args.max_bgs:
-        bg_folders = bg_folders[:args.max_bgs]
-    if not bg_folders:
-        raise ValueError(f"No first-level BG folders found in: {data_root}")
+        bg_entries = bg_entries[:args.max_bgs]
+    if not bg_entries:
+        raise ValueError("No non-empty Data_Folder_Path entries found in the dataset Excel.")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = args.output_dir / "file_preview_cache"
@@ -421,16 +426,31 @@ def run(args: argparse.Namespace) -> Path:
     llm = create_connector(args.model, os.environ["BOSCH_FARM_SUBSCRIPTION_KEY"])
     rows: list[dict[str, Any]] = []
 
-    for bg_folder in bg_folders:
+    for dataset_index, bg_folder in bg_entries:
+        if not bg_folder.is_dir():
+            logging.warning("Dataset row %s points to a missing folder: %s", dataset_index, bg_folder)
+            rows.append({
+                "Dataset_Row": dataset_index, "BG_Folder": bg_folder.name, "Data_Folder_Path": str(bg_folder),
+                "Relative_Path": "", "File_Name": "", "Extension": "", "File_Size_MB": None,
+                "Readable_By_Pipeline": "no", "Preview_Mode": "", "Primary_Type": "", "Secondary_Types": "",
+                "Confidence": None, "Evidence": "", "Needs_Review": "yes", "Processing_Status": "MISSING_DATA_FOLDER",
+                "Manual_Type": "", "Manual_Secondary_Types": "", "Review_Status": "not_reviewed",
+                "Raw_Model_Response": "", "Run_Model": args.model,
+                "Run_Timestamp": datetime.now().isoformat(timespec="seconds"),
+            })
+            save_workbook(rows, output_path)
+            continue
         files = sorted((path for path in bg_folder.rglob("*") if path.is_file() and not path.name.startswith("~$")), key=lambda path: str(path).casefold())
         logging.info("BG %s: %d file(s)", bg_folder.name, len(files))
         for file_path in files:
             try:
-                rows.append(classify_one_file(llm, bg_folder, file_path, cache_dir, args))
+                record = classify_one_file(llm, bg_folder, file_path, cache_dir, args)
+                record["Dataset_Row"] = dataset_index
+                rows.append(record)
             except Exception as error:
                 logging.exception("Failed to classify %s", file_path)
                 rows.append({
-                    "BG_Folder": bg_folder.name, "Relative_Path": str(file_path.relative_to(bg_folder)),
+                    "Dataset_Row": dataset_index, "BG_Folder": bg_folder.name, "Data_Folder_Path": str(bg_folder), "Relative_Path": str(file_path.relative_to(bg_folder)),
                     "File_Name": file_path.name, "Extension": file_path.suffix.casefold(),
                     "File_Size_MB": round(file_path.stat().st_size / (1024 * 1024), 3),
                     "Readable_By_Pipeline": "yes" if file_path.suffix.casefold() in READABLE_EXTENSIONS else "no",
@@ -470,4 +490,4 @@ if __name__ == "__main__":
         sys.exit(1)
 
 # Example pilot command (run from the RepoMA root):
-# python scripts\classify_bg_files.py --data-root "C:\\path\\to\\processed_BG" --max-bgs 5
+# python scripts\classify_bg_files.py --dataset-excel ".\\input\\classification_experiment_dataset_V2.xlsx" --max-bgs 5
