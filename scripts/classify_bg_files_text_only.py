@@ -523,5 +523,8 @@ if __name__ == "__main__":
         logging.error("File classification did not finish: %s", error)
         sys.exit(1)
 
-# Example command (run from the RepoMA root):
-# python scripts\classify_bg_files_text_only.py --dataset-excel ".\\input\\classification_experiment_dataset_V2.xlsx" --max-bgs 5
+# Command examples (run from Task3_Prompt_Development; place this script beside the connector):
+# 1) Check the first 5 BG folders:
+# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --max-bgs 5
+# 2) Process all BG folders after the check:
+# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx"
