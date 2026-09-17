@@ -680,12 +680,12 @@ if __name__ == "__main__":
         logging.error("File classification did not finish: %s", error)
         sys.exit(1)
 
-# Command examples (run from Task3_Prompt_Development; place this script beside the connector):
-# 1) Check the first 5 BG folders:
+# Final text-only pipeline commands (run from Task3_Prompt_Development):
+# Step 1a) Check the first 5 final-test BG folders. Rows with prompt_engineering = yes are excluded:
 # python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --max-bgs 5 --max-workers 8
-# 2) Process all BG folders after the check:
+# Step 1b) Create the complete final-test inventory after the check:
 # python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --max-workers 8
-#    Rows marked prompt_engineering = yes are excluded by default (final-test split).
-# 3) Only when explicitly preparing the 14 prompt-development BGs as well:
+# Copy the timestamped .xlsx path printed after "Done:" into Step 2 below.
+# Only when explicitly preparing the 14 prompt-development BGs as well:
 # python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --include-prompt-engineering --max-workers 8
 
