@@ -90,7 +90,7 @@ def render_dossier(payload: dict[str, Any], source_json_name: str) -> tuple[str,
         "",
         "EXTRACTED TECHNICAL FACTS",
     ]
-    counts = Counter(documents=0, chunks=0, successful_chunks=0, facts=0, limitations=0)
+    counts = Counter(documents=0, chunks=0, successful_chunks=0, facts=0, limitations=0, low_relevance_datasheets=0, uncertain_datasheets=0)
     documents = payload.get("documents", [])
     if not documents:
         lines.extend(["", "- No source documents were available in this extraction result."])
@@ -98,10 +98,16 @@ def render_dossier(payload: dict[str, Any], source_json_name: str) -> tuple[str,
     for document in documents:
         if not isinstance(document, dict):
             continue
-        counts["documents"] += 1
         relative_path = clean_text(document.get("relative_path")) or "unknown source file"
         doc_type = clean_text(document.get("document_type"))
         document_status = clean_text(document.get("status"))
+        if document_status == "SKIPPED_LOW_RELEVANCE_DATASHEET":
+            counts["low_relevance_datasheets"] += 1
+            continue
+        if document_status == "SKIPPED_DATASHEET_TRIAGE_UNCERTAIN":
+            counts["uncertain_datasheets"] += 1
+            continue
+        counts["documents"] += 1
         lines.extend(["", f"## {document_heading(doc_type)}", f"Source file: {relative_path}"])
         if document_status:
             lines.append(f"Document status: {document_status}")
@@ -154,6 +160,8 @@ def render_dossier(payload: dict[str, Any], source_json_name: str) -> tuple[str,
         f"- Successfully extracted sections: {counts['successful_chunks']}",
         f"- Source-traceable facts: {counts['facts']}",
         f"- Recorded limitations / uncertainties: {counts['limitations']}",
+        f"- Low-relevance datasheets omitted: {counts['low_relevance_datasheets']}",
+        f"- Uncertain datasheets omitted for review: {counts['uncertain_datasheets']}",
         "",
         "END OF DOSSIER",
         "",
