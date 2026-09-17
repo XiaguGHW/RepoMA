@@ -569,10 +569,12 @@ if __name__ == "__main__":
         logging.error("Fact extraction did not finish: %s", error)
         sys.exit(1)
 
-# Command examples (run after reviewing the inventory Excel from step 1):
-# 1) Extract facts for the same first 5 BG folders:
+# Final text-only pipeline commands (run after reviewing Step 1's inventory Excel):
+# Step 2a) Check fact extraction for the first 5 final-test BG folders:
 # python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --max-bgs 5 --max-workers 8
-# 2) Extract facts for all BG folders:
+# Step 2b) Extract facts for all final-test BG folders:
 # python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --max-workers 8
-# 3) More conservative scanned-PDF mode (one page and 0.8 MiB per image):
+# Copy the output directory printed after "Done:"; its \facts subfolder is Step 3's --facts-dir.
+# Optional conservative scanned-PDF mode (one page and 0.8 MiB per image):
 # python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --pdf-pages-per-chunk 1 --max-attachment-mb 0.8 --max-workers 8
+
