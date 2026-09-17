@@ -6,7 +6,7 @@ readable document into a document role so later scripts can extract facts from
 the appropriate files.  Excel files are converted locally to a text preview;
 large PDFs and images are represented by a deterministic preview attachment.
 
-The Bosch ``llm_connector.py`` is deliberately reused unchanged.  It must
+The Bosch ``llm_connector_with_prompt_caching.py`` is deliberately reused unchanged.  It must
 provide ``LLMConnector(...).ask_about_files(...)`` as used by
 ``scripts/run_classification.py``.
 """
@@ -303,10 +303,10 @@ def normalize_result(payload: dict[str, Any] | None) -> tuple[str, str, float | 
 
 def create_connector(model_name: str, api_key: str):
     try:
-        from llm_connector import LLMConnector
+        from llm_connector_with_prompt_caching import LLMConnector
     except ImportError as error:
         raise ImportError(
-            "llm_connector.py was not found beside the scripts. Place the actual Bosch connector "
+            "llm_connector_with_prompt_caching.py was not found beside the scripts. Place the Bosch connector "
             "next to this script; no code change is required for this first script."
         ) from error
     return LLMConnector(model_name, api_key)
