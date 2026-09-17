@@ -22,7 +22,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import pandas as pd
 
@@ -398,6 +398,33 @@ def save_workbook(rows: list[dict[str, Any]], output_path: Path) -> None:
                 sheet.column_dimensions[get_column_letter(column_number)].width = width
 
 
+def iter_source_files(bg_folder: Path) -> Iterable[Path]:
+    """Yield original source files, excluding known duplicate conversions.
+
+    ``converted...`` directories contain derivative images created from the
+    original documents.  ``*_visual_context.pdf`` is also a derived PDF, so
+    neither belongs in the source-document inventory.
+    """
+    for root, directory_names, file_names in os.walk(bg_folder):
+        # Pruning prevents os.walk from ever descending into these directories.
+        directory_names[:] = sorted(
+            (name for name in directory_names if not name.casefold().startswith("converted")),
+            key=str.casefold,
+        )
+        root_path = Path(root)
+        for filename in sorted(file_names, key=str.casefold):
+            file_path = root_path / filename
+            if filename.startswith("~$"):
+                continue
+            if (
+                file_path.suffix.casefold() == ".pdf"
+                and "_visual_context" in file_path.stem.casefold()
+            ):
+                logging.info("Skipping duplicate visual-context PDF: %s", file_path)
+                continue
+            yield file_path
+
+
 def run(args: argparse.Namespace) -> Path:
     if not os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY"):
         raise EnvironmentError("BOSCH_FARM_SUBSCRIPTION_KEY is not set in .env or the environment.")
@@ -440,7 +467,7 @@ def run(args: argparse.Namespace) -> Path:
             })
             save_workbook(rows, output_path)
             continue
-        files = sorted((path for path in bg_folder.rglob("*") if path.is_file() and not path.name.startswith("~$")), key=lambda path: str(path).casefold())
+        files = list(iter_source_files(bg_folder))
         logging.info("BG %s: %d file(s)", bg_folder.name, len(files))
         for file_path in files:
             try:
