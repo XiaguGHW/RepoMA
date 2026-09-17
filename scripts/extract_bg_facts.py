@@ -114,6 +114,19 @@ def source_path(row: pd.Series) -> Path:
     return Path(str(row["Data_Folder_Path"])).expanduser() / Path(str(row["Relative_Path"]))
 
 
+def is_duplicate_derivative(row: pd.Series) -> bool:
+    """Defensively exclude rows from inventories created before duplicate filtering."""
+    relative_path = Path(str(row["Relative_Path"]))
+    in_converted_directory = any(
+        part.casefold().startswith("converted") for part in relative_path.parts[:-1]
+    )
+    is_visual_context_pdf = (
+        relative_path.suffix.casefold() == ".pdf"
+        and "_visual_context" in relative_path.stem.casefold()
+    )
+    return in_converted_directory or is_visual_context_pdf
+
+
 def render_page_image(pdf_path: Path, page_number: int, target: Path, max_px: int) -> Path:
     if fitz is None:
         raise ImportError("PyMuPDF is required for PDF page processing.")
@@ -268,6 +281,10 @@ def run(args: argparse.Namespace) -> Path:
     selected = selected[selected["Effective_Type"].isin(PROCESSABLE_TYPES)]
     if not args.include_other:
         selected = selected[selected["Effective_Type"] != "other_technical_document"]
+    duplicate_count = int(selected.apply(is_duplicate_derivative, axis=1).sum())
+    if duplicate_count:
+        logging.info("Excluding %d duplicate converted/visual-context inventory row(s).", duplicate_count)
+        selected = selected[~selected.apply(is_duplicate_derivative, axis=1)]
     bg_order = list(dict.fromkeys(selected["BG_Folder"].tolist()))
     if args.max_bgs:
         bg_order = bg_order[:args.max_bgs]
