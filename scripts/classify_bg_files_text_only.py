@@ -125,6 +125,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default="gemini-2.5-pro")
     parser.add_argument("--max-bgs", type=int, default=None, help="Process only the first N BG folders.")
     parser.add_argument("--max-workers", type=int, default=1, help="Concurrent file workers; default 1.")
+    parser.add_argument(
+        "--include-prompt-engineering",
+        action="store_true",
+        help=(
+            "Include rows marked prompt_engineering = yes. By default these development "
+            "BGs are excluded so the inventory is suitable for the independent final test."
+        ),
+    )
     parser.add_argument("--max-file-mb", type=float, default=5.0, help="Largest original PDF/image attachment in MiB.")
     parser.add_argument("--max-preview-px", type=int, default=1600, help="Maximum long edge for generated image previews.")
     parser.add_argument("--excel-preview-rows", type=int, default=20)
@@ -527,6 +535,41 @@ def run(args: argparse.Namespace) -> Path:
     dataset = pd.read_excel(args.dataset_excel, dtype=str).fillna("")
     if "Data_Folder_Path" not in dataset.columns:
         raise ValueError("Dataset Excel must contain the column 'Data_Folder_Path'.")
+    prompt_engineering_column = next(
+        (
+            str(column)
+            for column in dataset.columns
+            if str(column).strip().casefold() == "prompt_engineering"
+        ),
+        None,
+    )
+    if not args.include_prompt_engineering:
+        if prompt_engineering_column is None:
+            raise ValueError(
+                "Dataset Excel must contain the column 'prompt_engineering' for the final-test "
+                "exclusion. Use --include-prompt-engineering only when intentionally processing "
+                "a dataset without this separation."
+            )
+        prompt_mask = (
+            dataset[prompt_engineering_column]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.casefold()
+            .eq("yes")
+        )
+        excluded_count = int(prompt_mask.sum())
+        dataset = dataset.loc[~prompt_mask].copy()
+        logging.info(
+            "Excluded %d prompt-engineering BG row(s); final-test inventory contains %d row(s).",
+            excluded_count,
+            len(dataset),
+        )
+        if excluded_count != 14:
+            logging.warning(
+                "Expected 14 prompt-engineering rows, but excluded %d. Check the input Excel marker column.",
+                excluded_count,
+            )
     bg_entries = []
     for index, row in dataset.iterrows():
         raw_path = str(row["Data_Folder_Path"]).strip()
@@ -642,4 +685,7 @@ if __name__ == "__main__":
 # python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --max-bgs 5 --max-workers 8
 # 2) Process all BG folders after the check:
 # python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --max-workers 8
+#    Rows marked prompt_engineering = yes are excluded by default (final-test split).
+# 3) Only when explicitly preparing the 14 prompt-development BGs as well:
+# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --include-prompt-engineering --max-workers 8
 
