@@ -55,9 +55,7 @@ Ausschnitts erkennbar sein. Antworte ausschließlich als JSON."""
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    env_root = os.getenv("BG_DATA_ROOT")
     parser.add_argument("--inventory-excel", type=Path, required=True)
-    parser.add_argument("--data-root", type=Path, default=Path(env_root).expanduser() if env_root else None)
     parser.add_argument("--output-dir", type=Path, default=PROJECT_DIR / "outputs" / "text_preprocessing")
     parser.add_argument("--model", default="gemini-2.5-pro")
     parser.add_argument("--max-bgs", type=int, default=None, help="Pilot: process first N BG folders in inventory order.")
@@ -112,8 +110,8 @@ def effective_type(row: pd.Series) -> str:
     return manual or primary
 
 
-def source_path(row: pd.Series, data_root: Path) -> Path:
-    return data_root / str(row["BG_Folder"]) / Path(str(row["Relative_Path"]))
+def source_path(row: pd.Series) -> Path:
+    return Path(str(row["Data_Folder_Path"])).expanduser() / Path(str(row["Relative_Path"]))
 
 
 def render_page_image(pdf_path: Path, page_number: int, target: Path, max_px: int) -> Path:
@@ -257,12 +255,10 @@ def write_manifest(rows: list[dict[str, Any]], output_path: Path) -> None:
 def run(args: argparse.Namespace) -> Path:
     if not os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY"):
         raise EnvironmentError("BOSCH_FARM_SUBSCRIPTION_KEY is not set in .env or environment.")
-    if args.data_root is None:
-        raise EnvironmentError("--data-root is required, or set BG_DATA_ROOT in .env.")
     if args.pdf_pages_per_chunk <= 0 or args.excel_rows_per_chunk <= 0:
         raise ValueError("Chunk sizes must be positive.")
     inventory = pd.read_excel(args.inventory_excel, sheet_name="file_classification", dtype=str).fillna("")
-    required = {"BG_Folder", "Relative_Path", "Primary_Type", "Manual_Type"}
+    required = {"BG_Folder", "Data_Folder_Path", "Relative_Path", "Primary_Type", "Manual_Type"}
     missing = required.difference(inventory.columns)
     if missing:
         raise ValueError(f"Inventory misses required columns: {sorted(missing)}")
@@ -282,16 +278,13 @@ def run(args: argparse.Namespace) -> Path:
     cache_dir = run_dir / "preview_cache"
     manifest_path = run_dir / "extraction_manifest.xlsx"
     llm = create_connector(args.model, os.environ["BOSCH_FARM_SUBSCRIPTION_KEY"])
-    data_root = args.data_root.expanduser().resolve()
-    if not data_root.is_dir():
-        raise NotADirectoryError(f"Data root does not exist: {data_root}")
     manifest_rows: list[dict[str, Any]] = []
 
     for bg_folder in bg_order:
         bg_records: list[dict[str, Any]] = []
         bg_rows = selected[selected["BG_Folder"] == bg_folder]
         for _, row in bg_rows.iterrows():
-            path = source_path(row, data_root)
+            path = source_path(row)
             relative = str(row["Relative_Path"])
             doc_type = str(row["Effective_Type"])
             record = {"relative_path": relative, "document_type": doc_type, "chunks": []}
@@ -345,4 +338,4 @@ if __name__ == "__main__":
         sys.exit(1)
 
 # Pilot command (run from RepoMA root):
-# python scripts\extract_bg_facts.py --inventory-excel ".\outputs\text_preprocessing\file_inventory_classified_....xlsx" --data-root "C:\\path\\to\\processed_BG" --max-bgs 5
+# python scripts\extract_bg_facts.py --inventory-excel ".\outputs\text_preprocessing\file_inventory_classified_....xlsx" --max-bgs 5
