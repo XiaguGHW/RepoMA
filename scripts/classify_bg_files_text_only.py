@@ -141,6 +141,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-preview-chars", type=int, default=5000)
     parser.add_argument("--retries", type=int, default=1)
     parser.add_argument(
+        "--max-output-tokens",
+        type=int,
+        default=4000,
+        help="Maximum LLM output tokens per document classification; default 4000.",
+    )
+    parser.add_argument(
         "--no-filename-rules",
         action="store_false",
         dest="use_filename_rules",
@@ -473,7 +479,12 @@ def classify_one_file(llm: Any, bg_folder: Path, file_path: Path, cache_dir: Pat
             file_paths=attachments,
             question=question,
             system_prompt=SYSTEM_PROMPT,
-            generation_config={"temperature": 0.0, "topP": 0.95, "candidateCount": 1, "maxOutputTokens": 600},
+            generation_config={
+                "temperature": 0.0,
+                "topP": 0.95,
+                "candidateCount": 1,
+                "maxOutputTokens": args.max_output_tokens,
+            },
         )
         payload = extract_json(str(response))
         recovered_from_malformed_json = False
@@ -565,6 +576,8 @@ def run(args: argparse.Namespace) -> Path:
         raise ValueError("--max-bgs must be positive.")
     if args.max_workers <= 0:
         raise ValueError("--max-workers must be positive.")
+    if args.max_output_tokens <= 0:
+        raise ValueError("--max-output-tokens must be positive.")
 
     dataset = pd.read_excel(args.dataset_excel, dtype=str).fillna("")
     if "Data_Folder_Path" not in dataset.columns:
@@ -716,10 +729,10 @@ if __name__ == "__main__":
 
 # Final text-only pipeline commands (run from Task3_Prompt_Development):
 # Step 1a) Check the first 5 final-test BG folders. Rows with prompt_engineering = yes are excluded:
-# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --model gemini-2.5-flash --max-bgs 5 --max-workers 8
+# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --model gemini-2.5-flash --max-output-tokens 4000 --max-bgs 5 --max-workers 8
 # Step 1b) Create the complete final-test inventory after the check:
-# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --model gemini-2.5-flash --max-workers 8
+# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --model gemini-2.5-flash --max-output-tokens 4000 --max-workers 8
 # Copy the timestamped .xlsx path printed after "Done:" into Step 2 below.
 # Only when explicitly preparing the 14 prompt-development BGs as well:
-# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --model gemini-2.5-flash --include-prompt-engineering --max-workers 8
+# python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --model gemini-2.5-flash --max-output-tokens 4000 --include-prompt-engineering --max-workers 8
 
