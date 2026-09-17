@@ -243,5 +243,10 @@ if __name__ == "__main__":
         logging.error("Text dossier rendering did not finish: %s", error)
         sys.exit(1)
 
-# Example command (run from RepoMA root):
-# python scripts\render_text_dossiers_text_only.py --facts-dir ".\outputs\text_only_preprocessing\facts_<model>_<timestamp>\facts"
+# Command examples (run after step 2):
+# 1) Render dossiers for all extracted BG facts:
+# python render_text_dossiers_text_only.py --facts-dir ".\outputs\text_only_preprocessing\facts_<model>_<timestamp>\facts"
+# 2) Render only the first 5 dossiers for inspection:
+# python render_text_dossiers_text_only.py --facts-dir ".\outputs\text_only_preprocessing\facts_<model>_<timestamp>\facts" --max-bgs 5
+# 3) Store dossiers in an explicit directory:
+# python render_text_dossiers_text_only.py --facts-dir ".\outputs\text_only_preprocessing\facts_<model>_<timestamp>\facts" --output-dir ".\outputs\text_only_preprocessing\review_dossiers"
