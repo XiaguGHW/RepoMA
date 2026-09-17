@@ -281,10 +281,22 @@ if __name__ == "__main__":
         logging.error("Text-dossier classification did not finish: %s", error)
         sys.exit(1)
 
-# Final experiment commands. Fixed prompt: .\prompts\P3_original.txt
-# First test one model with the first 5 dossiers:
-# python run_text_dossier_classification.py --dossiers-dir ".\outputs\text_only_preprocessing\facts_<model>_<timestamp>\text_dossiers" --models gemini-pro --max-bgs 5 --max-workers 8 --max-output-tokens 4000
-# Run one selected model for all final-test dossiers:
-# python run_text_dossier_classification.py --dossiers-dir ".\outputs\text_only_preprocessing\facts_<model>_<timestamp>\text_dossiers" --models gemini-pro --max-workers 8 --max-output-tokens 4000
-# Run all eight requested models sequentially (eight separate Excel workbooks):
-# python run_text_dossier_classification.py --dossiers-dir ".\outputs\text_only_preprocessing\facts_<model>_<timestamp>\text_dossiers" --models all --max-workers 8 --max-output-tokens 4000
+# Final text-only classification experiment commands.
+# Fixed system prompt (not supplied on the command line): .\prompts\P3_original.txt
+# Replace <facts_run_folder> with the exact Step 2 folder, e.g.
+# facts_gemini-2.5-pro_2026-09-17_10-08-02.
+#
+# Step 3) First create the text dossiers. This command does NOT call an LLM:
+# python render_text_dossiers_text_only.py --facts-dir ".\outputs\text_only_preprocessing\<facts_run_folder>\facts" --max-workers 8
+#
+# Step 4a) Pilot: Gemini 2.5 Pro for the first 5 dossiers:
+# python run_text_dossier_classification.py --dossiers-dir ".\outputs\text_only_preprocessing\<facts_run_folder>\text_dossiers" --models gemini-pro --max-bgs 5 --max-workers 8 --max-output-tokens 4000
+#
+# Step 4b) Full run for one selected model:
+# python run_text_dossier_classification.py --dossiers-dir ".\outputs\text_only_preprocessing\<facts_run_folder>\text_dossiers" --models gemini-pro --max-workers 8 --max-output-tokens 4000
+#
+# Step 4c) Full cross-model run: eight separate Excel workbooks, one per model:
+# python run_text_dossier_classification.py --dossiers-dir ".\outputs\text_only_preprocessing\<facts_run_folder>\text_dossiers" --models all --max-workers 8 --max-output-tokens 4000
+#
+# Available --models aliases: gemini-pro, gemini-flash, claude-opus,
+# claude-haiku, gpt-4o, gpt-4o-mini, deepseek-r1, llama, all.
