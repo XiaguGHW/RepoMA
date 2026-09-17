@@ -55,6 +55,7 @@ PROJECT_DIR = SCRIPT_DIR.parent if SCRIPT_DIR.name.casefold() == "scripts" else 
 READABLE_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".xlsx", ".xls", ".csv"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 EXCEL_EXTENSIONS = {".xlsx", ".xls", ".csv"}
+EXCLUDED_IMAGE_DIRECTORY_NAMES = {"screenshots", "bilder"}
 
 DOCUMENT_TYPES = {
     "assembly_drawing",
@@ -466,14 +467,18 @@ def save_workbook(rows: list[dict[str, Any]], output_path: Path) -> None:
 def iter_source_files(bg_folder: Path) -> Iterable[Path]:
     """Yield original source files, excluding known duplicate conversions.
 
-    ``converted...`` directories contain derivative images created from the
-    original documents.  ``*_visual_context.pdf`` is also a derived PDF, so
-    neither belongs in the source-document inventory.
+    ``converted...`` directories and the image-only ``Screenshots``/``Bilder``
+    directories do not belong in the text-only source-document inventory.
+    ``*_visual_context.pdf`` is also a derived PDF and is excluded.
     """
     for root, directory_names, file_names in os.walk(bg_folder):
         # Pruning prevents os.walk from ever descending into these directories.
         directory_names[:] = sorted(
-            (name for name in directory_names if not name.casefold().startswith("converted")),
+            (
+                name for name in directory_names
+                if not name.casefold().startswith("converted")
+                and name.casefold() not in EXCLUDED_IMAGE_DIRECTORY_NAMES
+            ),
             key=str.casefold,
         )
         root_path = Path(root)
