@@ -64,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-text-chars", type=int, default=12000)
     parser.add_argument("--image-max-px", type=int, default=1600)
     parser.add_argument(
-        "--max-attachment-mb", type=float, default=1.5,
+        "--max-attachment-mb", type=float, default=1.0,
         help="Maximum size of each rendered/converted image attachment in MiB.",
     )
     parser.add_argument(
