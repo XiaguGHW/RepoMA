@@ -54,6 +54,19 @@ def clean_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def is_excluded_derivative_document(document: dict[str, Any]) -> bool:
+    relative_path = Path(clean_text(document.get("relative_path")))
+    parent_parts = relative_path.parts[:-1]
+    return (
+        any(part.casefold().startswith("converted") for part in parent_parts)
+        or any(part.casefold() in {"screenshots", "bilder"} for part in parent_parts)
+        or (
+            relative_path.suffix.casefold() == ".pdf"
+            and "_visual_context" in relative_path.stem.casefold()
+        )
+    )
+
+
 def document_heading(document_type: str) -> str:
     labels = {
         "assembly_drawing": "Assembly drawing",
@@ -90,13 +103,16 @@ def render_dossier(payload: dict[str, Any], source_json_name: str) -> tuple[str,
         "",
         "EXTRACTED TECHNICAL FACTS",
     ]
-    counts = Counter(documents=0, chunks=0, successful_chunks=0, facts=0, limitations=0, low_relevance_datasheets=0, uncertain_datasheets=0)
+    counts = Counter(documents=0, chunks=0, successful_chunks=0, facts=0, limitations=0, low_relevance_datasheets=0, uncertain_datasheets=0, excluded_derivative_documents=0)
     documents = payload.get("documents", [])
     if not documents:
         lines.extend(["", "- No source documents were available in this extraction result."])
 
     for document in documents:
         if not isinstance(document, dict):
+            continue
+        if is_excluded_derivative_document(document):
+            counts["excluded_derivative_documents"] += 1
             continue
         relative_path = clean_text(document.get("relative_path")) or "unknown source file"
         doc_type = clean_text(document.get("document_type"))
@@ -162,6 +178,7 @@ def render_dossier(payload: dict[str, Any], source_json_name: str) -> tuple[str,
         f"- Recorded limitations / uncertainties: {counts['limitations']}",
         f"- Low-relevance datasheets omitted: {counts['low_relevance_datasheets']}",
         f"- Uncertain datasheets omitted for review: {counts['uncertain_datasheets']}",
+        f"- Converted/visual-context/image-folder documents omitted: {counts['excluded_derivative_documents']}",
         "",
         "END OF DOSSIER",
         "",
