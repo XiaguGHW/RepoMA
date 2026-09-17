@@ -10,6 +10,7 @@ chunks and images one by one, then writes raw fact records per Baugruppe.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import logging
@@ -65,6 +66,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=PROJECT_DIR / "outputs" / "text_only_preprocessing")
     parser.add_argument("--model", default="gemini-2.5-pro")
     parser.add_argument("--max-bgs", type=int, default=None, help="Process first N BG folders in inventory order.")
+    parser.add_argument("--max-workers", type=int, default=1, help="Concurrent independent chunk workers; default 1.")
     parser.add_argument("--pdf-pages-per-chunk", type=int, default=2)
     parser.add_argument("--excel-rows-per-chunk", type=int, default=150)
     parser.add_argument("--max-text-chars", type=int, default=12000)
@@ -427,6 +429,8 @@ def run(args: argparse.Namespace) -> Path:
         raise ValueError("Datasheet evidence page limits must be positive.")
     if args.max_attachment_mb <= 0:
         raise ValueError("--max-attachment-mb must be positive.")
+    if args.max_workers <= 0:
+        raise ValueError("--max-workers must be positive.")
     inventory = pd.read_excel(args.inventory_excel, sheet_name="file_classification", dtype=str).fillna("")
     required = {"BG_Folder", "Data_Folder_Path", "Relative_Path", "Primary_Type", "Manual_Type"}
     missing = required.difference(inventory.columns)
@@ -516,7 +520,8 @@ def run(args: argparse.Namespace) -> Path:
                 bg_records.append(record)
                 manifest_rows.append({"BG_Folder": bg_folder, "Relative_Path": relative, "Document_Type": doc_type, "Chunk": "", "Status": f"PREPARATION_ERROR: {error}", "Fact_Count": 0})
                 continue
-            for index, chunk in enumerate(chunks, start=1):
+            def process_chunk(item: tuple[int, dict[str, Any]]) -> tuple[int, dict[str, Any]]:
+                index, chunk = item
                 if not chunk_has_usable_content(chunk):
                     parsed, raw = None, ""
                     status = "SKIPPED_NO_USABLE_CONTENT"
@@ -526,15 +531,19 @@ def run(args: argparse.Namespace) -> Path:
                     status = "SUCCESS" if parsed else "CHECK_INVALID_JSON_OR_RESPONSE"
                     limitations = parsed.get("missing_or_uncertain", []) if parsed else []
                 facts = parsed.get("facts", []) if parsed else []
-                chunk_record = {
+                return index, {
                     "chunk_index": index, "source_location": chunk["location"],
                     "status": status,
                     "facts": facts,
                     "missing_or_uncertain": limitations,
                     "raw_model_response": raw,
                 }
+
+            with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+                processed_chunks = list(executor.map(process_chunk, enumerate(chunks, start=1)))
+            for _index, chunk_record in sorted(processed_chunks):
                 record["chunks"].append(chunk_record)
-                manifest_rows.append({"BG_Folder": bg_folder, "Relative_Path": relative, "Document_Type": doc_type, "Chunk": chunk["location"], "Status": chunk_record["status"], "Fact_Count": len(facts)})
+                manifest_rows.append({"BG_Folder": bg_folder, "Relative_Path": relative, "Document_Type": doc_type, "Chunk": chunk_record["source_location"], "Status": chunk_record["status"], "Fact_Count": len(chunk_record["facts"])})
                 write_manifest(manifest_rows, manifest_path)
                 write_json(run_dir / "facts" / f"{safe_name(bg_folder)}.json", {"bg_folder": bg_folder, "run_id": run_id, "documents": bg_records + [record]})
             bg_records.append(record)
@@ -562,8 +571,8 @@ if __name__ == "__main__":
 
 # Command examples (run after reviewing the inventory Excel from step 1):
 # 1) Extract facts for the same first 5 BG folders:
-# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --max-bgs 5
+# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --max-bgs 5 --max-workers 8
 # 2) Extract facts for all BG folders:
-# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx"
+# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --max-workers 8
 # 3) More conservative scanned-PDF mode (one page and 0.8 MiB per image):
-# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --pdf-pages-per-chunk 1 --max-attachment-mb 0.8
+# python extract_bg_facts_text_only.py --inventory-excel ".\outputs\text_only_preprocessing\file_inventory_classified_<model>_<timestamp>.xlsx" --pdf-pages-per-chunk 1 --max-attachment-mb 0.8 --max-workers 8
