@@ -329,6 +329,25 @@ def local_filename_rule(bg_folder: Path, file_path: Path) -> tuple[str, str] | N
                 return document_type, f"Local filename/path rule matched '{keyword}' in '{relative}'."
     if "dfc" in stem or "/dfc/" in f"/{relative}/":
         return "assembly_structure_or_dfc", f"Local filename/path rule matched 'dfc' in '{relative}'."
+    # Engineering-drawing PDFs are often named only with a part/drawing number.
+    # When an exported PDF shares its stem with a native drawing file, this is a
+    # strong, deterministic signal and avoids an unnecessary LLM call.
+    if file_path.suffix.casefold() == ".pdf":
+        drawing_extensions = {".idw", ".dwg", ".dxf"}
+        try:
+            has_matching_drawing_source = any(
+                candidate.is_file()
+                and candidate.suffix.casefold() in drawing_extensions
+                and candidate.stem.casefold() == stem
+                for candidate in file_path.parent.iterdir()
+            )
+        except OSError:
+            has_matching_drawing_source = False
+        if has_matching_drawing_source:
+            return (
+                "assembly_drawing",
+                f"Local paired drawing-source rule matched same-stem CAD drawing for '{file_path.name}'.",
+            )
     if re.match(r"^dr\d{5,}", stem):
         return "assembly_drawing", f"Local drawing-number rule matched '{file_path.name}'."
     return None
@@ -623,3 +642,4 @@ if __name__ == "__main__":
 # python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --max-bgs 5 --max-workers 8
 # 2) Process all BG folders after the check:
 # python classify_bg_files_text_only.py --dataset-excel ".\input\classification_experiment_dataset_V2.xlsx" --max-workers 8
+
