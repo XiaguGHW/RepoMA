@@ -11,6 +11,7 @@ subsequent text-only classification experiment.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import logging
 import re
@@ -42,6 +43,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Render only the first N dossiers in filename order.",
     )
+    parser.add_argument("--max-workers", type=int, default=1, help="Concurrent dossier-rendering workers; default 1.")
     return parser.parse_args()
 
 
@@ -194,6 +196,8 @@ def write_manifest(rows: list[dict[str, Any]], path: Path) -> None:
 def run(args: argparse.Namespace) -> Path:
     if args.max_bgs is not None and args.max_bgs <= 0:
         raise ValueError("--max-bgs must be positive.")
+    if args.max_workers <= 0:
+        raise ValueError("--max-workers must be positive.")
     facts_dir = args.facts_dir.expanduser()
     if not facts_dir.is_dir():
         raise FileNotFoundError(f"Facts directory does not exist: {facts_dir}")
@@ -208,14 +212,15 @@ def run(args: argparse.Namespace) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_rows: list[dict[str, Any]] = []
 
-    for json_path in json_files:
+    def render_one(json_path: Path) -> dict[str, Any]:
         try:
             payload = load_fact_file(json_path)
             dossier, counts = render_dossier(payload, json_path.name)
             bg_folder = clean_text(payload.get("bg_folder")) or json_path.stem
             dossier_path = output_dir / f"{safe_name(bg_folder)}.txt"
             dossier_path.write_text(dossier, encoding="utf-8")
-            manifest_rows.append({
+            logging.info("Rendered dossier for %s: %s", bg_folder, dossier_path.name)
+            return {
                 "BG_Folder": bg_folder,
                 "Source_JSON": str(json_path),
                 "Dossier_File": str(dossier_path),
@@ -225,11 +230,10 @@ def run(args: argparse.Namespace) -> Path:
                 "Successful_Section_Count": counts["successful_chunks"],
                 "Fact_Count": counts["facts"],
                 "Limitation_Count": counts["limitations"],
-            })
-            logging.info("Rendered dossier for %s: %s", bg_folder, dossier_path.name)
+            }
         except Exception as error:
             logging.exception("Could not render dossier from %s", json_path)
-            manifest_rows.append({
+            return {
                 "BG_Folder": json_path.stem,
                 "Source_JSON": str(json_path),
                 "Dossier_File": "",
@@ -239,7 +243,10 @@ def run(args: argparse.Namespace) -> Path:
                 "Successful_Section_Count": 0,
                 "Fact_Count": 0,
                 "Limitation_Count": 0,
-            })
+            }
+
+    with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+        manifest_rows.extend(executor.map(render_one, json_files))
 
     manifest_path = output_dir / "text_dossier_manifest.csv"
     write_manifest(manifest_rows, manifest_path)
@@ -262,8 +269,8 @@ if __name__ == "__main__":
 
 # Command examples (run after step 2):
 # 1) Render dossiers for all extracted BG facts:
-# python render_text_dossiers_text_only.py --facts-dir ".\outputs\text_only_preprocessing\facts_<model>_<timestamp>\facts"
+# python render_text_dossiers_text_only.py --facts-dir ".\outputs\text_only_preprocessing\facts_<model>_<timestamp>\facts" --max-workers 8
 # 2) Render only the first 5 dossiers for inspection:
-# python render_text_dossiers_text_only.py --facts-dir ".\outputs\text_only_preprocessing\facts_<model>_<timestamp>\facts" --max-bgs 5
+# python render_text_dossiers_text_only.py --facts-dir ".\outputs\text_only_preprocessing\facts_<model>_<timestamp>\facts" --max-bgs 5 --max-workers 8
 # 3) Store dossiers in an explicit directory:
-# python render_text_dossiers_text_only.py --facts-dir ".\outputs\text_only_preprocessing\facts_<model>_<timestamp>\facts" --output-dir ".\outputs\text_only_preprocessing\review_dossiers"
+# python render_text_dossiers_text_only.py --facts-dir ".\outputs\text_only_preprocessing\facts_<model>_<timestamp>\facts" --output-dir ".\outputs\text_only_preprocessing\review_dossiers" --max-workers 8
