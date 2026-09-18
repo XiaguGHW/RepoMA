@@ -41,7 +41,6 @@ except ImportError:
 APP_DIR = Path(__file__).resolve().parent / ".excel_chat_agent"
 SYSTEM = "你是一个谨慎的 Excel 助手。始终用中文回答。只能依据本地精确工具返回的单元格、公式和计划；不得猜测单元格位置或文件内容。写入前必须清楚展示计划并等待用户输入‘确认执行’。"
 QUOTED_RE = re.compile(r'["“]([^"”\n]+)["”]')
-DIRECT_FILE_RE = re.compile(r'([A-Za-z]:\\[^"“”\r\n]*?\.(?:xlsx|xlsm))', re.IGNORECASE)
 WINDOWS_PATH_RE = re.compile(r'([A-Za-z]:\\[^"“”\r\n]+)')
 NAME_HINT_RE = re.compile(r'(?:名字叫|名为|叫)\s*["“]?([^"“”\s]+?)(?:的)?(?:excel|xlsx|xlsm|工作簿|表格|文件)', re.IGNORECASE)
 
@@ -71,7 +70,7 @@ class Session:
         self.root = APP_DIR / name
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = self.root / "session.json"
-        self.data = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {"workbook": None, "results": None, "pending_plan": None, "history": []}
+        self.data = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {"workbook": None, "results": None, "pending_plan": None, "discovered_files": [], "history": []}
 
     def save(self) -> None:
         self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -85,6 +84,7 @@ class Session:
 class WorkbookTools:
     def __init__(self, session: Session):
         self.session = session
+        self.allowed_roots: list[Path] = []
 
     @property
     def path(self) -> Path:
@@ -101,6 +101,43 @@ class WorkbookTools:
 
     def overview(self) -> dict[str, Any]:
         return worksheet_overview(self.book())
+
+    def discover_workbooks(self, root: str, name_hint: str = "", purpose: str = "workbook") -> dict[str, Any]:
+        folder = Path(root).expanduser().resolve()
+        if not folder.is_dir():
+            raise ValueError(f"该目录不存在：{folder}")
+        if not self.allowed_roots:
+            raise ValueError("请先在当前消息中提供需要搜索的目录路径。")
+        try:
+            permitted = any(os.path.commonpath([str(folder), str(allowed)]) == str(allowed) for allowed in self.allowed_roots)
+        except ValueError:
+            permitted = False
+        if not permitted:
+            raise ValueError("只能搜索你在当前消息中明确提供的目录或其子目录。")
+        include_csv = purpose == "results"
+        candidates = workbook_candidates(folder, name_hint, include_csv=include_csv)
+        self.session.data["discovered_files"] = [str(item.resolve()) for item in candidates]
+        self.session.save()
+        return {"root": str(folder), "name_hint": name_hint, "purpose": purpose, "candidates": [{"path": str(item.resolve()), "name": item.name} for item in candidates[:30]], "candidate_count": len(candidates)}
+
+    def open_workbook(self, path: str, role: str = "workbook") -> dict[str, Any]:
+        candidate = Path(path).expanduser().resolve()
+        known = {Path(item).resolve() for item in self.session.data.get("discovered_files", [])}
+        if candidate not in known:
+            raise ValueError("只能打开本轮目录搜索返回的候选文件。")
+        if role == "results":
+            if candidate.suffix.lower() not in {".xlsx", ".xlsm", ".csv"}:
+                raise ValueError("结果文件必须是 .xlsx、.xlsm 或 .csv。")
+            self.session.data["results"] = str(candidate)
+            self.session.save()
+            return {"opened_results_file": candidate.name, "path": str(candidate)}
+        if candidate.suffix.lower() not in {".xlsx", ".xlsm"}:
+            raise ValueError("工作簿必须是 .xlsx 或 .xlsm 文件。")
+        book = load_book(candidate, data_only=False)
+        self.session.data["workbook"] = str(candidate)
+        self.session.data["pending_plan"] = None
+        self.session.save()
+        return {"opened_workbook": candidate.name, "path": str(candidate), "overview": worksheet_overview(book)}
 
     def sheet_preview(self, selector: str, rows: int = 35, cols: int = 20) -> dict[str, Any]:
         book = self.book()
@@ -196,6 +233,8 @@ class WorkbookTools:
 
 def controller_prompt(question: str, context: dict[str, Any], tool_results: list[dict[str, Any]]) -> str:
     tools = """可调用工具：
+- discover_workbooks {root: '用户本轮提供的目录', name_hint: '用户提到的文件名或关键词', purpose: 'workbook 或 results'}
+- open_workbook {path: 'discover_workbooks 返回的候选完整路径', role: 'workbook 或 results'}
 - overview {}
 - sheet_preview {sheet: 'Sheet名称或序号', rows: 35, cols: 20}
 - read_range {sheet: '名称或序号', range: 'A1:Z40'}
@@ -206,9 +245,10 @@ def controller_prompt(question: str, context: dict[str, Any], tool_results: list
 规则：
 1. 只返回一个 JSON 对象，不要 Markdown。
 2. JSON 格式为 {"tool_calls":[{"name":"...","arguments":{...}}],"reply":"给用户的简短中文说明"}。
-3. 如果尚未有精确工具证据，先调用读取工具；不要臆测单元格。
-4. 绝不调用写入工具。plan_participants 只可生成待确认计划，且必须先检查相关表头、目标列和结果文件字段。
-5. 每轮最多两个工具调用，优先小范围读取。"""
+3. 每一轮普通聊天都先规划工具调用。如果用户提到要打开、读取、使用某个本地 Excel，先 discover_workbooks，随后只能 open_workbook 一个返回的候选文件；不要要求用户使用固定句式。
+4. 如果尚未有精确工具证据，先调用读取工具；不要臆测单元格。
+5. 绝不调用写入工具。plan_participants 只可生成待确认计划，且必须先检查相关表头、目标列和结果文件字段。
+6. 每轮最多两个工具调用，优先小范围读取。"""
     return f"""你是 Excel Agent 的工具规划器。{tools}
 
 当前会话：{json.dumps(context, ensure_ascii=False)}
@@ -228,13 +268,14 @@ def normalise_name(value: str) -> str:
     return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", value.lower())
 
 
-def workbook_candidates(folder: Path, hint: str = "") -> list[Path]:
+def workbook_candidates(folder: Path, hint: str = "", include_csv: bool = False) -> list[Path]:
     if not folder.is_dir():
         return []
     # Search descendants too: project folders often keep the workbook in input/
     # or another named subfolder. Limit the result list, never scan a drive root.
     choices: list[Path] = []
-    for pattern in ("*.xlsx", "*.xlsm"):
+    patterns = ("*.xlsx", "*.xlsm", "*.csv") if include_csv else ("*.xlsx", "*.xlsm")
+    for pattern in patterns:
         for item in folder.rglob(pattern):
             choices.append(item)
             if len(choices) >= 200:
@@ -261,59 +302,20 @@ def natural_folder_and_hint(line: str) -> tuple[Path | None, str]:
     return None, hint
 
 
-def identify_file_from_text(line: str) -> tuple[Path | None, list[Path], str | None]:
-    """Accept full paths, folders, and Chinese phrases such as '路径里面名字叫129BG的excel文件'."""
-    direct = DIRECT_FILE_RE.search(line)
-    if direct:
-        candidate = Path(direct.group(1)).expanduser()
-        return (candidate.resolve() if candidate.is_file() else None), [], f"找不到指定文件：{candidate}"
-    quoted = QUOTED_RE.findall(line)
-    for raw in quoted:
-        candidate = Path(raw).expanduser()
-        if candidate.is_file() and candidate.suffix.lower() in {".xlsx", ".xlsm"}:
-            return candidate.resolve(), [], None
-        if candidate.is_dir():
-            choices = workbook_candidates(candidate)
-            if len(choices) == 1:
-                return choices[0].resolve(), [], None
-            return None, choices, None
-    folder, hint = natural_folder_and_hint(line)
+def declared_roots_from_text(line: str) -> list[Path]:
+    roots: list[Path] = []
+    folder, _ = natural_folder_and_hint(line)
     if folder:
-        choices = workbook_candidates(folder, hint)
-        if len(choices) == 1:
-            return choices[0].resolve(), [], None
-        return None, choices, None
-    return None, [], None
-
-
-def set_session_file(path: Path, session: Session, kind: str) -> None:
-    if kind == "results":
-        session.data["results"] = str(path)
-        session.save()
-        print(f"assistant> 已设置参与者结果文件：{path.name}。现在可直接用中文说明要新增哪位参与者的判断。")
-    else:
-        book = load_book(path, data_only=False)
-        session.data["workbook"] = str(path)
-        session.data["pending_plan"] = None
-        session.save()
-        overview = worksheet_overview(book)
-        names = "、".join(f"{item['number']}.{item['name']}" for item in overview["sheets"])
-        print(f"assistant> 已打开 {path.name}，共 {overview['sheet_count']} 个 Sheet：{names}。现在可以直接中文提问。")
-
-
-def open_from_text(line: str, session: Session, kind: str) -> bool:
-    path, choices, error = identify_file_from_text(line)
-    if error:
-        print(f"assistant> {error}")
-        return True
-    if path:
-        set_session_file(path, session, kind)
-        return True
-    if choices:
-        shown = "；".join(str(item) for item in choices[:8])
-        print(f"assistant> 我在该目录找到多个候选 Excel：{shown}。请直接说其中一个文件名，或提供更具体的名称。")
-        return True
-    return False
+        roots.append(folder.resolve())
+    for raw in QUOTED_RE.findall(line) + WINDOWS_PATH_RE.findall(line):
+        candidate = Path(raw).expanduser()
+        if candidate.is_dir():
+            roots.append(candidate.resolve())
+        elif candidate.suffix.lower() in {".xlsx", ".xlsm", ".csv"} and candidate.parent.is_dir():
+            # A directly named file also explicitly authorises a search of its
+            # parent directory; the LLM still has to discover then select it.
+            roots.append(candidate.parent.resolve())
+    return list(dict.fromkeys(roots))
 
 
 def main() -> None:
@@ -332,7 +334,7 @@ def main() -> None:
     tools = WorkbookTools(session)
     farm_session_id = uuid.uuid4().hex
     llm = LLMConnector(args.model, key, session_id=farm_session_id)
-    print(f"Excel Chat Agent — model={args.model}, session={args.session}. 用中文说‘打开 \\\"C:\\\\文件.xlsx\\\"’，或输入 /help。")
+    print(f"Excel Chat Agent — model={args.model}, session={args.session}. 每条普通中文消息先由 LLM 规划受控工具；输入 /help 查看安全控制。")
     while True:
         try:
             line = input("you> ").strip()
@@ -343,7 +345,7 @@ def main() -> None:
         if line in {"/quit", "/exit"}:
             break
         if line == "/help":
-            print("assistant> 直接中文提问即可。首次输入：打开 \"C:\\路径\\工作簿.xlsx\"。参与者结果输入：结果文件 \"C:\\路径\\results.xlsx\"。可用 /model 模型ID、/status、/cancel、确认执行、/quit。")
+            print("assistant> 直接中文提问即可；每条普通消息都会先由 LLM 规划。首次请在消息中给出目录路径，例如：请打开这个目录里名为129BG的 Excel。可用 /model 模型ID、/status、/cancel、确认执行、/quit。")
             continue
         if line.startswith("/model "):
             requested_model = line[7:].strip()
@@ -366,25 +368,20 @@ def main() -> None:
             except Exception as exc:
                 print(f"assistant> 未执行写入：{exc}")
             continue
-        lowered = line.lower()
-        if "打开" in line or "加载" in line or lowered.startswith("open ") or lowered.startswith("/open "):
-            if not open_from_text(line, session, "workbook"):
-                print("assistant> 我没有在这句话中定位到 Excel。你可以说完整路径、一个目录，或例如：打开“C:\\资料\\这个路径里面名字叫129BG的excel文件”。")
-            continue
-        if "结果文件" in line or lowered.startswith("/results "):
-            if not open_from_text(line, session, "results"):
-                print("assistant> 请写成：结果文件 \"C:\\路径\\参与者结果.xlsx\"")
-            continue
-        if not session.data.get("workbook"):
-            print("assistant> 请先输入：打开 \"C:\\路径\\工作簿.xlsx\"")
-            continue
-        context = {"workbook": session.data.get("workbook"), "results_file": session.data.get("results"), "pending_plan": bool(session.data.get("pending_plan")), "workbook_overview": tools.overview()}
+        tools.allowed_roots = declared_roots_from_text(line)
+        workbook_overview = tools.overview() if session.data.get("workbook") else None
+        context = {"workbook": session.data.get("workbook"), "results_file": session.data.get("results"), "pending_plan": bool(session.data.get("pending_plan")), "declared_search_roots": [str(item) for item in tools.allowed_roots], "workbook_overview": workbook_overview}
         tool_results: list[dict[str, Any]] = []
         try:
             for _ in range(3):
                 raw = llm.ask_about_files([], controller_prompt(line, context, tool_results), SYSTEM, {"maxOutputTokens": 1800})
                 decision = parse_json_reply(raw)
                 if not decision:
+                    retry = "上一轮没有返回可执行的 JSON。请严格按要求重新规划；若涉及本地文件，必须先调用 discover_workbooks。"
+                    raw = llm.ask_about_files([], retry + "\n\n" + controller_prompt(line, context, tool_results), SYSTEM, {"maxOutputTokens": 1800})
+                    decision = parse_json_reply(raw)
+                if not decision:
+                    tool_results.append({"tool": "planner", "result": {"error": "模型没有返回可执行的工具规划。请重试，或切换到更强模型。"}})
                     break
                 calls = decision.get("tool_calls") or []
                 if not calls:
@@ -392,7 +389,9 @@ def main() -> None:
                 for call in calls[:2]:
                     name, arguments = call.get("name"), call.get("arguments") or {}
                     try:
-                        if name == "overview": result = tools.overview()
+                        if name == "discover_workbooks": result = tools.discover_workbooks(str(arguments.get("root", "")), str(arguments.get("name_hint", "")), str(arguments.get("purpose", "workbook")))
+                        elif name == "open_workbook": result = tools.open_workbook(str(arguments.get("path", "")), str(arguments.get("role", "workbook")))
+                        elif name == "overview": result = tools.overview()
                         elif name == "sheet_preview": result = tools.sheet_preview(str(arguments.get("sheet")), int(arguments.get("rows", 35)), int(arguments.get("cols", 20)))
                         elif name == "read_range": result = tools.read_range(str(arguments.get("sheet")), str(arguments.get("range")))
                         elif name == "search": result = tools.search(str(arguments.get("query", "")), arguments.get("sheet"))
@@ -402,6 +401,11 @@ def main() -> None:
                     except Exception as exc:
                         result = {"error": str(exc)}
                     tool_results.append({"tool": name, "result": result})
+                    if name == "open_workbook" and "opened_workbook" in result:
+                        context["workbook"] = result["path"]
+                        context["workbook_overview"] = result["overview"]
+                    elif name == "open_workbook" and "opened_results_file" in result:
+                        context["results_file"] = result["path"]
                 if any(item["tool"] == "plan_participants" for item in tool_results):
                     break
             answer = llm.ask_about_files([], final_prompt(line, context, tool_results), SYSTEM, {"maxOutputTokens": 2200})
@@ -420,7 +424,8 @@ if __name__ == "__main__":
 # 2) Start with your Bosch Farm model and the .env in this folder:
 #    python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop
 #    python excel_chat_agent.py --model gemini-2.5-pro --session workshop
-# 3) In the terminal, talk naturally in Chinese:
+# 3) In the terminal, every normal Chinese message is first planned by the LLM.
+#    The only direct commands are /help, /model, /status, /cancel, 确认执行, /quit:
 #    打开 "C:\\path\\to\\workshop.xlsx"
 #    打开 "C:\\path\\to\\资料目录\\这个路径里面名字叫129BG的excel文件"
 #    第六个 Sheet 的表头是什么？请列出准确单元格坐标和公式关系。

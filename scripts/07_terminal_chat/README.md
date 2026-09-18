@@ -1,15 +1,15 @@
 # Bosch Farm Terminal Chat
 
 Download the complete `07_terminal_chat` folder anywhere on your Bosch computer.
-The two Python files must remain together inside it:
+These Python files must remain together inside it:
 
 - `llm_connector_with_prompt_caching.py`
 - `bosch_chat.py`
 - `excel_agent.py` — precise Excel inspection and safe writing tool
 - `excel_chat_agent.py` — recommended Chinese conversational Excel agent
 
-Use your existing Farm `.env` file. Do not put its secret into either Python
-file or copy it into this tool folder:
+Put your existing Farm `.env` file in this downloaded tool folder (or provide
+its location with `--env-file`). Do not put its secret into any Python file:
 
 ```dotenv
 BOSCH_FARM_SUBSCRIPTION_KEY=...
@@ -65,16 +65,24 @@ For workbook questions and safe edits, start the single conversational tool:
 python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop
 ```
 
-It opens with `you>`. Talk in Chinese; commands are only needed for the
-emergency controls `/status`, `/cancel` and `/quit`. The first message only
-needs to describe where the source file is. It accepts either an exact file
-path or a folder plus a natural-language filename hint, for example:
+It opens with `you>`. Every normal Chinese message is first sent to the chosen
+LLM as a tool-planning request: the LLM decides whether to search the folder,
+choose one returned candidate, open the workbook, inspect cells or prepare a
+safe edit plan. It does **not** rely on a fixed Chinese command format.
+
+The local program remains the safety boundary: it only lets the model search a
+directory explicitly named in the current message, only lets it open a file
+that search returned, and never writes until you type `确认执行`. Commands are
+only needed for `/model`, `/status`, `/cancel`, `/quit` and that confirmation.
+The first message only needs to describe where the source file is. It accepts
+either an exact file path or a folder plus a natural-language filename hint,
+for example:
 
 ```text
 打开 "C:\\work\\workshop.xlsx"
 打开 "C:\\work\\资料目录\\这个路径里面名字叫129BG的excel文件"
 第六个 Sheet 的表头和公式关系是什么？请引用准确单元格坐标。
-结果文件 "C:\\work\\berk_results.xlsx"
+请在 "C:\\work" 中找到 berk_results.xlsx，把它作为参与者结果文件。
 在 Workshop 表中按 BG-ID 添加 Berk 的判断，先给出修改计划，不要写入。
 ```
 
