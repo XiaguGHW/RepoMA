@@ -42,12 +42,12 @@ class Memory:
         self.data["history"].append({"role": role, "text": text, "time": utc_now()}); self.save()
     def recent(self, n=8): return self.data["history"][-n:]
 
-    def ingest(self, file_path: Path):
+    def ingest(self, file_path: Path, force=False):
         path = file_path.expanduser().resolve()
         if not path.is_file(): raise FileNotFoundError(path)
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         key = str(path)
-        if self.data["files"].get(key, {}).get("sha256") == digest: return "already indexed"
+        if not force and self.data["files"].get(key, {}).get("sha256") == digest: return "already indexed (use /reindex PATH after updating the tool)"
         text = extract_text(path)
         self.db.execute("DELETE FROM chunks WHERE path = ?", (key,))
         count = 0
@@ -122,7 +122,7 @@ def make_prompt(memory, question, results):
 
 
 def print_help():
-    print("Commands: /add PATH | /files | /search WORDS | /summary TEXT | /model MODEL_ID | /new | /test | /quit\nAny other text is sent as a chat question.")
+    print("Commands: /add PATH | /reindex PATH | /files | /search WORDS | /summary TEXT | /model MODEL_ID | /new | /test | /quit\nAny other text is sent as a chat question.")
 
 def main():
     parser = argparse.ArgumentParser(description="Bosch Farm terminal chat with local memory")
@@ -162,6 +162,11 @@ def main():
             target = Path(line[5:].strip().strip('"'))
             try: print(memory.ingest(target))
             except Exception as exc: print(f"Cannot add file: {exc}")
+            continue
+        if line.startswith("/reindex "):
+            target = Path(line[9:].strip().strip('"'))
+            try: print(memory.ingest(target, force=True))
+            except Exception as exc: print(f"Cannot reindex file: {exc}")
             continue
         if line == "/files":
             for path, meta in memory.data["files"].items(): print(f"- {path} ({meta['text_chunks']} chunks)")
