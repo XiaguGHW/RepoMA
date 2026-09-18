@@ -13,6 +13,8 @@ import json
 import os
 import re
 import sys
+import threading
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +42,12 @@ except ImportError:
 
 APP_DIR = Path(__file__).resolve().parent / ".excel_chat_agent"
 SYSTEM = "你是一个谨慎的 Excel 助手。始终用中文回答。只能依据本地精确工具返回的单元格、公式和计划；不得猜测单元格位置或文件内容。写入前必须清楚展示计划并等待用户输入‘确认执行’。"
+TOOL_LABELS = {
+    "discover_workbooks": "搜索目录", "open_workbook": "打开选中的文件",
+    "overview": "读取工作簿概况", "sheet_preview": "读取工作表预览",
+    "read_range": "读取指定单元格", "search": "搜索单元格内容",
+    "trace": "检查公式引用", "plan_participants": "生成参与者修改计划",
+}
 QUOTED_RE = re.compile(r'["“]([^"”\n]+)["”]')
 WINDOWS_PATH_RE = re.compile(r'([A-Za-z]:\\[^"“”\r\n]+)')
 NAME_HINT_RE = re.compile(r'(?:名字叫|名为|叫)\s*["“]?([^"“”\s]+?)(?:的)?(?:excel|xlsx|xlsm|工作簿|表格|文件)', re.IGNORECASE)
@@ -63,6 +71,95 @@ def parse_json_reply(text: str) -> dict[str, Any] | None:
         except json.JSONDecodeError:
             pass
     return None
+
+
+class TerminalProgress:
+    """Show actual stages and elapsed time, independently of model output."""
+
+    def __init__(self, interval: float = 10.0):
+        self.interval = interval
+        self.output = sys.stdout
+        self._lock = threading.Lock()
+        self._stream_kind = None
+        self._last_activity = time.monotonic()
+
+    def _end_stream(self) -> None:
+        if self._stream_kind is not None:
+            print(file=self.output, flush=True)
+            self._stream_kind = None
+
+    def note(self, message: str) -> None:
+        with self._lock:
+            self._end_stream()
+            print(f"[进度] {message}", file=self.output, flush=True)
+            self._last_activity = time.monotonic()
+
+    def chunk(self, kind: str, text: str) -> None:
+        if not text:
+            return
+        with self._lock:
+            if self._stream_kind != kind:
+                self._end_stream()
+                print("接口思考> " if kind == "reasoning" else "assistant> ", end="", file=self.output, flush=True)
+                self._stream_kind = kind
+            print(text, end="", file=self.output, flush=True)
+            self._last_activity = time.monotonic()
+
+    @contextlib.contextmanager
+    def phase(self, label: str):
+        self.note(label)
+        started = time.monotonic()
+        stopped = threading.Event()
+
+        def heartbeat():
+            while not stopped.wait(self.interval):
+                with self._lock:
+                    if time.monotonic() - self._last_activity < self.interval:
+                        continue
+                    self._end_stream()
+                    elapsed = time.monotonic() - started
+                    print(f"[进度] {label}，已用 {elapsed:.0f} 秒，仍在等待完成…", file=self.output, flush=True)
+                    self._last_activity = time.monotonic()
+
+        worker = threading.Thread(target=heartbeat, daemon=True)
+        worker.start()
+        state = "完成"
+        try:
+            yield
+        except BaseException:
+            state = "中止"
+            raise
+        finally:
+            stopped.set()
+            worker.join(timeout=0.5)
+            self.note(f"{label}：{state}，{time.monotonic() - started:.1f} 秒")
+
+
+def ask_with_progress(llm, prompt: str, label: str, tokens: int, args, progress: TerminalProgress,
+                      *, show_answer: bool = False) -> tuple[str, bool]:
+    rendered_answer = False
+
+    def on_event(kind, text):
+        nonlocal rendered_answer
+        if kind == "notice":
+            progress.note(text)
+        elif kind == "reasoning" and args.show_reasoning:
+            progress.chunk(kind, text)
+        elif kind == "content" and show_answer:
+            progress.chunk(kind, text)
+            rendered_answer = True
+
+    with progress.phase(label):
+        answer = llm.ask_about_files(
+            [], prompt, SYSTEM, {"maxOutputTokens": tokens},
+            stream=args.stream or (args.show_reasoning and not args.no_stream),
+            event_handler=on_event, thinking=args.thinking,
+        )
+        if answer.startswith(("Error:", "HTTP error", "Error after")):
+            raise RuntimeError(answer)
+    if args.show_reasoning and not llm.last_reasoning:
+        progress.note("本次接口没有返回 reasoning_content；无法显示本次思考文本。")
+    return answer, rendered_answer
 
 
 class Session:
@@ -248,7 +345,9 @@ def controller_prompt(question: str, context: dict[str, Any], tool_results: list
 3. 每一轮普通聊天都先规划工具调用。如果用户提到要打开、读取、使用某个本地 Excel，先 discover_workbooks，随后只能 open_workbook 一个返回的候选文件；不要要求用户使用固定句式。
 4. 如果尚未有精确工具证据，先调用读取工具；不要臆测单元格。
 5. 绝不调用写入工具。plan_participants 只可生成待确认计划，且必须先检查相关表头、目标列和结果文件字段。
-6. 每轮最多两个工具调用，优先小范围读取。"""
+6. 每轮最多两个工具调用，优先小范围读取。
+7. 工具证据足够时，返回空 tool_calls 和完整中文 reply，无需重复查询。工作簿事实应引用准确坐标；创建计划后必须提示确认执行。
+8. max_row/max_column 是工作表记录范围的边界，可能因格式延伸到空白区域；不能称为实际有数据的行数或列数。"""
     return f"""你是 Excel Agent 的工具规划器。{tools}
 
 当前会话：{json.dumps(context, ensure_ascii=False)}
@@ -257,7 +356,7 @@ def controller_prompt(question: str, context: dict[str, Any], tool_results: list
 
 
 def final_prompt(question: str, context: dict[str, Any], tool_results: list[dict[str, Any]]) -> str:
-    return f"""请用中文直接回答用户。只能使用下方精确工具结果；涉及工作簿事实时必须引用 Sheet!A1 格式的坐标。若证据不足，说明下一步需要读取的区域。若已创建计划，要列出 Sheet、目标列、写入单元格数量，并明确提示用户输入“确认执行”才会生成新文件。
+    return f"""请用中文直接回答用户。只能使用下方精确工具结果；涉及工作簿事实时必须引用 Sheet!A1 格式的坐标。若证据不足，说明下一步需要读取的区域。若已创建计划，要列出 Sheet、目标列、写入单元格数量，并明确提示用户输入“确认执行”才会生成新文件。max_row/max_column 仅是记录范围边界，不能当作实际有数据的行列数。
 
 用户问题：{question}
 当前会话：{json.dumps(context, ensure_ascii=False)}
@@ -323,6 +422,11 @@ def main() -> None:
     parser.add_argument("--model", default=os.getenv("BOSCH_CHAT_MODEL", "gpt-5.5"))
     parser.add_argument("--session", default="excel_project")
     parser.add_argument("--env-file")
+    parser.add_argument("--show-reasoning", action="store_true", help="显示接口实际返回的 reasoning_content，并默认请求流式输出")
+    streaming = parser.add_mutually_exclusive_group()
+    streaming.add_argument("--stream", action="store_true", help="请求流式回答（目前用于 OpenAI 格式连接器）")
+    streaming.add_argument("--no-stream", action="store_true", help="使用完整响应；若带 --show-reasoning，收到后显示思考文本")
+    parser.add_argument("--thinking", choices=("auto", "enabled", "disabled"), default="auto", help="DeepSeek 思考参数；auto 保留 Farm 默认设置")
     args = parser.parse_args()
     load_dotenv(args.env_file or (Path(__file__).resolve().parent / ".env"))
     from llm_connector_with_prompt_caching import LLMConnector
@@ -334,7 +438,9 @@ def main() -> None:
     tools = WorkbookTools(session)
     farm_session_id = uuid.uuid4().hex
     llm = LLMConnector(args.model, key, session_id=farm_session_id)
+    progress = TerminalProgress()
     print(f"Excel Chat Agent — model={args.model}, session={args.session}. 每条普通中文消息先由 LLM 规划受控工具；输入 /help 查看安全控制。")
+    print(f"步骤进度已开启；显示接口思考={'开启' if args.show_reasoning else '关闭'}。", flush=True)
     while True:
         try:
             line = input("you> ").strip()
@@ -363,43 +469,60 @@ def main() -> None:
             session.data["pending_plan"] = None; session.save(); print("assistant> 已取消待执行计划，原 Excel 未被修改。"); continue
         if line in {"确认执行", "/confirm"}:
             try:
-                result = tools.apply_pending()
+                with progress.phase("执行已确认计划并校验新文件"):
+                    result = tools.apply_pending()
                 print(f"assistant> 已生成新文件：{result['output']}。逐格校验结果：{result['verification']['checked_cells']} 个单元格通过；原文件未修改。请用 Excel 打开新文件一次以重算公式。")
             except Exception as exc:
                 print(f"assistant> 未执行写入：{exc}")
             continue
-        tools.allowed_roots = declared_roots_from_text(line)
-        workbook_overview = tools.overview() if session.data.get("workbook") else None
-        context = {"workbook": session.data.get("workbook"), "results_file": session.data.get("results"), "pending_plan": bool(session.data.get("pending_plan")), "declared_search_roots": [str(item) for item in tools.allowed_roots], "workbook_overview": workbook_overview}
+        turn_started = time.monotonic()
+        llm_calls = 0
+        rendered_answer = False
+        answer = None
         tool_results: list[dict[str, Any]] = []
         try:
-            for _ in range(3):
-                raw = llm.ask_about_files([], controller_prompt(line, context, tool_results), SYSTEM, {"maxOutputTokens": 1800})
+            with progress.phase("准备本地会话与工作簿概况"):
+                tools.allowed_roots = declared_roots_from_text(line)
+                workbook_overview = tools.overview() if session.data.get("workbook") else None
+                context = {"workbook": session.data.get("workbook"), "results_file": session.data.get("results"), "pending_plan": bool(session.data.get("pending_plan")), "declared_search_roots": [str(item) for item in tools.allowed_roots], "workbook_overview": workbook_overview}
+            for round_number in range(1, 4):
+                llm_calls += 1
+                raw, _ = ask_with_progress(llm, controller_prompt(line, context, tool_results), f"等待模型规划（第 {round_number} 轮）", 1800, args, progress)
                 decision = parse_json_reply(raw)
                 if not decision:
                     retry = "上一轮没有返回可执行的 JSON。请严格按要求重新规划；若涉及本地文件，必须先调用 discover_workbooks。"
-                    raw = llm.ask_about_files([], retry + "\n\n" + controller_prompt(line, context, tool_results), SYSTEM, {"maxOutputTokens": 1800})
+                    llm_calls += 1
+                    raw, _ = ask_with_progress(llm, retry + "\n\n" + controller_prompt(line, context, tool_results), "等待模型修正规划格式", 1800, args, progress)
                     decision = parse_json_reply(raw)
                 if not decision:
                     tool_results.append({"tool": "planner", "result": {"error": "模型没有返回可执行的工具规划。请重试，或切换到更强模型。"}})
                     break
                 calls = decision.get("tool_calls") or []
+                if not isinstance(calls, list):
+                    raise ValueError("模型的 tool_calls 必须是列表，本轮没有执行该规划。")
                 if not calls:
+                    if isinstance(decision.get("reply"), str) and decision["reply"].strip():
+                        answer = decision["reply"].strip()
                     break
                 for call in calls[:2]:
+                    if not isinstance(call, dict) or not isinstance(call.get("arguments", {}), dict):
+                        raise ValueError("模型的工具参数格式无效，本轮没有执行该调用。")
                     name, arguments = call.get("name"), call.get("arguments") or {}
                     try:
-                        if name == "discover_workbooks": result = tools.discover_workbooks(str(arguments.get("root", "")), str(arguments.get("name_hint", "")), str(arguments.get("purpose", "workbook")))
-                        elif name == "open_workbook": result = tools.open_workbook(str(arguments.get("path", "")), str(arguments.get("role", "workbook")))
-                        elif name == "overview": result = tools.overview()
-                        elif name == "sheet_preview": result = tools.sheet_preview(str(arguments.get("sheet")), int(arguments.get("rows", 35)), int(arguments.get("cols", 20)))
-                        elif name == "read_range": result = tools.read_range(str(arguments.get("sheet")), str(arguments.get("range")))
-                        elif name == "search": result = tools.search(str(arguments.get("query", "")), arguments.get("sheet"))
-                        elif name == "trace": result = tools.trace(str(arguments.get("cell", "")))
-                        elif name == "plan_participants": result = tools.plan_participants(arguments)
-                        else: result = {"error": f"不允许的工具：{name}"}
+                        with progress.phase(TOOL_LABELS.get(name, "未知工具") + " " + compact(json.dumps(arguments, ensure_ascii=False), 160)):
+                            if name == "discover_workbooks": result = tools.discover_workbooks(str(arguments.get("root", "")), str(arguments.get("name_hint", "")), str(arguments.get("purpose", "workbook")))
+                            elif name == "open_workbook": result = tools.open_workbook(str(arguments.get("path", "")), str(arguments.get("role", "workbook")))
+                            elif name == "overview": result = tools.overview()
+                            elif name == "sheet_preview": result = tools.sheet_preview(str(arguments.get("sheet")), int(arguments.get("rows", 35)), int(arguments.get("cols", 20)))
+                            elif name == "read_range": result = tools.read_range(str(arguments.get("sheet")), str(arguments.get("range")))
+                            elif name == "search": result = tools.search(str(arguments.get("query", "")), arguments.get("sheet"))
+                            elif name == "trace": result = tools.trace(str(arguments.get("cell", "")))
+                            elif name == "plan_participants": result = tools.plan_participants(arguments)
+                            else: result = {"error": f"不允许的工具：{name}"}
                     except Exception as exc:
                         result = {"error": str(exc)}
+                    if "error" in result:
+                        progress.note(f"工具返回错误：{result['error']}")
                     tool_results.append({"tool": name, "result": result})
                     if name == "open_workbook" and "opened_workbook" in result:
                         context["workbook"] = result["path"]
@@ -408,10 +531,16 @@ def main() -> None:
                         context["results_file"] = result["path"]
                 if any(item["tool"] == "plan_participants" for item in tool_results):
                     break
-            answer = llm.ask_about_files([], final_prompt(line, context, tool_results), SYSTEM, {"maxOutputTokens": 2200})
+            if answer is None:
+                llm_calls += 1
+                answer, rendered_answer = ask_with_progress(llm, final_prompt(line, context, tool_results), "等待模型整理中文回答", 2200, args, progress, show_answer=True)
+        except KeyboardInterrupt:
+            answer = "已中断本轮分析。"
         except Exception as exc:
             answer = f"无法完成本轮分析：{exc}"
-        print("assistant> " + answer)
+        if not rendered_answer:
+            print("assistant> " + answer, flush=True)
+        progress.note(f"本轮共用 {time.monotonic() - turn_started:.1f} 秒；模型请求 {llm_calls} 次；工具结果 {len(tool_results)} 个")
         session.add("user", line); session.add("assistant", answer)
 
 
@@ -436,3 +565,13 @@ if __name__ == "__main__":
 # 5) The source workbook is kept unchanged; the agent creates and verifies a new *_ai_updated.xlsx file.
 # 6) Optional model switch without losing the local Excel session:
 #    /model gemini-2.5-pro
+# 7) 显示实际步骤与耗时：上面的普通启动命令默认已开启。
+#    显示 Farm 实际返回的思考文本，同时请求流式输出：
+#    python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --show-reasoning
+#    只流式显示最终回答，不显示接口思考：
+#    python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --stream
+#    若 Farm 不支持流式，用完整响应（返回后再显示思考文本）：
+#    python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --show-reasoning --no-stream
+#    如 Farm 支持 DeepSeek 的 thinking 参数，可以明确请求启用思考：
+#    python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --show-reasoning --thinking enabled
+#    --show-reasoning 只显示接口实际返回的 reasoning_content；不会生成假的思考过程。

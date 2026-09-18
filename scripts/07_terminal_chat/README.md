@@ -65,6 +65,42 @@ For workbook questions and safe edits, start the single conversational tool:
 python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop
 ```
 
+Progress is now shown by default: model planning, folder search, workbook
+loading, tool execution and elapsed seconds. While a stage is waiting, an
+update appears every 10 seconds. A single user message can require several
+model requests; the final line reports the request count and total time.
+
+To also display the reasoning text **actually returned by Farm** and request
+streaming:
+
+```powershell
+python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --show-reasoning
+```
+
+`接口思考>` is the API's `reasoning_content`; `[进度]` is a local execution
+status. Neither is evidence that a tool has succeeded until it returns.
+The official DeepSeek API supports this field, but the Bosch deployment must
+forward it. If the field is missing, the program says so. It never invents a
+reasoning transcript. Reasoning text is not saved to conversation history.
+
+If Farm explicitly rejects streaming, the connector retries once without it
+and keeps that choice for the current connection. A broken stream after output
+has begun is reported as an error; partial planner JSON is never executed.
+You can also start explicitly without streaming; reasoning, if returned, will
+then appear only when the response finishes:
+
+```powershell
+python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --show-reasoning --no-stream
+```
+
+`--stream` alone streams answer text without displaying reasoning. `--thinking
+enabled` or `--thinking disabled` explicitly sends DeepSeek's thinking option;
+only use it if your Farm deployment accepts that option. The default `auto`
+preserves the deployment's existing setting, and `--show-reasoning` by itself
+does not change that setting. Gemini and Claude currently use full responses
+with progress updates. Showing output sooner does not shorten model compute.
+See the [DeepSeek thinking API guide](https://api-docs.deepseek.com/guides/thinking_mode/).
+
 It opens with `you>`. Every normal Chinese message is first sent to the chosen
 LLM as a tool-planning request: the LLM decides whether to search the folder,
 choose one returned candidate, open the workbook, inspect cells or prepare a

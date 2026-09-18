@@ -37,6 +37,9 @@ class LLMConnector:
         self.api_key = api_key
         self.session_id = session_id
         self.last_usage = None
+        self.last_reasoning = ""
+        self.last_response_model = None
+        self._stream_rejected = False
         self._family = self._detect_family(model_name)
         logging.info("LLMConnector ready: model=%s, family=%s, session_id=%s", model_name, self._family, session_id)
 
@@ -52,14 +55,25 @@ class LLMConnector:
         raise ValueError("Cannot determine model family from %r. Supported: gemini, claude, gpt, o1, o3, llama, glm, deepseek." % model_name)
 
     def analyze_documents(self, file_paths: list, user_prompt: str, system_prompt: str | None = None,
-                          generation_config: dict | None = None) -> str:
+                          generation_config: dict | None = None, *, stream: bool = False,
+                          event_handler=None, thinking: str = "auto") -> str:
+        self.last_usage = None
+        self.last_reasoning = ""
+        self.last_response_model = None
+        if self._family == "openai":
+            return self._call_openai(file_paths, user_prompt, system_prompt, generation_config,
+                                     stream=stream, event_handler=event_handler, thinking=thinking)
+        if stream and event_handler:
+            event_handler("notice", "当前模型的连接器使用非流式输出，步骤进度仍会显示。")
         return {"gemini": self._call_gemini, "claude": self._call_claude, "openai": self._call_openai}[self._family](
             file_paths, user_prompt, system_prompt, generation_config
         )
 
     def ask_about_files(self, file_paths: list, question: str, system_prompt: str | None = None,
-                        generation_config: dict | None = None) -> str:
-        return self.analyze_documents(file_paths, question, system_prompt, generation_config)
+                        generation_config: dict | None = None, *, stream: bool = False,
+                        event_handler=None, thinking: str = "auto") -> str:
+        return self.analyze_documents(file_paths, question, system_prompt, generation_config,
+                                      stream=stream, event_handler=event_handler, thinking=thinking)
 
     def get_last_token_usage(self) -> dict | None:
         return self.last_usage
@@ -128,7 +142,8 @@ class LLMConnector:
         content = reply.get("content", [])
         return content[0].get("text", "(no text content)") if content else "(no text content)"
 
-    def _call_openai(self, file_paths, user_prompt, system_prompt, generation_config):
+    def _call_openai(self, file_paths, user_prompt, system_prompt, generation_config, *,
+                     stream=False, event_handler=None, thinking="auto"):
         if not _OPENAI_AVAILABLE:
             return "Error: openai package must be installed — run: pip install openai"
         name = self.model_name.lower()
@@ -153,12 +168,91 @@ class LLMConnector:
         kwargs["max_completion_tokens" if reasoning else "max_tokens"] = tokens
         if config.get("temperature") is not None and not reasoning:
             kwargs["temperature"] = config["temperature"]
+        if thinking not in {"auto", "enabled", "disabled"}:
+            client.close()
+            raise ValueError("thinking must be auto, enabled or disabled")
+        # Bosch Farm may not forward this DeepSeek-specific extension.  Only
+        # send it when explicitly requested; auto preserves deployment defaults.
+        if name.startswith("deepseek") and thinking != "auto":
+            kwargs["extra_body"] = {"thinking": {"type": thinking}}
+        if name.startswith("deepseek") and thinking != "disabled":
+            kwargs.pop("temperature", None)
+        use_stream = bool(stream and not self._stream_rejected)
+        if use_stream:
+            kwargs["stream"] = True
+
+        def emit(kind, text):
+            if event_handler and text:
+                event_handler(kind, text)
+
+        def capture_metadata(response):
+            model = getattr(response, "model", None)
+            if model:
+                self.last_response_model = model
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                self.last_usage = usage.model_dump() if hasattr(usage, "model_dump") else usage
+
+        response_stream = None
         try:
-            result = client.chat.completions.create(**kwargs)
-            return (result.choices[0].message.content or "").strip()
+            try:
+                result = client.chat.completions.create(**kwargs)
+            except Exception as exc:
+                # Fall back only for an explicit rejection of streaming, before
+                # receiving any content. Never replay a partially received answer.
+                error = str(exc).lower()
+                unsupported = getattr(exc, "status_code", None) in {400, 422, 501} and "stream" in error and any(
+                    term in error for term in ("not supported", "unsupported", "not allowed", "unknown", "unrecognized", "not implemented", "unexpected", "extra inputs")
+                )
+                if not use_stream or not unsupported:
+                    raise
+                self._stream_rejected = True
+                use_stream = False
+                kwargs.pop("stream", None)
+                emit("notice", "Farm 拒绝流式输出，本次连接改用完整响应；仍显示等待耗时。")
+                result = client.chat.completions.create(**kwargs)
+            if not use_stream:
+                capture_metadata(result)
+                message = result.choices[0].message
+                self.last_reasoning = getattr(message, "reasoning_content", None) or ""
+                emit("reasoning", self.last_reasoning)
+                text = message.content or ""
+                if not text.strip():
+                    raise ValueError("接口未返回最终正文；可能只返回了思考文本或输出预算耗尽。")
+                emit("content", text)
+                return text.strip()
+            response_stream = result
+            texts, thoughts = [], []
+            finish_reason = None
+            for chunk in result:
+                capture_metadata(chunk)
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                finish_reason = choice.finish_reason or finish_reason
+                delta = choice.delta
+                thought = getattr(delta, "reasoning_content", None) or ""
+                content_delta = getattr(delta, "content", None) or ""
+                if thought:
+                    thoughts.append(thought)
+                    emit("reasoning", thought)
+                if content_delta:
+                    texts.append(content_delta)
+                    emit("content", content_delta)
+            self.last_reasoning = "".join(thoughts)
+            if finish_reason is None:
+                raise ValueError("流式连接提前结束，未收到完成标记；本轮不执行工具。")
+            text = "".join(texts).strip()
+            if not text:
+                raise ValueError(f"接口未返回最终正文（finish_reason={finish_reason}）；可能输出预算耗尽。")
+            return text
         except Exception as exc:
             logging.exception("OpenAI call failed")
             return f"Error: {exc}"
+        finally:
+            if response_stream is not None:
+                response_stream.close()
+            client.close()
 
     @staticmethod
     def _mime(path: str) -> str:
@@ -262,3 +356,14 @@ class LLMConnector:
                 logging.exception("Unexpected request error")
                 return f"Error: {exc}"
         return "Error: retries exhausted"
+
+
+# Run from the downloaded standalone folder; keep .env in the same folder.
+# 1) python -m pip install -r requirements.txt
+# 2) python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop
+# 3) Display reasoning_content when Farm returns it (also requests streaming):
+#    python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --show-reasoning
+# 4) If Farm does not support streaming, keep progress and use a full response:
+#    python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --show-reasoning --no-stream
+# 5) Optionally request DeepSeek thinking explicitly, only if Farm supports it:
+#    python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --show-reasoning --thinking enabled
