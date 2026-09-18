@@ -15,6 +15,24 @@
 
 Die Tabelle beschreibt die strikte Bewertung mit dem primären Ground-Truth-Label. Die Werte wurden aus den Screenshots übernommen und auf Konsistenz geprüft. Für Gantry gilt: `12 / 16 = 0,75`; deshalb sind Accuracy und Recall jeweils 75,0 % und der F1-Score beträgt mit Precision 0,86 gerundet 0,80.
 
+## Strikte Ergebnisse nach Regime
+
+| Regime | Auswertbare Fälle | Fehler | Strikt korrekt | Strict Accuracy | Precision | Recall | F1-Score |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| E1 | 56 | 2 | 54 | 96,4 % | noch nicht berechenbar | noch nicht berechenbar | noch nicht berechenbar |
+| E2 | 35 | 5 | 30 | 85,7 % | noch nicht berechenbar | noch nicht berechenbar | noch nicht berechenbar |
+| M | 24 | 6 | 18 | 75,0 % | noch nicht berechenbar | noch nicht berechenbar | noch nicht berechenbar |
+
+```text
+E1 strict Accuracy = 54 / 56 = 96,4 %
+E2 strict Accuracy = 30 / 35 = 85,7 %
+M strict Accuracy  = 18 / 24 = 75,0 %
+```
+
+Für Precision, Recall und F1-Score reichen die Fehlerzahlen allein nicht aus. Dafür wird je Regime die vollständige Zuordnung aus tatsächlicher Klasse und vorhergesagter Klasse benötigt, also die jeweilige Confusion Matrix bzw. die vollständige Ergebnisliste.
+
+Die drei Regime enthalten zusammen 115 Fälle und 102 strikte korrekte Vorhersagen. Das weicht um einen Fall von der klassenweisen Tabelle oben ab (dort: 101 korrekte Vorhersagen). Vor einer gemeinsamen Gesamtkennzahl müssen diese beiden Quellen daher noch abgeglichen werden; die drei Regime-Werte selbst sind davon nicht betroffen.
+
 ## 1. Overall Accuracy
 
 Die Overall Accuracy beantwortet die Frage: *Welcher Anteil aller auswertbaren Baugruppen wurde exakt mit dem primären Ground-Truth-Label klassifiziert?*
