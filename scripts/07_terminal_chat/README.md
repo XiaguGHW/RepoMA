@@ -6,6 +6,7 @@ The two Python files must remain together inside it:
 - `llm_connector_with_prompt_caching.py`
 - `bosch_chat.py`
 - `excel_agent.py` — precise Excel inspection and safe writing tool
+- `excel_chat_agent.py` — recommended Chinese conversational Excel agent
 
 Use your existing Farm `.env` file. Do not put its secret into either Python
 file or copy it into this tool folder:
@@ -55,6 +56,34 @@ model names to the appropriate Farm API. Ask questions in Chinese and add this
 to `/summary` if you always want Chinese output: `始终使用中文回答。`
 
 ## Complex Excel workbooks
+
+### Recommended: conversational Excel Agent
+
+For workbook questions and safe edits, start the single conversational tool:
+
+```powershell
+python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop
+```
+
+It opens with `you>`. Talk in Chinese; commands are only needed for the
+emergency controls `/status`, `/cancel` and `/quit`. The first message only
+needs to provide the source file, for example:
+
+```text
+打开 "C:\\work\\workshop.xlsx"
+第六个 Sheet 的表头和公式关系是什么？请引用准确单元格坐标。
+结果文件 "C:\\work\\berk_results.xlsx"
+在 Workshop 表中按 BG-ID 添加 Berk 的判断，先给出修改计划，不要写入。
+```
+
+The model can call only the controlled local tools for exact ranges, cell
+searches and direct formula references. It replies in Chinese and must cite
+`Sheet!A1` for workbook facts. It can create a JSON plan but cannot write the
+workbook until you type exactly `确认执行`. It then creates a separately named
+`*_ai_updated.xlsx` and verifies each planned cell plus all original formula
+text. The original file remains unchanged.
+
+### General document chat
 
 Add the `.xlsx` file first:
 
