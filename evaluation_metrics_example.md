@@ -1,17 +1,15 @@
 # Beispiel: Berechnung von Macro- und Weighted-Metriken
 
-| Klasse | Support | korrekt | Precision | Recall | F1-Score |
-|---|---:|---:|---:|---:|---:|
-| Lineareinheit | 20 | 17 | 0,94 | 0,85 | 0,89 |
-| Gantry | 15 | 12 | 0,86 | 0,80 | 0,83 |
-| Greifer | 18 | 18 | 1,00 | 1,00 | 1,00 |
-| Umsetzeinheit | 20 | 17 | 0,81 | 0,85 | 0,83 |
-| Roboter | 18 | 18 | 1,00 | 1,00 | 1,00 |
-| Rotationseinheit | 16 | 12 | 0,92 | 0,75 | 0,83 |
-| Keine der verfügbaren Klassen | 7 | 7 | 0,58 | 1,00 | 0,74 |
-| **Gesamt** | **114** | **101** |  |  |  |
-
-Hinweis: Der Quotient `korrekt / Support` ist in dieser Tabelle der **Recall** der Klasse. Er sollte daher nicht als klassenweise „Accuracy“ bezeichnet werden.
+| Class | Ground Truth rows | Correct predictions | Accuracy | Precision | Recall | F1-score |
+|---|---:|---:|---:|---:|---:|---:|
+| Lineareinheit | 20 | 17 | 85,0 % | 0,94 | 0,85 | 0,89 |
+| Gantry | 15 | 12 | 80,0 % | 0,86 | 0,80 | 0,83 |
+| Greifer | 18 | 18 | 100,0 % | 1,00 | 1,00 | 1,00 |
+| Umsetzeinheit | 20 | 17 | 85,0 % | 0,81 | 0,85 | 0,83 |
+| Roboter | 18 | 18 | 100,0 % | 1,00 | 1,00 | 1,00 |
+| Rotationseinheit | 16 | 12 | 75,0 % | 0,92 | 0,75 | 0,83 |
+| Keine der verfügbaren Klassen | 7 | 7 | 100,0 % | 0,58 | 1,00 | 0,74 |
+| **Gesamt** | **114** | **101** |  |  |  |  |
 
 > **Platz für Abbildung:** Hier kann später ein Screenshot der zugehörigen Confusion Matrix eingefügt werden.
 
@@ -47,7 +45,7 @@ Macro-F1        = (F1_1 + F1_2 + ... + F1_7) / 7
 
 ## 3. Weighted-Average
 
-Beim Weighted-Average wird jede Klasse mit ihrem Support gewichtet. Häufigere Klassen beeinflussen das Ergebnis daher stärker.
+Beim Weighted-Average wird jede Klasse mit ihrer Anzahl an Ground-Truth-Fällen gewichtet. Häufigere Klassen beeinflussen das Ergebnis daher stärker.
 
 ```text
 Weighted-Metric = (n1 × Metric1 + n2 × Metric2 + ... + n7 × Metric7) / N
@@ -73,27 +71,6 @@ Weighted-F1        = (20×0,89 + 15×0,83 + 18×1,00 + 20×0,83
 Die Werte können geringfügig von der Skriptausgabe abweichen, weil die Klassenwerte in der Tabelle bereits auf zwei Dezimalstellen gerundet sind. Das Skript sollte stets mit den ungerundeten TP-, FP- und FN-Werten rechnen.
 
 **Interpretation:** Weighted-Werte beschreiben die Leistung unter Berücksichtigung der tatsächlichen Klassenverteilung dieses Datensatzes.
-
-## 4. Warum Micro-Average nicht separat berichtet wird
-
-In einer vollständigen Single-Label-Multiclass-Aufgabe gilt:
-
-```text
-Micro-Precision = Micro-Recall = Micro-F1 = Overall Accuracy
-```
-
-Für dieses Beispiel sind alle vier Werte daher 101/114 = **88,6 %**. Micro-Average liefert hier keine zusätzliche Information und wird nicht separat interpretiert.
-
-## Vorgesehene Berichterstattung
-
-Für jeden Modell-/Prompt-/Input-Vergleich werden berichtet:
-
-- Overall Accuracy;
-- Macro Precision, Macro Recall und Macro F1 als klassenneutrale Kennzahlen;
-- Weighted Precision, Weighted Recall und Weighted F1 als ergänzende Kennzahlen für die tatsächliche Klassenverteilung;
-- klassenweise Precision, Recall und F1 sowie eine Confusion Matrix zur Fehleranalyse.
-
-Mehrdeutige M-Fälle werden zusätzlich getrennt bewertet: durch Strict Primary-Label Accuracy, Accepted-Label-Set Accuracy und Joint Decision Accuracy. Sie werden nicht stillschweigend in eine reguläre Single-Label-Confusion-Matrix umdefiniert.
 
 ## Kurze Zusammenfassung der Literaturrecherche
 
