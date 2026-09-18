@@ -197,5 +197,7 @@ if __name__ == "__main__": main()
 # 4) Run /test. Then add material, for example:
 #    /add "C:\\path\\to\\file.xlsx"
 #    /add "C:\\path\\to\\visual_sheets.pdf"
+# Rebuild the local Excel index after updating this tool (your current file):
+#    /reindex "C:\\Users\\wdu4fel\\Documents\\Python_Projects\\整理129BG资料\\129BG.xlsx"
 # 5) Switch model without losing local memory:
 #    /model gemini-2.5-flash
