@@ -61,11 +61,24 @@ class Memory:
 
     def search(self, question, limit=6):
         terms = " OR ".join(tokenise(question)[:12])
-        if not terms: return []
-        try:
-            return self.db.execute("SELECT path, label, snippet(chunks, 2, '[', ']', '…', 32) FROM chunks WHERE chunks MATCH ? ORDER BY bm25(chunks) LIMIT ?", (terms, limit)).fetchall()
-        except sqlite3.OperationalError:
-            return []
+        if terms:
+            try:
+                matches = self.db.execute("SELECT path, label, snippet(chunks, 2, '[', ']', '…', 32) FROM chunks WHERE chunks MATCH ? ORDER BY bm25(chunks) LIMIT ?", (terms, limit)).fetchall()
+                if matches:
+                    return matches
+            except sqlite3.OperationalError:
+                pass
+        # FTS tokenisation is weak for a natural Chinese question such as
+        # "这个 Excel 有几个 sheet".  Never leave a newly added local file out
+        # of the prompt merely because no exact cell text was mentioned.
+        # The first chunk contains the workbook overview / document heading.
+        recent_paths = list(self.data["files"])[-3:]
+        fallback = []
+        for path in reversed(recent_paths):
+            row = self.db.execute("SELECT path, label, content FROM chunks WHERE path = ? ORDER BY rowid LIMIT 1", (path,)).fetchone()
+            if row:
+                fallback.append((row[0], row[1], row[2][:2200]))
+        return fallback
 
     def attachments(self, results):
         paths = []
@@ -95,7 +108,9 @@ def extract_text(path: Path) -> str:
         try:
             import openpyxl
             book = openpyxl.load_workbook(path, read_only=True, data_only=False)
-            return "\n".join(f"[{sheet.title}]\n" + "\n".join(" | ".join(str(v) for v in row if v is not None) for row in sheet.iter_rows(values_only=True)) for sheet in book.worksheets)
+            sheet_names = ", ".join(sheet.title for sheet in book.worksheets)
+            body = "\n".join(f"[{sheet.title}]\n" + "\n".join(" | ".join(str(v) for v in row if v is not None) for row in sheet.iter_rows(values_only=True)) for sheet in book.worksheets)
+            return f"[Workbook overview: {len(book.worksheets)} sheets: {sheet_names}]\n\n{body}"
         except Exception: return ""
     return ""
 
