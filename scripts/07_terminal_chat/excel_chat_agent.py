@@ -42,10 +42,8 @@ APP_DIR = Path(__file__).resolve().parent / ".excel_chat_agent"
 SYSTEM = "你是一个谨慎的 Excel 助手。始终用中文回答。只能依据本地精确工具返回的单元格、公式和计划；不得猜测单元格位置或文件内容。写入前必须清楚展示计划并等待用户输入‘确认执行’。"
 QUOTED_RE = re.compile(r'["“]([^"”\n]+)["”]')
 DIRECT_FILE_RE = re.compile(r'([A-Za-z]:\\[^"“”\r\n]*?\.(?:xlsx|xlsm))', re.IGNORECASE)
-NAMED_WORKBOOK_RE = re.compile(
-    r'(?P<folder>[A-Za-z]:\\.+?)(?:这个)?(?:路径)?(?:里面|中|下).{0,12}?(?:名字叫|名为|叫)(?P<hint>.+?)(?:的)?(?:excel|xlsx|工作簿)',
-    re.IGNORECASE,
-)
+WINDOWS_PATH_RE = re.compile(r'([A-Za-z]:\\[^"“”\r\n]+)')
+NAME_HINT_RE = re.compile(r'(?:名字叫|名为|叫)\s*["“]?([^"“”\s]+?)(?:的)?(?:excel|xlsx|xlsm|工作簿|表格|文件)', re.IGNORECASE)
 
 
 def compact(value: Any, length: int = 220) -> str:
@@ -233,9 +231,34 @@ def normalise_name(value: str) -> str:
 def workbook_candidates(folder: Path, hint: str = "") -> list[Path]:
     if not folder.is_dir():
         return []
-    choices = sorted([*folder.glob("*.xlsx"), *folder.glob("*.xlsm")])
+    # Search descendants too: project folders often keep the workbook in input/
+    # or another named subfolder. Limit the result list, never scan a drive root.
+    choices: list[Path] = []
+    for pattern in ("*.xlsx", "*.xlsm"):
+        for item in folder.rglob(pattern):
+            choices.append(item)
+            if len(choices) >= 200:
+                break
+        if len(choices) >= 200:
+            break
+    choices.sort()
     key = normalise_name(hint.replace("文件", "").replace("表格", ""))
     return [item for item in choices if not key or key in normalise_name(item.stem)]
+
+
+def natural_folder_and_hint(line: str) -> tuple[Path | None, str]:
+    """Extract a real directory from free Chinese, not a pre-defined sentence."""
+    hint_match = NAME_HINT_RE.search(line)
+    hint = hint_match.group(1) if hint_match else ""
+    sources = QUOTED_RE.findall(line) + WINDOWS_PATH_RE.findall(line)
+    markers = ("这个路径", "该路径", "此路径", "路径里面", "里面", "文件夹中", "文件夹里", "目录中", "目录里")
+    for source in sources:
+        cutoff = min((source.find(marker) for marker in markers if source.find(marker) >= 0), default=len(source))
+        raw_folder = source[:cutoff].rstrip("\\/ ")
+        folder = Path(raw_folder).expanduser()
+        if folder.is_dir():
+            return folder, hint
+    return None, hint
 
 
 def identify_file_from_text(line: str) -> tuple[Path | None, list[Path], str | None]:
@@ -254,10 +277,9 @@ def identify_file_from_text(line: str) -> tuple[Path | None, list[Path], str | N
             if len(choices) == 1:
                 return choices[0].resolve(), [], None
             return None, choices, None
-    named = NAMED_WORKBOOK_RE.search(line)
-    if named:
-        folder = Path(named.group("folder").rstrip("\\/ "))
-        choices = workbook_candidates(folder, named.group("hint"))
+    folder, hint = natural_folder_and_hint(line)
+    if folder:
+        choices = workbook_candidates(folder, hint)
         if len(choices) == 1:
             return choices[0].resolve(), [], None
         return None, choices, None
