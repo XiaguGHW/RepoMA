@@ -19,35 +19,29 @@ Hinweis: Der Quotient `korrekt / Support` ist in dieser Tabelle der **Recall** d
 
 Die Overall Accuracy beantwortet die Frage: *Welcher Anteil aller auswertbaren Baugruppen wurde exakt mit dem primären Ground-Truth-Label klassifiziert?*
 
-\[
-\mathrm{Accuracy} = \frac{\text{Anzahl korrekter Vorhersagen}}{N}
-= \frac{101}{114} = 0{,}8860 = 88{,}6\%.
-\]
+```text
+Accuracy = korrekte Vorhersagen / Anzahl auswertbarer Fälle
+         = 101 / 114
+         = 0,8860 = 88,6 %
+```
 
 ## 2. Macro-Average
 
 Beim Macro-Average erhält jede der sieben Funktionsklassen dasselbe Gewicht, unabhängig von ihrer Anzahl im Datensatz.
 
-\[
-\mathrm{Macro\mbox{-}Precision} = \frac{1}{7} \sum_{i=1}^{7} P_i
-\]
+```text
+Macro-Precision = (P1 + P2 + ... + P7) / 7
+                = (0,94 + 0,86 + 1,00 + 0,81 + 1,00 + 0,92 + 0,58) / 7
+                = 0,873 = 87,3 %
 
-\[
-= \frac{0{,}94+0{,}86+1{,}00+0{,}81+1{,}00+0{,}92+0{,}58}{7}
-= 0{,}873 = 87{,}3\%.
-\]
+Macro-Recall    = (R1 + R2 + ... + R7) / 7
+                = (0,85 + 0,80 + 1,00 + 0,85 + 1,00 + 0,75 + 1,00) / 7
+                = 0,893 = 89,3 %
 
-\[
-\mathrm{Macro\mbox{-}Recall}
-= \frac{0{,}85+0{,}80+1{,}00+0{,}85+1{,}00+0{,}75+1{,}00}{7}
-= 0{,}893 = 89{,}3\%.
-\]
-
-\[
-\mathrm{Macro\mbox{-}F1}
-= \frac{0{,}89+0{,}83+1{,}00+0{,}83+1{,}00+0{,}83+0{,}74}{7}
-= 0{,}874 = 87{,}4\%.
-\]
+Macro-F1        = (F1_1 + F1_2 + ... + F1_7) / 7
+                = (0,89 + 0,83 + 1,00 + 0,83 + 1,00 + 0,83 + 0,74) / 7
+                = 0,874 = 87,4 %
+```
 
 **Interpretation:** Macro-Werte zeigen, wie gleichmäßig das Modell über alle Funktionsklassen arbeitet. Die Klasse „Keine der verfügbaren Klassen“ mit nur sieben Fällen zählt dabei genauso stark wie eine Klasse mit 20 Fällen.
 
@@ -55,31 +49,26 @@ Beim Macro-Average erhält jede der sieben Funktionsklassen dasselbe Gewicht, un
 
 Beim Weighted-Average wird jede Klasse mit ihrem Support gewichtet. Häufigere Klassen beeinflussen das Ergebnis daher stärker.
 
-\[
-\mathrm{Weighted\mbox{-}Metric}
-= \frac{1}{N} \sum_{i=1}^{7} n_i \cdot \mathrm{Metric}_i
-\]
+```text
+Weighted-Metric = (n1 × Metric1 + n2 × Metric2 + ... + n7 × Metric7) / N
+```
 
 Für Precision ergibt sich mit den in der Tabelle gerundeten Klassenwerten:
 
-\[
-\mathrm{Weighted\mbox{-}Precision}
-= \frac{20\cdot0{,}94+15\cdot0{,}86+18\cdot1{,}00+20\cdot0{,}81+18\cdot1{,}00+16\cdot0{,}92+7\cdot0{,}58}{114}
-= 0{,}901 = 90{,}1\%.
-\]
+```text
+Weighted-Precision = (20×0,94 + 15×0,86 + 18×1,00 + 20×0,81
+                      + 18×1,00 + 16×0,92 + 7×0,58) / 114
+                   = 0,901 = 90,1 %
 
-\[
-\mathrm{Weighted\mbox{-}Recall}
-= \frac{20\cdot0{,}85+15\cdot0{,}80+18\cdot1{,}00+20\cdot0{,}85+18\cdot1{,}00+16\cdot0{,}75+7\cdot1{,}00}{114}
-= \frac{101}{114}
-= 0{,}886 = 88{,}6\%.
-\]
+Weighted-Recall    = (20×0,85 + 15×0,80 + 18×1,00 + 20×0,85
+                      + 18×1,00 + 16×0,75 + 7×1,00) / 114
+                   = 101 / 114
+                   = 0,886 = 88,6 %
 
-\[
-\mathrm{Weighted\mbox{-}F1}
-= \frac{20\cdot0{,}89+15\cdot0{,}83+18\cdot1{,}00+20\cdot0{,}83+18\cdot1{,}00+16\cdot0{,}83+7\cdot0{,}74}{114}
-= 0{,}889 = 88{,}9\%.
-\]
+Weighted-F1        = (20×0,89 + 15×0,83 + 18×1,00 + 20×0,83
+                      + 18×1,00 + 16×0,83 + 7×0,74) / 114
+                   = 0,889 = 88,9 %
+```
 
 Die Werte können geringfügig von der Skriptausgabe abweichen, weil die Klassenwerte in der Tabelle bereits auf zwei Dezimalstellen gerundet sind. Das Skript sollte stets mit den ungerundeten TP-, FP- und FN-Werten rechnen.
 
@@ -89,12 +78,9 @@ Die Werte können geringfügig von der Skriptausgabe abweichen, weil die Klassen
 
 In einer vollständigen Single-Label-Multiclass-Aufgabe gilt:
 
-\[
-\mathrm{Micro\mbox{-}Precision}
-= \mathrm{Micro\mbox{-}Recall}
-= \mathrm{Micro\mbox{-}F1}
-= \mathrm{Overall\ Accuracy}.
-\]
+```text
+Micro-Precision = Micro-Recall = Micro-F1 = Overall Accuracy
+```
 
 Für dieses Beispiel sind alle vier Werte daher 101/114 = **88,6 %**. Micro-Average liefert hier keine zusätzliche Information und wird nicht separat interpretiert.
 
