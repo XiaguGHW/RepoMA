@@ -13,6 +13,26 @@
 
 > **Platz für Abbildung:** Hier kann später ein Screenshot der zugehörigen Confusion Matrix eingefügt werden.
 
+## Strikte Ergebnisse nach Regime
+
+Für die drei Regime sind bisher folgende Fallzahlen und Fehlerzahlen bekannt:
+
+| Regime | Auswertbare Fälle | Fehler | Strikt korrekt | Strict Accuracy | Precision | Recall | F1-Score |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| E1 | 63 | 2 | 61 | 96,8 % | noch nicht berechenbar | noch nicht berechenbar | noch nicht berechenbar |
+| E2 | 39 | 3 | 36 | 92,3 % | noch nicht berechenbar | noch nicht berechenbar | noch nicht berechenbar |
+| M | 27 | 9 | 18 | 66,7 % | noch nicht berechenbar | noch nicht berechenbar | noch nicht berechenbar |
+
+Die Strict Accuracy wird je Regime wie folgt berechnet:
+
+```text
+E1 strict Accuracy = 61 / 63 = 96,8 %
+E2 strict Accuracy = 36 / 39 = 92,3 %
+M strict Accuracy  = 18 / 27 = 66,7 %
+```
+
+Für Precision, Recall und F1-Score reichen die Fehlerzahlen allein nicht aus. Dafür werden pro Regime die tatsächliche Klasse und die vorhergesagte Klasse jedes Falls benötigt, also die jeweilige Confusion Matrix bzw. die vollständige Ergebnisliste.
+
 ## 1. Overall Accuracy
 
 Die Overall Accuracy beantwortet die Frage: *Welcher Anteil aller auswertbaren Baugruppen wurde exakt mit dem primären Ground-Truth-Label klassifiziert?*
