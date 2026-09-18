@@ -258,7 +258,8 @@ def main() -> None:
         raise SystemExit(2)
     session = Session(args.session)
     tools = WorkbookTools(session)
-    llm = LLMConnector(args.model, key, session_id=uuid.uuid4().hex)
+    farm_session_id = uuid.uuid4().hex
+    llm = LLMConnector(args.model, key, session_id=farm_session_id)
     print(f"Excel Chat Agent — model={args.model}, session={args.session}. 用中文说‘打开 \\\"C:\\\\文件.xlsx\\\"’，或输入 /help。")
     while True:
         try:
@@ -270,7 +271,16 @@ def main() -> None:
         if line in {"/quit", "/exit"}:
             break
         if line == "/help":
-            print("assistant> 直接中文提问即可。首次输入：打开 \"C:\\路径\\工作簿.xlsx\"。参与者结果输入：结果文件 \"C:\\路径\\results.xlsx\"。可用 /status、/cancel、确认执行、/quit。")
+            print("assistant> 直接中文提问即可。首次输入：打开 \"C:\\路径\\工作簿.xlsx\"。参与者结果输入：结果文件 \"C:\\路径\\results.xlsx\"。可用 /model 模型ID、/status、/cancel、确认执行、/quit。")
+            continue
+        if line.startswith("/model "):
+            requested_model = line[7:].strip()
+            if not requested_model:
+                print("assistant> 用法：/model 模型ID")
+                continue
+            args.model = requested_model
+            llm = LLMConnector(args.model, key, session_id=farm_session_id)
+            print(f"assistant> 已切换到模型：{args.model}。本地工作簿、结果文件和待确认计划均保留。")
             continue
         if line == "/status":
             print("assistant> " + json.dumps({"workbook": session.data.get("workbook"), "results": session.data.get("results"), "pending_plan": session.data.get("pending_plan")}, ensure_ascii=False))
@@ -346,3 +356,5 @@ if __name__ == "__main__":
 # 4) Only after reviewing the Chinese plan, type exactly:
 #    确认执行
 # 5) The source workbook is kept unchanged; the agent creates and verifies a new *_ai_updated.xlsx file.
+# 6) Optional model switch without losing the local Excel session:
+#    /model gemini-2.5-pro
