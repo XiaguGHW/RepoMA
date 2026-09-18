@@ -5,6 +5,7 @@ The two Python files must remain together inside it:
 
 - `llm_connector_with_prompt_caching.py`
 - `bosch_chat.py`
+- `excel_agent.py` — precise Excel inspection and safe writing tool
 
 Use your existing Farm `.env` file. Do not put its secret into either Python
 file or copy it into this tool folder:
@@ -78,10 +79,36 @@ actual layout:
 /add "C:\\work\\Results_sheets.pdf"
 ```
 
-This version can read, analyse and propose Excel modifications, but it does
-not write into a workbook yet. That separation is intentional: a future edit
-command should first show the requested cell/range changes and require your
-confirmation before saving a copy of the `.xlsx` file.
+For exact spreadsheet work, do not ask the RAG chat to guess a cell address.
+Use `excel_agent.py`: it prints exact `Sheet!A1` coordinates and formula text,
+creates a JSON plan containing every intended write, and only applies that
+reviewed plan to a *new* workbook. It refuses to overwrite the source file,
+to write into a non-empty target column, to proceed when a BG ID is missing,
+or to apply a plan after the source workbook changed. It also verifies each
+written cell and checks that every original formula is unchanged.
+
+Typical workshop-participant workflow:
+
+```powershell
+# Inspect Sheet names and exact layout.
+python excel_agent.py inspect "C:\\work\\workshop.xlsx"
+python excel_agent.py range "C:\\work\\workshop.xlsx" --sheet "Workshop" --range "A1:Z40"
+
+# Create an editable but non-executing plan. BG-ID and Judgement are columns
+# in berk_results.xlsx (or CSV). M must be a reserved, fully empty column.
+python excel_agent.py plan-participants "C:\\work\\workshop.xlsx" --sheet "Workshop" --header-row 1 --id-header "BG-ID" --template-header "Jonas" --target-column "M" --new-header "Berk" --results "C:\\work\\berk_results.xlsx" --results-id-column "BG-ID" --results-value-column "Judgement" --plan "C:\\work\\berk_plan.json"
+
+# Open and review berk_plan.json. Then apply to a copy and verify it.
+python excel_agent.py apply "C:\\work\\workshop.xlsx" --plan "C:\\work\\berk_plan.json" --output "C:\\work\\workshop_with_berk.xlsx"
+python excel_agent.py verify "C:\\work\\workshop_with_berk.xlsx" --plan "C:\\work\\berk_plan.json"
+```
+
+The safe first version fills a **pre-existing empty participant column** and
+copies the chosen template column's formatting. It deliberately does not
+insert columns or automatically rewrite unrelated formulas, tables, charts or
+external links; those changes need a workbook-specific reviewed plan. Open the
+result in Excel once to recalculate formulas, because openpyxl preserves but
+does not calculate Excel formulas.
 
 For PDFs and images retrieved as relevant evidence, the source file is sent
 again to the selected Farm model. For text-based files, only the relevant local
