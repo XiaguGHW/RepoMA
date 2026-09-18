@@ -11,12 +11,6 @@
 | Keine der verfügbaren Klassen | 7 | 7 | 100,0 % | 0,58 | 1,00 | 0,74 |
 | **Gesamt (alle Anfragen)** | **115** | **101** | **87,8 %** |  |  |  |
 
-> **Platz für Abbildung:** Hier kann später ein Screenshot der zugehörigen Confusion Matrix eingefügt werden.
-
-Die Tabelle beschreibt die strikte Bewertung mit dem primären Ground-Truth-Label. Die Werte wurden aus den Screenshots übernommen und auf Konsistenz geprüft. Für Gantry gilt: `12 / 16 = 0,75`; deshalb sind Accuracy und Recall jeweils 75,0 % und der F1-Score beträgt mit Precision 0,86 gerundet 0,80. Die Zeile „Gesamt (alle Anfragen)“ zählt einen E2-Fall mit HTTP-Fehler als nicht korrekt und ergibt deshalb 101/115 = 87,8 %.
-
-## Strikte Ergebnisse nach Regime
-
 | Regime | Ursprüngliche Fälle | Nicht auswertbar | Auswertbare Fälle | Fehler | Strikt korrekt | Strict Accuracy |
 |---|---:|---:|---:|---:|---:|---:|
 | E1 | 56 | 0 | 56 | 2 | 54 | 96,4 % |
@@ -24,30 +18,14 @@ Die Tabelle beschreibt die strikte Bewertung mit dem primären Ground-Truth-Labe
 | M | 24 | 0 | 24 | 6 | 18 | 75,0 % |
 | **Gesamt** | **115** | **1** | **114** | **13** | **101** | **88,6 %** |
 
-```text
-E1 strict Accuracy = 54 / 56 = 96,4 %
-E2 strict Accuracy = 29 / 34 = 85,3 %
-M strict Accuracy  = 18 / 24 = 75,0 %
-Overall Accuracy   = 101 / 114 = 88,6 %
-```
-
-Für Precision, Recall und F1-Score reichen die Fehlerzahlen allein nicht aus. Dafür wird je Regime die vollständige Zuordnung aus tatsächlicher Klasse und vorhergesagter Klasse benötigt, also die jeweilige Confusion Matrix bzw. die vollständige Ergebnisliste.
-
-## 1. Overall Accuracy
-
-Die Overall Accuracy beantwortet die Frage: *Welcher Anteil aller auswertbaren Baugruppen wurde exakt mit dem primären Ground-Truth-Label klassifiziert?*
+## Overall Accuracy
 
 ```text
-Overall Accuracy = korrekte Vorhersagen / Anzahl auswertbarer Fälle
-                 = 101 / 114
-                 = 0,8860 = 88,6 %
+Strict Overall Accuracy (auswertbare Fälle) = 101 / 114 = 88,6 %
+Accuracy über alle Anfragen                  = 101 / 115 = 87,8 %
 ```
 
-## 2. Macro-Average
-
-Beim Macro-Average erhält jede der sieben Funktionsklassen dasselbe Gewicht, unabhängig von ihrer Anzahl im Datensatz.
-
-Die folgenden Macro-Werte stammen aus dem klassenweisen Bericht über alle 115 Anfragen; darin wird der HTTP-Fehler als nicht korrekte Anfrage gezählt. Sie sind daher getrennt von der unten berichteten Overall Accuracy über die 114 auswertbaren Fälle zu lesen.
+## Macro-Average
 
 ```text
 Macro-Precision = (0,94 + 0,86 + 1,00 + 0,81 + 1,00 + 0,92 + 0,58) / 7
@@ -60,17 +38,7 @@ Macro-F1        = (0,89 + 0,80 + 1,00 + 0,83 + 1,00 + 0,83 + 0,74) / 7
                 = 0,870 = 87,0 %
 ```
 
-**Interpretation:** Macro-Werte zeigen, wie gleichmäßig das Modell über alle Funktionsklassen arbeitet. Die Klasse „Keine der verfügbaren Klassen“ mit sieben Fällen zählt dabei genauso stark wie eine Klasse mit 20 Fällen.
-
-## 3. Weighted-Average
-
-Beim Weighted-Average wird jede Klasse mit ihrer Anzahl an Ground-Truth-Fällen gewichtet. Häufigere Klassen beeinflussen das Ergebnis daher stärker.
-
-Auch die folgenden Weighted-Werte beziehen sich auf den klassenweisen Bericht über alle 115 Anfragen und behandeln den HTTP-Fehler als nicht korrekte Anfrage.
-
-```text
-Weighted-Metric = (n1 × Metric1 + n2 × Metric2 + ... + n7 × Metric7) / N
-```
+## Weighted-Average
 
 ```text
 Weighted-Precision = (20×0,94 + 16×0,86 + 18×1,00 + 20×0,81
@@ -87,19 +55,12 @@ Weighted-F1        = (20×0,89 + 16×0,80 + 18×1,00 + 20×0,83
                    = 0,884 = 88,4 %
 ```
 
-Die Werte können geringfügig von einer Skriptausgabe abweichen, weil die klassenweisen Precision-, Recall- und F1-Werte in dieser Tabelle bereits gerundet sind. Das Skript sollte stets mit den ungerundeten TP-, FP- und FN-Werten rechnen.
-
-**Interpretation:** Weighted-Werte beschreiben die Leistung unter Berücksichtigung der tatsächlichen Klassenverteilung dieses Datensatzes.
-
 ## Kurze Zusammenfassung der Literaturrecherche
 
-Die Literatur beschreibt keine einzige, für jede Multi-Class-Aufgabe immer richtige Aggregationsmethode. Die Wahl hängt vom Evaluationsziel ab:
-
-- **Macro-Average** ist passend, wenn alle Klassen gleich wichtig sind. Dies trifft hier auf die sieben Funktionsklassen zu.
-- **Weighted-Average** berücksichtigt zusätzlich die beobachtete Klassenverteilung des Datensatzes.
-- **Micro-Average** fasst alle Entscheidungen zusammen; bei vollständiger Single-Label-Multiclass-Klassifikation ist es identisch mit der Overall Accuracy.
-- Bei ungleich verteilten Klassen sollte Accuracy nicht allein berichtet werden; klassenweise Kennzahlen und Macro-Werte machen mögliche Schwächen kleinerer Klassen sichtbar.
-- Bei Macro-F1 muss die Formel eindeutig angegeben werden. In diesem Dokument ist Macro-F1 der arithmetische Mittelwert der klassenweisen F1-Scores.
+- **Macro-Average** ist passend, wenn alle Klassen gleich wichtig sind.
+- **Weighted-Average** berücksichtigt zusätzlich die beobachtete Klassenverteilung.
+- **Micro-Average** ist bei vollständiger Single-Label-Multiclass-Klassifikation identisch mit der Overall Accuracy.
+- Bei ungleich verteilten Klassen sollten Accuracy und klassenweise Kennzahlen gemeinsam berichtet werden.
 
 ## Literatur
 
@@ -107,13 +68,3 @@ Die Literatur beschreibt keine einzige, für jede Multi-Class-Aufgabe immer rich
 2. Sokolova, M. & Lapalme, G. (2009). *A Systematic Analysis of Performance Measures for Classification Tasks*. Information Processing & Management, 45(4), 427–437. https://doi.org/10.1016/j.ipm.2009.03.002
 3. Opitz, J. & Burst, S. (2021). *Macro F1 and Macro F1*. arXiv:1911.03347. https://arxiv.org/abs/1911.03347
 4. Branco, P., Torgo, L. & Ribeiro, R. P. (2016). *A Survey of Predictive Modelling under Imbalanced Distributions*. ACM Computing Surveys, 49(2), Article 31. https://doi.org/10.1145/2907070
-
-## Bild einfügen
-
-Ein Bild kann später direkt unter der gewünschten Überschrift eingefügt werden. Bei einer lokalen Markdown-Datei reicht zum Beispiel:
-
-```markdown
-![Confusion Matrix des Beispiel-Laufs](images/confusion_matrix_beispiel.png)
-```
-
-Die Bilddatei sollte dann im Unterordner `images` liegen. In GitHub, VS Code und vielen Markdown-Viewern wird sie automatisch angezeigt.
