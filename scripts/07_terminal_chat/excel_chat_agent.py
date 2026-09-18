@@ -40,7 +40,12 @@ except ImportError:
 
 APP_DIR = Path(__file__).resolve().parent / ".excel_chat_agent"
 SYSTEM = "你是一个谨慎的 Excel 助手。始终用中文回答。只能依据本地精确工具返回的单元格、公式和计划；不得猜测单元格位置或文件内容。写入前必须清楚展示计划并等待用户输入‘确认执行’。"
-PATH_RE = re.compile(r'["“]([^"”\n]+?\.(?:xlsx|xlsm))["”]', re.IGNORECASE)
+QUOTED_RE = re.compile(r'["“]([^"”\n]+)["”]')
+DIRECT_FILE_RE = re.compile(r'([A-Za-z]:\\[^"“”\r\n]*?\.(?:xlsx|xlsm))', re.IGNORECASE)
+NAMED_WORKBOOK_RE = re.compile(
+    r'(?P<folder>[A-Za-z]:\\.+?)(?:这个)?(?:路径)?(?:里面|中|下).{0,12}?(?:名字叫|名为|叫)(?P<hint>.+?)(?:的)?(?:excel|xlsx|工作簿)',
+    re.IGNORECASE,
+)
 
 
 def compact(value: Any, length: int = 220) -> str:
@@ -221,14 +226,45 @@ def final_prompt(question: str, context: dict[str, Any], tool_results: list[dict
 精确工具结果：{json.dumps(tool_results, ensure_ascii=False)[:22000]}"""
 
 
-def open_from_text(line: str, session: Session, kind: str) -> bool:
-    match = PATH_RE.search(line)
-    if not match:
-        return False
-    path = Path(match.group(1)).expanduser().resolve()
-    if not path.is_file():
-        print(f"assistant> 找不到文件：{path}")
-        return True
+def normalise_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", value.lower())
+
+
+def workbook_candidates(folder: Path, hint: str = "") -> list[Path]:
+    if not folder.is_dir():
+        return []
+    choices = sorted([*folder.glob("*.xlsx"), *folder.glob("*.xlsm")])
+    key = normalise_name(hint.replace("文件", "").replace("表格", ""))
+    return [item for item in choices if not key or key in normalise_name(item.stem)]
+
+
+def identify_file_from_text(line: str) -> tuple[Path | None, list[Path], str | None]:
+    """Accept full paths, folders, and Chinese phrases such as '路径里面名字叫129BG的excel文件'."""
+    direct = DIRECT_FILE_RE.search(line)
+    if direct:
+        candidate = Path(direct.group(1)).expanduser()
+        return (candidate.resolve() if candidate.is_file() else None), [], f"找不到指定文件：{candidate}"
+    quoted = QUOTED_RE.findall(line)
+    for raw in quoted:
+        candidate = Path(raw).expanduser()
+        if candidate.is_file() and candidate.suffix.lower() in {".xlsx", ".xlsm"}:
+            return candidate.resolve(), [], None
+        if candidate.is_dir():
+            choices = workbook_candidates(candidate)
+            if len(choices) == 1:
+                return choices[0].resolve(), [], None
+            return None, choices, None
+    named = NAMED_WORKBOOK_RE.search(line)
+    if named:
+        folder = Path(named.group("folder").rstrip("\\/ "))
+        choices = workbook_candidates(folder, named.group("hint"))
+        if len(choices) == 1:
+            return choices[0].resolve(), [], None
+        return None, choices, None
+    return None, [], None
+
+
+def set_session_file(path: Path, session: Session, kind: str) -> None:
     if kind == "results":
         session.data["results"] = str(path)
         session.save()
@@ -241,7 +277,21 @@ def open_from_text(line: str, session: Session, kind: str) -> bool:
         overview = worksheet_overview(book)
         names = "、".join(f"{item['number']}.{item['name']}" for item in overview["sheets"])
         print(f"assistant> 已打开 {path.name}，共 {overview['sheet_count']} 个 Sheet：{names}。现在可以直接中文提问。")
-    return True
+
+
+def open_from_text(line: str, session: Session, kind: str) -> bool:
+    path, choices, error = identify_file_from_text(line)
+    if error:
+        print(f"assistant> {error}")
+        return True
+    if path:
+        set_session_file(path, session, kind)
+        return True
+    if choices:
+        shown = "；".join(str(item) for item in choices[:8])
+        print(f"assistant> 我在该目录找到多个候选 Excel：{shown}。请直接说其中一个文件名，或提供更具体的名称。")
+        return True
+    return False
 
 
 def main() -> None:
@@ -295,9 +345,9 @@ def main() -> None:
                 print(f"assistant> 未执行写入：{exc}")
             continue
         lowered = line.lower()
-        if lowered.startswith("打开") or lowered.startswith("open ") or lowered.startswith("/open "):
+        if "打开" in line or "加载" in line or lowered.startswith("open ") or lowered.startswith("/open "):
             if not open_from_text(line, session, "workbook"):
-                print("assistant> 请写成：打开 \"C:\\路径\\工作簿.xlsx\"")
+                print("assistant> 我没有在这句话中定位到 Excel。你可以说完整路径、一个目录，或例如：打开“C:\\资料\\这个路径里面名字叫129BG的excel文件”。")
             continue
         if "结果文件" in line or lowered.startswith("/results "):
             if not open_from_text(line, session, "results"):
@@ -350,6 +400,7 @@ if __name__ == "__main__":
 #    python excel_chat_agent.py --model gemini-2.5-pro --session workshop
 # 3) In the terminal, talk naturally in Chinese:
 #    打开 "C:\\path\\to\\workshop.xlsx"
+#    打开 "C:\\path\\to\\资料目录\\这个路径里面名字叫129BG的excel文件"
 #    第六个 Sheet 的表头是什么？请列出准确单元格坐标和公式关系。
 #    结果文件 "C:\\path\\to\\berk_results.xlsx"
 #    在 Workshop 表中按 BG-ID 添加 Berk 的判断，先给出修改计划，不要写入。

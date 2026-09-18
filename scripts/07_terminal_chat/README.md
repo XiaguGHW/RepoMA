@@ -67,10 +67,12 @@ python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session worksh
 
 It opens with `you>`. Talk in Chinese; commands are only needed for the
 emergency controls `/status`, `/cancel` and `/quit`. The first message only
-needs to provide the source file, for example:
+needs to describe where the source file is. It accepts either an exact file
+path or a folder plus a natural-language filename hint, for example:
 
 ```text
 打开 "C:\\work\\workshop.xlsx"
+打开 "C:\\work\\资料目录\\这个路径里面名字叫129BG的excel文件"
 第六个 Sheet 的表头和公式关系是什么？请引用准确单元格坐标。
 结果文件 "C:\\work\\berk_results.xlsx"
 在 Workshop 表中按 BG-ID 添加 Berk 的判断，先给出修改计划，不要写入。
