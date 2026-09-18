@@ -24,11 +24,15 @@ from typing import Any
 from openpyxl.utils.cell import range_boundaries
 
 from excel_agent import (
+    cell_record,
     command_apply,
     command_plan_participants,
-    formula_references,
+    excel_json_value,
     load_book,
     resolve_sheet,
+    special_formula_ranges,
+    stored_cells,
+    trace_cell,
     verify_plan,
     worksheet_overview,
 )
@@ -240,10 +244,11 @@ class WorkbookTools:
         book = self.book()
         sheet = resolve_sheet(book, str(selector))
         cells = []
+        definitions = special_formula_ranges(sheet)
         for row in sheet.iter_rows(min_row=1, max_row=min(rows, sheet.max_row), max_col=min(cols, sheet.max_column)):
             for cell in row:
                 if cell.value is not None:
-                    cells.append({"cell": f"{sheet.title}!{cell.coordinate}", "value": compact(cell.value), "formula": cell.value if isinstance(cell.value, str) and cell.value.startswith("=") else None})
+                    cells.append(cell_record(cell, definitions))
         return {"sheet": sheet.title, "dimensions": sheet.calculate_dimension(), "preview": f"A1:{sheet.cell(min(rows, sheet.max_row), min(cols, sheet.max_column)).coordinate}", "cells": cells}
 
     def read_range(self, selector: str, address: str) -> dict[str, Any]:
@@ -256,9 +261,10 @@ class WorkbookTools:
         if (max_col - min_col + 1) * (max_row - min_row + 1) > 500:
             raise ValueError("一次最多读取 500 个单元格。请缩小区域。")
         cells = []
+        definitions = special_formula_ranges(sheet)
         for row in sheet.iter_rows(min_row=min_row, max_row=max_row, min_col=min_col, max_col=max_col):
             for cell in row:
-                cells.append({"cell": f"{sheet.title}!{cell.coordinate}", "value": compact(cell.value), "formula": cell.value if isinstance(cell.value, str) and cell.value.startswith("=") else None})
+                cells.append(cell_record(cell, definitions))
         return {"sheet": sheet.title, "range": address, "cells": cells}
 
     def trace(self, qualified_cell: str) -> dict[str, Any]:
@@ -267,11 +273,7 @@ class WorkbookTools:
         sheet_name, address = qualified_cell.rsplit("!", 1)
         book = self.book()
         sheet = resolve_sheet(book, sheet_name)
-        value = sheet[address].value
-        if not isinstance(value, str) or not value.startswith("="):
-            return {"cell": qualified_cell, "value": value, "formula": None, "references": []}
-        refs, warnings = formula_references(value, sheet.title)
-        return {"cell": qualified_cell, "formula": value, "references": refs, "warnings": warnings}
+        return trace_cell(sheet, address)
 
     def search(self, query: str, selector: str | None = None, limit: int = 40) -> dict[str, Any]:
         query = query.strip().lower()
@@ -281,12 +283,12 @@ class WorkbookTools:
         sheets = [resolve_sheet(book, str(selector))] if selector else book.worksheets
         matches = []
         for sheet in sheets:
-            for row in sheet.iter_rows():
-                for cell in row:
-                    if cell.value is not None and query in str(cell.value).lower():
-                        matches.append({"cell": f"{sheet.title}!{cell.coordinate}", "value": compact(cell.value), "formula": cell.value if isinstance(cell.value, str) and cell.value.startswith("=") else None})
-                        if len(matches) >= limit:
-                            return {"query": query, "matches": matches, "truncated": True}
+            definitions = special_formula_ranges(sheet)
+            for cell in stored_cells(sheet):
+                if cell.value is not None and query in json.dumps(excel_json_value(cell.value), ensure_ascii=False).lower():
+                    matches.append(cell_record(cell, definitions))
+                    if len(matches) >= limit:
+                        return {"query": query, "matches": matches, "truncated": True}
         return {"query": query, "matches": matches, "truncated": False}
 
     def plan_participants(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -347,11 +349,12 @@ def controller_prompt(question: str, context: dict[str, Any], tool_results: list
 5. 绝不调用写入工具。plan_participants 只可生成待确认计划，且必须先检查相关表头、目标列和结果文件字段。
 6. 每轮最多两个工具调用，优先小范围读取。
 7. 工具证据足够时，返回空 tool_calls 和完整中文 reply，无需重复查询。工作簿事实应引用准确坐标；创建计划后必须提示确认执行。
-8. max_row/max_column 是工作表记录范围的边界，可能因格式延伸到空白区域；不能称为实际有数据的行数或列数。"""
+8. max_row/max_column 是工作表记录范围的边界，可能因格式延伸到空白区域；不能称为实际有数据的行数或列数。
+9. 数组公式的 formula_anchor 是公式定义位置，formula_range 是作用范围；非起始格共享该公式，不是空白格，也不能把它解释为已计算的结果。工具只读取，不计算公式。"""
     return f"""你是 Excel Agent 的工具规划器。{tools}
 
-当前会话：{json.dumps(context, ensure_ascii=False)}
-此前工具结果：{json.dumps(tool_results, ensure_ascii=False)[:18000]}
+当前会话：{json.dumps(context, ensure_ascii=False, default=excel_json_value)}
+此前工具结果：{json.dumps(tool_results, ensure_ascii=False, default=excel_json_value)[:18000]}
 用户的问题：{question}"""
 
 
@@ -359,8 +362,8 @@ def final_prompt(question: str, context: dict[str, Any], tool_results: list[dict
     return f"""请用中文直接回答用户。只能使用下方精确工具结果；涉及工作簿事实时必须引用 Sheet!A1 格式的坐标。若证据不足，说明下一步需要读取的区域。若已创建计划，要列出 Sheet、目标列、写入单元格数量，并明确提示用户输入“确认执行”才会生成新文件。max_row/max_column 仅是记录范围边界，不能当作实际有数据的行列数。
 
 用户问题：{question}
-当前会话：{json.dumps(context, ensure_ascii=False)}
-精确工具结果：{json.dumps(tool_results, ensure_ascii=False)[:22000]}"""
+当前会话：{json.dumps(context, ensure_ascii=False, default=excel_json_value)}
+精确工具结果：{json.dumps(tool_results, ensure_ascii=False, default=excel_json_value)[:22000]}"""
 
 
 def normalise_name(value: str) -> str:
@@ -575,3 +578,5 @@ if __name__ == "__main__":
 #    如 Farm 支持 DeepSeek 的 thinking 参数，可以明确请求启用思考：
 #    python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --show-reasoning --thinking enabled
 #    --show-reasoning 只显示接口实际返回的 reasoning_content；不会生成假的思考过程。
+# 8) 在 you> 后直接重试数组公式问题（不需要先运行 excel_agent.py）：
+#    请读取 Klassifikation_Übersicht_Gesamt 的 M30、X30、Y30，分别列出公式原文、数组范围和直接引用，再用中文解释。

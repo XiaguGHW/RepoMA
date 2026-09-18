@@ -13,12 +13,70 @@ import json
 import re
 import sys
 from copy import copy
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from openpyxl import load_workbook
+from openpyxl.formula.tokenizer import Tokenizer
 from openpyxl.utils import column_index_from_string, get_column_letter
+from openpyxl.utils.cell import range_boundaries
+from openpyxl.worksheet.formula import ArrayFormula, DataTableFormula
+
+
+SPECIAL_FORMULAS = (ArrayFormula, DataTableFormula)
+
+
+def excel_json_value(value: Any) -> Any:
+    """Keep formula definitions and Excel types meaningful at the JSON boundary."""
+    if isinstance(value, ArrayFormula):
+        return {"type": "array_formula", "text": value.text, "ref": value.ref}
+    if isinstance(value, DataTableFormula):
+        return {"type": "data_table_formula", **dict(value)}
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, timedelta):
+        return {"type": "duration", "seconds": value.total_seconds()}
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    raise TypeError(f"Unsupported Excel value type: {type(value).__name__}")
+
+
+def stored_cells(sheet):
+    # Normal (non-read-only) worksheets retain sparse cells in _cells. Avoid
+    # iter_rows(), which expands a formatted 1,048,576-row sheet into blank cells.
+    return (cell for _, cell in sorted(sheet._cells.items()))
+
+
+def special_formula_ranges(sheet) -> list[tuple]:
+    definitions = []
+    for cell in stored_cells(sheet):
+        if isinstance(cell.value, SPECIAL_FORMULAS) and cell.value.ref:
+            definitions.append((cell.coordinate, range_boundaries(cell.value.ref), cell.value))
+    return definitions
+
+
+def cell_record(cell, definitions: list[tuple] | None = None) -> dict[str, Any]:
+    """Exact stored value plus the formula owner for an array/table result cell."""
+    value = cell.value
+    record = {"cell": f"{cell.parent.title}!{cell.coordinate}", "value": excel_json_value(value),
+              "formula": None, "value_type": type(value).__name__}
+    if isinstance(value, str) and value.startswith("=") and cell.data_type == "f":
+        record.update(formula=value, formula_type="normal")
+        return record
+    definitions = special_formula_ranges(cell.parent) if definitions is None else definitions
+    for anchor, bounds, definition in definitions:
+        min_col, min_row, max_col, max_row = bounds
+        if min_col <= cell.column <= max_col and min_row <= cell.row <= max_row:
+            record.update(
+                formula=getattr(definition, "text", None),
+                formula_type="array" if isinstance(definition, ArrayFormula) else "data_table",
+                formula_anchor=f"{cell.parent.title}!{anchor}", formula_range=definition.ref,
+                is_formula_anchor=cell.coordinate == anchor,
+                formula_definition=excel_json_value(definition),
+            )
+            break
+    return record
 
 
 def die(message: str) -> None:
@@ -39,11 +97,14 @@ def formula_fingerprint(book) -> dict[str, Any]:
     digest = hashlib.sha256()
     count = 0
     for sheet in book.worksheets:
-        for row in sheet.iter_rows():
-            for cell in row:
-                if isinstance(cell.value, str) and cell.value.startswith("="):
-                    digest.update(f"{sheet.title}!{cell.coordinate}\0{cell.value}\n".encode("utf-8"))
-                    count += 1
+        for cell in stored_cells(sheet):
+            value = cell.value
+            if isinstance(value, SPECIAL_FORMULAS):
+                value = json.dumps(excel_json_value(value), ensure_ascii=False, sort_keys=True)
+            elif not (isinstance(value, str) and value.startswith("=")):
+                continue
+            digest.update(f"{sheet.title}!{cell.coordinate}\0{value}\n".encode("utf-8"))
+            count += 1
     return {"formula_cells": count, "formula_sha256": digest.hexdigest()}
 
 
@@ -67,7 +128,7 @@ def resolve_sheet(book, selector: str):
 
 
 def json_out(value: Any) -> None:
-    print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
+    print(json.dumps(value, ensure_ascii=False, indent=2, default=excel_json_value))
 
 
 def display_value(value: Any, limit: int = 240) -> str:
@@ -103,10 +164,11 @@ def command_sheet(args) -> None:
     sheet = resolve_sheet(book, args.sheet)
     max_rows, max_cols = args.rows, args.cols
     cells = []
+    definitions = special_formula_ranges(sheet)
     for row in sheet.iter_rows(min_row=1, max_row=min(sheet.max_row, max_rows), max_col=min(sheet.max_column, max_cols)):
         for cell in row:
             if cell.value is not None:
-                cells.append({"cell": f"{sheet.title}!{cell.coordinate}", "value": display_value(cell.value), "formula": cell.value if isinstance(cell.value, str) and cell.value.startswith("=") else None})
+                cells.append(cell_record(cell, definitions))
     json_out({"sheet": sheet.title, "dimensions": sheet.calculate_dimension(), "preview_rows": max_rows, "preview_columns": max_cols, "cells": cells})
 
 
@@ -118,24 +180,40 @@ def command_range(args) -> None:
     except ValueError as exc:
         die(f"Invalid range: {exc}")
     values = []
+    definitions = special_formula_ranges(sheet)
+    if hasattr(target, "coordinate"):
+        target = ((target,),)
     for row in target:
         values.append([
-            {"cell": f"{sheet.title}!{cell.coordinate}", "value": display_value(cell.value), "formula": cell.value if isinstance(cell.value, str) and cell.value.startswith("=") else None}
+            cell_record(cell, definitions)
             for cell in row
         ])
     json_out({"sheet": sheet.title, "range": args.range, "values": values})
 
 
-# Deliberately conservative A1-reference recogniser.  It reports direct references
-# only; INDIRECT, OFFSET, named ranges and external links are surfaced as warnings.
-REF_RE = re.compile(r"(?:(?:'([^']+)'|([A-Za-z0-9_ ]+))!)?(\$?[A-Z]{1,3}\$?\d+)")
+# Direct A1 references and ranges. Tokenizing preserves cross-sheet range owners
+# and prevents quoted text such as "M30" from being treated as a cell reference.
+REF_RE = re.compile(r"(?:[A-Z]{1,3}[1-9][0-9]*(?::[A-Z]{1,3}[1-9][0-9]*)?|[A-Z]{1,3}:[A-Z]{1,3}|[1-9][0-9]*:[1-9][0-9]*)", re.I)
 
 
 def formula_references(formula: str, current_sheet: str) -> tuple[list[str], list[str]]:
-    refs = []
-    for quoted_sheet, plain_sheet, address in REF_RE.findall(formula):
-        refs.append(f"{quoted_sheet or plain_sheet or current_sheet}!{address.replace('$', '')}")
-    warnings = []
+    refs, warnings = [], []
+    try:
+        tokens = Tokenizer(formula).items
+    except Exception as exc:
+        return [], [f"Cannot parse formula references: {exc}"]
+    for token in tokens:
+        if token.type != "OPERAND" or token.subtype != "RANGE":
+            continue
+        raw = token.value
+        sheet_name, address = raw.rsplit("!", 1) if "!" in raw else (current_sheet, raw)
+        if sheet_name.startswith("'") and sheet_name.endswith("'"):
+            sheet_name = sheet_name[1:-1].replace("''", "'")
+        address = address.replace("$", "")
+        if "[" in raw or ":" in sheet_name or not REF_RE.fullmatch(address):
+            warnings.append(f"Unresolved named, structured, external or 3D reference: {raw}")
+            continue
+        refs.append(f"{sheet_name}!{address}")
     upper = formula.upper()
     for name in ("INDIRECT", "OFFSET", "[", "!"):
         if name in upper and name in {"INDIRECT", "OFFSET", "["}:
@@ -144,18 +222,26 @@ def formula_references(formula: str, current_sheet: str) -> tuple[list[str], lis
     return sorted(set(refs)), warnings
 
 
+def trace_cell(sheet, address: str) -> dict[str, Any]:
+    record = cell_record(sheet[address])
+    formula = record["formula"]
+    refs, warnings = formula_references(formula, sheet.title) if formula else ([], [])
+    if record.get("formula_type") == "array":
+        warnings.append("Array result cells share the anchor formula; it is not a separate formula in every result cell.")
+    if record.get("formula_type") == "data_table":
+        warnings.append("Excel data-table definition has no ordinary formula text; input metadata is provided.")
+    if record.get("formula_type"):
+        warnings.append("Formula text was read from the workbook; this tool does not recalculate it.")
+    return {**record, "references": refs, "warnings": warnings}
+
+
 def command_trace(args) -> None:
     book = load_book(Path(args.workbook), data_only=False)
     if "!" not in args.cell:
         die("Use a fully qualified cell, e.g. 'Workshop!D37'.")
     sheet_name, address = args.cell.rsplit("!", 1)
     sheet = resolve_sheet(book, sheet_name)
-    cell = sheet[address]
-    if not isinstance(cell.value, str) or not cell.value.startswith("="):
-        json_out({"cell": args.cell, "value": cell.value, "formula": None, "references": []})
-        return
-    refs, warnings = formula_references(cell.value, sheet.title)
-    json_out({"cell": args.cell, "formula": cell.value, "references": refs, "warnings": warnings})
+    json_out(trace_cell(sheet, address))
 
 
 def find_header_column(sheet, header_row: int, header: str) -> int:
@@ -197,6 +283,9 @@ def read_values(path: Path, id_column: str, value_column: str) -> dict[str, Any]
 
 
 def assert_target_safe(sheet, destination_column: int, header_row: int, first_row: int, last_row: int) -> None:
+    for anchor, (min_col, min_row, max_col, max_row), _ in special_formula_ranges(sheet):
+        if min_col <= destination_column <= max_col and min_row <= last_row and max_row >= header_row:
+            die(f"Destination overlaps array/data-table formula range owned by {sheet.title}!{anchor}.")
     if any(str(rng).split(":")[0] == f"{get_column_letter(destination_column)}{header_row}" for rng in sheet.merged_cells.ranges):
         die("Destination header is merged. Choose a normal, unmerged column.")
     occupied = [sheet.cell(row, destination_column).coordinate for row in range(header_row, last_row + 1) if sheet.cell(row, destination_column).value is not None]
@@ -231,6 +320,8 @@ def command_plan_participants(args) -> None:
         die("Result IDs absent from workbook; no plan created: " + ", ".join(missing[:15]))
     edits = [{"cell": f"{sheet.title}!{get_column_letter(target_col)}{args.header_row}", "value": args.new_header, "kind": "header"}]
     for key, value in incoming.items():
+        if isinstance(value, SPECIAL_FORMULAS):
+            die(f"Result {key} contains an array/data-table formula. Supply its calculated judgement as a value.")
         edits.append({"cell": f"{sheet.title}!{get_column_letter(target_col)}{workbook_ids[key]}", "value": value, "kind": "participant_judgement", "bg_id": key})
     plan = {
         "format": "bosch-excel-agent-plan-v1",
@@ -292,6 +383,8 @@ def command_apply(args) -> None:
     if output.exists() and not args.force:
         die(f"Output already exists: {output}. Use --force only after reviewing it.")
     book = load_book(source, data_only=False)
+    if plan.get("source_formula_fingerprint") != formula_fingerprint(book):
+        die("Formula validation changed. Recreate the plan with this version before applying it.")
     sheet = resolve_sheet(book, plan["sheet"])
     target_col = column_index_from_string(plan["target_column"])
     template_col = column_index_from_string(plan["template_column"])
@@ -378,3 +471,6 @@ if __name__ == "__main__":
 #    python excel_agent.py apply "C:\\path\\to\\workbook.xlsx" --plan "C:\\path\\to\\berk_plan.json" --output "C:\\path\\to\\workbook_with_berk.xlsx"
 # 6) Re-run an independent verification at any time:
 #    python excel_agent.py verify "C:\\path\\to\\workbook_with_berk.xlsx" --plan "C:\\path\\to\\berk_plan.json"
+# 7) Inspect array formulas, including their anchor and covered range:
+#    python excel_agent.py trace "C:\Users\wdu4fel\Documents\Python_Projects\整理129BG资料\129BG.xlsx" --cell "Klassifikation_Übersicht_Gesamt!M30"
+#    python excel_agent.py range "C:\Users\wdu4fel\Documents\Python_Projects\整理129BG资料\129BG.xlsx" --sheet "Klassifikation_Übersicht_Gesamt" --range "M30:Y30"

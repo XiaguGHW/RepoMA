@@ -129,6 +129,25 @@ workbook until you type exactly `确认执行`. It then creates a separately nam
 `*_ai_updated.xlsx` and verifies each planned cell plus all original formula
 text. The original file remains unchanged.
 
+Array formulas are supported by the exact reader and formula tracer. Results
+include the original formula text, its anchor cell and the covered range;
+array result cells point back to that anchor. Excel data-table formulas expose
+their stored definition instead of an invented formula string. Dates, times
+and durations are converted to JSON-compatible values. This fixes
+`Object of type ArrayFormula is not JSON serializable` during analysis.
+
+For example, ask naturally:
+
+```text
+请读取 Klassifikation_Übersicht_Gesamt 的 M30、X30、Y30，分别列出公式原文、数组范围和直接引用，再用中文解释。
+```
+
+The reader does not calculate Excel formulas. Direct references retain their
+Sheet and range; dynamic references, named ranges and external links that
+cannot be resolved are explicitly reported. New edit plans also check array
+formula definitions and refuse to write into array/data-table result ranges.
+Recreate an older edit plan if its formula verification predates this fix.
+
 ### General document chat
 
 Add the `.xlsx` file first:
