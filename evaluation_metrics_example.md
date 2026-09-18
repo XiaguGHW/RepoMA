@@ -1,19 +1,19 @@
 # Beispiel: Berechnung von Macro- und Weighted-Metriken
 
-| Class | Ground Truth rows | Correct predictions | Accuracy / Recall | Precision | Recall | F1-score |
+| Class | Ground Truth rows | Correct predictions | Accuracy | Precision | Recall | F1-score |
 |---|---:|---:|---:|---:|---:|---:|
-| Lineareinheit | 20 | 15 | 75,0 % | nicht bestimmbar | 0,75 | nicht bestimmbar |
-| Gantry | 16 | 10 | 62,5 % | nicht bestimmbar | 0,625 | nicht bestimmbar |
-| Greifer | 18 | 18 | 100,0 % | nicht bestimmbar | 1,00 | nicht bestimmbar |
-| Umsetzeinheit | 20 | 16 | 80,0 % | nicht bestimmbar | 0,80 | nicht bestimmbar |
-| Roboter | 18 | 18 | 100,0 % | nicht bestimmbar | 1,00 | nicht bestimmbar |
-| Rotationseinheit | 16 | 11 | 68,75 % | nicht bestimmbar | 0,6875 | nicht bestimmbar |
-| Keine der verfügbaren Klassen | 7 | 7 | 100,0 % | nicht bestimmbar | 1,00 | nicht bestimmbar |
-| **Gesamt** | **115** | **95** | **82,6 %** |  |  |  |
+| Lineareinheit | 20 | 17 | 85,0 % | 0,94 | 0,85 | 0,89 |
+| Gantry | 16 | 12 | 75,0 % | 0,86 | 0,75 | 0,80 |
+| Greifer | 18 | 18 | 100,0 % | 1,00 | 1,00 | 1,00 |
+| Umsetzeinheit | 20 | 17 | 85,0 % | 0,81 | 0,85 | 0,83 |
+| Roboter | 18 | 18 | 100,0 % | 1,00 | 1,00 | 1,00 |
+| Rotationseinheit | 16 | 12 | 75,0 % | 0,92 | 0,75 | 0,83 |
+| Keine der verfügbaren Klassen | 7 | 7 | 100,0 % | 0,58 | 1,00 | 0,74 |
+| **Gesamt** | **115** | **101** | **87,8 %** |  |  |  |
 
 > **Platz für Abbildung:** Hier kann später ein Screenshot der zugehörigen Confusion Matrix eingefügt werden.
 
-Die Tabelle wurde aus dem zweiten Screenshot übernommen. Der Quotient `Correct predictions / Ground Truth rows` ist der **Recall** der jeweiligen Klasse. Die Bezeichnung „Accuracy / Recall“ dient hier nur dazu, die direkt sichtbare Quote verständlich zu machen.
+Die Tabelle beschreibt die strikte Bewertung mit dem primären Ground-Truth-Label. Die Werte wurden aus den Screenshots übernommen und auf Konsistenz geprüft. Für Gantry gilt: `12 / 16 = 0,75`; deshalb sind Accuracy und Recall jeweils 75,0 % und der F1-Score beträgt mit Precision 0,86 gerundet 0,80.
 
 ## 1. Overall Accuracy
 
@@ -21,24 +21,26 @@ Die Overall Accuracy beantwortet die Frage: *Welcher Anteil aller auswertbaren B
 
 ```text
 Overall Accuracy = korrekte Vorhersagen / Anzahl auswertbarer Fälle
-                 = 95 / 115
-                 = 0,8261 = 82,6 %
+                 = 101 / 115
+                 = 0,8783 = 87,8 %
 ```
 
 ## 2. Macro-Average
 
 Beim Macro-Average erhält jede der sieben Funktionsklassen dasselbe Gewicht, unabhängig von ihrer Anzahl im Datensatz.
 
-Aus den in diesem Screenshot sichtbaren Daten lässt sich nur der Macro-Recall exakt berechnen:
-
 ```text
-Macro-Recall = (0,75 + 0,625 + 1,00 + 0,80 + 1,00 + 0,6875 + 1,00) / 7
-             = 0,8375 = 83,8 %
+Macro-Precision = (0,94 + 0,86 + 1,00 + 0,81 + 1,00 + 0,92 + 0,58) / 7
+                = 0,873 = 87,3 %
+
+Macro-Recall    = (0,85 + 0,75 + 1,00 + 0,85 + 1,00 + 0,75 + 1,00) / 7
+                = 0,886 = 88,6 %
+
+Macro-F1        = (0,89 + 0,80 + 1,00 + 0,83 + 1,00 + 0,83 + 0,74) / 7
+                = 0,870 = 87,0 %
 ```
 
-Macro-Precision und Macro-F1 sind mit dieser Tabelle **nicht bestimmbar**. Dafür werden zusätzlich die False Positives jeder Klasse benötigt; diese stehen in einer vollständigen Confusion Matrix oder in der vollständigen Ergebnisliste.
-
-**Interpretation:** Der Macro-Recall gibt jeder Klasse dasselbe Gewicht. Die Klasse „Keine der verfügbaren Klassen“ mit sieben Fällen zählt daher genauso stark wie eine Klasse mit 20 Fällen.
+**Interpretation:** Macro-Werte zeigen, wie gleichmäßig das Modell über alle Funktionsklassen arbeitet. Die Klasse „Keine der verfügbaren Klassen“ mit sieben Fällen zählt dabei genauso stark wie eine Klasse mit 20 Fällen.
 
 ## 3. Weighted-Average
 
@@ -48,16 +50,24 @@ Beim Weighted-Average wird jede Klasse mit ihrer Anzahl an Ground-Truth-Fällen 
 Weighted-Metric = (n1 × Metric1 + n2 × Metric2 + ... + n7 × Metric7) / N
 ```
 
-Für den Recall ergibt sich:
-
 ```text
-Weighted-Recall = (20×0,75 + 16×0,625 + 18×1,00 + 20×0,80
-                   + 18×1,00 + 16×0,6875 + 7×1,00) / 115
-                = 95 / 115
-                = 0,8261 = 82,6 %
+Weighted-Precision = (20×0,94 + 16×0,86 + 18×1,00 + 20×0,81
+                      + 18×1,00 + 16×0,92 + 7×0,58) / 115
+                   = 0,900 = 90,0 %
+
+Weighted-Recall    = (20×0,85 + 16×0,75 + 18×1,00 + 20×0,85
+                      + 18×1,00 + 16×0,75 + 7×1,00) / 115
+                   = 101 / 115
+                   = 0,878 = 87,8 %
+
+Weighted-F1        = (20×0,89 + 16×0,80 + 18×1,00 + 20×0,83
+                      + 18×1,00 + 16×0,83 + 7×0,74) / 115
+                   = 0,884 = 88,4 %
 ```
 
-Bei einer vollständigen Single-Label-Multiclass-Klassifikation ist der Weighted-Recall gleich der Overall Accuracy. Weighted-Precision und Weighted-F1 sind aus dem Screenshot ebenfalls nicht bestimmbar.
+Die Werte können geringfügig von einer Skriptausgabe abweichen, weil die klassenweisen Precision-, Recall- und F1-Werte in dieser Tabelle bereits gerundet sind. Das Skript sollte stets mit den ungerundeten TP-, FP- und FN-Werten rechnen.
+
+**Interpretation:** Weighted-Werte beschreiben die Leistung unter Berücksichtigung der tatsächlichen Klassenverteilung dieses Datensatzes.
 
 ## Kurze Zusammenfassung der Literaturrecherche
 
@@ -67,7 +77,7 @@ Die Literatur beschreibt keine einzige, für jede Multi-Class-Aufgabe immer rich
 - **Weighted-Average** berücksichtigt zusätzlich die beobachtete Klassenverteilung des Datensatzes.
 - **Micro-Average** fasst alle Entscheidungen zusammen; bei vollständiger Single-Label-Multiclass-Klassifikation ist es identisch mit der Overall Accuracy.
 - Bei ungleich verteilten Klassen sollte Accuracy nicht allein berichtet werden; klassenweise Kennzahlen und Macro-Werte machen mögliche Schwächen kleinerer Klassen sichtbar.
-- Bei Macro-F1 muss die Formel eindeutig angegeben werden. Macro-F1 ist der arithmetische Mittelwert der klassenweisen F1-Scores.
+- Bei Macro-F1 muss die Formel eindeutig angegeben werden. In diesem Dokument ist Macro-F1 der arithmetische Mittelwert der klassenweisen F1-Scores.
 
 ## Literatur
 
