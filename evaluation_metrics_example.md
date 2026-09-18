@@ -9,29 +9,29 @@
 | Roboter | 18 | 18 | 100,0 % | 1,00 | 1,00 | 1,00 |
 | Rotationseinheit | 16 | 12 | 75,0 % | 0,92 | 0,75 | 0,83 |
 | Keine der verfügbaren Klassen | 7 | 7 | 100,0 % | 0,58 | 1,00 | 0,74 |
-| **Gesamt** | **115** | **101** | **87,8 %** |  |  |  |
+| **Gesamt (alle Anfragen)** | **115** | **101** | **87,8 %** |  |  |  |
 
 > **Platz für Abbildung:** Hier kann später ein Screenshot der zugehörigen Confusion Matrix eingefügt werden.
 
-Die Tabelle beschreibt die strikte Bewertung mit dem primären Ground-Truth-Label. Die Werte wurden aus den Screenshots übernommen und auf Konsistenz geprüft. Für Gantry gilt: `12 / 16 = 0,75`; deshalb sind Accuracy und Recall jeweils 75,0 % und der F1-Score beträgt mit Precision 0,86 gerundet 0,80.
+Die Tabelle beschreibt die strikte Bewertung mit dem primären Ground-Truth-Label. Die Werte wurden aus den Screenshots übernommen und auf Konsistenz geprüft. Für Gantry gilt: `12 / 16 = 0,75`; deshalb sind Accuracy und Recall jeweils 75,0 % und der F1-Score beträgt mit Precision 0,86 gerundet 0,80. Die Zeile „Gesamt (alle Anfragen)“ zählt einen E2-Fall mit HTTP-Fehler als nicht korrekt und ergibt deshalb 101/115 = 87,8 %.
 
 ## Strikte Ergebnisse nach Regime
 
-| Regime | Auswertbare Fälle | Fehler | Strikt korrekt | Strict Accuracy | Precision | Recall | F1-Score |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| E1 | 56 | 2 | 54 | 96,4 % | noch nicht berechenbar | noch nicht berechenbar | noch nicht berechenbar |
-| E2 | 35 | 5 | 30 | 85,7 % | noch nicht berechenbar | noch nicht berechenbar | noch nicht berechenbar |
-| M | 24 | 6 | 18 | 75,0 % | noch nicht berechenbar | noch nicht berechenbar | noch nicht berechenbar |
+| Regime | Ursprüngliche Fälle | Nicht auswertbar | Auswertbare Fälle | Fehler | Strikt korrekt | Strict Accuracy |
+|---|---:|---:|---:|---:|---:|---:|
+| E1 | 56 | 0 | 56 | 2 | 54 | 96,4 % |
+| E2 | 35 | 1 (HTTP-Fehler) | 34 | 5 | 29 | 85,3 % |
+| M | 24 | 0 | 24 | 6 | 18 | 75,0 % |
+| **Gesamt** | **115** | **1** | **114** | **13** | **101** | **88,6 %** |
 
 ```text
 E1 strict Accuracy = 54 / 56 = 96,4 %
-E2 strict Accuracy = 30 / 35 = 85,7 %
+E2 strict Accuracy = 29 / 34 = 85,3 %
 M strict Accuracy  = 18 / 24 = 75,0 %
+Overall Accuracy   = 101 / 114 = 88,6 %
 ```
 
 Für Precision, Recall und F1-Score reichen die Fehlerzahlen allein nicht aus. Dafür wird je Regime die vollständige Zuordnung aus tatsächlicher Klasse und vorhergesagter Klasse benötigt, also die jeweilige Confusion Matrix bzw. die vollständige Ergebnisliste.
-
-Die drei Regime enthalten zusammen 115 Fälle und 102 strikte korrekte Vorhersagen. Das weicht um einen Fall von der klassenweisen Tabelle oben ab (dort: 101 korrekte Vorhersagen). Vor einer gemeinsamen Gesamtkennzahl müssen diese beiden Quellen daher noch abgeglichen werden; die drei Regime-Werte selbst sind davon nicht betroffen.
 
 ## 1. Overall Accuracy
 
@@ -39,13 +39,15 @@ Die Overall Accuracy beantwortet die Frage: *Welcher Anteil aller auswertbaren B
 
 ```text
 Overall Accuracy = korrekte Vorhersagen / Anzahl auswertbarer Fälle
-                 = 101 / 115
-                 = 0,8783 = 87,8 %
+                 = 101 / 114
+                 = 0,8860 = 88,6 %
 ```
 
 ## 2. Macro-Average
 
 Beim Macro-Average erhält jede der sieben Funktionsklassen dasselbe Gewicht, unabhängig von ihrer Anzahl im Datensatz.
+
+Die folgenden Macro-Werte stammen aus dem klassenweisen Bericht über alle 115 Anfragen; darin wird der HTTP-Fehler als nicht korrekte Anfrage gezählt. Sie sind daher getrennt von der unten berichteten Overall Accuracy über die 114 auswertbaren Fälle zu lesen.
 
 ```text
 Macro-Precision = (0,94 + 0,86 + 1,00 + 0,81 + 1,00 + 0,92 + 0,58) / 7
@@ -63,6 +65,8 @@ Macro-F1        = (0,89 + 0,80 + 1,00 + 0,83 + 1,00 + 0,83 + 0,74) / 7
 ## 3. Weighted-Average
 
 Beim Weighted-Average wird jede Klasse mit ihrer Anzahl an Ground-Truth-Fällen gewichtet. Häufigere Klassen beeinflussen das Ergebnis daher stärker.
+
+Auch die folgenden Weighted-Werte beziehen sich auf den klassenweisen Bericht über alle 115 Anfragen und behandeln den HTTP-Fehler als nicht korrekte Anfrage.
 
 ```text
 Weighted-Metric = (n1 × Metric1 + n2 × Metric2 + ... + n7 × Metric7) / N
