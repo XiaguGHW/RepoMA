@@ -19,11 +19,7 @@ try:
 except ImportError:
     def load_dotenv(*_args, **_kwargs): pass
 
-# The connector reads BOSCH_FARM_BASE_URL at import time.
-load_dotenv()
-from llm_connector_with_prompt_caching import LLMConnector
-
-APP_DIR = Path(".bosch_chat")
+APP_DIR = Path(__file__).resolve().parent / ".bosch_chat"
 TEXT_EXTS = {".txt", ".md", ".py", ".json", ".yaml", ".yml", ".csv", ".log", ".ini", ".toml", ".xml", ".html", ".js", ".ts", ".java", ".c", ".cpp", ".h", ".sql"}
 DIRECT_ATTACH_EXTS = {".pdf", ".png", ".jpg", ".jpeg"}
 SYSTEM = "You are a careful project assistant. Use the supplied local-memory excerpts and attached files. State when evidence is insufficient. Never claim that you changed a file unless the user explicitly asked for a write operation and it was performed."
@@ -117,8 +113,12 @@ def main():
     parser = argparse.ArgumentParser(description="Bosch Farm terminal chat with local memory")
     parser.add_argument("--model", default=os.getenv("BOSCH_CHAT_MODEL", "gpt-5.5"))
     parser.add_argument("--session", default="default")
+    parser.add_argument("--env-file", help="Path to an existing .env file with Bosch Farm credentials")
     args = parser.parse_args()
-    load_dotenv()
+    # Load the chosen existing .env before importing the connector: it reads
+    # BOSCH_FARM_BASE_URL at import time. No key is copied into this tool.
+    load_dotenv(args.env_file or (Path(__file__).resolve().parent / ".env"))
+    from llm_connector_with_prompt_caching import LLMConnector
     key = os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY") or os.getenv("BOSCH_FARM_API_KEY")
     if not key:
         print("Missing BOSCH_FARM_SUBSCRIPTION_KEY in .env or environment.", file=sys.stderr); raise SystemExit(2)
@@ -166,13 +166,14 @@ def main():
 
 if __name__ == "__main__": main()
 
-# Usage (place this file beside llm_connector_with_prompt_caching.py):
-# 1) Install dependencies once:
-#    python -m pip install -r requirements_bosch_chat.txt
-# 2) Ensure .env contains BOSCH_FARM_SUBSCRIPTION_KEY (and optionally BOSCH_FARM_BASE_URL).
-# 3) Start a persistent session with any Bosch Farm model ID, for example:
-# python bosch_chat.py --model gpt-5.5 --session masterarbeit
-# python bosch_chat.py --model gemini-2.5-pro --session masterarbeit
-# python bosch_chat.py --model claude-opus-4 --session masterarbeit
-# 4) In the chat: /test, then /add "C:\\path\\to\\file.xlsx" or /add "C:\\path\\to\\file.pdf"
-# 5) Switch model without losing local memory: /model gemini-2.5-flash
+# Independent-folder usage (download this whole 07_terminal_chat folder):
+# 1) In this folder, install dependencies once:
+#    python -m pip install -r requirements.txt
+# 2) Do NOT copy or expose the Bosch key. Point to the .env you already use:
+#    python bosch_chat.py --env-file "C:\\path\\to\\your_existing\\.env" --model gemini-2.5-pro --session excel_project
+#    python bosch_chat.py --env-file "C:\\path\\to\\your_existing\\.env" --model claude-sonnet-5 --session excel_project
+# 3) Run /test. Then add material, for example:
+#    /add "C:\\path\\to\\file.xlsx"
+#    /add "C:\\path\\to\\visual_sheets.pdf"
+# 4) Switch model without losing local memory:
+#    /model gemini-2.5-flash

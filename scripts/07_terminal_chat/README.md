@@ -1,12 +1,13 @@
 # Bosch Farm Terminal Chat
 
-Put these two Python files in the same directory in your Bosch project:
+Download the complete `07_terminal_chat` folder anywhere on your Bosch computer.
+The two Python files must remain together inside it:
 
 - `llm_connector_with_prompt_caching.py`
 - `bosch_chat.py`
 
-The project `.env` must contain the existing Farm secret (do not put it into
-either Python file):
+Use your existing Farm `.env` file. Do not put its secret into either Python
+file or copy it into this tool folder:
 
 ```dotenv
 BOSCH_FARM_SUBSCRIPTION_KEY=...
@@ -15,16 +16,16 @@ BOSCH_FARM_BASE_URL=https://aoai-farm.bosch-temp.com/api
 ```
 
 Install the listed packages once in the Python environment that already uses
-your Bosch proxy:
+your Bosch proxy, from inside the downloaded tool folder:
 
 ```powershell
-python -m pip install -r requirements_bosch_chat.txt
+python -m pip install -r requirements.txt
 ```
 
-Start a named persistent conversation:
+Start a named persistent conversation and point it to the existing `.env`:
 
 ```powershell
-python bosch_chat.py --model gpt-5.5 --session masterarbeit
+python bosch_chat.py --env-file "C:\\path\\to\\your_existing\\.env" --model gemini-2.5-pro --session excel_project
 ```
 
 Then first run `/test`. It must reply exactly `Bosch Farm terminal chat is
