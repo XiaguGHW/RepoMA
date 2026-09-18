@@ -169,11 +169,13 @@ if __name__ == "__main__": main()
 # Independent-folder usage (download this whole 07_terminal_chat folder):
 # 1) In this folder, install dependencies once:
 #    python -m pip install -r requirements.txt
-# 2) Do NOT copy or expose the Bosch key. Point to the .env you already use:
+# 2) Simplest setup: put your existing .env in this same folder, then run:
+#    python bosch_chat.py --model gemini-2.5-pro --session excel_project
+# 3) Alternatively, keep .env elsewhere and point to it without copying the key:
 #    python bosch_chat.py --env-file "C:\\path\\to\\your_existing\\.env" --model gemini-2.5-pro --session excel_project
 #    python bosch_chat.py --env-file "C:\\path\\to\\your_existing\\.env" --model claude-sonnet-5 --session excel_project
-# 3) Run /test. Then add material, for example:
+# 4) Run /test. Then add material, for example:
 #    /add "C:\\path\\to\\file.xlsx"
 #    /add "C:\\path\\to\\visual_sheets.pdf"
-# 4) Switch model without losing local memory:
+# 5) Switch model without losing local memory:
 #    /model gemini-2.5-flash
