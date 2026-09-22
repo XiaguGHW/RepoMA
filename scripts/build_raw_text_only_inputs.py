@@ -161,7 +161,13 @@ def read_dataset(path: Path, include_prompt_engineering: bool) -> list[dict[str,
             continue
         seen_paths.add(path_key)
         label = clean(row.get(identity_column)) if identity_column else ""
-        rows.append({"bg_folder": label or folder_path.name, "folder_path": str(folder_path)})
+        rows.append({
+            "bg_folder": label or folder_path.name,
+            "folder_path": str(folder_path),
+            # Carry this audit flag into raw_text_manifest.xlsx so Step 2 can
+            # enforce the independent-final-test exclusion again if needed.
+            "prompt_engineering": clean(row.get(prompt_column)) if prompt_column else "",
+        })
     if excluded:
         logging.info("Excluded %d prompt-engineering dataset row(s).", excluded)
     return rows
@@ -368,7 +374,10 @@ def extract_bg(
     output_path = text_dir / f"{safe_name(bg_name)}.txt"
     source_rows: list[dict[str, Any]] = []
     if not bg_folder.is_dir():
-        return ({"BG_Folder": bg_name, "Data_Folder_Path": str(bg_folder), "Output_Text_File": "", "Status": "SKIPPED_BG_FOLDER_NOT_AVAILABLE", "Source_File_Count": 0, "Text_Characters": 0}, source_rows)
+        return ({"BG_Folder": bg_name, "Data_Folder_Path": str(bg_folder),
+                 "prompt_engineering": item.get("prompt_engineering", ""),
+                 "Output_Text_File": "", "Status": "SKIPPED_BG_FOLDER_NOT_AVAILABLE",
+                 "Source_File_Count": 0, "Text_Characters": 0}, source_rows)
 
     files, skipped_rows = supported_files(bg_folder, args.skip_image_folders)
     for row in skipped_rows:
@@ -400,7 +409,9 @@ def extract_bg(
     output_path.write_text("\n".join(sections), encoding="utf-8")
     text_characters = output_path.stat().st_size
     return ({
-        "BG_Folder": bg_name, "Data_Folder_Path": str(bg_folder), "Output_Text_File": str(output_path),
+        "BG_Folder": bg_name, "Data_Folder_Path": str(bg_folder),
+        "prompt_engineering": item.get("prompt_engineering", ""),
+        "Output_Text_File": str(output_path),
         "Status": "SUCCESS", "Source_File_Count": file_count, "Text_Characters": text_characters,
     }, source_rows)
 
@@ -441,6 +452,7 @@ def run(args: argparse.Namespace) -> Path:
                 logging.exception("Unexpected BG extraction failure for %s", item["bg_folder"])
                 bg_record = {
                     "BG_Folder": item["bg_folder"], "Data_Folder_Path": item["folder_path"],
+                    "prompt_engineering": item.get("prompt_engineering", ""),
                     "Output_Text_File": "", "Status": f"UNEXPECTED_BG_ERROR: {error}",
                     "Source_File_Count": 0, "Text_Characters": 0,
                 }
