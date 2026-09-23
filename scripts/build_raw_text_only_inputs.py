@@ -16,6 +16,7 @@ because they are duplicate conversions of original material.
 from __future__ import annotations
 
 import argparse
+import csv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import logging
@@ -270,18 +271,85 @@ def image_segments(path: Path, args: argparse.Namespace) -> tuple[list[str], lis
     }]
 
 
+def read_delimited_text_table(path: Path) -> pd.DataFrame:
+    """Read CSV-like files, including files incorrectly named ``.XLS``.
+
+    Several legacy BOM exports have a .XLS suffix even though their bytes are
+    a delimited text table.  Excel displays its format/extension warning and
+    can open them after the user's *Konvertieren* choice; pandas cannot infer
+    an Excel engine for them.  Only use this path if the file genuinely looks
+    like readable text, so a binary/corrupted workbook is never silently
+    converted into garbage.
+    """
+    raw_sample = path.read_bytes()[:131_072]
+    if not raw_sample:
+        return pd.DataFrame()
+
+    last_error: Exception | None = None
+    for encoding in ("utf-8-sig", "utf-16", "cp1252", "latin-1"):
+        try:
+            decoded = raw_sample.decode(encoding)
+        except UnicodeDecodeError as error:
+            last_error = error
+            continue
+
+        # A genuine delimited export should be overwhelmingly printable and
+        # contain at least one normal field/table separator.
+        printable = sum(character.isprintable() or character in "\r\n\t" for character in decoded)
+        ratio = printable / max(len(decoded), 1)
+        if ratio < 0.92 or not any(separator in decoded for separator in (",", ";", "\t", "|")):
+            continue
+        try:
+            return pd.read_csv(
+                path,
+                sep=None,
+                engine="python",
+                header=None,
+                dtype=str,
+                keep_default_na=False,
+                encoding=encoding,
+                quoting=csv.QUOTE_MINIMAL,
+            )
+        except Exception as error:
+            last_error = error
+
+    explanation = "file does not look like a readable delimited-text table"
+    if last_error:
+        explanation += f" ({last_error})"
+    raise ValueError(explanation)
+
+
 def spreadsheet_segments(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     records: list[dict[str, str]] = []
     segments: list[str] = []
-    if path.suffix.casefold() == ".csv":
-        try:
-            frame = pd.read_csv(path, header=None, dtype=str, keep_default_na=False, encoding="utf-8-sig")
-        except UnicodeDecodeError:
-            frame = pd.read_csv(path, header=None, dtype=str, keep_default_na=False, encoding="latin-1")
-        sheets = [("CSV", frame)]
+    suffix = path.suffix.casefold()
+    if suffix == ".csv":
+        sheets = [("CSV", read_delimited_text_table(path))]
     else:
-        workbook = pd.ExcelFile(path)
-        sheets = [(sheet, pd.read_excel(path, sheet_name=sheet, header=None, dtype=str, keep_default_na=False)) for sheet in workbook.sheet_names]
+        try:
+            workbook = pd.ExcelFile(path)
+            sheets = [
+                (sheet, pd.read_excel(path, sheet_name=sheet, header=None, dtype=str, keep_default_na=False))
+                for sheet in workbook.sheet_names
+            ]
+        except Exception as workbook_error:
+            # Excel's warning "file format and extension do not match" is a
+            # common sign of this exact legacy export.  Preserve all cells by
+            # falling back to delimited text; keep the mode explicit in the
+            # manifest for traceability.
+            if suffix != ".xls":
+                raise
+            try:
+                sheets = [("TEXT_TABLE_FALLBACK", read_delimited_text_table(path))]
+                logging.info(
+                    "Read extension-mismatched .XLS as a delimited text table: %s",
+                    path,
+                )
+            except Exception as text_error:
+                raise ValueError(
+                    f"Could not read legacy .XLS as an Excel workbook ({workbook_error}) "
+                    f"or as a delimited text table ({text_error})."
+                ) from workbook_error
     for sheet_name, frame in sheets:
         lines = [f"[Spreadsheet sheet: {sheet_name}]"]
         nonempty_count = 0
@@ -303,7 +371,8 @@ def spreadsheet_segments(path: Path) -> tuple[list[str], list[dict[str, str]]]:
         text_count = sum(len(line) for line in lines)
         records.append({
             "Relative_Path": "", "File_Type": path.suffix.casefold(), "Source_Location": f"sheet {sheet_name}",
-            "Extraction_Mode": "all_nonempty_cells", "Status": "SUCCESS",
+            "Extraction_Mode": "all_nonempty_cells" if sheet_name != "TEXT_TABLE_FALLBACK" else "delimited_text_fallback",
+            "Status": "SUCCESS",
             "Text_Characters": str(text_count), "Nonempty_Cells": str(nonempty_count),
         })
     return segments, records
