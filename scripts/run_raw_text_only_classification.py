@@ -195,10 +195,10 @@ def scalar(value: Any) -> str:
 
 
 def prediction_fields(parsed: dict[str, Any] | None) -> tuple[str, str, str]:
-    """Support the P3 JSON field names without changing the model's answer."""
+    """Support P3 response variants (including ``class_label``) without changing the model answer."""
     if not parsed:
         return "", "", ""
-    primary_keys = ("primary_type", "primary_class", "functional_class", "predicted_class", "class")
+    primary_keys = ("class_label", "primary_type", "primary_class", "functional_class", "predicted_class", "class")
     secondary_keys = ("secondary_types", "secondary_type", "alternative_classes", "alternatives")
     reason_keys = ("reasoning", "rationale", "evidence", "justification", "explanation")
     primary = next((scalar(parsed[key]) for key in primary_keys if key in parsed), "")
