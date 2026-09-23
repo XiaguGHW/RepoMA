@@ -60,15 +60,33 @@ IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 class LLMConnector:
     """Universal Bosch Model Farm connector with Claude prompt caching."""
 
-    def __init__(self, model_name: str, api_key: str, session_id: str | None = None):
+    def __init__(
+        self,
+        model_name: str,
+        api_key: str,
+        session_id: str | None = None,
+        api_model_name: str | None = None,
+        openai_endpoint: str = "deployment",
+    ):
+        """Create a connector for one Model Farm deployment.
+
+        ``model_name`` is always the Model Farm deployment/model ID used in the
+        URL.  Vertex-hosted OpenAI-compatible models (for example DeepSeek R1
+        and Llama MaaS) additionally require the vendor-qualified ``model``
+        value from the Model Farm table; pass it via ``api_model_name``.
+        """
         self.model_name = model_name
+        self.api_model_name = api_model_name or model_name
+        if openai_endpoint not in {"deployment", "vertex"}:
+            raise ValueError("openai_endpoint must be 'deployment' or 'vertex'.")
+        self.openai_endpoint = openai_endpoint
         self.api_key = api_key
         self.session_id = session_id
         self.last_usage: dict[str, Any] | None = None
         self._family = self._detect_family(model_name)
         logging.info(
-            "LLMConnector (with caching) ready — model=%r, family=%r, session_id=%r",
-            model_name, self._family, self.session_id,
+            "LLMConnector (with caching) ready — model_id=%r, api_model=%r, family=%r, endpoint=%r, session_id=%r",
+            model_name, self.api_model_name, self._family, self.openai_endpoint, self.session_id,
         )
 
     @staticmethod
@@ -243,7 +261,7 @@ class LLMConnector:
         if not _OPENAI_AVAILABLE:
             return "Error: openai package must be installed — run: pip install openai"
         name = self.model_name.casefold()
-        if "glm" in name or "openai-" in name:
+        if self.openai_endpoint == "vertex" or "glm" in name or "openai-" in name:
             base_url = f"{FARM_BASE}/google/v1/endpoints/{self.model_name}/openai"
         else:
             base_url = f"{FARM_BASE}/openai/deployments/{self.model_name}"
@@ -266,7 +284,7 @@ class LLMConnector:
         max_tokens = int(generation_config.get("maxOutputTokens", 4096))
         is_reasoning_model = self.model_name.casefold().startswith(("gpt-5", "o1", "o3", "deepseek-r1"))
         request: dict[str, Any] = {
-            "model": self.model_name,
+            "model": self.api_model_name,
             "messages": messages,
             "timeout": 300,
             "extra_query": {"api-version": "2024-08-01-preview"} if "openai" in base_url else {},
@@ -479,4 +497,3 @@ class LLMConnector:
                 logging.exception("Unexpected connector error")
                 return f"Error: {error}"
         return "Error: request failed"
-
