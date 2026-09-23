@@ -46,17 +46,36 @@ PROJECT_DIR = SCRIPT_DIR.parent if SCRIPT_DIR.name.casefold() == "scripts" else 
 FIXED_PROMPT_PATH = PROJECT_DIR / "prompts" / "P3_original.txt"
 DEFAULT_OUTPUT_DIR = PROJECT_DIR / "outputs" / "raw_text_only_classification"
 
-# Deployment IDs from the Model Farm overview.  These are text-input runs: the
-# raw BG transcription is sent as text, never as an attached document/image.
+# Verified against the Model Farm overview supplied for this experiment.
+# ``id`` is the endpoint deployment/model ID.  Vertex-hosted OpenAI-compatible
+# models additionally require the vendor-qualified ``api_model`` in the JSON
+# request body.  These are text-input runs: the raw BG transcription is sent
+# as text, never as an attached document/image.
 MODEL_REGISTRY: dict[str, dict[str, str]] = {
     "gemini-pro": {"display": "Gemini 2.5 Pro", "id": "gemini-2.5-pro"},
     "gemini-flash": {"display": "Gemini 2.5 Flash", "id": "gemini-2.5-flash"},
     "claude-opus": {"display": "Claude Opus 4.8", "id": "claude-opus-4-8"},
     "claude-haiku": {"display": "Claude Haiku 4.5", "id": "claude-haiku-4-5@20251001"},
-    "gpt-4o": {"display": "GPT-4o", "id": "gpt-4o"},
-    "gpt-4o-mini": {"display": "GPT-4o mini", "id": "gpt-4o-mini"},
-    "deepseek-r1": {"display": "DeepSeek R1", "id": "deepseek-r1"},
-    "llama": {"display": "Llama 3.3 70B Instruct", "id": "llama-3.3-70B-instruct"},
+    "gpt-4o": {
+        "display": "GPT-4o (2024-11-20)",
+        "id": "askbosch-prod-farm-openai-gpt-4o-2024-11-20",
+    },
+    "gpt-4o-mini": {
+        "display": "GPT-4o mini (2024-07-18)",
+        "id": "askbosch-prod-farm-openai-gpt-4o-mini-2024-07-18",
+    },
+    "deepseek-r1": {
+        "display": "DeepSeek R1 (0528)",
+        "id": "deepseek-r1-0528-maas",
+        "api_model": "deepseek-ai/deepseek-r1-0528-maas",
+        "openai_endpoint": "vertex",
+    },
+    "llama": {
+        "display": "Llama 3.3 70B Instruct",
+        "id": "llama-3.3-70b-instruct-maas",
+        "api_model": "meta/llama-3.3-70b-instruct-maas",
+        "openai_endpoint": "vertex",
+    },
 }
 
 
@@ -83,6 +102,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--include-prompt-engineering", action="store_true",
         help="Override the independent-final-test exclusion and include prompt_engineering=yes rows when present.",
+    )
+    parser.add_argument(
+        "--skip-model-preflight", action="store_true",
+        help="Skip the one tiny connectivity check per selected model before the BG calls (not recommended).",
     )
     return parser.parse_args()
 
@@ -114,14 +137,20 @@ def find_column(frame: pd.DataFrame, candidates: tuple[str, ...]) -> str | None:
     return None
 
 
-def load_connector(model_id: str, session_id: str) -> Any:
+def load_connector(model: dict[str, str], session_id: str) -> Any:
     try:
         from llm_connector_with_prompt_caching import LLMConnector
     except ImportError as error:
         raise ImportError(
             "llm_connector_with_prompt_caching.py must be in the same scripts directory."
         ) from error
-    return LLMConnector(model_id, os.environ["BOSCH_FARM_SUBSCRIPTION_KEY"], session_id=session_id)
+    return LLMConnector(
+        model["id"],
+        os.environ["BOSCH_FARM_SUBSCRIPTION_KEY"],
+        session_id=session_id,
+        api_model_name=model.get("api_model"),
+        openai_endpoint=model.get("openai_endpoint", "deployment"),
+    )
 
 
 def read_fixed_prompt() -> str:
@@ -219,7 +248,7 @@ def manifest_records(raw_input_dir: Path, include_prompt_engineering: bool) -> l
 
 
 def classify_one(
-    record: dict[str, Any], fixed_prompt: str, model_id: str, session_id: str,
+    record: dict[str, Any], fixed_prompt: str, model: dict[str, str], session_id: str,
     raw_response_dir: Path, max_output_tokens: int,
 ) -> dict[str, Any]:
     bg_folder = str(record["BG_Folder"])
@@ -228,7 +257,7 @@ def classify_one(
         source_text = text_file.read_text(encoding="utf-8", errors="replace").strip()
         if not source_text:
             raise ValueError("Raw BG text file is empty.")
-        connector = load_connector(model_id, session_id)
+        connector = load_connector(model, session_id)
         user_message = (
             "Klassifiziere genau diese eine Baugruppe anhand des festen P3-Original-Prompts. "
             "Nutze ausschließlich den folgenden vollständigen, quellenerhaltenden Rohtext. "
@@ -261,7 +290,7 @@ def classify_one(
             "Output_Tokens": usage.get("output_tokens", usage.get("completion_tokens", "")),
         }
     except Exception as error:
-        logging.exception("Failed BG %s with model %s", bg_folder, model_id)
+        logging.exception("Failed BG %s with model %s", bg_folder, model["id"])
         return {
             **record,
             "Primary_Type": "", "Secondary_Types": "", "Model_Rationale": "",
@@ -283,6 +312,31 @@ def write_checkpoint(rows: list[dict[str, Any]], output_path: Path) -> None:
     frame.to_excel(output_path, index=False, engine="openpyxl")
 
 
+def is_model_call_error(response: Any) -> bool:
+    return str(response or "").strip().startswith(("Error:", "HTTP error", "Error after"))
+
+
+def preflight_models(aliases: list[str], run_stamp: str) -> None:
+    """Verify every requested endpoint before any of the 115-BG jobs begin."""
+    for alias in aliases:
+        model = MODEL_REGISTRY[alias]
+        connector = load_connector(model, f"raw_text_preflight_{alias}_{run_stamp}")
+        response = connector.ask_about_files(
+            file_paths=[],
+            question="Reply with exactly: OK",
+            system_prompt=None,
+            generation_config={"temperature": 0.0, "maxOutputTokens": 16},
+        )
+        if is_model_call_error(response):
+            raise RuntimeError(
+                f"Model preflight failed for {model['display']} (deployment ID: {model['id']}): {response}"
+            )
+        logging.info(
+            "Model preflight succeeded: %s | deployment=%s | api_model=%s",
+            model["display"], model["id"], model.get("api_model", model["id"]),
+        )
+
+
 def run_one_model(
     records: list[dict[str, Any]], fixed_prompt: str, model_alias: str,
     args: argparse.Namespace, run_stamp: str,
@@ -299,7 +353,7 @@ def run_one_model(
 
     with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
         futures = [
-            executor.submit(classify_one, record, fixed_prompt, model_id, session_id,
+            executor.submit(classify_one, record, fixed_prompt, model, session_id,
                             raw_response_dir, args.max_output_tokens)
             for record in records
         ]
@@ -307,6 +361,8 @@ def run_one_model(
             result = future.result()
             result.update({
                 "Run_Model": model_id, "Run_Model_Display": model["display"],
+                "Run_API_Model": model.get("api_model", model_id),
+                "Run_OpenAI_Endpoint": model.get("openai_endpoint", "deployment"),
                 "Fixed_Prompt_File": str(FIXED_PROMPT_PATH), "Run_Timestamp": run_stamp,
                 "Run_Mode": "complete_raw_text_only_no_attachments",
             })
@@ -337,6 +393,8 @@ def run(args: argparse.Namespace) -> list[Path]:
     aliases = list(MODEL_REGISTRY) if "all" in args.models else args.models
     args.output_dir.mkdir(parents=True, exist_ok=True)
     run_stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    if not args.skip_model_preflight:
+        preflight_models(aliases, run_stamp)
     return [run_one_model(records, fixed_prompt, alias, args, run_stamp) for alias in aliases]
 
 
@@ -365,11 +423,16 @@ if __name__ == "__main__":
 # Step 2a) Pilot: Gemini 2.5 Pro for the first 5 independent final-test BGs:
 # python run_raw_text_only_classification.py --raw-input-dir ".\outputs\raw_text_only_preprocessing\<raw_text_run_folder>" --models gemini-pro --max-bgs 5 --max-workers 1 --max-output-tokens 4000
 #
-# Step 2b) Full run for one selected model (recommended first full run):
+# Step 2b) Full 115-BG run, one command per required text model.  By default,
+# each command first makes one small endpoint preflight request, then starts.
 # python run_raw_text_only_classification.py --raw-input-dir ".\outputs\raw_text_only_preprocessing\<raw_text_run_folder>" --models gemini-pro --max-workers 8 --max-output-tokens 4000
+# python run_raw_text_only_classification.py --raw-input-dir ".\outputs\raw_text_only_preprocessing\<raw_text_run_folder>" --models gemini-flash --max-workers 8 --max-output-tokens 4000
+# python run_raw_text_only_classification.py --raw-input-dir ".\outputs\raw_text_only_preprocessing\<raw_text_run_folder>" --models claude-opus --max-workers 8 --max-output-tokens 4000
+# python run_raw_text_only_classification.py --raw-input-dir ".\outputs\raw_text_only_preprocessing\<raw_text_run_folder>" --models claude-haiku --max-workers 8 --max-output-tokens 4000
+# python run_raw_text_only_classification.py --raw-input-dir ".\outputs\raw_text_only_preprocessing\<raw_text_run_folder>" --models gpt-4o --max-workers 8 --max-output-tokens 4000
+# python run_raw_text_only_classification.py --raw-input-dir ".\outputs\raw_text_only_preprocessing\<raw_text_run_folder>" --models gpt-4o-mini --max-workers 8 --max-output-tokens 4000
+# python run_raw_text_only_classification.py --raw-input-dir ".\outputs\raw_text_only_preprocessing\<raw_text_run_folder>" --models deepseek-r1 --max-workers 8 --max-output-tokens 4000
+# python run_raw_text_only_classification.py --raw-input-dir ".\outputs\raw_text_only_preprocessing\<raw_text_run_folder>" --models llama --max-workers 8 --max-output-tokens 4000
 #
-# Step 2c) Full cross-model experiment: eight separate Excel result workbooks:
+# Optional one-command full cross-model experiment: eight separate Excel result workbooks:
 # python run_raw_text_only_classification.py --raw-input-dir ".\outputs\raw_text_only_preprocessing\<raw_text_run_folder>" --models all --max-workers 8 --max-output-tokens 4000
-#
-# Available --models aliases: gemini-pro, gemini-flash, claude-opus, claude-haiku,
-# gpt-4o, gpt-4o-mini, deepseek-r1, llama, all.
