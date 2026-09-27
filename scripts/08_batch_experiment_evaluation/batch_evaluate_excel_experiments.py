@@ -6,6 +6,10 @@ Batch evaluation for independent Excel classification experiments.
 Place this script in the SAME folder as the experiment .xlsx files and run:
     python batch_evaluate_excel_experiments.py
 
+Or pass one or more folders containing experiment .xlsx files.  Each folder
+receives its own Evaluation_Summary.xlsx:
+    python batch_evaluate_excel_experiments.py "C:\\path\\to\\experiment_A" "D:\\path\\to\\experiment_B"
+
 Rules:
 - Every .xlsx file is one independent experiment.
 - Only worksheet "Sheet1" is read; all other worksheets are ignored.
@@ -22,6 +26,7 @@ Rules:
 
 from pathlib import Path
 from math import isclose
+import argparse
 import re
 
 from openpyxl import load_workbook, Workbook
@@ -455,6 +460,54 @@ def auto_width(ws, min_width=10, max_width=32):
         )
 
 
+def fit_wrapped_rows(ws, min_row=1, max_row=None, min_height=15, max_height=75):
+    """Set practical row heights after column widths and text wrapping are applied.
+
+    openpyxl stores wrapped text but does not calculate Excel's automatic row
+    height.  This keeps long headers and notes readable in Excel and LibreOffice
+    without making short rows unnecessarily tall.
+    """
+    if max_row is None:
+        max_row = ws.max_row
+
+    for row in range(min_row, max_row + 1):
+        required_lines = 1
+        for cell in ws[row]:
+            if cell.value is None or not cell.alignment.wrap_text:
+                continue
+
+            column_letter = get_column_letter(cell.column)
+            if ws.column_dimensions[column_letter].hidden:
+                continue
+
+            width = ws.column_dimensions[column_letter].width or 10
+            chars_per_line = max(int(width * 1.1), 1)
+            required_lines = max(
+                required_lines,
+                max(
+                    (len(line) + chars_per_line - 1) // chars_per_line
+                    for line in str(cell.value).splitlines() or [""]
+                ),
+            )
+
+        ws.row_dimensions[row].height = min(
+            max(min_height, required_lines * 15),
+            max_height,
+        )
+
+
+def print_progress(current, total, label, width=28):
+    """Render one compact terminal progress bar without extra dependencies."""
+    fraction = current / total if total else 1.0
+    filled = round(width * fraction)
+    bar = "#" * filled + "-" * (width - filled)
+    print(
+        f"\r{label} [{bar}] {current}/{total} ({fraction:.0%})",
+        end="\n" if current >= total else "",
+        flush=True,
+    )
+
+
 def extract_experiment_sheet_base(filename_or_stem):
     """
     Extract a compact sheet name from experiment filenames like:
@@ -868,6 +921,8 @@ def write_experiment_sheet(wb, res, used_sheet_names):
             ws.column_dimensions[get_column_letter(col)].width or 12,
             22,
         )
+    fit_wrapped_rows(ws)
+    ws.row_dimensions[1].height = 24
 
     return sheet_name
 
@@ -890,7 +945,8 @@ def write_output(results, output_path):
     ]
     ws.append(headers)
     style_header_range(ws, 1, 1, len(headers))
-    ws.freeze_panes = "A2"
+    # Keep experiment identity visible while horizontally reading the 27 metrics.
+    ws.freeze_panes = "C2"
     ws.sheet_view.showGridLines = False
 
     for res in results:
@@ -921,6 +977,8 @@ def write_output(results, output_path):
     auto_width(ws, 10, 28)
     ws.column_dimensions["A"].width = 36
     ws.column_dimensions["B"].width = 28
+    fit_wrapped_rows(ws)
+    ws.row_dimensions[1].height = max(ws.row_dimensions[1].height or 0, 30)
 
     ws = wb.create_sheet("Config")
     ws.append(["Setting", "Value"])
@@ -947,12 +1005,13 @@ def write_output(results, output_path):
     ws.column_dimensions["A"].width = 32
     ws.column_dimensions["B"].width = 100
     ws.sheet_view.showGridLines = False
+    fit_wrapped_rows(ws)
+    ws.row_dimensions[1].height = max(ws.row_dimensions[1].height or 0, 24)
 
     wb.save(output_path)
 
 
-def main():
-    base_dir = Path(__file__).resolve().parent
+def process_directory(base_dir: Path, directory_index: int, directory_total: int) -> bool:
     output_path = base_dir / OUTPUT_FILENAME
 
     input_files = sorted(
@@ -960,14 +1019,17 @@ def main():
         if p.name != OUTPUT_FILENAME and not p.name.startswith("~$")
     )
     if not input_files:
-        raise SystemExit(f"No .xlsx experiment files found in: {base_dir}")
+        print(f"SKIP [{directory_index}/{directory_total}]: no .xlsx experiment files in {base_dir}")
+        return False
 
+    print(f"\nFolder [{directory_index}/{directory_total}]: {base_dir}")
     print(f"Found {len(input_files)} experiment file(s).")
     print(f"Only worksheet {INPUT_SHEET_NAME!r} will be read.")
 
     results = []
     for i, path in enumerate(input_files, 1):
-        print(f"[{i}/{len(input_files)}] {path.name}")
+        print_progress(i - 1, len(input_files), "Progress")
+        print(f"\n[{i}/{len(input_files)}] {path.name}")
 
         rows, columns = read_experiment(path)
         overall = overall_accuracies(rows)
@@ -1014,11 +1076,62 @@ def main():
             f"accepted={overall['accepted_accuracy']:.1%} | "
             f"sklearn={'PASS' if all(x.endswith('PASS') for x in checks) else 'CHECK'}"
         )
+        print_progress(i, len(input_files), "Progress")
 
     # Output is written only after all experiments pass the mandatory sklearn checks.
     write_output(results, output_path)
-    print(f"DONE: {output_path}")
+    print(f"DONE [{directory_index}/{directory_total}]: {output_path}")
+    return True
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Evaluate every experiment .xlsx in one or more folders. "
+            "Each selected folder receives its own Evaluation_Summary.xlsx."
+        )
+    )
+    parser.add_argument(
+        "input_dirs",
+        nargs="*",
+        metavar="INPUT_DIR",
+        help=(
+            "Folder containing experiment .xlsx files. Use absolute paths for "
+            "folders outside the script directory."
+        ),
+    )
+    args = parser.parse_args()
+
+    raw_directories = args.input_dirs or [str(Path(__file__).resolve().parent)]
+    directories = []
+    seen_directories = set()
+    for raw_directory in raw_directories:
+        directory = Path(raw_directory).expanduser().resolve()
+        if not directory.is_dir():
+            parser.error(f"Input directory does not exist or is not a folder: {directory}")
+        if directory not in seen_directories:
+            directories.append(directory)
+            seen_directories.add(directory)
+
+    completed = sum(
+        process_directory(directory, index, len(directories))
+        for index, directory in enumerate(directories, 1)
+    )
+    if not completed:
+        raise SystemExit("No Evaluation_Summary.xlsx was created because no input .xlsx files were found.")
+    print(f"\nCOMPLETE: {completed}/{len(directories)} folder(s) processed successfully.")
 
 
 if __name__ == "__main__":
     main()
+
+
+# Examples (Windows PowerShell)
+# Default: process .xlsx files in this script's own folder.
+# python .\batch_evaluate_excel_experiments.py
+#
+# Process several absolute folder paths; each folder receives its own
+# Evaluation_Summary.xlsx.
+# python .\batch_evaluate_excel_experiments.py `
+#   "C:\\Users\\<Name>\\RepoMA\\outputs\\valid_results_10_runs\\gemini-2.5-pro_pdf_P3_optimized_10_runs" `
+#   "C:\\Users\\<Name>\\RepoMA\\outputs\\pdf_cross_model"
