@@ -589,6 +589,7 @@ def make_unique_sheet_name(raw_name, used_names):
 
 def add_overview_counts(ws, res, start_row=1, start_col=1):
     overall = res["overall"]
+    total_metrics = res["scopes"]["Gesamt"]["metrics"]
     section_title(ws, start_row, start_col, "Experiment Overview / Counts", span=4)
     header_row = start_row + 1
     headers = ["Metric", "Value", "Notes"]
@@ -599,6 +600,10 @@ def add_overview_counts(ws, res, start_row=1, start_col=1):
     values = [
         ("N total", overall["n_total"], "Valid Ground Truth + Regime rows"),
         ("N auswertbar", overall["n_auswertbar"], "Nonblank prediction"),
+        ("Total TP", total_metrics["sum_TP"], "Sum across 7 one-vs-rest classes; strict primary GT"),
+        ("Total TN", total_metrics["sum_TN"], "Sum across 7 one-vs-rest classes; strict primary GT"),
+        ("Total FP", total_metrics["sum_FP"], "Sum across 7 one-vs-rest classes; strict primary GT"),
+        ("Total FN", total_metrics["sum_FN"], "Sum across 7 one-vs-rest classes; strict primary GT"),
         ("Strict Correct", overall["strict_correct"], "Prediction exactly matches primary Ground Truth"),
         (
             "Accepted-Set Correct",
