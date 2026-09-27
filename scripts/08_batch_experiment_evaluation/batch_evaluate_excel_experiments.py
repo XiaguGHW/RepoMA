@@ -451,6 +451,31 @@ def auto_width(ws, min_width=10, max_width=32):
         )
 
 
+def extract_experiment_sheet_base(filename_or_stem):
+    """
+    Extract a compact sheet name from experiment filenames like:
+      prompt_development_P1_gemini-2.5-pro_caching_2026-09-15_17-15-50.xlsx
+      -> P1_gemini-2.5-pro
+
+      prompt_development_P4_claude-haiku-4-5_20251001_caching_...
+      -> P4_claude-haiku-4-5_20251001
+
+    If the expected pattern is not found, fall back to the original stem.
+    """
+    name = Path(filename_or_stem).stem
+    match = re.search(
+        r"(?:^|_)P([1-4])_(.+?)_caching(?:_|$)",
+        name,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return name
+
+    prompt_id = f"P{match.group(1)}"
+    model_name = match.group(2).strip("_")
+    return f"{prompt_id}_{model_name}"
+
+
 def make_unique_sheet_name(raw_name, used_names):
     cleaned = re.sub(r"[\[\]:*?/\\]", "_", raw_name).strip().strip("'")
     if not cleaned:
@@ -651,7 +676,8 @@ def add_non_evaluable(ws, res, start_row):
 
 
 def write_experiment_sheet(wb, res, used_sheet_names):
-    sheet_name = make_unique_sheet_name(res["experiment"], used_sheet_names)
+    sheet_base = extract_experiment_sheet_base(res["source_filename"])
+    sheet_name = make_unique_sheet_name(sheet_base, used_sheet_names)
     res["output_sheet"] = sheet_name
     ws = wb.create_sheet(sheet_name)
     ws.freeze_panes = "A2"
@@ -749,6 +775,7 @@ def write_output(results, output_path):
         ("sklearn", "Mandatory independent verification for confusion matrix, accuracy, class P/R/F1, macro and weighted P/R/F1 for E1/E2/M/Gesamt"),
         ("Pie chart", "Gesamt Sum TP/TN/FP/FN; colors TP #00B050, TN #00B0F0, FP #FF0000, FN #FF66FF"),
         ("Experiment sheets", "One sheet per input Excel with all metrics/matrices for that experiment"),
+        ("Experiment sheet naming", "Extract P1/P2/P3/P4 + model name from filename; fallback to original stem; duplicate names get _2, _3, ..."),
     ]
     for setting, value in config_rows:
         ws.append([setting, value])
