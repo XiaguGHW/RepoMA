@@ -164,11 +164,16 @@ def read_experiment(path: Path):
         alt_col = find_header_column(ws, ALTERNATIVE_GT_HEADERS)
 
         rows = []
-        for r in range(2, ws.max_row + 1):
-            raw_gt = ws.cell(r, gt_col).value
-            raw_regime = ws.cell(r, regime_col).value
-            raw_pred = ws.cell(r, pred_col).value
-            raw_alt = ws.cell(r, alt_col).value if alt_col else None
+        for r, row_cells in enumerate(ws.iter_rows(min_row=2), start=2):
+            def row_value(col_idx):
+                if not col_idx or col_idx < 1 or col_idx > len(row_cells):
+                    return None
+                return row_cells[col_idx - 1].value
+
+            raw_gt = row_value(gt_col)
+            raw_regime = row_value(regime_col)
+            raw_pred = row_value(pred_col)
+            raw_alt = row_value(alt_col) if alt_col else None
 
             if all(norm_text(x) == "" for x in (raw_gt, raw_regime, raw_pred, raw_alt)):
                 continue
