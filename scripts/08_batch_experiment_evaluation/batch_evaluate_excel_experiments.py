@@ -455,7 +455,7 @@ HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
 HEADER_FONT = Font(bold=True, color="FFFFFF")
 SUBHEADER_FILL = PatternFill("solid", fgColor="D9EAF7")
 SUBHEADER_FONT = Font(bold=True)
-DIAGONAL_FILL = PatternFill("solid", fgColor="E2F0D9")
+DIAGONAL_FILL = PatternFill("solid", fgColor="DDEBF7")
 SECTION_FILL = PatternFill("solid", fgColor="DDEBF7")
 SECTION_FONT = Font(bold=True, size=12)
 PERCENT_FMT = "0.0%"
