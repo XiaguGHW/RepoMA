@@ -25,16 +25,23 @@ from math import isclose
 import re
 
 from openpyxl import load_workbook, Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.chart import PieChart, Reference
+from openpyxl.chart.label import DataLabelList
+from openpyxl.chart.marker import DataPoint
+from openpyxl.chart.shapes import GraphicalProperties
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 try:
     import numpy as np
+    from sklearn.metrics import accuracy_score
     from sklearn.metrics import confusion_matrix as sk_confusion_matrix
     from sklearn.metrics import precision_recall_fscore_support
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
+except ImportError as exc:
+    raise SystemExit(
+        "This script requires numpy and scikit-learn for mandatory metric verification. "
+        "Install them with: pip install numpy scikit-learn"
+    ) from exc
 
 
 OUTPUT_FILENAME = "Evaluation_Summary.xlsx"
@@ -84,6 +91,14 @@ FALLBACK_GT_COL = 6
 FALLBACK_REGIME_COL = 7
 FALLBACK_PRED_COL = 9
 VALID_REGIMES = ("E1", "E2", "M")
+SCOPES = ("E1", "E2", "M", "Gesamt")
+
+PIE_COLORS = {
+    "TP": "00B050",
+    "TN": "00B0F0",
+    "FP": "FF0000",
+    "FN": "FF66FF",
+}
 
 
 def norm_text(value) -> str:
@@ -310,7 +325,7 @@ def overall_accuracies(rows):
             raise ValueError(f"Row {r['excel_row']}: unknown GT {r['raw_gt']!r}")
         if str(r["pred"]).startswith("__UNKNOWN__"):
             raise ValueError(f"Row {r['excel_row']}: unknown prediction {r['raw_pred']!r}")
-        if r["alt"] is not None and str(r["alt"]).startswith("__UNKNOWN__"):
+        if r["regime"] == "M" and r["alt"] is not None and str(r["alt"]).startswith("__UNKNOWN__"):
             raise ValueError(f"Row {r['excel_row']}: unknown alternative GT {r['raw_alt']!r}")
 
     strict_correct = sum(r["pred"] == r["gt"] for r in evaluated)
@@ -340,15 +355,19 @@ def overall_accuracies(rows):
 
 
 def sklearn_cross_check(rows, custom_cm, custom_metrics, context):
-    if not SKLEARN_AVAILABLE:
-        return "SKIPPED (sklearn not installed)"
-
+    """Independent sklearn validation of the custom strict multiclass metrics."""
     y_true = [r["gt"] for r in rows]
     y_pred = [r["pred"] for r in rows]
 
     sk_cm = sk_confusion_matrix(y_true, y_pred, labels=CANONICAL_LABELS)
     if not np.array_equal(np.array(custom_cm, dtype=int), sk_cm):
         raise AssertionError(f"{context}: custom confusion matrix != sklearn")
+
+    # For an empty scope, custom accuracy is defined as 0.0.
+    if rows:
+        sk_acc = float(accuracy_score(y_true, y_pred))
+        if not isclose(custom_metrics["accuracy"], sk_acc, abs_tol=1e-12):
+            raise AssertionError(f"{context}: accuracy mismatch")
 
     p, r, f1, support = precision_recall_fscore_support(
         y_true,
@@ -385,22 +404,45 @@ def sklearn_cross_check(rows, custom_cm, custom_metrics, context):
 
     return "PASS"
 
-
-HEADER_FILL = PatternFill("solid", fgColor="D9EAF7")
-SUBHEADER_FILL = PatternFill("solid", fgColor="EDEDED")
-HEADER_FONT = Font(bold=True)
+HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
+HEADER_FONT = Font(bold=True, color="FFFFFF")
+SUBHEADER_FILL = PatternFill("solid", fgColor="D9EAF7")
+SUBHEADER_FONT = Font(bold=True)
+SECTION_FILL = PatternFill("solid", fgColor="DDEBF7")
+SECTION_FONT = Font(bold=True, size=12)
 PERCENT_FMT = "0.0%"
+THIN_GRAY = Side(style="thin", color="D9E1F2")
+TABLE_BORDER = Border(left=THIN_GRAY, right=THIN_GRAY, top=THIN_GRAY, bottom=THIN_GRAY)
 
 
-def style_header(ws, row=1):
-    for cell in ws[row]:
+def style_header_range(ws, row, start_col, end_col, dark=True):
+    fill = HEADER_FILL if dark else SUBHEADER_FILL
+    font = HEADER_FONT if dark else SUBHEADER_FONT
+    for col in range(start_col, end_col + 1):
+        cell = ws.cell(row, col)
         if cell.value is not None:
-            cell.fill = HEADER_FILL
-            cell.font = HEADER_FONT
-            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.fill = fill
+            cell.font = font
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = TABLE_BORDER
 
 
-def auto_width(ws, min_width=10, max_width=40):
+def style_table_cells(ws, min_row, max_row, min_col, max_col):
+    for row in ws.iter_rows(min_row=min_row, max_row=max_row, min_col=min_col, max_col=max_col):
+        for cell in row:
+            cell.border = TABLE_BORDER
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+
+
+def section_title(ws, row, col, text, span=6):
+    ws.cell(row, col, text)
+    for c in range(col, col + span):
+        ws.cell(row, c).fill = SECTION_FILL
+        ws.cell(row, c).font = SECTION_FONT
+    return row
+
+
+def auto_width(ws, min_width=10, max_width=32):
     for col_cells in ws.columns:
         col_idx = col_cells[0].column
         max_len = max(len(str(c.value)) if c.value is not None else 0 for c in col_cells)
@@ -409,158 +451,311 @@ def auto_width(ws, min_width=10, max_width=40):
         )
 
 
+def make_unique_sheet_name(raw_name, used_names):
+    cleaned = re.sub(r"[\[\]:*?/\\]", "_", raw_name).strip().strip("'")
+    if not cleaned:
+        cleaned = "Experiment"
+    cleaned = cleaned[:31]
+
+    candidate = cleaned
+    counter = 2
+    while candidate.casefold() in used_names:
+        suffix = f"_{counter}"
+        candidate = f"{cleaned[:31-len(suffix)]}{suffix}"
+        counter += 1
+    used_names.add(candidate.casefold())
+    return candidate
+
+
+def add_overall_block(ws, res, start_row=1, start_col=1):
+    overall = res["overall"]
+    section_title(ws, start_row, start_col, "Overall", span=4)
+    headers = ["Metric", "Value", "Count/Status", "Notes"]
+    header_row = start_row + 1
+    for j, h in enumerate(headers, start=start_col):
+        ws.cell(header_row, j, h)
+    style_header_range(ws, header_row, start_col, start_col + 3)
+
+    values = [
+        ("Total cases", overall["n_total"], "", "Valid Ground Truth + Regime rows"),
+        ("Auswertbar", overall["n_auswertbar"], "", "Nonblank prediction"),
+        ("Nicht auswertbar", overall["n_nicht_auswertbar"], "", "Blank prediction"),
+        ("Coverage", overall["coverage"], "", "Auswertbar / Total"),
+        ("Strict Overall Accuracy", overall["strict_accuracy"], overall["strict_correct"], "Primary Ground Truth only"),
+        ("Accepted-Set Overall Accuracy", overall["accepted_accuracy"], overall["accepted_correct"], "Primary GT + alternative GT for M"),
+        ("sklearn verification", res["sklearn_status"], "", "E1 / E2 / M / Gesamt"),
+    ]
+    row = header_row + 1
+    for metric, value, count, notes in values:
+        ws.cell(row, start_col, metric)
+        ws.cell(row, start_col + 1, value)
+        ws.cell(row, start_col + 2, count)
+        ws.cell(row, start_col + 3, notes)
+        if metric in ("Coverage", "Strict Overall Accuracy", "Accepted-Set Overall Accuracy"):
+            ws.cell(row, start_col + 1).number_format = PERCENT_FMT
+        row += 1
+    style_table_cells(ws, header_row, row - 1, start_col, start_col + 3)
+    return row
+
+
+def add_pie_chart(ws, res, anchor="F2"):
+    m = res["scopes"]["Gesamt"]["metrics"]
+    start_row = 2
+    label_col = 27
+    value_col = 28
+    pie_rows = [
+        ("TP", m["sum_TP"]),
+        ("TN", m["sum_TN"]),
+        ("FP", m["sum_FP"]),
+        ("FN", m["sum_FN"]),
+    ]
+    for i, (label, value) in enumerate(pie_rows, start=start_row):
+        ws.cell(i, label_col, label)
+        ws.cell(i, value_col, value)
+
+    labels = Reference(ws, min_col=label_col, min_row=start_row, max_row=start_row + 3)
+    data = Reference(ws, min_col=value_col, min_row=start_row, max_row=start_row + 3)
+
+    chart = PieChart()
+    chart.add_data(data, titles_from_data=False)
+    chart.set_categories(labels)
+    chart.title = None
+    chart.height = 9.2
+    chart.width = 13.5
+    chart.legend.position = "b"
+    chart.dataLabels = DataLabelList()
+    chart.dataLabels.showVal = True
+    chart.dataLabels.showLegendKey = False
+    chart.dataLabels.showPercent = False
+    chart.dataLabels.showCatName = False
+    chart.dataLabels.showLeaderLines = True
+    chart.dataLabels.dLblPos = "outEnd"
+    chart.series[0].data_points = [
+        DataPoint(idx=i, spPr=GraphicalProperties(solidFill=PIE_COLORS[label]))
+        for i, (label, _) in enumerate(pie_rows)
+    ]
+    ws.add_chart(chart, anchor)
+    ws.column_dimensions["AA"].hidden = True
+    ws.column_dimensions["AB"].hidden = True
+
+
+def add_regime_summary(ws, res, start_row):
+    section_title(ws, start_row, 1, "Regime / Gesamt Metrics", span=15)
+    row = start_row + 1
+    headers = [
+        "Scope", "N auswertbar", "Correct", "Strict Accuracy",
+        "Macro Precision", "Macro Recall", "Macro F1",
+        "Weighted Precision", "Weighted Recall", "Weighted F1",
+        "Sum TP", "Sum TN", "Sum FP", "Sum FN", "sklearn",
+    ]
+    for j, h in enumerate(headers, start=1):
+        ws.cell(row, j, h)
+    style_header_range(ws, row, 1, len(headers))
+
+    for scope in SCOPES:
+        m = res["scopes"][scope]["metrics"]
+        ws.append([
+            scope, m["n"], m["correct"], m["accuracy"],
+            m["macro_precision"], m["macro_recall"], m["macro_f1"],
+            m["weighted_precision"], m["weighted_recall"], m["weighted_f1"],
+            m["sum_TP"], m["sum_TN"], m["sum_FP"], m["sum_FN"],
+            res["scopes"][scope]["sklearn_status"],
+        ])
+        current = ws.max_row
+        for c in range(4, 11):
+            ws.cell(current, c).number_format = PERCENT_FMT
+
+    style_table_cells(ws, row, ws.max_row, 1, len(headers))
+    return ws.max_row + 2
+
+
+def add_confusion_matrix(ws, scope, cm, start_row, start_col=1):
+    section_title(ws, start_row, start_col, f"{scope} Confusion Matrix — Strict Ground Truth", span=8)
+    header_row = start_row + 1
+    ws.cell(header_row, start_col, "True \\ Pred")
+    for j, label in enumerate(CANONICAL_LABELS, start=start_col + 1):
+        ws.cell(header_row, j, label)
+    style_header_range(ws, header_row, start_col, start_col + len(CANONICAL_LABELS), dark=False)
+
+    for i, label in enumerate(CANONICAL_LABELS):
+        r = header_row + 1 + i
+        ws.cell(r, start_col, label)
+        ws.cell(r, start_col).font = SUBHEADER_FONT
+        ws.cell(r, start_col).fill = SUBHEADER_FILL
+        for j, value in enumerate(cm[i], start=start_col + 1):
+            ws.cell(r, j, value)
+    last_row = header_row + len(CANONICAL_LABELS)
+    style_table_cells(ws, header_row, last_row, start_col, start_col + len(CANONICAL_LABELS))
+    return last_row + 2
+
+
+def add_class_metrics(ws, scope, class_metrics, start_row, start_col=1):
+    section_title(ws, start_row, start_col, f"{scope} Class Metrics", span=10)
+    header_row = start_row + 1
+    headers = [
+        "Class", "Support", "TP", "TN", "FP", "FN",
+        "OvR Accuracy", "Precision", "Recall", "F1",
+    ]
+    for j, h in enumerate(headers, start=start_col):
+        ws.cell(header_row, j, h)
+    style_header_range(ws, header_row, start_col, start_col + len(headers) - 1)
+
+    for i, c in enumerate(class_metrics, start=1):
+        r = header_row + i
+        vals = [
+            c["class"], c["support"], c["TP"], c["TN"], c["FP"], c["FN"],
+            c["accuracy_ovr"], c["precision"], c["recall"], c["f1"],
+        ]
+        for j, value in enumerate(vals, start=start_col):
+            ws.cell(r, j, value)
+        for j in range(start_col + 6, start_col + 10):
+            ws.cell(r, j).number_format = PERCENT_FMT
+
+    last_row = header_row + len(class_metrics)
+    style_table_cells(ws, header_row, last_row, start_col, start_col + len(headers) - 1)
+    return last_row + 2
+
+
+def add_non_evaluable(ws, res, start_row):
+    bad_rows = []
+    for r in res["rows"]:
+        if not r["row_valid"]:
+            reason = r["issue"]
+        elif r["pred"] is None:
+            reason = "Predicted_Label blank -> nicht auswertbar"
+        else:
+            continue
+        bad_rows.append((r, reason))
+
+    section_title(ws, start_row, 1, f"Nicht auswertbar ({len(bad_rows)})", span=7)
+    header_row = start_row + 1
+    headers = ["Excel row", "Regime", "Ground Truth", "Prediction", "Alternative GT", "Reason", "Source file"]
+    for j, h in enumerate(headers, start=1):
+        ws.cell(header_row, j, h)
+    style_header_range(ws, header_row, 1, len(headers))
+
+    row = header_row + 1
+    for r, reason in bad_rows:
+        vals = [
+            r["excel_row"], r["raw_regime"], r["raw_gt"], r["raw_pred"],
+            r["raw_alt"], reason, res["source_filename"],
+        ]
+        for j, value in enumerate(vals, start=1):
+            ws.cell(row, j, value)
+        row += 1
+    if not bad_rows:
+        ws.cell(row, 1, "None")
+        row += 1
+    style_table_cells(ws, header_row, row - 1, 1, len(headers))
+    return row + 1
+
+
+def write_experiment_sheet(wb, res, used_sheet_names):
+    sheet_name = make_unique_sheet_name(res["experiment"], used_sheet_names)
+    res["output_sheet"] = sheet_name
+    ws = wb.create_sheet(sheet_name)
+    ws.freeze_panes = "A2"
+    ws.sheet_view.showGridLines = False
+
+    ws["A1"] = res["experiment"]
+    ws["A1"].font = Font(bold=True, size=14)
+    ws["A1"].alignment = Alignment(vertical="center")
+
+    row = add_overall_block(ws, res, start_row=3, start_col=1)
+    add_pie_chart(ws, res, anchor="F2")
+
+    row = max(row + 1, 14)
+    row = add_regime_summary(ws, res, row)
+
+    for scope in SCOPES:
+        row = add_confusion_matrix(ws, scope, res["scopes"][scope]["cm"], row, 1)
+        row = add_class_metrics(ws, scope, res["scopes"][scope]["metrics"]["class_metrics"], row, 1)
+
+    add_non_evaluable(ws, res, row)
+
+    auto_width(ws, 10, 28)
+    ws.column_dimensions["A"].width = 30
+    for col in range(2, 16):
+        ws.column_dimensions[get_column_letter(col)].width = min(
+            ws.column_dimensions[get_column_letter(col)].width or 12, 22
+        )
+    return sheet_name
+
+
 def write_output(results, output_path):
     wb = Workbook()
     wb.remove(wb.active)
+    used_sheet_names = {"experiment_summary", "config"}
 
     ws = wb.create_sheet("Experiment_Summary")
-    ws.append([
-        "Experiment", "N total", "N auswertbar", "N nicht auswertbar", "Coverage",
+    headers = [
+        "Experiment", "Sheet", "N total", "N auswertbar", "N nicht auswertbar", "Coverage",
         "Strict Overall Correct", "Strict Overall Accuracy",
         "Accepted-Set Correct", "Accepted-Set Overall Accuracy",
-        "E1 N", "E1 Accuracy", "E1 Macro Precision", "E1 Macro Recall", "E1 Macro F1", "E1 Weighted F1",
-        "E2 N", "E2 Accuracy", "E2 Macro Precision", "E2 Macro Recall", "E2 Macro F1", "E2 Weighted F1",
-        "M N", "M Accuracy", "M Macro Precision", "M Macro Recall", "M Macro F1", "M Weighted F1",
-        "Gesamt N", "Gesamt Accuracy", "Gesamt Macro Precision", "Gesamt Macro Recall", "Gesamt Macro F1", "Gesamt Weighted F1",
-        "sklearn verification", "Alternative-GT column detected",
-    ])
-    style_header(ws)
+        "E1 N", "E1 Accuracy", "E1 Macro F1", "E1 Weighted F1",
+        "E2 N", "E2 Accuracy", "E2 Macro F1", "E2 Weighted F1",
+        "M N", "M Accuracy", "M Macro F1", "M Weighted F1",
+        "Gesamt N", "Gesamt Accuracy", "Gesamt Macro F1", "Gesamt Weighted F1",
+        "sklearn verification",
+    ]
+    ws.append(headers)
+    style_header_range(ws, 1, 1, len(headers))
     ws.freeze_panes = "A2"
+    ws.sheet_view.showGridLines = False
+
+    for res in results:
+        write_experiment_sheet(wb, res, used_sheet_names)
 
     for res in results:
         overall = res["overall"]
         row = [
-            res["experiment"],
-            overall["n_total"],
-            overall["n_auswertbar"],
-            overall["n_nicht_auswertbar"],
-            overall["coverage"],
-            overall["strict_correct"],
-            overall["strict_accuracy"],
-            overall["accepted_correct"],
-            overall["accepted_accuracy"],
+            res["experiment"], res["output_sheet"], overall["n_total"],
+            overall["n_auswertbar"], overall["n_nicht_auswertbar"], overall["coverage"],
+            overall["strict_correct"], overall["strict_accuracy"],
+            overall["accepted_correct"], overall["accepted_accuracy"],
         ]
-        for scope in ("E1", "E2", "M", "Gesamt"):
+        for scope in SCOPES:
             m = res["scopes"][scope]["metrics"]
-            row.extend([
-                m["n"], m["accuracy"], m["macro_precision"], m["macro_recall"],
-                m["macro_f1"], m["weighted_f1"],
-            ])
-        row.extend([
-            res["sklearn_status"],
-            "Yes" if res["columns"]["alt_col"] else "No",
-        ])
+            row.extend([m["n"], m["accuracy"], m["macro_f1"], m["weighted_f1"]])
+        row.append(res["sklearn_status"])
         ws.append(row)
+        current = ws.max_row
+        ws.cell(current, 2).hyperlink = f"#'{res['output_sheet']}'!A1"
+        ws.cell(current, 2).style = "Hyperlink"
 
-    for col in [5,7,9,11,12,13,14,15,17,18,19,20,21,23,24,25,26,27,29,30,31,32,33]:
+    percent_cols = [6, 8, 10, 12, 13, 14, 16, 17, 18, 20, 21, 22, 24, 25, 26]
+    for col in percent_cols:
         for r in range(2, ws.max_row + 1):
             ws.cell(r, col).number_format = PERCENT_FMT
-    auto_width(ws)
-
-    ws = wb.create_sheet("Regime_Metrics")
-    ws.append([
-        "Experiment", "Scope", "N auswertbar", "Correct", "Strict Accuracy",
-        "Macro Precision", "Macro Recall", "Macro F1",
-        "Weighted Precision", "Weighted Recall", "Weighted F1",
-        "Sum TP", "Sum TN", "Sum FP", "Sum FN",
-    ])
-    style_header(ws)
-    ws.freeze_panes = "A2"
-    for res in results:
-        for scope in ("E1", "E2", "M", "Gesamt"):
-            m = res["scopes"][scope]["metrics"]
-            ws.append([
-                res["experiment"], scope, m["n"], m["correct"], m["accuracy"],
-                m["macro_precision"], m["macro_recall"], m["macro_f1"],
-                m["weighted_precision"], m["weighted_recall"], m["weighted_f1"],
-                m["sum_TP"], m["sum_TN"], m["sum_FP"], m["sum_FN"],
-            ])
-    for col in range(5, 12):
-        for r in range(2, ws.max_row + 1):
-            ws.cell(r, col).number_format = PERCENT_FMT
-    auto_width(ws)
-
-    ws = wb.create_sheet("Class_Metrics")
-    ws.append([
-        "Experiment", "Scope", "Class", "Support", "TP", "TN", "FP", "FN",
-        "One-vs-Rest Accuracy", "Precision", "Recall", "F1",
-    ])
-    style_header(ws)
-    ws.freeze_panes = "A2"
-    for res in results:
-        for scope in ("E1", "E2", "M", "Gesamt"):
-            for c in res["scopes"][scope]["metrics"]["class_metrics"]:
-                ws.append([
-                    res["experiment"], scope, c["class"], c["support"],
-                    c["TP"], c["TN"], c["FP"], c["FN"],
-                    c["accuracy_ovr"], c["precision"], c["recall"], c["f1"],
-                ])
-    for col in range(9, 13):
-        for r in range(2, ws.max_row + 1):
-            ws.cell(r, col).number_format = PERCENT_FMT
-    auto_width(ws)
-
-    ws = wb.create_sheet("Confusion_Matrices")
-    row = 1
-    for res in results:
-        for scope in ("E1", "E2", "M", "Gesamt"):
-            ws.cell(row, 1, f"{res['experiment']} — {scope} — Strict Ground Truth")
-            ws.cell(row, 1).font = Font(bold=True, size=12)
-            row += 1
-            ws.cell(row, 1, "True \\ Pred")
-            for j, label in enumerate(CANONICAL_LABELS, start=2):
-                ws.cell(row, j, label)
-            for c in ws[row][:len(CANONICAL_LABELS)+1]:
-                c.fill = SUBHEADER_FILL
-                c.font = HEADER_FONT
-            row += 1
-
-            cm = res["scopes"][scope]["cm"]
-            for i, label in enumerate(CANONICAL_LABELS):
-                ws.cell(row, 1, label)
-                ws.cell(row, 1).font = HEADER_FONT
-                for j, value in enumerate(cm[i], start=2):
-                    ws.cell(row, j, value)
-                row += 1
-            row += 2
-    auto_width(ws, 12, 30)
-
-    ws = wb.create_sheet("Nicht_Auswertbar")
-    ws.append([
-        "Experiment", "Excel row", "Regime", "Ground Truth",
-        "Prediction", "Alternative GT", "Reason",
-    ])
-    style_header(ws)
-    ws.freeze_panes = "A2"
-    for res in results:
-        for r in res["rows"]:
-            if not r["row_valid"]:
-                reason = r["issue"]
-            elif r["pred"] is None:
-                reason = "Predicted_Label blank -> nicht auswertbar"
-            else:
-                continue
-            ws.append([
-                res["experiment"], r["excel_row"], r["raw_regime"], r["raw_gt"],
-                r["raw_pred"], r["raw_alt"], reason,
-            ])
-    auto_width(ws)
+    style_table_cells(ws, 1, ws.max_row, 1, len(headers))
+    auto_width(ws, 10, 28)
+    ws.column_dimensions["A"].width = 36
+    ws.column_dimensions["B"].width = 28
 
     ws = wb.create_sheet("Config")
     ws.append(["Setting", "Value"])
-    style_header(ws)
-    ws.append(["Input worksheet", INPUT_SHEET_NAME])
-    ws.append(["Output file", OUTPUT_FILENAME])
-    ws.append(["Canonical labels", " | ".join(CANONICAL_LABELS)])
-    ws.append(["Gantry mapping", "Gantry = Multi-Achs-System (Gantry)"])
-    ws.append(["Umsetzeinheit mapping", "Umsetzeinheit = Kombinierte Einheit"])
-    ws.append(["Blank prediction", "nicht auswertbar; excluded from all classification metrics"])
-    ws.append(["E1/E2/M/Gesamt confusion matrices", "Strict primary Ground Truth"])
-    ws.append(["Strict Overall Accuracy", "Primary GT only; denominator = all auswertbar rows"])
-    ws.append(["Accepted-Set Overall Accuracy", "Primary GT + M alternative GT; denominator = all auswertbar rows"])
-    ws.append(["Calculation", "Custom pure-Python metrics are authoritative"])
-    ws.append(["sklearn", "Independent verification for E1, E2, M and Gesamt"])
-    auto_width(ws, 18, 90)
+    style_header_range(ws, 1, 1, 2)
+    config_rows = [
+        ("Input worksheet", INPUT_SHEET_NAME),
+        ("Output file", OUTPUT_FILENAME),
+        ("Canonical labels", " | ".join(CANONICAL_LABELS)),
+        ("Gantry mapping", "Gantry = Multi-Achs-System (Gantry)"),
+        ("Umsetzeinheit mapping", "Umsetzeinheit = Kombinierte Einheit"),
+        ("Blank prediction", "nicht auswertbar; excluded from all classification metrics"),
+        ("E1/E2/M/Gesamt confusion matrices", "Strict primary Ground Truth"),
+        ("Strict Overall Accuracy", "Primary GT only; denominator = all auswertbar rows"),
+        ("Accepted-Set Overall Accuracy", "Primary GT + M alternative GT; denominator = all auswertbar rows"),
+        ("Calculation", "Custom pure-Python metrics are authoritative"),
+        ("sklearn", "Mandatory independent verification for confusion matrix, accuracy, class P/R/F1, macro and weighted P/R/F1 for E1/E2/M/Gesamt"),
+        ("Pie chart", "Gesamt Sum TP/TN/FP/FN; colors TP #00B050, TN #00B0F0, FP #FF0000, FN #FF66FF"),
+        ("Experiment sheets", "One sheet per input Excel with all metrics/matrices for that experiment"),
+    ]
+    for setting, value in config_rows:
+        ws.append([setting, value])
+    style_table_cells(ws, 1, ws.max_row, 1, 2)
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 100
+    ws.sheet_view.showGridLines = False
 
     wb.save(output_path)
 
@@ -597,10 +792,12 @@ def main():
                 "evaluated": evaluated,
                 "cm": cm,
                 "metrics": metrics,
+                "sklearn_status": status,
             }
 
         results.append({
             "experiment": path.stem,
+            "source_filename": path.name,
             "rows": rows,
             "columns": columns,
             "overall": overall,
@@ -612,14 +809,13 @@ def main():
             f"    total={overall['n_total']} | "
             f"auswertbar={overall['n_auswertbar']} | "
             f"strict={overall['strict_accuracy']:.1%} | "
-            f"accepted={overall['accepted_accuracy']:.1%}"
+            f"accepted={overall['accepted_accuracy']:.1%} | "
+            f"sklearn={'PASS' if all(x.endswith('PASS') for x in checks) else 'CHECK'}"
         )
 
+    # Output is written only after all experiments pass the mandatory sklearn checks.
     write_output(results, output_path)
     print(f"DONE: {output_path}")
-
-    if not SKLEARN_AVAILABLE:
-        print("NOTE: sklearn cross-check was skipped. Install: pip install scikit-learn numpy")
 
 
 if __name__ == "__main__":
