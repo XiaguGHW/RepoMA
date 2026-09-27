@@ -94,10 +94,9 @@ VALID_REGIMES = ("E1", "E2", "M")
 SCOPES = ("E1", "E2", "M", "Gesamt")
 
 PIE_COLORS = {
-    "TP": "00B050",
-    "TN": "00B0F0",
-    "FP": "FF0000",
-    "FN": "FF66FF",
+    "Strict Correct": "00B050",
+    "Strict Wrong": "FF0000",
+    "Nicht auswertbar": "A6A6A6",
 }
 
 
@@ -492,54 +491,121 @@ def make_unique_sheet_name(raw_name, used_names):
     return candidate
 
 
-def add_overall_block(ws, res, start_row=1, start_col=1):
+def add_overview_counts(ws, res, start_row=1, start_col=1):
     overall = res["overall"]
-    section_title(ws, start_row, start_col, "Overall", span=4)
-    headers = ["Metric", "Value", "Count/Status", "Notes"]
+    section_title(ws, start_row, start_col, "Experiment Overview / Counts", span=4)
     header_row = start_row + 1
+    headers = ["Metric", "Value", "Notes"]
     for j, h in enumerate(headers, start=start_col):
         ws.cell(header_row, j, h)
-    style_header_range(ws, header_row, start_col, start_col + 3)
+    style_header_range(ws, header_row, start_col, start_col + 2)
 
     values = [
-        ("Total cases", overall["n_total"], "", "Valid Ground Truth + Regime rows"),
-        ("Auswertbar", overall["n_auswertbar"], "", "Nonblank prediction"),
-        ("Nicht auswertbar", overall["n_nicht_auswertbar"], "", "Blank prediction"),
-        ("Coverage", overall["coverage"], "", "Auswertbar / Total"),
-        ("Strict Overall Accuracy", overall["strict_accuracy"], overall["strict_correct"], "Primary Ground Truth only"),
-        ("Accepted-Set Overall Accuracy", overall["accepted_accuracy"], overall["accepted_correct"], "Primary GT + alternative GT for M"),
-        ("sklearn verification", res["sklearn_status"], "", "E1 / E2 / M / Gesamt"),
+        ("N total", overall["n_total"], "Valid Ground Truth + Regime rows"),
+        ("N auswertbar", overall["n_auswertbar"], "Nonblank prediction"),
+        ("N nicht auswertbar", overall["n_nicht_auswertbar"], "Usually blank prediction / technical failure"),
+        ("Coverage", overall["coverage"], "N auswertbar / N total"),
     ]
     row = header_row + 1
-    for metric, value, count, notes in values:
+    for metric, value, notes in values:
         ws.cell(row, start_col, metric)
         ws.cell(row, start_col + 1, value)
-        ws.cell(row, start_col + 2, count)
-        ws.cell(row, start_col + 3, notes)
-        if metric in ("Coverage", "Strict Overall Accuracy", "Accepted-Set Overall Accuracy"):
+        ws.cell(row, start_col + 2, notes)
+        if metric == "Coverage":
             ws.cell(row, start_col + 1).number_format = PERCENT_FMT
         row += 1
-    style_table_cells(ws, header_row, row - 1, start_col, start_col + 3)
-    return row
+
+    style_table_cells(ws, header_row, row - 1, start_col, start_col + 2)
+    return row + 1
 
 
-def add_pie_chart(ws, res, anchor="F2"):
+def add_primary_overall_metrics(ws, res, start_row=1, start_col=1):
+    overall = res["overall"]
     m = res["scopes"]["Gesamt"]["metrics"]
+
+    section_title(ws, start_row, start_col, "Primary Overall Metrics", span=4)
+    header_row = start_row + 1
+    headers = ["Metric", "Value", "Details"]
+    for j, h in enumerate(headers, start=start_col):
+        ws.cell(header_row, j, h)
+    style_header_range(ws, header_row, start_col, start_col + 2)
+
+    values = [
+        (
+            "Strict Overall Accuracy",
+            overall["strict_accuracy"],
+            f'{overall["strict_correct"]}/{overall["n_auswertbar"]}',
+        ),
+        (
+            "Accepted-Set Overall Accuracy",
+            overall["accepted_accuracy"],
+            f'{overall["accepted_correct"]}/{overall["n_auswertbar"]}',
+        ),
+        ("Gesamt Macro Precision", m["macro_precision"], ""),
+        ("Gesamt Macro Recall", m["macro_recall"], ""),
+        ("Gesamt Macro F1", m["macro_f1"], ""),
+        ("sklearn verification (Gesamt)", res["scopes"]["Gesamt"]["sklearn_status"], ""),
+    ]
+
+    row = header_row + 1
+    for metric, value, details in values:
+        ws.cell(row, start_col, metric)
+        ws.cell(row, start_col + 1, value)
+        ws.cell(row, start_col + 2, details)
+        if metric != "sklearn verification (Gesamt)":
+            ws.cell(row, start_col + 1).number_format = PERCENT_FMT
+        row += 1
+
+    style_table_cells(ws, header_row, row - 1, start_col, start_col + 2)
+    return row + 1
+
+
+def add_weighted_overall_metrics(ws, res, start_row=1, start_col=1):
+    m = res["scopes"]["Gesamt"]["metrics"]
+
+    section_title(ws, start_row, start_col, "Gesamt Weighted Metrics", span=4)
+    header_row = start_row + 1
+    headers = ["Metric", "Value"]
+    for j, h in enumerate(headers, start=start_col):
+        ws.cell(header_row, j, h)
+    style_header_range(ws, header_row, start_col, start_col + 1)
+
+    values = [
+        ("Gesamt Weighted Precision", m["weighted_precision"]),
+        ("Gesamt Weighted Recall", m["weighted_recall"]),
+        ("Gesamt Weighted F1", m["weighted_f1"]),
+    ]
+
+    row = header_row + 1
+    for metric, value in values:
+        ws.cell(row, start_col, metric)
+        ws.cell(row, start_col + 1, value)
+        ws.cell(row, start_col + 1).number_format = PERCENT_FMT
+        row += 1
+
+    style_table_cells(ws, header_row, row - 1, start_col, start_col + 1)
+    return row + 1
+
+
+def add_overview_pie_chart(ws, res, anchor="F2"):
+    overall = res["overall"]
+    strict_wrong = overall["n_auswertbar"] - overall["strict_correct"]
+
     start_row = 2
     label_col = 27
     value_col = 28
     pie_rows = [
-        ("TP", m["sum_TP"]),
-        ("TN", m["sum_TN"]),
-        ("FP", m["sum_FP"]),
-        ("FN", m["sum_FN"]),
+        ("Strict Correct", overall["strict_correct"]),
+        ("Strict Wrong", strict_wrong),
+        ("Nicht auswertbar", overall["n_nicht_auswertbar"]),
     ]
+
     for i, (label, value) in enumerate(pie_rows, start=start_row):
         ws.cell(i, label_col, label)
         ws.cell(i, value_col, value)
 
-    labels = Reference(ws, min_col=label_col, min_row=start_row, max_row=start_row + 3)
-    data = Reference(ws, min_col=value_col, min_row=start_row, max_row=start_row + 3)
+    labels = Reference(ws, min_col=label_col, min_row=start_row, max_row=start_row + 2)
+    data = Reference(ws, min_col=value_col, min_row=start_row, max_row=start_row + 2)
 
     chart = PieChart()
     chart.add_data(data, titles_from_data=False)
@@ -564,43 +630,53 @@ def add_pie_chart(ws, res, anchor="F2"):
     ws.column_dimensions["AB"].hidden = True
 
 
-def add_regime_summary(ws, res, start_row):
-    section_title(ws, start_row, 1, "Regime / Gesamt Metrics", span=15)
-    row = start_row + 1
-    headers = [
-        "Scope", "N auswertbar", "Correct", "Strict Accuracy",
-        "Macro Precision", "Macro Recall", "Macro F1",
-        "Weighted Precision", "Weighted Recall", "Weighted F1",
-        "Sum TP", "Sum TN", "Sum FP", "Sum FN", "sklearn",
+def add_scope_metrics(ws, res, scope, start_row, start_col=1):
+    m = res["scopes"][scope]["metrics"]
+
+    section_title(ws, start_row, start_col, f"{scope} Evaluation", span=9)
+    header_row = start_row + 1
+    headers = ["Metric", "Value"]
+    for j, h in enumerate(headers, start=start_col):
+        ws.cell(header_row, j, h)
+    style_header_range(ws, header_row, start_col, start_col + 1)
+
+    values = [
+        (f"{scope} N auswertbar", m["n"]),
+        (f"{scope} Accuracy", m["accuracy"]),
+        (f"{scope} Macro Precision", m["macro_precision"]),
+        (f"{scope} Macro Recall", m["macro_recall"]),
+        (f"{scope} Macro F1", m["macro_f1"]),
+        (f"{scope} Weighted Precision", m["weighted_precision"]),
+        (f"{scope} Weighted Recall", m["weighted_recall"]),
+        (f"{scope} Weighted F1", m["weighted_f1"]),
+        (f"{scope} sklearn verification", res["scopes"][scope]["sklearn_status"]),
     ]
-    for j, h in enumerate(headers, start=1):
-        ws.cell(row, j, h)
-    style_header_range(ws, row, 1, len(headers))
 
-    for scope in SCOPES:
-        m = res["scopes"][scope]["metrics"]
-        ws.append([
-            scope, m["n"], m["correct"], m["accuracy"],
-            m["macro_precision"], m["macro_recall"], m["macro_f1"],
-            m["weighted_precision"], m["weighted_recall"], m["weighted_f1"],
-            m["sum_TP"], m["sum_TN"], m["sum_FP"], m["sum_FN"],
-            res["scopes"][scope]["sklearn_status"],
-        ])
-        current = ws.max_row
-        for c in range(4, 11):
-            ws.cell(current, c).number_format = PERCENT_FMT
+    row = header_row + 1
+    for metric, value in values:
+        ws.cell(row, start_col, metric)
+        ws.cell(row, start_col + 1, value)
+        if metric not in (f"{scope} N auswertbar", f"{scope} sklearn verification"):
+            ws.cell(row, start_col + 1).number_format = PERCENT_FMT
+        row += 1
 
-    style_table_cells(ws, row, ws.max_row, 1, len(headers))
-    return ws.max_row + 2
+    style_table_cells(ws, header_row, row - 1, start_col, start_col + 1)
+    return row + 1
 
 
 def add_confusion_matrix(ws, scope, cm, start_row, start_col=1):
-    section_title(ws, start_row, start_col, f"{scope} Confusion Matrix — Strict Ground Truth", span=8)
+    section_title(ws, start_row, start_col, f"{scope} Confusion Matrix", span=8)
     header_row = start_row + 1
     ws.cell(header_row, start_col, "True \\ Pred")
     for j, label in enumerate(CANONICAL_LABELS, start=start_col + 1):
         ws.cell(header_row, j, label)
-    style_header_range(ws, header_row, start_col, start_col + len(CANONICAL_LABELS), dark=False)
+    style_header_range(
+        ws,
+        header_row,
+        start_col,
+        start_col + len(CANONICAL_LABELS),
+        dark=False,
+    )
 
     for i, label in enumerate(CANONICAL_LABELS):
         r = header_row + 1 + i
@@ -609,17 +685,30 @@ def add_confusion_matrix(ws, scope, cm, start_row, start_col=1):
         ws.cell(r, start_col).fill = SUBHEADER_FILL
         for j, value in enumerate(cm[i], start=start_col + 1):
             ws.cell(r, j, value)
+
     last_row = header_row + len(CANONICAL_LABELS)
-    style_table_cells(ws, header_row, last_row, start_col, start_col + len(CANONICAL_LABELS))
+    style_table_cells(
+        ws,
+        header_row,
+        last_row,
+        start_col,
+        start_col + len(CANONICAL_LABELS),
+    )
     return last_row + 2
 
 
 def add_class_metrics(ws, scope, class_metrics, start_row, start_col=1):
-    section_title(ws, start_row, start_col, f"{scope} Class Metrics", span=10)
+    section_title(ws, start_row, start_col, f"{scope} Class Metrics", span=8)
     header_row = start_row + 1
     headers = [
-        "Class", "Support", "TP", "TN", "FP", "FN",
-        "OvR Accuracy", "Precision", "Recall", "F1",
+        "Class",
+        "Support",
+        "TP",
+        "FP",
+        "FN",
+        "Precision",
+        "Recall",
+        "F1",
     ]
     for j, h in enumerate(headers, start=start_col):
         ws.cell(header_row, j, h)
@@ -628,16 +717,29 @@ def add_class_metrics(ws, scope, class_metrics, start_row, start_col=1):
     for i, c in enumerate(class_metrics, start=1):
         r = header_row + i
         vals = [
-            c["class"], c["support"], c["TP"], c["TN"], c["FP"], c["FN"],
-            c["accuracy_ovr"], c["precision"], c["recall"], c["f1"],
+            c["class"],
+            c["support"],
+            c["TP"],
+            c["FP"],
+            c["FN"],
+            c["precision"],
+            c["recall"],
+            c["f1"],
         ]
         for j, value in enumerate(vals, start=start_col):
             ws.cell(r, j, value)
-        for j in range(start_col + 6, start_col + 10):
+
+        for j in range(start_col + 5, start_col + 8):
             ws.cell(r, j).number_format = PERCENT_FMT
 
     last_row = header_row + len(class_metrics)
-    style_table_cells(ws, header_row, last_row, start_col, start_col + len(headers) - 1)
+    style_table_cells(
+        ws,
+        header_row,
+        last_row,
+        start_col,
+        start_col + len(headers) - 1,
+    )
     return last_row + 2
 
 
@@ -654,7 +756,15 @@ def add_non_evaluable(ws, res, start_row):
 
     section_title(ws, start_row, 1, f"Nicht auswertbar ({len(bad_rows)})", span=7)
     header_row = start_row + 1
-    headers = ["Excel row", "Regime", "Ground Truth", "Prediction", "Alternative GT", "Reason", "Source file"]
+    headers = [
+        "Excel row",
+        "Regime",
+        "Ground Truth",
+        "Prediction",
+        "Alternative GT",
+        "Reason",
+        "Source file",
+    ]
     for j, h in enumerate(headers, start=1):
         ws.cell(header_row, j, h)
     style_header_range(ws, header_row, 1, len(headers))
@@ -662,15 +772,22 @@ def add_non_evaluable(ws, res, start_row):
     row = header_row + 1
     for r, reason in bad_rows:
         vals = [
-            r["excel_row"], r["raw_regime"], r["raw_gt"], r["raw_pred"],
-            r["raw_alt"], reason, res["source_filename"],
+            r["excel_row"],
+            r["raw_regime"],
+            r["raw_gt"],
+            r["raw_pred"],
+            r["raw_alt"],
+            reason,
+            res["source_filename"],
         ]
         for j, value in enumerate(vals, start=1):
             ws.cell(row, j, value)
         row += 1
+
     if not bad_rows:
         ws.cell(row, 1, "None")
         row += 1
+
     style_table_cells(ws, header_row, row - 1, 1, len(headers))
     return row + 1
 
@@ -679,6 +796,7 @@ def write_experiment_sheet(wb, res, used_sheet_names):
     sheet_base = extract_experiment_sheet_base(res["source_filename"])
     sheet_name = make_unique_sheet_name(sheet_base, used_sheet_names)
     res["output_sheet"] = sheet_name
+
     ws = wb.create_sheet(sheet_name)
     ws.freeze_panes = "A2"
     ws.sheet_view.showGridLines = False
@@ -687,24 +805,65 @@ def write_experiment_sheet(wb, res, used_sheet_names):
     ws["A1"].font = Font(bold=True, size=14)
     ws["A1"].alignment = Alignment(vertical="center")
 
-    row = add_overall_block(ws, res, start_row=3, start_col=1)
-    add_pie_chart(ws, res, anchor="F2")
+    # 1) Experiment Overview / Counts
+    row = add_overview_counts(ws, res, start_row=3, start_col=1)
 
-    row = max(row + 1, 14)
-    row = add_regime_summary(ws, res, row)
+    # 2) Primary Overall Metrics
+    row = add_primary_overall_metrics(ws, res, start_row=row, start_col=1)
 
-    for scope in SCOPES:
-        row = add_confusion_matrix(ws, scope, res["scopes"][scope]["cm"], row, 1)
-        row = add_class_metrics(ws, scope, res["scopes"][scope]["metrics"]["class_metrics"], row, 1)
+    # 3) Gesamt Weighted Metrics
+    row = add_weighted_overall_metrics(ws, res, start_row=row, start_col=1)
 
+    # 4) Overall Overview Chart (right side; does not interrupt vertical flow)
+    add_overview_pie_chart(ws, res, anchor="F2")
+
+    # 5) Gesamt Confusion Matrix
+    row = add_confusion_matrix(
+        ws,
+        "Gesamt",
+        res["scopes"]["Gesamt"]["cm"],
+        start_row=row,
+        start_col=1,
+    )
+
+    # 6) Gesamt Class Metrics
+    row = add_class_metrics(
+        ws,
+        "Gesamt",
+        res["scopes"]["Gesamt"]["metrics"]["class_metrics"],
+        start_row=row,
+        start_col=1,
+    )
+
+    # 7-9) E1 / E2 / M: metrics -> confusion matrix -> class metrics
+    for scope in ("E1", "E2", "M"):
+        row = add_scope_metrics(ws, res, scope, start_row=row, start_col=1)
+        row = add_confusion_matrix(
+            ws,
+            scope,
+            res["scopes"][scope]["cm"],
+            start_row=row,
+            start_col=1,
+        )
+        row = add_class_metrics(
+            ws,
+            scope,
+            res["scopes"][scope]["metrics"]["class_metrics"],
+            start_row=row,
+            start_col=1,
+        )
+
+    # 10) Nicht auswertbar details
     add_non_evaluable(ws, res, row)
 
     auto_width(ws, 10, 28)
     ws.column_dimensions["A"].width = 30
     for col in range(2, 16):
         ws.column_dimensions[get_column_letter(col)].width = min(
-            ws.column_dimensions[get_column_letter(col)].width or 12, 22
+            ws.column_dimensions[get_column_letter(col)].width or 12,
+            22,
         )
+
     return sheet_name
 
 
@@ -773,8 +932,8 @@ def write_output(results, output_path):
         ("Accepted-Set Overall Accuracy", "Primary GT + M alternative GT; denominator = all auswertbar rows"),
         ("Calculation", "Custom pure-Python metrics are authoritative"),
         ("sklearn", "Mandatory independent verification for confusion matrix, accuracy, class P/R/F1, macro and weighted P/R/F1 for E1/E2/M/Gesamt"),
-        ("Pie chart", "Gesamt Sum TP/TN/FP/FN; colors TP #00B050, TN #00B0F0, FP #FF0000, FN #FF66FF"),
-        ("Experiment sheets", "One sheet per input Excel with all metrics/matrices for that experiment"),
+        ("Pie chart", "Strict Correct / Strict Wrong / Nicht auswertbar; colors green #00B050, red #FF0000, gray #A6A6A6"),
+        ("Experiment sheets", "Order: Counts -> Primary Overall -> Gesamt Weighted -> Gesamt CM -> Gesamt Class Metrics -> E1 -> E2 -> M -> Nicht auswertbar"),
         ("Experiment sheet naming", "Extract P1/P2/P3/P4 + model name from filename; fallback to original stem; duplicate names get _2, _3, ..."),
     ]
     for setting, value in config_rows:
@@ -821,6 +980,17 @@ def main():
                 "metrics": metrics,
                 "sklearn_status": status,
             }
+
+        # Cross-definition consistency checks for single-label multiclass evaluation.
+        gesamt = scopes["Gesamt"]["metrics"]
+        if overall["strict_correct"] != gesamt["correct"]:
+            raise AssertionError(f"{path.name}: Strict correct count != Gesamt correct count")
+        if not isclose(overall["strict_accuracy"], gesamt["accuracy"], abs_tol=1e-12):
+            raise AssertionError(f"{path.name}: Strict Overall Accuracy != Gesamt Accuracy")
+        if not isclose(gesamt["weighted_recall"], gesamt["accuracy"], abs_tol=1e-12):
+            raise AssertionError(f"{path.name}: Weighted Recall != Accuracy")
+        if overall["accepted_accuracy"] + 1e-12 < overall["strict_accuracy"]:
+            raise AssertionError(f"{path.name}: Accepted-Set Accuracy < Strict Accuracy")
 
         results.append({
             "experiment": path.stem,
