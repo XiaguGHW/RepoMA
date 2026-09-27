@@ -652,17 +652,17 @@ def add_primary_overall_metrics(ws, res, start_row=1, start_col=1):
         (
             "Gesamt Macro Precision",
             m["macro_precision"],
-            "Mean of the 7 class precisions: (1/7) × Σ TP/(TP+FP); strict primary GT; zero division = 0",
+            "Mean of the 7 class Prec. values: (1/7) * Σ TP/(TP+FP); strict primary GT; zero division = 0",
         ),
         (
             "Gesamt Macro Recall",
             m["macro_recall"],
-            "Mean of the 7 class recalls: (1/7) × Σ TP/(TP+FN); strict primary GT; zero division = 0",
+            "Mean of the 7 class Rec. values: (1/7) * Σ TP/(TP+FN); strict primary GT; zero division = 0",
         ),
         (
             "Gesamt Macro F1",
             m["macro_f1"],
-            "Mean of the 7 per-class F1 values: (1/7) × Σ 2PR/(P+R); strict primary GT; zero division = 0",
+            "Mean of the 7 per-class F1 values: (1/7) * Σ 2*Prec.*Rec./(Prec.+Rec.); strict primary GT; zero division = 0",
         ),
         ("sklearn verification (Gesamt)", res["scopes"]["Gesamt"]["sklearn_status"], ""),
     ]
