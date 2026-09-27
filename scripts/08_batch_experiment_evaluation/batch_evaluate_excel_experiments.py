@@ -455,6 +455,7 @@ HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
 HEADER_FONT = Font(bold=True, color="FFFFFF")
 SUBHEADER_FILL = PatternFill("solid", fgColor="D9EAF7")
 SUBHEADER_FONT = Font(bold=True)
+DIAGONAL_FILL = PatternFill("solid", fgColor="E2F0D9")
 SECTION_FILL = PatternFill("solid", fgColor="DDEBF7")
 SECTION_FONT = Font(bold=True, size=12)
 PERCENT_FMT = "0.0%"
@@ -806,7 +807,9 @@ def add_confusion_matrix(ws, scope, cm, start_row, start_col=1):
         ws.cell(r, start_col).font = SUBHEADER_FONT
         ws.cell(r, start_col).fill = SUBHEADER_FILL
         for j, value in enumerate(cm[i], start=start_col + 1):
-            ws.cell(r, j, value)
+            cell = ws.cell(r, j, value)
+            if i == j - (start_col + 1):
+                cell.fill = DIAGONAL_FILL
 
     last_row = header_row + len(CANONICAL_LABELS)
     style_table_cells(
