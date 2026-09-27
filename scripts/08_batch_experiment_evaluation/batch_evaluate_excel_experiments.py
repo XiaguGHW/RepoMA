@@ -728,6 +728,9 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
     chart.height = 9.2
     chart.width = 13.5
     chart.legend.position = "b"
+    # The source cells are hidden in AA:AB.  Excel otherwise omits hidden
+    # cells from the chart and renders an empty chart area.
+    chart.visible_cells_only = False
     chart.dataLabels = DataLabelList()
     chart.dataLabels.showVal = True
     chart.dataLabels.showLegendKey = False
