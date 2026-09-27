@@ -20,6 +20,8 @@ Rules:
 - E1/E2/M/Gesamt use strict primary Ground Truth.
 - M confusion matrix also uses strict primary Ground Truth.
 - Strict Overall Accuracy and Accepted-Set Overall Accuracy are separate metrics.
+- For M, "Weitere zulässige Ground Truth" may list multiple allowed classes,
+  separated by commas, semicolons, pipes, or line breaks.
 - All official metrics are calculated with custom pure-Python logic.
 - sklearn independently recalculates confusion matrix and P/R/F1 metrics as a cross-check.
 """
@@ -143,6 +145,22 @@ def normalize_label(value):
     return f"__UNKNOWN__:{raw}"
 
 
+ALT_LABEL_SEPARATORS = re.compile(r"[,;|\r\n]+")
+
+
+def normalize_label_set(value):
+    """Parse the zero or more allowed alternative labels from one Excel cell."""
+    if value is None or not norm_text(value):
+        return set()
+
+    labels = set()
+    for raw_label in ALT_LABEL_SEPARATORS.split(str(value)):
+        label = normalize_label(raw_label)
+        if label is not None:
+            labels.add(label)
+    return labels
+
+
 def normalize_regime(value):
     value = norm_text(value).upper().replace(" ", "")
     return value if value in VALID_REGIMES else None
@@ -186,7 +204,7 @@ def read_experiment(path: Path):
             gt = normalize_label(raw_gt)
             regime = normalize_regime(raw_regime)
             pred = normalize_label(raw_pred)
-            alt = normalize_label(raw_alt)
+            alt_labels = normalize_label_set(raw_alt)
 
             row_valid = gt is not None and regime is not None
             rows.append({
@@ -198,7 +216,7 @@ def read_experiment(path: Path):
                 "gt": gt,
                 "regime": regime,
                 "pred": pred,
-                "alt": alt,
+                "alt_labels": alt_labels,
                 "row_valid": row_valid,
                 "issue": "" if row_valid else "Missing/invalid Ground Truth or Regime",
             })
@@ -334,8 +352,14 @@ def overall_accuracies(rows):
             raise ValueError(f"Row {r['excel_row']}: unknown GT {r['raw_gt']!r}")
         if str(r["pred"]).startswith("__UNKNOWN__"):
             raise ValueError(f"Row {r['excel_row']}: unknown prediction {r['raw_pred']!r}")
-        if r["regime"] == "M" and r["alt"] is not None and str(r["alt"]).startswith("__UNKNOWN__"):
-            raise ValueError(f"Row {r['excel_row']}: unknown alternative GT {r['raw_alt']!r}")
+        unknown_alternatives = [
+            label for label in r["alt_labels"] if str(label).startswith("__UNKNOWN__")
+        ]
+        if r["regime"] == "M" and unknown_alternatives:
+            raise ValueError(
+                f"Row {r['excel_row']}: unknown alternative GT "
+                f"{unknown_alternatives!r} in {r['raw_alt']!r}"
+            )
 
     strict_correct = sum(r["pred"] == r["gt"] for r in evaluated)
 
@@ -343,8 +367,8 @@ def overall_accuracies(rows):
     for r in evaluated:
         accepted = {r["gt"]}
         # Alternative GT changes correctness only for M.
-        if r["regime"] == "M" and r["alt"] is not None:
-            accepted.add(r["alt"])
+        if r["regime"] == "M":
+            accepted.update(r["alt_labels"])
         if r["pred"] in accepted:
             accepted_correct += 1
 
@@ -365,6 +389,22 @@ def overall_accuracies(rows):
 
 def sklearn_cross_check(rows, custom_cm, custom_metrics, context):
     """Independent sklearn validation of the custom strict multiclass metrics."""
+    # sklearn's multiclass helpers reject empty inputs.  An empty regime is a
+    # valid experiment outcome, however: the custom definition is an all-zero
+    # matrix with all metrics set to 0.0.  Validate that definition directly.
+    if not rows:
+        if any(any(value for value in matrix_row) for matrix_row in custom_cm):
+            raise AssertionError(f"{context}: non-zero confusion matrix for empty scope")
+        if custom_metrics["n"] != 0:
+            raise AssertionError(f"{context}: non-zero sample count for empty scope")
+        metric_names = (
+            "accuracy", "macro_precision", "macro_recall", "macro_f1",
+            "weighted_precision", "weighted_recall", "weighted_f1",
+        )
+        if any(custom_metrics[name] != 0.0 for name in metric_names):
+            raise AssertionError(f"{context}: non-zero metric for empty scope")
+        return "EMPTY: PASS"
+
     y_true = [r["gt"] for r in rows]
     y_pred = [r["pred"] for r in rows]
 
@@ -372,11 +412,9 @@ def sklearn_cross_check(rows, custom_cm, custom_metrics, context):
     if not np.array_equal(np.array(custom_cm, dtype=int), sk_cm):
         raise AssertionError(f"{context}: custom confusion matrix != sklearn")
 
-    # For an empty scope, custom accuracy is defined as 0.0.
-    if rows:
-        sk_acc = float(accuracy_score(y_true, y_pred))
-        if not isclose(custom_metrics["accuracy"], sk_acc, abs_tol=1e-12):
-            raise AssertionError(f"{context}: accuracy mismatch")
+    sk_acc = float(accuracy_score(y_true, y_pred))
+    if not isclose(custom_metrics["accuracy"], sk_acc, abs_tol=1e-12):
+        raise AssertionError(f"{context}: accuracy mismatch")
 
     p, r, f1, support = precision_recall_fscore_support(
         y_true,
@@ -992,7 +1030,7 @@ def write_output(results, output_path):
         ("Blank prediction", "nicht auswertbar; excluded from all classification metrics"),
         ("E1/E2/M/Gesamt confusion matrices", "Strict primary Ground Truth"),
         ("Strict Overall Accuracy", "Primary GT only; denominator = all auswertbar rows"),
-        ("Accepted-Set Overall Accuracy", "Primary GT + M alternative GT; denominator = all auswertbar rows"),
+        ("Accepted-Set Overall Accuracy", "Primary GT + all listed M alternative GT labels; denominator = all auswertbar rows"),
         ("Calculation", "Custom pure-Python metrics are authoritative"),
         ("sklearn", "Mandatory independent verification for confusion matrix, accuracy, class P/R/F1, macro and weighted P/R/F1 for E1/E2/M/Gesamt"),
         ("Pie chart", "Strict Correct / Strict Wrong / Nicht auswertbar; colors green #00B050, red #FF0000, gray #A6A6A6"),
