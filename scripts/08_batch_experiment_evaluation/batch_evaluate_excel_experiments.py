@@ -599,6 +599,12 @@ def add_overview_counts(ws, res, start_row=1, start_col=1):
     values = [
         ("N total", overall["n_total"], "Valid Ground Truth + Regime rows"),
         ("N auswertbar", overall["n_auswertbar"], "Nonblank prediction"),
+        ("Strict Correct", overall["strict_correct"], "Prediction exactly matches primary Ground Truth"),
+        (
+            "Accepted-Set Correct",
+            overall["accepted_correct"],
+            "Primary Ground Truth plus all listed M alternative labels",
+        ),
         ("N nicht auswertbar", overall["n_nicht_auswertbar"], "Usually blank prediction / technical failure"),
         ("Coverage", overall["coverage"], "N auswertbar / N total"),
     ]
@@ -637,9 +643,21 @@ def add_primary_overall_metrics(ws, res, start_row=1, start_col=1):
             overall["accepted_accuracy"],
             f'{overall["accepted_correct"]}/{overall["n_auswertbar"]}',
         ),
-        ("Gesamt Macro Precision", m["macro_precision"], ""),
-        ("Gesamt Macro Recall", m["macro_recall"], ""),
-        ("Gesamt Macro F1", m["macro_f1"], ""),
+        (
+            "Gesamt Macro Precision",
+            m["macro_precision"],
+            "Mean of the 7 class precisions: (1/7) × Σ TP/(TP+FP); strict primary GT; zero division = 0",
+        ),
+        (
+            "Gesamt Macro Recall",
+            m["macro_recall"],
+            "Mean of the 7 class recalls: (1/7) × Σ TP/(TP+FN); strict primary GT; zero division = 0",
+        ),
+        (
+            "Gesamt Macro F1",
+            m["macro_f1"],
+            "Mean of the 7 per-class F1 values: (1/7) × Σ 2PR/(P+R); strict primary GT; zero division = 0",
+        ),
         ("sklearn verification (Gesamt)", res["scopes"]["Gesamt"]["sklearn_status"], ""),
     ]
 
