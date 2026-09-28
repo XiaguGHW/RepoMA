@@ -104,8 +104,8 @@ SCOPES = ("E1", "E2", "M", "Gesamt")
 # Muted, report-friendly colors. The white outlines are configured directly
 # on each data point so adjacent pie segments remain visually distinct.
 PIE_COLORS = {
-    "Strict Correct": "2E7D5B",
-    "Strict Wrong": "D64545",
+    "Strict Correct": "278C3F",  # Bosch green
+    "Strict Wrong": "D51317",    # Bosch red
     "Nicht auswertbar": "AEB5BF",
 }
 PIE_OUTLINE_COLOR = "FFFFFF"
@@ -740,7 +740,7 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
     chart.height = 5.3
     chart.width = 7.9
     chart.firstSliceAng = 270
-    chart.legend.position = "b"
+    chart.legend = None
     # Remove Excel's default chart-area border: the worksheet remains the
     # visual canvas and the pie reads as a clean dashboard element.
     chart.graphical_properties = GraphicalProperties(
@@ -750,19 +750,13 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
     # The source cells are hidden in AA:AB.  Excel otherwise omits hidden
     # cells from the chart and renders an empty chart area.
     chart.visible_cells_only = False
-    chart.dataLabels = DataLabelList()
-    chart.dataLabels.showVal = True
-    chart.dataLabels.showLegendKey = False
-    chart.dataLabels.showPercent = False
-    chart.dataLabels.showCatName = True
-    chart.dataLabels.showSerName = False
-    chart.dataLabels.separator = ": "
-    chart.dataLabels.showLeaderLines = True
-    chart.dataLabels.dLblPos = "outEnd"
+    # Category/count labels are rendered as a fixed worksheet panel rather
+    # than chart data labels. Excel cannot reliably position three external
+    # pie labels in a compact chart, which caused overlap in the output.
     chart.series[0].data_points = [
         DataPoint(
             idx=i,
-            explosion=4 if label == "Strict Wrong" else 0,
+            explosion=0,
             spPr=GraphicalProperties(
                 solidFill=PIE_COLORS[label],
                 ln=LineProperties(
@@ -774,6 +768,30 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
         for i, (label, _) in enumerate(pie_rows)
     ]
     ws.add_chart(chart, anchor)
+
+    # Fixed, editable result labels: unlike pie-chart data labels, these cells
+    # never overlap and their widths can be changed independently in Excel.
+    panel_label_col = 17  # Q
+    panel_value_col = 18  # R
+    ws.column_dimensions["Q"].width = 22
+    ws.column_dimensions["R"].width = 8
+    for i, (label, value) in enumerate(pie_rows):
+        row = 3 + i * 2
+        label_cell = ws.cell(row, panel_label_col, label)
+        value_cell = ws.cell(row, panel_value_col, value)
+        label_cell.fill = PatternFill("solid", fgColor=PIE_COLORS[label])
+        label_cell.font = Font(bold=True, color="FFFFFF")
+        label_cell.alignment = Alignment(horizontal="left", vertical="center")
+        value_cell.font = Font(bold=True, size=12, color="1F1F1F")
+        value_cell.alignment = Alignment(horizontal="center", vertical="center")
+        value_cell.border = Border(
+            left=Side(style="medium", color=PIE_COLORS[label]),
+            right=Side(style="medium", color=PIE_COLORS[label]),
+            top=Side(style="medium", color=PIE_COLORS[label]),
+            bottom=Side(style="medium", color=PIE_COLORS[label]),
+        )
+        ws.row_dimensions[row].height = 22
+
     ws.column_dimensions["AA"].hidden = True
     ws.column_dimensions["AB"].hidden = True
 
@@ -1087,7 +1105,7 @@ def write_output(results, output_path):
         ("Accepted-Set Overall Accuracy", "Primary GT + all listed M alternative GT labels; denominator = all auswertbar rows"),
         ("Calculation", "Custom pure-Python metrics are authoritative"),
         ("sklearn", "Mandatory independent verification for confusion matrix, accuracy, class P/R/F1, macro and weighted P/R/F1 for E1/E2/M/Gesamt"),
-        ("Pie chart", "Strict Correct / Strict Wrong / Nicht auswertbar; colors green #00B050, red #FF0000, gray #A6A6A6"),
+        ("Pie chart", "Compact pie without automatic data labels; fixed worksheet label panel; colors Bosch green #278C3F, Bosch red #D51317, gray #AEB5BF"),
         ("Experiment sheets", "Order: Counts -> Primary Overall -> Gesamt Weighted -> Gesamt CM -> Gesamt Class Metrics -> E1 -> E2 -> M -> Nicht auswertbar"),
         ("Experiment sheet naming", "Extract P1/P2/P3/P4 + model name from filename; fallback to original stem; duplicate names get _2, _3, ..."),
     ]
