@@ -736,8 +736,9 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
     chart.add_data(data, titles_from_data=False)
     chart.set_categories(labels)
     chart.title = None
-    chart.height = 8.8
-    chart.width = 13.2
+    # Keep the chart compact; Excel retains the data-label font size.
+    chart.height = 5.3
+    chart.width = 7.9
     chart.firstSliceAng = 270
     chart.legend.position = "b"
     # Remove Excel's default chart-area border: the worksheet remains the
