@@ -35,6 +35,7 @@ from openpyxl import load_workbook, Workbook
 from openpyxl.chart import PieChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.marker import DataPoint
+from openpyxl.chart.layout import Layout, ManualLayout
 from openpyxl.chart.shapes import GraphicalProperties
 from openpyxl.drawing.line import LineProperties
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -737,10 +738,25 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
     chart.set_categories(labels)
     chart.title = None
     # Keep the chart compact; Excel retains the data-label font size.
+    # A wide canvas leaves dedicated empty space for the lower-right legend.
+    # 14.0 / 5.3 = 2.64, i.e. wider than the requested 2.5:1 aspect ratio.
     chart.height = 5.3
-    chart.width = 7.9
+    chart.width = 14.0
     chart.firstSliceAng = 270
-    chart.legend.position = "b"
+    chart.legend.position = "r"
+    chart.legend.layout = Layout(
+        manualLayout=ManualLayout(
+            layoutTarget="outer",
+            xMode="factor",
+            yMode="factor",
+            wMode="factor",
+            hMode="factor",
+            x=0.62,
+            y=0.70,
+            w=0.34,
+            h=0.25,
+        )
+    )
     # Remove Excel's default chart-area border: the worksheet remains the
     # visual canvas and the pie reads as a clean dashboard element.
     chart.graphical_properties = GraphicalProperties(
@@ -1089,7 +1105,7 @@ def write_output(results, output_path):
         ("Accepted-Set Overall Accuracy", "Primary GT + all listed M alternative GT labels; denominator = all auswertbar rows"),
         ("Calculation", "Custom pure-Python metrics are authoritative"),
         ("sklearn", "Mandatory independent verification for confusion matrix, accuracy, class P/R/F1, macro and weighted P/R/F1 for E1/E2/M/Gesamt"),
-        ("Pie chart", "Compact pie with values inside segments and a bottom legend; colors Bosch green #278C3F, Bosch red #D51317, gray #AEB5BF"),
+        ("Pie chart", "Wide 2.64:1 pie chart with values inside segments and a fixed lower-right vertical legend; colors Bosch green #278C3F, Bosch red #D51317, gray #AEB5BF"),
         ("Experiment sheets", "Order: Counts -> Primary Overall -> Gesamt Weighted -> Gesamt CM -> Gesamt Class Metrics -> E1 -> E2 -> M -> Nicht auswertbar"),
         ("Experiment sheet naming", "Extract P1/P2/P3/P4 + model name from filename; fallback to original stem; duplicate names get _2, _3, ..."),
     ]
