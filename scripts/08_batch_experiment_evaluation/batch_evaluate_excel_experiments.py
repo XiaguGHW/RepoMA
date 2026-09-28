@@ -36,6 +36,7 @@ from openpyxl.chart import PieChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.marker import DataPoint
 from openpyxl.chart.shapes import GraphicalProperties
+from openpyxl.drawing.line import LineProperties
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
@@ -100,11 +101,15 @@ FALLBACK_PRED_COL = 9
 VALID_REGIMES = ("E1", "E2", "M")
 SCOPES = ("E1", "E2", "M", "Gesamt")
 
+# Muted, report-friendly colors. The white outlines are configured directly
+# on each data point so adjacent pie segments remain visually distinct.
 PIE_COLORS = {
-    "Strict Correct": "00B050",
-    "Strict Wrong": "FF0000",
-    "Nicht auswertbar": "A6A6A6",
+    "Strict Correct": "2E7D5B",
+    "Strict Wrong": "D64545",
+    "Nicht auswertbar": "AEB5BF",
 }
+PIE_OUTLINE_COLOR = "FFFFFF"
+PIE_OUTLINE_WIDTH = 19050  # 1.5 pt (OOXML units: 1 pt = 12,700)
 
 
 def norm_text(value) -> str:
@@ -731,9 +736,16 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
     chart.add_data(data, titles_from_data=False)
     chart.set_categories(labels)
     chart.title = None
-    chart.height = 9.2
-    chart.width = 13.5
+    chart.height = 8.8
+    chart.width = 13.2
+    chart.firstSliceAng = 270
     chart.legend.position = "b"
+    # Remove Excel's default chart-area border: the worksheet remains the
+    # visual canvas and the pie reads as a clean dashboard element.
+    chart.graphical_properties = GraphicalProperties(
+        noFill=True,
+        ln=LineProperties(noFill=True),
+    )
     # The source cells are hidden in AA:AB.  Excel otherwise omits hidden
     # cells from the chart and renders an empty chart area.
     chart.visible_cells_only = False
@@ -747,7 +759,17 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
     chart.dataLabels.showLeaderLines = True
     chart.dataLabels.dLblPos = "outEnd"
     chart.series[0].data_points = [
-        DataPoint(idx=i, spPr=GraphicalProperties(solidFill=PIE_COLORS[label]))
+        DataPoint(
+            idx=i,
+            explosion=4 if label == "Strict Wrong" else 0,
+            spPr=GraphicalProperties(
+                solidFill=PIE_COLORS[label],
+                ln=LineProperties(
+                    solidFill=PIE_OUTLINE_COLOR,
+                    w=PIE_OUTLINE_WIDTH,
+                ),
+            ),
+        )
         for i, (label, _) in enumerate(pie_rows)
     ]
     ws.add_chart(chart, anchor)
