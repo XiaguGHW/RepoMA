@@ -738,9 +738,11 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
     chart.title = None
     # Keep the chart compact; Excel retains the data-label font size.
     chart.height = 5.3
-    chart.width = 7.9
+    # Keep the pie small via its height, but make the chart canvas wide
+    # enough for readable external labels and a right-side legend.
+    chart.width = 13.2
     chart.firstSliceAng = 270
-    chart.legend = None
+    chart.legend.position = "r"
     # Remove Excel's default chart-area border: the worksheet remains the
     # visual canvas and the pie reads as a clean dashboard element.
     chart.graphical_properties = GraphicalProperties(
@@ -750,9 +752,15 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
     # The source cells are hidden in AA:AB.  Excel otherwise omits hidden
     # cells from the chart and renders an empty chart area.
     chart.visible_cells_only = False
-    # Category/count labels are rendered as a fixed worksheet panel rather
-    # than chart data labels. Excel cannot reliably position three external
-    # pie labels in a compact chart, which caused overlap in the output.
+    chart.dataLabels = DataLabelList()
+    chart.dataLabels.showVal = True
+    chart.dataLabels.showLegendKey = False
+    chart.dataLabels.showPercent = False
+    chart.dataLabels.showCatName = True
+    chart.dataLabels.showSerName = False
+    chart.dataLabels.separator = ": "
+    chart.dataLabels.showLeaderLines = True
+    chart.dataLabels.dLblPos = "outEnd"
     chart.series[0].data_points = [
         DataPoint(
             idx=i,
@@ -768,32 +776,6 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
         for i, (label, _) in enumerate(pie_rows)
     ]
     ws.add_chart(chart, anchor)
-
-    # Fixed, editable result labels: unlike pie-chart data labels, these cells
-    # never overlap and their widths can be changed independently in Excel.
-    panel_label_col = 9   # I, directly to the right of the chart
-    panel_value_col = 10  # J
-    ws.column_dimensions["I"].width = 16
-    ws.column_dimensions["J"].width = 8
-    for i, (label, value) in enumerate(pie_rows):
-        row = 3 + i * 2
-        display_label = "Nicht\nauswertbar" if label == "Nicht auswertbar" else label
-        label_cell = ws.cell(row, panel_label_col, display_label)
-        value_cell = ws.cell(row, panel_value_col, value)
-        label_cell.fill = PatternFill("solid", fgColor=PIE_COLORS[label])
-        label_cell.font = Font(bold=True, color="FFFFFF")
-        label_cell.alignment = Alignment(
-            horizontal="left", vertical="center", wrap_text=True
-        )
-        value_cell.font = Font(bold=True, size=12, color="1F1F1F")
-        value_cell.alignment = Alignment(horizontal="center", vertical="center")
-        value_cell.border = Border(
-            left=Side(style="medium", color=PIE_COLORS[label]),
-            right=Side(style="medium", color=PIE_COLORS[label]),
-            top=Side(style="medium", color=PIE_COLORS[label]),
-            bottom=Side(style="medium", color=PIE_COLORS[label]),
-        )
-        ws.row_dimensions[row].height = 32 if label == "Nicht auswertbar" else 22
 
     ws.column_dimensions["AA"].hidden = True
     ws.column_dimensions["AB"].hidden = True
@@ -1028,10 +1010,6 @@ def write_experiment_sheet(wb, res, used_sheet_names):
     add_non_evaluable(ws, res, row)
 
     auto_width(ws, 10, 28)
-    # Keep the pie-chart label panel wide enough for the longest individual
-    # word (“auswertbar”); the phrase itself is intentionally two lines.
-    ws.column_dimensions["I"].width = 16
-    ws.column_dimensions["J"].width = 8
     ws.column_dimensions["A"].width = 30
     for col in range(2, 16):
         ws.column_dimensions[get_column_letter(col)].width = min(
@@ -1112,7 +1090,7 @@ def write_output(results, output_path):
         ("Accepted-Set Overall Accuracy", "Primary GT + all listed M alternative GT labels; denominator = all auswertbar rows"),
         ("Calculation", "Custom pure-Python metrics are authoritative"),
         ("sklearn", "Mandatory independent verification for confusion matrix, accuracy, class P/R/F1, macro and weighted P/R/F1 for E1/E2/M/Gesamt"),
-        ("Pie chart", "Compact pie without automatic data labels; fixed worksheet label panel; colors Bosch green #278C3F, Bosch red #D51317, gray #AEB5BF"),
+        ("Pie chart", "Compact pie with external category/count labels and a right-side legend; colors Bosch green #278C3F, Bosch red #D51317, gray #AEB5BF"),
         ("Experiment sheets", "Order: Counts -> Primary Overall -> Gesamt Weighted -> Gesamt CM -> Gesamt Class Metrics -> E1 -> E2 -> M -> Nicht auswertbar"),
         ("Experiment sheet naming", "Extract P1/P2/P3/P4 + model name from filename; fallback to original stem; duplicate names get _2, _3, ..."),
     ]
