@@ -773,7 +773,7 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
     # never overlap and their widths can be changed independently in Excel.
     panel_label_col = 17  # Q
     panel_value_col = 18  # R
-    ws.column_dimensions["Q"].width = 22
+    ws.column_dimensions["Q"].width = 28
     ws.column_dimensions["R"].width = 8
     for i, (label, value) in enumerate(pie_rows):
         row = 3 + i * 2
@@ -1025,6 +1025,10 @@ def write_experiment_sheet(wb, res, used_sheet_names):
     add_non_evaluable(ws, res, row)
 
     auto_width(ws, 10, 28)
+    # Keep the pie-chart label panel wide enough for “Nicht auswertbar”
+    # on one line; auto_width() would otherwise reduce it to text length.
+    ws.column_dimensions["Q"].width = 28
+    ws.column_dimensions["R"].width = 8
     ws.column_dimensions["A"].width = 30
     for col in range(2, 16):
         ws.column_dimensions[get_column_letter(col)].width = min(
