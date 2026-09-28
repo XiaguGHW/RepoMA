@@ -147,7 +147,7 @@ def add_comparison_sheet(output_path: Path, models: list[str], matrix: dict[str,
     # Larger category gap makes each four-prompt model group easier to scan.
     chart.type, chart.grouping, chart.overlap, chart.gapWidth = "col", "clustered", 0, 125
     chart.title = "Strict Overall Accuracy by Model and Prompt"
-    chart.y_axis.title, chart.x_axis.title = "Strict Overall Accuracy", "Model"
+    chart.y_axis.title = "Strict Overall Accuracy"
     chart.y_axis.scaling.min, chart.y_axis.scaling.max = 0, 1
     chart.y_axis.numFmt = "0%"
     chart.legend.position = "b"
