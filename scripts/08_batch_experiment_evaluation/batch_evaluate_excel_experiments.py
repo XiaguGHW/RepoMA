@@ -738,11 +738,9 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
     chart.title = None
     # Keep the chart compact; Excel retains the data-label font size.
     chart.height = 5.3
-    # Keep the pie small via its height, but make the chart canvas wide
-    # enough for readable external labels and a right-side legend.
-    chart.width = 13.2
+    chart.width = 7.9
     chart.firstSliceAng = 270
-    chart.legend.position = "r"
+    chart.legend.position = "b"
     # Remove Excel's default chart-area border: the worksheet remains the
     # visual canvas and the pie reads as a clean dashboard element.
     chart.graphical_properties = GraphicalProperties(
@@ -756,11 +754,12 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
     chart.dataLabels.showVal = True
     chart.dataLabels.showLegendKey = False
     chart.dataLabels.showPercent = False
-    chart.dataLabels.showCatName = True
+    chart.dataLabels.showCatName = False
     chart.dataLabels.showSerName = False
-    chart.dataLabels.separator = ": "
-    chart.dataLabels.showLeaderLines = True
-    chart.dataLabels.dLblPos = "outEnd"
+    # Values are placed directly in the pie segments; the legend below
+    # provides the category names without adding overlapping long labels.
+    chart.dataLabels.showLeaderLines = False
+    chart.dataLabels.dLblPos = "ctr"
     chart.series[0].data_points = [
         DataPoint(
             idx=i,
@@ -1090,7 +1089,7 @@ def write_output(results, output_path):
         ("Accepted-Set Overall Accuracy", "Primary GT + all listed M alternative GT labels; denominator = all auswertbar rows"),
         ("Calculation", "Custom pure-Python metrics are authoritative"),
         ("sklearn", "Mandatory independent verification for confusion matrix, accuracy, class P/R/F1, macro and weighted P/R/F1 for E1/E2/M/Gesamt"),
-        ("Pie chart", "Compact pie with external category/count labels and a right-side legend; colors Bosch green #278C3F, Bosch red #D51317, gray #AEB5BF"),
+        ("Pie chart", "Compact pie with values inside segments and a bottom legend; colors Bosch green #278C3F, Bosch red #D51317, gray #AEB5BF"),
         ("Experiment sheets", "Order: Counts -> Primary Overall -> Gesamt Weighted -> Gesamt CM -> Gesamt Class Metrics -> E1 -> E2 -> M -> Nicht auswertbar"),
         ("Experiment sheet naming", "Extract P1/P2/P3/P4 + model name from filename; fallback to original stem; duplicate names get _2, _3, ..."),
     ]
