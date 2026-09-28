@@ -773,15 +773,18 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
     # never overlap and their widths can be changed independently in Excel.
     panel_label_col = 17  # Q
     panel_value_col = 18  # R
-    ws.column_dimensions["Q"].width = 28
+    ws.column_dimensions["Q"].width = 16
     ws.column_dimensions["R"].width = 8
     for i, (label, value) in enumerate(pie_rows):
         row = 3 + i * 2
-        label_cell = ws.cell(row, panel_label_col, label)
+        display_label = "Nicht\nauswertbar" if label == "Nicht auswertbar" else label
+        label_cell = ws.cell(row, panel_label_col, display_label)
         value_cell = ws.cell(row, panel_value_col, value)
         label_cell.fill = PatternFill("solid", fgColor=PIE_COLORS[label])
         label_cell.font = Font(bold=True, color="FFFFFF")
-        label_cell.alignment = Alignment(horizontal="left", vertical="center")
+        label_cell.alignment = Alignment(
+            horizontal="left", vertical="center", wrap_text=True
+        )
         value_cell.font = Font(bold=True, size=12, color="1F1F1F")
         value_cell.alignment = Alignment(horizontal="center", vertical="center")
         value_cell.border = Border(
@@ -790,7 +793,7 @@ def add_overview_pie_chart(ws, res, anchor="F2"):
             top=Side(style="medium", color=PIE_COLORS[label]),
             bottom=Side(style="medium", color=PIE_COLORS[label]),
         )
-        ws.row_dimensions[row].height = 22
+        ws.row_dimensions[row].height = 32 if label == "Nicht auswertbar" else 22
 
     ws.column_dimensions["AA"].hidden = True
     ws.column_dimensions["AB"].hidden = True
@@ -1025,9 +1028,9 @@ def write_experiment_sheet(wb, res, used_sheet_names):
     add_non_evaluable(ws, res, row)
 
     auto_width(ws, 10, 28)
-    # Keep the pie-chart label panel wide enough for “Nicht auswertbar”
-    # on one line; auto_width() would otherwise reduce it to text length.
-    ws.column_dimensions["Q"].width = 28
+    # Keep the pie-chart label panel wide enough for the longest individual
+    # word (“auswertbar”); the phrase itself is intentionally two lines.
+    ws.column_dimensions["Q"].width = 16
     ws.column_dimensions["R"].width = 8
     ws.column_dimensions["A"].width = 30
     for col in range(2, 16):
