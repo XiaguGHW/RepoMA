@@ -144,13 +144,16 @@ def add_comparison_sheet(output_path: Path, models: list[str], matrix: dict[str,
     ws.freeze_panes = "B4"
 
     chart = BarChart()
-    chart.type, chart.grouping, chart.overlap, chart.gapWidth = "col", "clustered", 0, 55
+    # Larger category gap makes each four-prompt model group easier to scan.
+    chart.type, chart.grouping, chart.overlap, chart.gapWidth = "col", "clustered", 0, 125
     chart.title = "Strict Overall Accuracy by Model and Prompt"
     chart.y_axis.title, chart.x_axis.title = "Strict Overall Accuracy", "Model"
     chart.y_axis.scaling.min, chart.y_axis.scaling.max = 0, 1
     chart.y_axis.numFmt = "0%"
     chart.legend.position = "b"
-    chart.height, chart.width, chart.style = 13, 27, 10
+    # A low, wide plot area avoids visually oversized columns while preserving
+    # the truthful 0–100% baseline.
+    chart.height, chart.width, chart.style = 9.5, 29, 10
     data = Reference(ws, min_col=2, max_col=5, min_row=3, max_row=3 + len(models))
     categories = Reference(ws, min_col=1, min_row=4, max_row=3 + len(models))
     chart.add_data(data, titles_from_data=True)
