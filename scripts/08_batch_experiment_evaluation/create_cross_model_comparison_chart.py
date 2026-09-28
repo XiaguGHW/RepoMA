@@ -145,8 +145,10 @@ def add_comparison_sheet(output_path: Path, models: list[str], matrix: dict[str,
     ws.freeze_panes = "B4"
 
     chart = BarChart()
-    # Larger category gap makes each four-prompt model group easier to scan.
-    chart.type, chart.grouping, chart.overlap, chart.gapWidth = "col", "clustered", 0, 125
+    # Reduce the inter-model gap by 40% (125 -> 75).  A small negative
+    # overlap separates the four prompt columns within each model group while
+    # retaining their individual visual width.
+    chart.type, chart.grouping, chart.overlap, chart.gapWidth = "col", "clustered", -20, 75
     # The worksheet title in A1 is the single chart title.  Removing the
     # duplicate title inside the chart gives the comparison more white space.
     chart.title = None
