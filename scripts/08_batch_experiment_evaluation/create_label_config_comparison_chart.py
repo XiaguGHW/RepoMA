@@ -32,10 +32,10 @@ REQUIRED_HEADERS = (
 )
 CONFIG_ORDER = ("L1", "L2", "L3", "L4")
 CONFIG_COLORS = {
-    "L1": "F7D36A",  # warm gold
-    "L2": "EFA05A",  # muted orange
-    "L3": "C96A45",  # terracotta
-    "L4": "8B3A3A",  # deep wine red
+    "L1": "CFE5B5",  # light sage green
+    "L2": "A8CF7D",  # soft green
+    "L3": "7ABC32",  # Bosch Green
+    "L4": "4F7A1F",  # deep olive green
 }
 HEADER_FILL = PatternFill("solid", fgColor="123D63")
 HEADER_FONT = Font(bold=True, size=12, color="FFFFFF")
