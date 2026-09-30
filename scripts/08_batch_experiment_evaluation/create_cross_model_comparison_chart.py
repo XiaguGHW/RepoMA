@@ -14,6 +14,7 @@ import shutil
 from openpyxl import load_workbook
 from openpyxl.chart import BarChart, Reference
 from openpyxl.chart.axis import ChartLines
+from openpyxl.chart.data_source import AxDataSource, StrRef
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.shapes import GraphicalProperties
 from openpyxl.chart.text import RichText
@@ -182,9 +183,15 @@ def add_comparison_sheet(output_path: Path, models: list[str], matrix: dict[str,
         ln=LineProperties(noFill=True),
     )
     data = Reference(ws, min_col=2, max_col=5, min_row=3, max_row=3 + len(models))
-    categories = Reference(ws, min_col=1, min_row=4, max_row=3 + len(models))
     chart.add_data(data, titles_from_data=True)
-    chart.set_categories(categories)
+    # ``Reference`` serialises category labels as a numeric reference. Excel
+    # can then omit text model names on the x-axis. A string reference makes
+    # the four labels explicit: one underneath each model group.
+    category_formula = "'{}'!$A$4:$A${}".format(ws.title, 3 + len(models))
+    for series in chart.series:
+        series.cat = AxDataSource(strRef=StrRef(f=category_formula))
+    chart.x_axis.tickLblPos = "low"
+    chart.x_axis.tickLblSkip = 1
     chart.dLbls = DataLabelList()
     chart.dLbls.showVal, chart.dLbls.showCatName = True, False
     chart.dLbls.showLegendKey, chart.dLbls.showSerName = False, False
