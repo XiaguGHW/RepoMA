@@ -13,9 +13,12 @@ import shutil
 
 from openpyxl import load_workbook
 from openpyxl.chart import BarChart, Reference
+from openpyxl.chart.axis import ChartLines
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.shapes import GraphicalProperties
+from openpyxl.chart.text import RichText
 from openpyxl.drawing.line import LineProperties
+from openpyxl.drawing.text import CharacterProperties, Paragraph, ParagraphProperties
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 
@@ -39,6 +42,14 @@ HEADER_FONT = Font(bold=True, color="FFFFFF")
 THIN_GRAY = Side(style="thin", color="D9E1F2")
 TABLE_BORDER = Border(left=THIN_GRAY, right=THIN_GRAY, top=THIN_GRAY, bottom=THIN_GRAY)
 PERCENT_FMT = "0.0%"
+CHART_TEXT_SIZE = 1400  # 14 pt; Excel chart text uses 1/100 pt.
+DATA_LABEL_TEXT_SIZE = 1200  # 12 pt.
+
+
+def chart_text(size: int) -> RichText:
+    """Return a RichText style that Excel applies to chart labels."""
+    run = CharacterProperties(sz=size)
+    return RichText(p=[Paragraph(pPr=ParagraphProperties(defRPr=run), endParaRPr=run)])
 
 
 def header_key(value: object) -> str:
@@ -121,12 +132,12 @@ def add_comparison_sheet(output_path: Path, models: list[str], matrix: dict[str,
     ws = wb.create_sheet(OUTPUT_SHEET, 0)
     ws.sheet_view.showGridLines = False
     ws["A1"] = "Strict Overall Accuracy – Model and Prompt Comparison"
-    ws["A1"].font = Font(bold=True, size=14, color="123D63")
-    ws.merge_cells("A1:E1")
+    ws["A1"].font = Font(bold=True, size=18, color="123D63")
+    ws.merge_cells("A1:H1")
 
     for col, value in enumerate(["Model", *PROMPTS], start=1):
         cell = ws.cell(3, col, value)
-        cell.fill, cell.font, cell.border = HEADER_FILL, HEADER_FONT, TABLE_BORDER
+        cell.fill, cell.font, cell.border = HEADER_FILL, Font(bold=True, size=12, color="FFFFFF"), TABLE_BORDER
         cell.alignment = Alignment(horizontal="center", vertical="center")
     for row, model in enumerate(models, start=4):
         ws.cell(row, 1, model)
@@ -134,6 +145,7 @@ def add_comparison_sheet(output_path: Path, models: list[str], matrix: dict[str,
             ws.cell(row, col, matrix[model][prompt])
         for cell in ws[row][:5]:
             cell.border = TABLE_BORDER
+            cell.font = Font(size=12)
             cell.alignment = Alignment(horizontal="center", vertical="center")
         for col in range(2, 6):
             ws.cell(row, col).number_format = PERCENT_FMT
@@ -141,24 +153,29 @@ def add_comparison_sheet(output_path: Path, models: list[str], matrix: dict[str,
     ws.column_dimensions["A"].width = 24
     for col in "BCDE":
         ws.column_dimensions[col].width = 13
-    ws.row_dimensions[3].height = 24
+    ws.row_dimensions[3].height = 26
+    for row in range(4, 4 + len(models)):
+        ws.row_dimensions[row].height = 22
     ws.freeze_panes = "B4"
 
     chart = BarChart()
-    # Reduce the inter-model gap by 40% (125 -> 75).  A small negative
-    # overlap separates the four prompt columns within each model group while
-    # retaining their individual visual width.
-    chart.type, chart.grouping, chart.overlap, chart.gapWidth = "col", "clustered", -20, 75
-    # The worksheet title in A1 is the single chart title.  Removing the
-    # duplicate title inside the chart gives the comparison more white space.
+    # More white space between model groups: 125 is over 1.5× the previous
+    # setting (75). Prompt columns within each group remain clearly separated.
+    chart.type, chart.grouping, chart.overlap, chart.gapWidth = "col", "clustered", -20, 125
     chart.title = None
     chart.y_axis.title = "Strict Overall Accuracy"
     chart.y_axis.scaling.min, chart.y_axis.scaling.max = 0, 1
     chart.y_axis.numFmt = "0%"
-    chart.legend.position = "b"
-    # A low, wide plot area avoids visually oversized columns while preserving
-    # the truthful 0–100% baseline.
-    chart.height, chart.width, chart.style = 9.5, 29, 10
+    # A right-side legend has enough room for four large labels and cannot
+    # overlap the columns or the model names below the plot area.
+    chart.legend.position = "r"
+    chart.height, chart.width, chart.style = 15, 35, 10
+    chart.x_axis.txPr = chart_text(CHART_TEXT_SIZE)
+    chart.y_axis.txPr = chart_text(CHART_TEXT_SIZE)
+    chart.legend.txPr = chart_text(CHART_TEXT_SIZE)
+    chart.y_axis.majorGridlines = ChartLines(
+        spPr=GraphicalProperties(ln=LineProperties(solidFill="D9E2F3", w=6350))
+    )
     # Let the worksheet remain the visual canvas: no chart-area fill or frame.
     chart.graphical_properties = GraphicalProperties(
         noFill=True,
@@ -172,6 +189,7 @@ def add_comparison_sheet(output_path: Path, models: list[str], matrix: dict[str,
     chart.dLbls.showVal, chart.dLbls.showCatName = True, False
     chart.dLbls.showLegendKey, chart.dLbls.showSerName = False, False
     chart.dLbls.numFmt, chart.dLbls.dLblPos = PERCENT_FMT, "outEnd"
+    chart.dLbls.txPr = chart_text(DATA_LABEL_TEXT_SIZE)
     for series, prompt in zip(chart.series, PROMPTS):
         series.graphicalProperties = GraphicalProperties(solidFill=PROMPT_COLORS[prompt])
     ws.add_chart(chart, "A10")
