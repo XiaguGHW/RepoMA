@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">Verteilung der 14 Baugruppen im Label-Konfigurationstest</title>
+  <desc id="desc">Minimalistischer Donut mit sieben E1-, vier E2- und drei mehrdeutigen Fällen.</desc>
+  <rect width="1600" height="1000" fill="white"/>
+
+  <!-- Donut: E1 7/14, E2 4/14, M 3/14 -->
+  <g transform="rotate(-90 800 410)">
+    <circle cx="800" cy="410" r="245" fill="none" stroke="#7ABC32" stroke-width="112" stroke-dasharray="769.69 769.69" stroke-dashoffset="0"/>
+    <circle cx="800" cy="410" r="245" fill="none" stroke="#EAB200" stroke-width="112" stroke-dasharray="439.82 1099.56" stroke-dashoffset="-769.69"/>
+    <circle cx="800" cy="410" r="245" fill="none" stroke="#CC3A00" stroke-width="112" stroke-dasharray="329.87 1209.51" stroke-dashoffset="-1209.51"/>
+  </g>
+  <circle cx="800" cy="410" r="178" fill="white"/>
+  <text x="800" y="397" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="88" font-weight="700" fill="#262626">14</text>
+  <text x="800" y="455" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="600" fill="#555555">Baugruppen</text>
+
+  <!-- Labels outside the segments -->
+  <g text-anchor="middle" font-family="Arial, Helvetica, sans-serif" fill="#1A1A1A">
+    <text x="1185" y="390" font-size="42" font-weight="700">E1</text>
+    <text x="1185" y="437" font-size="34">7</text>
+    <text x="620" y="790" font-size="42" font-weight="700">E2</text>
+    <text x="620" y="837" font-size="34">4</text>
+    <text x="515" y="180" font-size="42" font-weight="700">M</text>
+    <text x="515" y="227" font-size="34">3</text>
+  </g>
+</svg>
