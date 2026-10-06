@@ -1,5 +1,8 @@
 # Sprechertext – Zwischenreview (Folien 1–11)
 
+**Zeitbudget für diesen Abschnitt: ca. 5:00 Minuten**  
+Die gesamte Präsentation bleibt damit bei etwa 15 Minuten. Die Zeitplanung ist eine kurze Einordnung; der inhaltliche Rahmen beginnt auf Folie 3.
+
 ## Folie 1 – Titel (ca. 0:15 | kumuliert: ca. 0:15)
 
 Ich möchte Ihnen heute den aktuellen Stand meiner Masterarbeit vorstellen.  
@@ -115,13 +118,13 @@ Das Ergebnis ist klar: Das reine Bildformat liegt bei allen vier Modellen unter 
 
 ## Folie 10 – Ergebnisstabilität im Vergleich (ca. 0:45 | kumuliert: ca. 8:10)
 
-Zum Schluss dieser Experimentreihe prüfe ich die Stabilität bei wiederholter Durchführung. Dafür wurden Gemini 2.5 Pro und Claude Haiku 4.5 jeweils zehnmal mit derselben Konfiguration – P3 – ausgeführt.
+Zum Schluss prüfe ich die Ergebnisstabilität bei wiederholter Durchführung. Dafür wurden Gemini 2.5 Pro und Claude Haiku 4.5 jeweils zehnmal unter denselben Bedingungen mit der Prompt-Konfiguration P3 ausgeführt. Bewertet wird die Allowed-Label-Set Accuracy.
 
-Die obere Grafik zeigt Gemini 2.5 Pro. Die mittlere Accuracy liegt bei 86,59 Prozent; die Standardabweichung beträgt 2,02 Prozentpunkte. Die Ergebnisse schwanken also sichtbar zwischen den einzelnen Durchläufen.
+Gemini 2.5 Pro erreicht mit 90,66 Prozent den höheren mittleren Accuracy-Wert. Die Standardabweichung beträgt jedoch 2,05 Prozentpunkte. Die Ergebnisse schwanken damit sichtbar zwischen 86,8 und 93,7 Prozent.
 
-Bei Claude Haiku 4.5 liegt der Mittelwert mit 88,33 Prozent höher und die Standardabweichung mit 0,45 Prozentpunkten deutlich niedriger. Claude Haiku liefert unter diesen Bedingungen somit die stabileren Ergebnisse.
+Bei Claude Haiku 4.5 liegt der Mittelwert mit 89,35 Prozent nur 1,31 Prozentpunkte darunter. Die Standardabweichung beträgt aber lediglich 0,47 Prozentpunkte. Die zehn Durchläufe liegen deshalb sehr nah beieinander, zwischen 88,9 und 89,8 Prozent.
 
-Damit sind die wichtigsten Einflüsse von Prompt, Eingabeformat und Wiederholung eingeordnet. Im nächsten Schritt fasse ich die Ergebnisse zusammen.
+Im direkten Stabilitätsvergleich liefert Claude Haiku 4.5 damit deutlich konstantere Ergebnisse, während Gemini 2.5 Pro den höheren durchschnittlichen Wert erreicht.
 
 ## Folie 11 – Fazit & Ausblick (ca. 1:00 | kumuliert: ca. 9:10)
 
@@ -140,3 +143,7 @@ Im weiteren Verlauf erweitere ich den Datensatz um 70 Baugruppen auf insgesamt 1
 Der zweite Schwerpunkt der Arbeit ist die LLM-gestützte Metadatenextraktion. Abschließend werden beide Arbeitspakete gemeinsam ausgewertet und in der Masterarbeit verschriftlicht.
 
 Damit bin ich am Ende meiner Präsentation. Vielen Dank.
+
+## Kurze Übungsregel
+
+Bis einschließlich Folie 10 beträgt die geplante Sprechzeit etwa 8:10 Minuten. Mit Folie 11 liegt sie bei etwa 9:10 Minuten. Die Folien nicht vorlesen: nur die obenstehenden Sätze sprechen und bei den sieben Klassen kurz über die Karten zeigen.
