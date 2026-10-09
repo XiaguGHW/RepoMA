@@ -22,7 +22,7 @@ Die Untersuchung folgt fünf aufeinander aufbauenden Schritten. So wird die Grun
 
 Zunächst erstellen wir einen einheitlichen Testdatensatz und ein Codebook. Damit sind sowohl die Baugruppen als auch die Regeln für ihre Zuordnung für Menschen und LLMs eindeutig festgelegt.
 
-Darauf aufbauend führen wir vier Labeling-Workshops durch. Sie liefern menschliche Klassifikationen und Zeitdaten zu den Baugruppen.
+Darauf aufbauend führen wir vier Labeling-Workshops durch, um das Klassenschema in der Anwendung zu überprüfen sowie menschliche Klassifikationsergebnisse und den dafür benötigten Zeitaufwand zu erfassen.
 
 Anschließend werden diese Ergebnisse anhand des Codebooks geprüft. Dadurch wird festgelegt, welche Fälle eindeutig sind und bei welchen mehrere Labels zulässig sind. Diese Regeln bilden später die Grundlage für die LLM-Bewertung.
 
