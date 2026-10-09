@@ -70,7 +70,7 @@ Im ersten Beispiel ordnen alle drei Teilnehmenden die Baugruppe als „Roboter�
 
 Im zweiten Beispiel wählen zwei Teilnehmende keine der verfügbaren Klassen. Teilnehmer C ordnet die Baugruppe als „Greifer“ ein; sie wurde möglicherweise aufgrund ihrer Form so wahrgenommen. Die Ground Truth bleibt nach der Prüfung Codebook-konform. Das ist E2: eindeutig, aber mit einer abweichenden Einzelmeinung.
 
-Im dritten Beispiel gibt es unterschiedliche Zuordnungen. Die Ground Truth lautet „Lineareinheit“, aber nach der Prüfung ist auch eine alternative Klasse zulässig. Das ist M: ein mehrdeutiger Fall. Die Ground Truth ist dabei nicht falsch, sondern eine der zulässigen Antworten.
+Im dritten Beispiel gibt es unterschiedliche Zuordnungen. Die Ground Truth lautet „Lineareinheit“, aber nach der Prüfung ist auch „Rotationseinheit“ zulässig, weil die Baugruppe zusätzlich einen Rotationsaktor enthält. Das ist M: ein mehrdeutiger Fall. Die Ground Truth ist dabei nicht falsch, sondern eine der zulässigen Antworten.
 
 ## Folie 7 – Auswertung der Workshops (ca. 0:55 | kumuliert: ca. 5:30)
 
