@@ -44,7 +44,7 @@ Je nach Baugruppe standen unterschiedliche Informationsquellen zur Verfügung, z
 
 Die verfügbaren Informationen wurden für jede Baugruppe manuell gesammelt und in einer einheitlichen Ordnerstruktur abgelegt.
 
-Das Codebook bildet die einheitliche Grundlage: Es enthält die sieben Klassendefinitionen und eine feste Entscheidungslogik. Sowohl die Teilnehmenden im Workshop als auch die LLMs klassifizieren nach diesem Regelwerk. Damit wird nachvollziehbar festgelegt, wie eine Baugruppe klassifiziert werden soll.
+Um eine einheitliche und nachvollziehbare Klassifikation durch Menschen und LLMs zu ermöglichen, wurde ein Codebook erstellt. Es enthält die sieben Klassendefinitionen und eine feste Entscheidungslogik. Sowohl die Teilnehmenden im Workshop als auch die LLMs klassifizieren nach diesem Regelwerk.
 
 Auf dieser Testbasis wurden anschließend vier Labeling-Workshops durchgeführt.
 
