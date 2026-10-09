@@ -64,17 +64,13 @@ Als Informationsquellen standen allen Teilnehmenden DFC und Teamcenter zur Verf�
 
 ## Folie 6 – Herleitung der Regime E1, E2 und M (ca. 0:50 | kumuliert: ca. 4:35)
 
-Auf dieser Folie zeige ich, wie die drei Regime aus den Workshop-Ergebnissen abgeleitet wurden.
+Bei der Auswertung zeigte sich, dass einige Baugruppen mehrdeutig sein können. Deshalb wurden die Fälle in E1, E2 und M eingeteilt. So können wir die Ergebnisse der anschließenden LLM-Experimente für eindeutige und mehrdeutige Baugruppen getrennt betrachten.
 
-Zuerst vergleichen wir die Zuordnungen der Teilnehmenden. Anschließend prüfen wir die ursprüngliche Ground Truth anhand des Codebooks.
+Im ersten Beispiel ordnen alle drei Teilnehmenden die Baugruppe als „Roboter“ ein. Es besteht Konsens, und die Ground Truth „Roboter“ wird nach der Prüfung bestätigt. Das ist E1: ein eindeutiger Fall mit einheitlicher Zuordnung.
 
-Beim ersten Beispiel ordnen alle Teilnehmenden die Baugruppe als Roboter ein. Die Ground Truth wird bestätigt. Das ist ein eindeutiger Fall, also E1.
+Im zweiten Beispiel wählen zwei Teilnehmende keine der verfügbaren Klassen. Teilnehmer C ordnet die Baugruppe als „Greifer“ ein; sie wurde möglicherweise aufgrund ihrer Form so wahrgenommen. Die Ground Truth bleibt nach der Prüfung Codebook-konform. Das ist E2: eindeutig, aber mit einer abweichenden Einzelmeinung.
 
-Beim zweiten Beispiel gibt es eine abweichende Einzelmeinung. Aufgrund ihrer Form wurde die Baugruppe möglicherweise als Greifer wahrgenommen und deshalb entsprechend eingeordnet. Nach der Prüfung bleibt die Ground Truth jedoch Codebook-konform. Dieser Fall gehört deshalb zu E2: ebenfalls eindeutig, aber nicht mit vollständigem Konsens.
-
-Beim dritten Beispiel unterscheiden sich die Zuordnungen. Die manuelle Prüfung zeigt, dass neben der Ground Truth auch eine alternative Klasse nach dem Codebook zulässig ist. Das ist ein mehrdeutiger Fall, also M. Die ursprüngliche Ground Truth ist dabei nicht falsch, sondern eine der zulässigen Antworten.
-
-Diese Einteilung wird später bei der LLM-Bewertung berücksichtigt.
+Im dritten Beispiel gibt es unterschiedliche Zuordnungen. Die Ground Truth lautet „Lineareinheit“, aber nach der Prüfung ist auch eine alternative Klasse zulässig. Das ist M: ein mehrdeutiger Fall. Die Ground Truth ist dabei nicht falsch, sondern eine der zulässigen Antworten.
 
 ## Folie 7 – Auswertung der Workshops (ca. 0:55 | kumuliert: ca. 5:30)
 
