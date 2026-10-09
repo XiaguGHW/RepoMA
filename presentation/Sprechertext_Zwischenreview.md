@@ -20,15 +20,15 @@ Das Ziel der Untersuchung ist zu prüfen, wie leistungsfähig eine automatisiert
 
 Die Untersuchung folgt fünf aufeinander aufbauenden Schritten. Sie schaffen die Grundlage, um die LLM-Leistung nachvollziehbar zu messen.
 
-Erstens werden ein einheitlicher Testdatensatz und ein Codebook erstellt. Damit sind sowohl die Baugruppen als auch die Regeln für ihre Zuordnung festgelegt. Das Ergebnis ist eine gemeinsame Klassifikationsgrundlage für Menschen und LLMs.
+Erstens werden ein einheitlicher Testdatensatz und ein Codebook erstellt. Zweck: Baugruppen und verbindliche Zuordnungsregeln festlegen. Ergebnis: eine gemeinsame Klassifikationsgrundlage für Menschen und LLMs.
 
-Zweitens werden vier Labeling-Workshops durchgeführt. Dabei erfassen wir menschliche Klassifikationen und den Zeitaufwand. So erhalten wir unabhängige Einschätzungen zu den Baugruppen.
+Zweitens werden vier Labeling-Workshops durchgeführt. Zweck: menschliche Klassifikationen und den Zeitaufwand erfassen. Ergebnis: unabhängige Zuordnungen und Zeitdaten.
 
-Drittens werden diese Ergebnisse anhand des Codebooks ausgewertet. Die Ground Truths werden geprüft und die Baugruppen E1, E2 oder M zugeordnet. Dadurch ist klar, welche Fälle eindeutig sind und bei welchen mehrere Labels zulässig sind.
+Drittens werden die Workshop-Ergebnisse anhand des Codebooks ausgewertet. Zweck: die Ground Truths prüfen. Ergebnis: E1, E2 oder M sowie zulässige Alternativen. Das legt die Bewertungsregeln für die LLM-Vorhersagen fest.
 
-Viertens werden LLMs unter vergleichbaren Bedingungen mit verschiedenen Modellen, Eingabeformaten und Prompt-Konfigurationen getestet. Das liefert die Vorhersagen für den Vergleich.
+Viertens werden LLMs mit verschiedenen Modellen, Eingabeformaten und Prompts getestet. Zweck: den Einfluss dieser Randbedingungen untersuchen. Ergebnis: vergleichbare LLM-Vorhersagen.
 
-Im letzten Schritt werden diese Vorhersagen mit den geprüften Ground Truths und zulässigen Alternativen bewertet. So lässt sich die Leistungsfähigkeit der LLMs auch bei mehrdeutigen Fällen nachvollziehbar einordnen.
+Im letzten Schritt werden die Vorhersagen mit den geprüften Ground Truths und zulässigen Alternativen bewertet. Zweck: die LLM-Leistung auch bei mehrdeutigen Fällen einordnen. Ergebnis: die Bewertungswerte der Experimente.
 
 Ich gehe diese fünf Schritte jetzt nacheinander durch. Zuerst zeige ich die gemeinsame Testbasis.
 
