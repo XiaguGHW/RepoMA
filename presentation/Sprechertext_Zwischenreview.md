@@ -116,7 +116,7 @@ Zuerst betrachte ich den Einfluss der Prompt-Konfiguration. Die Frage ist: Welch
 
 Die vier Prompt-Varianten bauen schrittweise aufeinander auf. P1 enthält nur die Klassennamen. P2 ergänzt die Klassendefinitionen aus dem Codebook. P3 ergänzt zusätzlich die Entscheidungslogik aus dem Codebook. P3 erweitert enthält darüber hinaus Beispiele und Ausnahmen.
 
-Die Balken zeigen die Accuracy für vier Modelle. Bei Claude Haiku steigt die Leistung mit zunehmendem Informationsumfang deutlich an. Da die Schwankung dieses Modells gering ist, lässt sich dieser Effekt plausibel auf die Prompt-Konfiguration zurückführen.
+Die Balken zeigen die Accuracy für vier Modelle. Bei Claude Haiku steigt die Accuracy mit jeder zusätzlichen Prompt-Information weiter an. Da dieses Modell in der Stabilitätsanalyse nur geringe Schwankungen zeigte, spricht dieser Anstieg dafür, dass ein größerer Informationsumfang die Klassifikationsleistung tatsächlich verbessert. Bei den drei anderen Modellen bleibt P3 jedoch besser.
 
 Bei Gemini 2.5 Pro ist der Unterschied von P2 zu P3 größer als die zuvor gezeigte Schwankung. Kleinere Unterschiede zwischen den übrigen Prompt-Varianten können dagegen auch durch die natürliche Modellschwankung entstanden sein.
 
