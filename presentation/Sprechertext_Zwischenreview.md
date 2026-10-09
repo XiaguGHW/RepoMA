@@ -74,11 +74,7 @@ Im dritten Beispiel gibt es unterschiedliche Zuordnungen. Die Ground Truth laute
 
 ## Folie 7 – Auswertung der Workshops (ca. 0:55 | kumuliert: ca. 5:30)
 
-Nach den vier Workshops haben Jonas und ich die Annotationsergebnisse ausgewertet und geprüft. Dabei wurden auch die ursprünglichen Ground Truths anhand des Codebooks überprüft.
-
-Danach wurden die Baugruppen in die drei gerade erläuterten Regime eingeteilt.
-
-Bei M, also mehrdeutigen Fällen, gab es ebenfalls abweichende Einzelmeinungen. Nach der Prüfung waren mehrere Labels nach dem Codebook zulässig. Das bedeutet, dass die ursprüngliche Ground Truth eines der vertretbaren Labels ist.
+Nach den vier Workshops haben Jonas und ich die Annotationsergebnisse ausgewertet und die ursprünglichen Ground Truths anhand des Codebooks geprüft. Anschließend wurden die Baugruppen den gerade erläuterten Regimen E1, E2 und M zugeordnet.
 
 Aus den Workshop-Ergebnissen konnte außerdem ein wichtiger Kennwert berechnet werden: Krippendorffs Alpha. Es ist ein Maß für die Übereinstimmung zwischen mehreren Personen. Je näher der Wert bei 1 liegt, desto stärker stimmen ihre Klassifikationen überein.
 
