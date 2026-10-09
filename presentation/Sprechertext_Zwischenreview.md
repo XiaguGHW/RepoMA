@@ -134,15 +134,17 @@ Bei M sind mehrere Labels zulässig. Auch hier wird eine nach dem Codebook zulä
 
 Der letzte Balken zeigt jeweils das Gesamtergebnis über alle Baugruppen. Dadurch wird deutlich, dass der Gesamtwert die Unterschiede zwischen den Regimen verdeckt. Genau deshalb betrachten wir die Regime getrennt.
 
-## Folie 12 – LLM-Ergebnisse nach Regime (ca. 0:45 | kumuliert: ca. 9:35)
+## Folie 12 – Eingabeformate im Vergleich (ca. 0:50 | kumuliert: ca. 9:45)
 
-Zum Schluss betrachte ich die Ergebnisse getrennt nach den Regimen E1, E2 und M. Die Bedingungen sind für alle Modelle gleich: PDF als Eingabe und P3, also das vollständige Codebook, als Prompt.
+Als Nächstes vergleiche ich die Eingabeformate bei gleicher Prompt-Konfiguration P3. Die Frage ist: Welches Datenformat führt zur besten Klassifikationsleistung?
 
-Jedes Modell wird hier mit vier Balken dargestellt: E1, E2, M und Gesamt. Der Gesamtwert entspricht dem zuvor verwendeten Gesamtergebnis.
+Zunächst sehen wir das PDF-Format. Die Modelle erhalten dabei alle verfügbaren PDF-Dateien einer Baugruppe, zum Beispiel Stücklisten, Datenblätter und Zeichnungen. Die Accuracy liegt je nach Modell zwischen 88,0 und 93,9 Prozent.
 
-Die Aufteilung zeigt, ob sich die Leistung zwischen eindeutigen und mehrdeutigen Baugruppen unterscheidet. Dadurch bleibt die im Workshop festgestellte Mehrdeutigkeit auch in der LLM-Bewertung sichtbar und geht nicht im Gesamtwert verloren.
+Beim Bildformat erhalten die Modelle CAD-Screenshots, die DFC-Struktur und in Bilder umgewandelte PDF-Seiten. Die Werte liegen bei allen vier Modellen unter denen des PDF-Formats.
 
-Für M wird dabei die Allowed-Label-Set Accuracy verwendet. Eine Vorhersage wird also als korrekt gewertet, wenn sie einer der nach dem Codebook zulässigen Klassen entspricht.
+Beim Textformat werden die aus PDF- und Bilddateien extrahierten Rohtexte verwendet. Bei Claude Haiku und Gemini 2.5 Flash liegt Text über PDF; bei Claude Opus und Gemini 2.5 Pro liegt PDF dagegen höher.
+
+Insgesamt ist das reine Bildformat am schwächsten. Zwischen PDF und Text gibt es keinen einheitlichen Gewinner: Welches der beiden Formate besser ist, hängt vom Modell ab.
 
 ## Folie 13 – Fazit & Ausblick (ca. 1:00 | kumuliert: ca. 10:35)
 
