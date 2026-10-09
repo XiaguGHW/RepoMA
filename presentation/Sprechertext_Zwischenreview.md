@@ -122,13 +122,17 @@ Bei Gemini 2.5 Pro ist der Unterschied von P2 zu P3 größer als die zuvor gezei
 
 Insgesamt zeigt der Vergleich, dass die Entscheidungslogik im Codebook eine wichtige Information für die Klassifikation ist. Für die folgenden Vergleiche verwende ich deshalb P3 als feste Prompt-Konfiguration.
 
-## Folie 11 – Eingabeformate im Vergleich (ca. 0:45 | kumuliert: ca. 8:50)
+## Folie 11 – LLM-Ergebnisse nach Regime (ca. 0:50 | kumuliert: ca. 8:55)
 
-Als Nächstes vergleiche ich die Eingabeformate bei gleicher Prompt-Konfiguration P3. Die Frage ist: Welches Datenformat führt zur besten Klassifikationsleistung?
+Jetzt betrachte ich die Ergebnisse getrennt nach den drei bereits erläuterten Regimen. Die Bedingungen sind für alle Modelle gleich: PDF als Eingabe und P3, also das vollständige Codebook, als Prompt. So wird sichtbar, ob sich die Leistung zwischen eindeutigen und mehrdeutigen Baugruppen unterscheidet.
 
-Bei PDF erhalten die Modelle die verfügbaren PDF-Dateien einer Baugruppe, zum Beispiel Zeichnungen, Stücklisten und Datenblätter. Beim Bildformat werden CAD- und DFC-Screenshots sowie in Bilder umgewandelte PDF-Seiten verwendet. Beim Textformat werden die aus PDF- und Bilddateien extrahierten Rohtexte verwendet.
+Zunächst sehen wir E1: eindeutige Fälle mit einheitlicher Zuordnung. Hier erreichen die Modelle zwischen 82,4 und 94,6 Prozent.
 
-Das reine Bildformat liegt bei allen vier Modellen unter PDF und Text. Welche der beiden anderen Varianten besser ist, hängt vom Modell ab. Daher lässt sich kein genereller Vorteil von PDF gegenüber Text ableiten. Beide Formate sind insgesamt vergleichbar.
+Als Nächstes folgt E2. Auch diese Fälle sind nach der Prüfung eindeutig, aber es gab eine abweichende Einzelmeinung. Die Werte liegen bei allen vier Modellen unter den E1-Werten.
+
+Bei M sind mehrere Labels zulässig. Auch hier wird eine nach dem Codebook zulässige Alternative als korrekt gewertet. Trotzdem sind die Werte bei allen Modellen am niedrigsten, besonders bei den Gemini-Modellen. Mehrdeutige Baugruppen bleiben damit für die LLMs anspruchsvoller.
+
+Der letzte Balken zeigt jeweils das Gesamtergebnis über alle Baugruppen. Dadurch wird deutlich, dass der Gesamtwert die Unterschiede zwischen den Regimen verdeckt. Genau deshalb betrachten wir die Regime getrennt.
 
 ## Folie 12 – LLM-Ergebnisse nach Regime (ca. 0:45 | kumuliert: ca. 9:35)
 
