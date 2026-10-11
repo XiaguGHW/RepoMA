@@ -13,7 +13,7 @@ RepoMA's `scripts/07_terminal_chat` folder. The connector and the existing
 
 ```powershell
 python -m pip install -r requirements.txt
-python code_chat_agent.py --workspace "D:\Projects\my_bot" --state-dir "D:\AI_Bot_State" --model gpt-5.5 --env-file "C:\path\to\.env"
+python code_chat_agent.py --workspace "C:\Users\XXXXX\Documents\Python_Projects\bosch_chat\bot_workspace" --state-dir "C:\Users\XXXXX\Documents\Python_Projects\bosch_chat\AI_Bot_State" --model gpt-6-luna-2026-09-22 --env-file "C:\Users\XXXXX\Documents\Python_Projects\bosch_chat\.env"
 ```
 
 `--state-dir` is required and may be any directory you choose. State is stored
