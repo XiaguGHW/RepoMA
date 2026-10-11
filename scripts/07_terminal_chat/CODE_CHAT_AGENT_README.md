@@ -32,6 +32,8 @@ Useful commands:
 - `/scan` — rebuild the local file and symbol index after substantial manual changes.
 - `/status` — show the number of indexed files, cumulative session tokens, and estimated cost.
 - `/context` — show exactly what the next request can carry into the model context.
+- `/remember TEXT` — save a user-confirmed long-term memory locally for this workspace.
+- `/memory` — list saved memories. Use `/memory search TEXT`, `/memory edit ID new text`, or `/memory delete ID` to manage them.
 - `/cancel` — discard the proposed changes.
 - `/quit` — exit.
 
@@ -45,3 +47,8 @@ The initial scan stays on the computer and does not call the model. Every new
 request uses local filename/symbol matching first. A full file is sent only
 when the model requests that file as the concrete target of a modification;
 the rest of the repository is not retransmitted. For OpenAI-compatible Farm models that allow streaming, the Chinese answer appears progressively in the terminal. The internal JSON action remains hidden. When the company gateway returns usage data, every completed turn shows input/output tokens and an estimated cost; `/status` shows the running total for this session. Prices come from local `model_pricing.json`; edit that file to update prices, or start with `--pricing-file "C:\\path\\to\\prices.json"`. If a model has no matching price entry, the script still works but reports the request as unpriced.
+
+
+## Long-term memory
+
+Long-term memory is stored only in `--state-dir/projects/<workspace-hash>/memory.json`, so it is shared by sessions for the same local workspace but is never placed in the source project. It is written only when you use `/remember` or begin a message with `记住：`. On each request the script locally selects up to five relevant confirmed items; it does not resend the entire memory file.
