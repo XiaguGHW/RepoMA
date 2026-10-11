@@ -34,7 +34,7 @@ SYSTEM = """You are a careful local workspace and document assistant. You never 
 The local program gives you code excerpts, locally extracted document excerpts, and, when necessary, current full files.
 Return ONLY a JSON object with these fields:
 {
-  "answer": "brief Chinese explanation for the user",
+  "answer": "concise Chinese explanation for the user (normally <= 1200 Chinese characters; complete the JSON even if you must shorten)",
   "read_files": ["relative/path"],
   "changes": [{"path": "relative/path", "content": "complete new UTF-8 file content", "reason": "brief reason"}],
   "memory_action": {"operation": "none|add|edit|delete", "id": "memory id or empty", "content": "new memory text or empty"}
@@ -52,6 +52,7 @@ Rules:
 - For add use the concise fact/preference in content. For edit/delete, use an exact memory id shown in the supplied long-term memory when available; otherwise use operation none and ask the user to use /memory.
 - Never claim a memory action was completed: the local program requires explicit confirmation.
 - Do not use Markdown fences around the JSON.
+- For ordinary explanations, be structured but concise. Never let a long explanation prevent a complete valid JSON object.
 """
 
 
@@ -342,9 +343,10 @@ def parse_json(answer: str) -> dict:
 
 def streamed_answer_handler():
     """Reveal only the JSON answer field while retaining the full action internally."""
-    raw, state = [], {"started": False, "done": False, "cursor": 0, "escape": False, "unicode": ""}
+    raw, state = [], {"started": False, "done": False, "cursor": 0, "escape": False, "unicode": "", "answer_chars": []}
 
     def emit_char(char: str):
+        state["answer_chars"].append(char)
         print(char, end="", flush=True)
 
     def handler(kind, text):
@@ -665,7 +667,7 @@ def main():
         stream_handler, streamed = streamed_answer_handler()
         raw = llm.ask_about_files(
             [], prompt_for(state, question, snippets, document_snippets=document_snippets), SYSTEM,
-            {"maxOutputTokens": 1800, "temperature": 0},
+            {"maxOutputTokens": 4096, "temperature": 0},
             stream=True, event_handler=stream_handler,
         )
         if streamed["started"]:
@@ -723,7 +725,16 @@ def main():
             state.add_turn("user", question)
             state.add_turn("assistant", action["answer"])
         except Exception as exc:
-            print(f"assistant> The model response was not applied: {exc}\nRaw response:\n{raw}")
+            # A gateway may cut a response before the final JSON quote/brace.
+            # Do not echo the full raw JSON again after a streamed response.
+            if streamed["started"]:
+                state.add_turn("user", question)
+                partial = "".join(streamed["answer_chars"]).strip()
+                if partial:
+                    state.add_turn("assistant", partial)
+                print("assistant> 本轮回答未形成完整的操作 JSON，未执行文件或记忆操作。若内容在句中结束，请用“继续上一段”重试；已显示的文字不会被重复打印。")
+            else:
+                print(f"assistant> The model response was not applied: {exc}")
 
 
 if __name__ == "__main__":
