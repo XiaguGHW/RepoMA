@@ -3,17 +3,205 @@
   "currency": "USD",
   "unit": "per_1m_tokens",
   "entries": [
-    {"display_name": "Claude Opus 5.5 (New)", "match": ["claude-opus-5-5", "claude-opus-5.5"], "input_usd_per_million": 4.00, "output_usd_per_million": 20.00},
-    {"display_name": "Claude Opus 5", "match": ["claude-opus-5"], "input_usd_per_million": 5.00, "output_usd_per_million": 25.00},
-    {"display_name": "Claude Opus 4.8", "match": ["claude-opus-4-8", "claude-opus-4.8"], "input_usd_per_million": 5.00, "output_usd_per_million": 25.00},
-    {"display_name": "Claude Opus 4.7", "match": ["claude-opus-4-7", "claude-opus-4.7"], "input_usd_per_million": 5.00, "output_usd_per_million": 25.00},
-    {"display_name": "Claude Opus 4.6", "match": ["claude-opus-4-6", "claude-opus-4.6"], "input_usd_per_million": 5.00, "output_usd_per_million": 25.00},
-    {"display_name": "Claude Opus 4.5", "match": ["claude-opus-4-5", "claude-opus-4.5"], "input_usd_per_million": 5.00, "output_usd_per_million": 25.00},
-    {"display_name": "Claude Sonnet 5.5 (New)", "match": ["claude-sonnet-5-5", "claude-sonnet-5.5"], "input_usd_per_million": 2.00, "output_usd_per_million": 10.00},
-    {"display_name": "Claude Sonnet 5", "match": ["claude-sonnet-5"], "input_usd_per_million": 2.00, "output_usd_per_million": 10.00},
-    {"display_name": "Claude Sonnet 4.6", "match": ["claude-sonnet-4-6", "claude-sonnet-4.6"], "input_usd_per_million": 3.00, "output_usd_per_million": 15.00},
-    {"display_name": "Claude Sonnet 4.5", "match": ["claude-sonnet-4-5", "claude-sonnet-4.5"], "input_usd_per_million": 3.00, "output_usd_per_million": 15.00},
-    {"display_name": "Claude Haiku 5.5 (New)", "match": ["claude-haiku-5-5", "claude-haiku-5.5"], "input_usd_per_million": 0.10, "output_usd_per_million": 0.50},
-    {"display_name": "Claude Haiku 4.5", "match": ["claude-haiku-4-5", "claude-haiku-4.5"], "input_usd_per_million": 1.00, "output_usd_per_million": 5.00}
+    {
+      "display_name": "Claude Opus 5.5 (New)",
+      "match": [
+        "claude-opus-5-5",
+        "claude-opus-5.5"
+      ],
+      "input_usd_per_million": 4,
+      "output_usd_per_million": 20
+    },
+    {
+      "display_name": "Claude Opus 5",
+      "match": [
+        "claude-opus-5"
+      ],
+      "input_usd_per_million": 5,
+      "output_usd_per_million": 25
+    },
+    {
+      "display_name": "Claude Opus 4.8",
+      "match": [
+        "claude-opus-4-8",
+        "claude-opus-4.8"
+      ],
+      "input_usd_per_million": 5,
+      "output_usd_per_million": 25
+    },
+    {
+      "display_name": "Claude Opus 4.7",
+      "match": [
+        "claude-opus-4-7",
+        "claude-opus-4.7"
+      ],
+      "input_usd_per_million": 5,
+      "output_usd_per_million": 25
+    },
+    {
+      "display_name": "Claude Opus 4.6",
+      "match": [
+        "claude-opus-4-6",
+        "claude-opus-4.6"
+      ],
+      "input_usd_per_million": 5,
+      "output_usd_per_million": 25
+    },
+    {
+      "display_name": "Claude Opus 4.5",
+      "match": [
+        "claude-opus-4-5",
+        "claude-opus-4.5"
+      ],
+      "input_usd_per_million": 5,
+      "output_usd_per_million": 25
+    },
+    {
+      "display_name": "Claude Sonnet 5.5 (New)",
+      "match": [
+        "claude-sonnet-5-5",
+        "claude-sonnet-5.5"
+      ],
+      "input_usd_per_million": 2,
+      "output_usd_per_million": 10
+    },
+    {
+      "display_name": "Claude Sonnet 5",
+      "match": [
+        "claude-sonnet-5"
+      ],
+      "input_usd_per_million": 2,
+      "output_usd_per_million": 10
+    },
+    {
+      "display_name": "Claude Sonnet 4.6",
+      "match": [
+        "claude-sonnet-4-6",
+        "claude-sonnet-4.6"
+      ],
+      "input_usd_per_million": 3,
+      "output_usd_per_million": 15
+    },
+    {
+      "display_name": "Claude Sonnet 4.5",
+      "match": [
+        "claude-sonnet-4-5",
+        "claude-sonnet-4.5"
+      ],
+      "input_usd_per_million": 3,
+      "output_usd_per_million": 15
+    },
+    {
+      "display_name": "Claude Haiku 5.5 (New)",
+      "match": [
+        "claude-haiku-5-5",
+        "claude-haiku-5.5"
+      ],
+      "input_usd_per_million": 0.1,
+      "output_usd_per_million": 0.5
+    },
+    {
+      "display_name": "Claude Haiku 4.5",
+      "match": [
+        "claude-haiku-4-5",
+        "claude-haiku-4.5"
+      ],
+      "input_usd_per_million": 1,
+      "output_usd_per_million": 5
+    },
+    {
+      "display_name": "DeepSeek R1 (0528)",
+      "match": [
+        "deepseek-r1"
+      ],
+      "input_usd_per_million": 1.35,
+      "output_usd_per_million": 5.4
+    },
+    {
+      "display_name": "Gemini 2.5 Pro",
+      "match": [
+        "gemini-2.5-pro"
+      ],
+      "input_usd_per_million": 1.25,
+      "output_usd_per_million": 10
+    },
+    {
+      "display_name": "Gemini 3.7 Flash (New)",
+      "match": [
+        "gemini-3.7-flash"
+      ],
+      "input_usd_per_million": 0.75,
+      "output_usd_per_million": 3.75,
+      "pricing_note": "Promotional price valid until 2026-12-31; then USD 1.50 input / USD 7.50 output per 1M tokens.",
+      "standard_input_usd_per_million": 1.5,
+      "standard_output_usd_per_million": 7.5,
+      "promotion_ends": "2026-12-31"
+    },
+    {
+      "display_name": "Gemini 3.6 Flash",
+      "match": [
+        "gemini-3.6-flash"
+      ],
+      "input_usd_per_million": 1.5,
+      "output_usd_per_million": 7.5
+    },
+    {
+      "display_name": "Gemini 3.5 Flash",
+      "match": [
+        "gemini-3.5-flash"
+      ],
+      "input_usd_per_million": 1.5,
+      "output_usd_per_million": 9
+    },
+    {
+      "display_name": "Gemini 2.5 Flash",
+      "match": [
+        "gemini-2.5-flash"
+      ],
+      "input_usd_per_million": 0.3,
+      "output_usd_per_million": 2.5
+    },
+    {
+      "display_name": "Gemini 3.5 Flash-Lite (New)",
+      "match": [
+        "gemini-3.5-flash-lite"
+      ],
+      "input_usd_per_million": 0.3,
+      "output_usd_per_million": 2.5
+    },
+    {
+      "display_name": "Gemini 3.1 Flash-Lite",
+      "match": [
+        "gemini-3.1-flash-lite"
+      ],
+      "input_usd_per_million": 0.25,
+      "output_usd_per_million": 1.5
+    },
+    {
+      "display_name": "Gemini 2.5 Flash-Lite",
+      "match": [
+        "gemini-2.5-flash-lite"
+      ],
+      "input_usd_per_million": 0.1,
+      "output_usd_per_million": 0.4
+    },
+    {
+      "display_name": "Llama 3.3 70B",
+      "match": [
+        "llama-3.3-70b",
+        "llama-3-3-70b"
+      ],
+      "input_usd_per_million": 0.72,
+      "output_usd_per_million": 0.72
+    },
+    {
+      "display_name": "Mistral Document AI 2512",
+      "match": [
+        "mistral-document-ai-2512"
+      ],
+      "billing_unit": "per_1000_pages",
+      "usd_per_1000_pages": 3,
+      "pricing_note": "Page-based model pricing; not included in token-cost calculations."
+    }
   ]
 }
