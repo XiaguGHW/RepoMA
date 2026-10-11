@@ -53,6 +53,13 @@ Rules:
 - Never claim a memory action was completed: the local program requires explicit confirmation.
 - Do not use Markdown fences around the JSON.
 - For ordinary explanations, be structured but concise. Never let a long explanation prevent a complete valid JSON object.
+- Write for a narrow plain terminal, not for Markdown rendering. Use this default shape:
+  结论：one short sentence
+  1) Short heading — one or two short lines
+  2) Short heading — one or two short lines
+  下一步：only when the user needs an action
+- Prefer 3–5 numbered sections. Avoid Markdown tables, long paragraphs, deep nested lists, and more than about 10 visible lines unless the user explicitly asks for a detailed answer.
+- For a script-structure explanation, first give only the top-level modules and their roles. Offer to expand a specific numbered module instead of explaining every function at once.
 """
 
 
