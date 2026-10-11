@@ -30,8 +30,8 @@ MAX_SNIPPETS = 6
 MAX_SNIPPET_CHARS = 4_000
 HISTORY_MESSAGES_PER_REQUEST = 4
 
-SYSTEM = """You are a careful local code assistant. You never have direct filesystem access.
-The local program gives you code excerpts and, when necessary, current full files.
+SYSTEM = """You are a careful local workspace and document assistant. You never have direct filesystem access.
+The local program gives you code excerpts, locally extracted document excerpts, and, when necessary, current full files.
 Return ONLY a JSON object with these fields:
 {
   "answer": "brief Chinese explanation for the user",
@@ -45,6 +45,8 @@ Rules:
 - Do not put a change in changes until you have the complete current content for that file.
 - A new file may be created directly if its parent path is clear.
 - Keep read_files focused (at most 4). Do not request an entire repository.
+- Use supplied document excerpts as evidence when answering document questions. Cite their filename/page or sheet in the answer when useful.
+- Do not propose a code change merely because the user asks a document question.
 - If evidence is insufficient, explain what is needed and leave changes empty.
 - Set memory_action only when the user explicitly asks you to remember, update, or delete a long-term memory. Never infer a memory action from ordinary discussion.
 - For add use the concise fact/preference in content. For edit/delete, use an exact memory id shown in the supplied long-term memory when available; otherwise use operation none and ask the user to use /memory.
@@ -397,13 +399,17 @@ def ensure_relative(path: str) -> str:
     return item.as_posix()
 
 
-def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], full_files: dict[str, str] | None = None):
+def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], full_files: dict[str, str] | None = None, document_snippets: list[dict] | None = None):
     recent = "\n".join(f"{turn['role']}: {turn['content']}" for turn in state.data["history"][-HISTORY_MESSAGES_PER_REQUEST:]) or "(new conversation)"
     memories = state.search_memory(question)
     memory_text = "\n".join(f"- [{item['id']}] {item['content']}" for item in memories) or "(No relevant confirmed long-term memory.)"
     indexed = "\n".join(f"- {p}: {', '.join(m.get('symbols', [])[:12])}" for p, m in list(state.data["files"].items())[:250])
     shown = "\n\n".join(f"--- EXCERPT {path} ---\n{text}" for path, text in snippets.items()) or "(No relevant excerpt found.)"
     complete = "\n\n".join(f"--- COMPLETE FILE {path} ---\n{text}" for path, text in (full_files or {}).items()) or "(No complete file was requested yet.)"
+    document_text = "\n\n".join(
+        f"--- DOCUMENT [{item['id']}] {item['label']} ---\n{item['text']}"
+        for item in (document_snippets or [])
+    ) or "(No relevant locally extracted document excerpt.)"
     return f"""Workspace: {state.workspace}
 Project summary: {state.data['summary'] or '(none)'}
 Recent conversation:\n{recent}
@@ -413,6 +419,8 @@ Relevant confirmed long-term memory (local, user-confirmed):\n{memory_text}
 Indexed files and symbols (local metadata only):\n{indexed}
 
 Relevant code excerpts:\n{shown}
+
+Relevant locally extracted document excerpts:\n{document_text}
 
 Complete current files supplied in this turn:\n{complete}
 
@@ -499,10 +507,12 @@ def main():
         raise SystemExit(f"Workspace does not exist: {workspace}")
     load_dotenv(args.env_file or (Path(__file__).resolve().parent / ".env"))
     from llm_connector_with_prompt_caching import LLMConnector
+    from local_document_library import LocalDocumentLibrary
     key = os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY") or os.getenv("BOSCH_FARM_API_KEY")
     if not key:
         raise SystemExit("Missing BOSCH_FARM_SUBSCRIPTION_KEY in .env or environment.")
     state = ProjectState(Path(args.state_dir), workspace, args.session)
+    documents = LocalDocumentLibrary(state.root.parent / "documents.json")
     pricing_path = Path(args.pricing_file) if args.pricing_file else Path(__file__).resolve().parent / "model_pricing.json"
     pricing = PricingCatalog(pricing_path)
     count = state.scan()
@@ -514,7 +524,7 @@ def main():
         print(f"Pricing disabled: could not load {pricing_path}: {pricing.error}")
     elif not pricing.entries:
         print(f"Pricing disabled: no entries in {pricing_path}")
-    print("Ask in Chinese. Commands: /model ID | /scan | /status | /context | /remember TEXT | /memory | /cancel | 确认执行 | 确认记忆 | /quit")
+    print("Ask in Chinese. Commands: /file PATH | /files | /model ID | /scan | /status | /context | /remember TEXT | /memory | /cancel | 确认执行 | 确认记忆 | /quit")
     while True:
         try:
             question = input("you> ").strip()
@@ -530,7 +540,7 @@ def main():
             continue
         if question == "/status":
             u = state.data["usage"]
-            print(f"model={args.model}; files={len(state.data['files'])}; requests={u['requests']}; input={u['input']}; output={u['output']}; estimated={format_cost(float(u.get('estimated_cost_usd', 0.0)))}; unpriced={u.get('unpriced_requests', 0)}; pending={len(pending)}")
+            print(f"model={args.model}; files={len(state.data['files'])}; requests={u['requests']}; input={u['input']}; output={u['output']}; estimated={format_cost(float(u.get('estimated_cost_usd', 0.0)))}; unpriced={u.get('unpriced_requests', 0)}; documents={len(documents.list())}; pending={len(pending)}")
             continue
         if question == "/context":
             history = state.data["history"]
@@ -545,12 +555,37 @@ def main():
                 f"按问题命中的最多 {MAX_SNIPPETS} 个代码片段（每个最多 {MAX_SNIPPET_CHARS} 字符）。"
             )
             print(
-                "另外会按当前问题带入最多 5 条相关的、用户确认的长期记忆。"
+                "另外会按当前问题带入最多 5 条相关的、用户确认的长期记忆，"
+                "以及最多 6 个本地文档片段。"
             )
             print(
                 "若模型请求修改某个文件，下一次调用还会带入该目标文件全文。"
                 "底层模型的最大上下文窗口未由 Model Farm 接口提供，因此脚本不能可靠显示该上限。"
             )
+            continue
+        if question == "/files":
+            entries = documents.list()
+            if not entries:
+                print("No local documents indexed. Add one with /file PATH")
+            else:
+                print(f"Local documents ({len(entries)}):")
+                for item in entries:
+                    print(f"[{item['id']}] {item['name']} — {len(item.get('chunks', []))} chunks")
+            continue
+        if question == "/file clear":
+            print(f"Removed {documents.clear()} local document index(es). Original files were not changed.")
+            continue
+        if question.startswith("/file remove "):
+            document_id = question[len("/file remove "):].strip()
+            print("Document index removed." if documents.remove(document_id) else "Document ID not found.")
+            continue
+        if question.startswith("/file "):
+            value = question[len("/file "):].strip()
+            try:
+                item = documents.add(value)
+                print(f"Indexed locally: [{item['id']}] {item['name']} — {len(item['chunks'])} chunks.")
+            except Exception as exc:
+                print(f"Document not indexed: {exc}")
             continue
         if question == "/memory":
             items = state.list_memory()
@@ -625,10 +660,11 @@ def main():
 
         matches = state.search(question)
         snippets = {relative: excerpt(state, relative, question) for relative in matches}
+        document_snippets = documents.search(question)
         turn_estimates = []
         stream_handler, streamed = streamed_answer_handler()
         raw = llm.ask_about_files(
-            [], prompt_for(state, question, snippets), SYSTEM,
+            [], prompt_for(state, question, snippets, document_snippets=document_snippets), SYSTEM,
             {"maxOutputTokens": 1800, "temperature": 0},
             stream=True, event_handler=stream_handler,
         )
@@ -652,7 +688,7 @@ def main():
             if full_files:
                 stream_handler, streamed = streamed_answer_handler()
                 raw = llm.ask_about_files(
-                    [], prompt_for(state, question, snippets, full_files), SYSTEM,
+                    [], prompt_for(state, question, snippets, full_files, document_snippets), SYSTEM,
                     {"maxOutputTokens": 3000, "temperature": 0},
                     stream=True, event_handler=stream_handler,
                 )
