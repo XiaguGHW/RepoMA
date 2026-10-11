@@ -6,7 +6,7 @@ Excel format (first worksheet):
     C = Teamcenter  (fallback folder name)
 
 Direct execution in VS Code:
-    1. Change EXCEL_PATH and BASE_PATH below.
+    1. The paths below already match C:\\Users\\wdu4fe\\Downloads\\70BG.
     2. Keep DRY_RUN = True for the first run (preview only).
     3. After checking the output, change DRY_RUN to False and run again.
 """
@@ -145,7 +145,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
 
-# Terminal commands (run these from the repoMA root folder):
+# Terminal commands (the script, Excel file and class folders are all in Downloads\\70BG):
 #
 # Preview only (no folders are created):
 # python scripts/create_bg_folders_from_excel.py --excel "C:\Users\YOUR_NAME\Downloads\70BG\70BG.xlsx" --base "C:\Users\YOUR_NAME\Downloads\70BG"
