@@ -266,6 +266,58 @@ def parse_json(answer: str) -> dict:
     return data
 
 
+def streamed_answer_handler():
+    """Reveal only the JSON answer field while retaining the full action internally."""
+    raw, state = [], {"started": False, "done": False, "cursor": 0, "escape": False, "unicode": ""}
+
+    def emit_char(char: str):
+        print(char, end="", flush=True)
+
+    def handler(kind, text):
+        if kind == "notice":
+            print(f"\n[stream] {text}")
+            return
+        if kind != "content" or not text:
+            return
+        raw.append(text)
+        joined = "".join(raw)
+        if not state["started"]:
+            match = re.search(r'"answer"\s*:\s*"', joined)
+            if not match:
+                return
+            state["started"] = True
+            state["cursor"] = match.end()
+            print("assistant> ", end="", flush=True)
+        while state["cursor"] < len(joined) and not state["done"]:
+            char = joined[state["cursor"]]
+            state["cursor"] += 1
+            if state["unicode"]:
+                state["unicode"] += char
+                if len(state["unicode"]) == 4:
+                    try:
+                        emit_char(chr(int(state["unicode"], 16)))
+                    except ValueError:
+                        emit_char("\\u" + state["unicode"])
+                    state["unicode"] = ""
+                    state["escape"] = False
+                continue
+            if state["escape"]:
+                if char == "u":
+                    state["unicode"] = ""
+                    continue
+                emit_char({"n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}.get(char, char))
+                state["escape"] = False
+                continue
+            if char == "\\":
+                state["escape"] = True
+            elif char == '"':
+                state["done"] = True
+            else:
+                emit_char(char)
+
+    return handler, state
+
+
 def ensure_relative(path: str) -> str:
     item = Path(path)
     if item.is_absolute() or ".." in item.parts or not path.strip():
@@ -409,7 +461,14 @@ def main():
         matches = state.search(question)
         snippets = {relative: excerpt(state, relative, question) for relative in matches}
         turn_estimates = []
-        raw = llm.ask_about_files([], prompt_for(state, question, snippets), SYSTEM, {"maxOutputTokens": 1800, "temperature": 0})
+        stream_handler, streamed = streamed_answer_handler()
+        raw = llm.ask_about_files(
+            [], prompt_for(state, question, snippets), SYSTEM,
+            {"maxOutputTokens": 1800, "temperature": 0},
+            stream=True, event_handler=stream_handler,
+        )
+        if streamed["started"]:
+            print()
         estimate = state.note_usage(llm.get_last_token_usage(), pricing, args.model)
         if estimate:
             turn_estimates.append(estimate)
@@ -426,12 +485,20 @@ def main():
             # premature change returned with it and obtain a new action based
             # on the actual latest file content.
             if full_files:
-                raw = llm.ask_about_files([], prompt_for(state, question, snippets, full_files), SYSTEM, {"maxOutputTokens": 3000, "temperature": 0})
+                stream_handler, streamed = streamed_answer_handler()
+                raw = llm.ask_about_files(
+                    [], prompt_for(state, question, snippets, full_files), SYSTEM,
+                    {"maxOutputTokens": 3000, "temperature": 0},
+                    stream=True, event_handler=stream_handler,
+                )
+                if streamed["started"]:
+                    print()
                 estimate = state.note_usage(llm.get_last_token_usage(), pricing, args.model)
                 if estimate:
                     turn_estimates.append(estimate)
                 action = parse_json(raw)
-            print(f"assistant> {action['answer']}")
+            if not streamed["started"]:
+                print(f"assistant> {action['answer']}")
             if turn_estimates:
                 turn_input = sum(item["input_tokens"] for item in turn_estimates)
                 turn_output = sum(item["output_tokens"] for item in turn_estimates)
