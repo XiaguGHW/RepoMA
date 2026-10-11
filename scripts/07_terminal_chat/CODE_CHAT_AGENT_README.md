@@ -28,6 +28,8 @@ shows a unified diff for any proposed creation or modification. Type exactly
 
 Useful commands:
 
+- `/file PATH` — locally extract and index a PDF, Word document, Excel workbook, CSV, TXT, or Markdown file. Quote paths containing spaces.
+- `/files` — list locally indexed documents. Use `/file remove ID` or `/file clear` to remove indexes; original files are never changed.
 - `/model MODEL_ID` — switch among models available through Farm.
 - `/scan` — rebuild the local file and symbol index after substantial manual changes.
 - `/status` — show the number of indexed files, cumulative session tokens, and estimated cost.
@@ -55,3 +57,8 @@ Long-term memory is stored only in `--state-dir/projects/<workspace-hash>/memory
 
 
 Natural-language memory changes are never applied automatically. The model can only propose one local add, edit, or delete action; the terminal displays it and requires the exact confirmation `确认记忆`.
+
+
+## Local document questions
+
+Use `/file "C:\\path\\to\\file.pdf"` to index a local PDF, Word (`.docx`), Excel (`.xlsx`/`.xlsm`), CSV, TXT, or Markdown file. Extraction and lexical search occur locally; the source file is not copied or uploaded. When you ask a question, the script sends at most six matching extracted excerpts to the selected model, labelled with the source filename and PDF page or Excel sheet. Image OCR is intentionally not included in this version.
