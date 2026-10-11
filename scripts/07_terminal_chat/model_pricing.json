@@ -202,6 +202,206 @@
       "billing_unit": "per_1000_pages",
       "usd_per_1000_pages": 3,
       "pricing_note": "Page-based model pricing; not included in token-cost calculations."
+    },
+    {
+      "display_name": "GPT-6 Astra (New)",
+      "match": [
+        "gpt-6-astra"
+      ],
+      "input_usd_per_million": 10,
+      "output_usd_per_million": 50
+    },
+    {
+      "display_name": "GPT-6 Sol (New)",
+      "match": [
+        "gpt-6-sol"
+      ],
+      "input_usd_per_million": 2,
+      "output_usd_per_million": 10
+    },
+    {
+      "display_name": "GPT-6 Luna (New)",
+      "match": [
+        "gpt-6-luna"
+      ],
+      "input_usd_per_million": 0.1,
+      "output_usd_per_million": 0.5
+    },
+    {
+      "display_name": "GPT-5.6 Sol",
+      "match": [
+        "gpt-5.6-sol"
+      ],
+      "input_usd_per_million": 4,
+      "output_usd_per_million": 20
+    },
+    {
+      "display_name": "GPT-5.6 Terra",
+      "match": [
+        "gpt-5.6-terra"
+      ],
+      "input_usd_per_million": 2,
+      "output_usd_per_million": 12
+    },
+    {
+      "display_name": "GPT-5.6 Luna",
+      "match": [
+        "gpt-5.6-luna"
+      ],
+      "input_usd_per_million": 0.2,
+      "output_usd_per_million": 1.2
+    },
+    {
+      "display_name": "GPT-5.5",
+      "match": [
+        "gpt-5.5"
+      ],
+      "input_usd_per_million": 5,
+      "output_usd_per_million": 30
+    },
+    {
+      "display_name": "GPT-5.4",
+      "match": [
+        "gpt-5.4"
+      ],
+      "input_usd_per_million": 2.5,
+      "output_usd_per_million": 15
+    },
+    {
+      "display_name": "GPT-5.4 mini",
+      "match": [
+        "gpt-5.4-mini"
+      ],
+      "input_usd_per_million": 0.75,
+      "output_usd_per_million": 4.5
+    },
+    {
+      "display_name": "GPT-5.4 nano",
+      "match": [
+        "gpt-5.4-nano"
+      ],
+      "input_usd_per_million": 0.2,
+      "output_usd_per_million": 1.25
+    },
+    {
+      "display_name": "GPT-5.2",
+      "match": [
+        "gpt-5.2"
+      ],
+      "input_usd_per_million": 1.75,
+      "output_usd_per_million": 14
+    },
+    {
+      "display_name": "GPT-5",
+      "match": [
+        "gpt-5"
+      ],
+      "input_usd_per_million": 1.25,
+      "output_usd_per_million": 10
+    },
+    {
+      "display_name": "GPT-5 mini",
+      "match": [
+        "gpt-5-mini"
+      ],
+      "input_usd_per_million": 0.25,
+      "output_usd_per_million": 2
+    },
+    {
+      "display_name": "GPT-5 nano",
+      "match": [
+        "gpt-5-nano"
+      ],
+      "input_usd_per_million": 0.05,
+      "output_usd_per_million": 0.4
+    },
+    {
+      "display_name": "GPT-4.1",
+      "match": [
+        "gpt-4.1"
+      ],
+      "input_usd_per_million": 2,
+      "output_usd_per_million": 8
+    },
+    {
+      "display_name": "GPT-4.1 mini",
+      "match": [
+        "gpt-4.1-mini"
+      ],
+      "input_usd_per_million": 0.4,
+      "output_usd_per_million": 1.6
+    },
+    {
+      "display_name": "GPT-4.1 nano",
+      "match": [
+        "gpt-4.1-nano"
+      ],
+      "input_usd_per_million": 0.1,
+      "output_usd_per_million": 0.4
+    },
+    {
+      "display_name": "GPT-4o",
+      "match": [
+        "gpt-4o"
+      ],
+      "input_usd_per_million": 2.5,
+      "output_usd_per_million": 10
+    },
+    {
+      "display_name": "GPT-4o mini",
+      "match": [
+        "gpt-4o-mini"
+      ],
+      "input_usd_per_million": 0.15,
+      "output_usd_per_million": 0.6
+    },
+    {
+      "display_name": "o4-mini",
+      "match": [
+        "o4-mini"
+      ],
+      "input_usd_per_million": 1.1,
+      "output_usd_per_million": 4.4
+    },
+    {
+      "display_name": "o3",
+      "match": [
+        "o3"
+      ],
+      "input_usd_per_million": 2,
+      "output_usd_per_million": 8
+    },
+    {
+      "display_name": "o3-mini",
+      "match": [
+        "o3-mini"
+      ],
+      "input_usd_per_million": 1.1,
+      "output_usd_per_million": 4.4
+    },
+    {
+      "display_name": "o1",
+      "match": [
+        "o1"
+      ],
+      "input_usd_per_million": 15,
+      "output_usd_per_million": 60
+    },
+    {
+      "display_name": "GLM-5",
+      "match": [
+        "glm-5"
+      ],
+      "input_usd_per_million": 1,
+      "output_usd_per_million": 3.2
+    },
+    {
+      "display_name": "GLM-4.7",
+      "match": [
+        "glm-4.7"
+      ],
+      "input_usd_per_million": 0.6,
+      "output_usd_per_million": 2.2
     }
   ]
 }
