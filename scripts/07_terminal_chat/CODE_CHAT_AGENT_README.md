@@ -32,7 +32,7 @@ Useful commands:
 - `/scan` — rebuild the local file and symbol index after substantial manual changes.
 - `/status` — show the number of indexed files, cumulative session tokens, and estimated cost.
 - `/context` — show exactly what the next request can carry into the model context.
-- `/remember TEXT` — save a user-confirmed long-term memory locally for this workspace.
+- `/remember TEXT` — immediately save a user-confirmed long-term memory locally for this workspace. Natural requests such as `请记住……` or `删除关于……的记忆` are first shown as a proposal; type `确认记忆` to apply.
 - `/memory` — list saved memories. Use `/memory search TEXT`, `/memory edit ID new text`, or `/memory delete ID` to manage them.
 - `/cancel` — discard the proposed changes.
 - `/quit` — exit.
@@ -52,3 +52,6 @@ the rest of the repository is not retransmitted. For OpenAI-compatible Farm mode
 ## Long-term memory
 
 Long-term memory is stored only in `--state-dir/projects/<workspace-hash>/memory.json`, so it is shared by sessions for the same local workspace but is never placed in the source project. It is written only when you use `/remember` or begin a message with `记住：`. On each request the script locally selects up to five relevant confirmed items; it does not resend the entire memory file.
+
+
+Natural-language memory changes are never applied automatically. The model can only propose one local add, edit, or delete action; the terminal displays it and requires the exact confirmation `确认记忆`.
