@@ -31,6 +31,7 @@ Useful commands:
 - `/model MODEL_ID` — switch among models available through Farm.
 - `/scan` — rebuild the local file and symbol index after substantial manual changes.
 - `/status` — show the number of indexed files, cumulative session tokens, and estimated cost.
+- `/context` — show exactly what the next request can carry into the model context.
 - `/cancel` — discard the proposed changes.
 - `/quit` — exit.
 
