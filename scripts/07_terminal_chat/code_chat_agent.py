@@ -347,7 +347,6 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Run this in the VS Code integrated Terminal (PowerShell). Replace paths,
-# model ID and .env path for your computer:
-# python code_chat_agent.py --workspace "D:\\Projects\\my_bot" --state-dir "D:\\AI_Bot_State" --model gpt-5.5 --env-file "C:\\path\\to\\.env"
+# Run this in the VS Code integrated Terminal (PowerShell):
+# python code_chat_agent.py --workspace "C:\\Users\\XXXXX\\Documents\\Python_Projects\\bosch_chat\\bot_workspace" --state-dir "C:\\Users\\XXXXX\\Documents\\Python_Projects\\bosch_chat\\AI_Bot_State" --model gpt-6-luna-2026-09-22 --env-file "C:\\Users\\XXXXX\\Documents\\Python_Projects\\bosch_chat\\.env"
 # State, indexes and conversation summaries are stored only under --state-dir.
