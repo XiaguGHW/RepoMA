@@ -28,6 +28,7 @@ IGNORED_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_c
 MAX_FILE_BYTES = 1_000_000
 MAX_SNIPPETS = 6
 MAX_SNIPPET_CHARS = 4_000
+HISTORY_MESSAGES_PER_REQUEST = 4
 
 SYSTEM = """You are a careful local code assistant. You never have direct filesystem access.
 The local program gives you code excerpts and, when necessary, current full files.
@@ -273,7 +274,7 @@ def ensure_relative(path: str) -> str:
 
 
 def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], full_files: dict[str, str] | None = None):
-    recent = "\n".join(f"{turn['role']}: {turn['content']}" for turn in state.data["history"][-4:]) or "(new conversation)"
+    recent = "\n".join(f"{turn['role']}: {turn['content']}" for turn in state.data["history"][-HISTORY_MESSAGES_PER_REQUEST:]) or "(new conversation)"
     indexed = "\n".join(f"- {p}: {', '.join(m.get('symbols', [])[:12])}" for p, m in list(state.data["files"].items())[:250])
     shown = "\n\n".join(f"--- EXCERPT {path} ---\n{text}" for path, text in snippets.items()) or "(No relevant excerpt found.)"
     complete = "\n\n".join(f"--- COMPLETE FILE {path} ---\n{text}" for path, text in (full_files or {}).items()) or "(No complete file was requested yet.)"
@@ -350,7 +351,7 @@ def main():
         print(f"Pricing disabled: could not load {pricing_path}: {pricing.error}")
     elif not pricing.entries:
         print(f"Pricing disabled: no entries in {pricing_path}")
-    print("Ask in Chinese. Commands: /model ID | /scan | /status | /cancel | 确认执行 | /quit")
+    print("Ask in Chinese. Commands: /model ID | /scan | /status | /context | /cancel | 确认执行 | /quit")
     while True:
         try:
             question = input("you> ").strip()
@@ -367,6 +368,23 @@ def main():
         if question == "/status":
             u = state.data["usage"]
             print(f"model={args.model}; files={len(state.data['files'])}; requests={u['requests']}; input={u['input']}; output={u['output']}; estimated={format_cost(float(u.get('estimated_cost_usd', 0.0)))}; unpriced={u.get('unpriced_requests', 0)}; pending={len(pending)}")
+            continue
+        if question == "/context":
+            history = state.data["history"]
+            carried = history[-HISTORY_MESSAGES_PER_REQUEST:]
+            history_chars = sum(len(str(turn.get("content", ""))) for turn in carried)
+            print(
+                f"本次请求会带入：最近最多 {HISTORY_MESSAGES_PER_REQUEST} 条历史消息"
+                f"（当前可带入 {len(carried)} 条，约 {history_chars} 个字符）。"
+            )
+            print(
+                f"另外会带入：系统规则、当前问题、文件索引元数据；"
+                f"按问题命中的最多 {MAX_SNIPPETS} 个代码片段（每个最多 {MAX_SNIPPET_CHARS} 字符）。"
+            )
+            print(
+                "若模型请求修改某个文件，下一次调用还会带入该目标文件全文。"
+                "底层模型的最大上下文窗口未由 Model Farm 接口提供，因此脚本不能可靠显示该上限。"
+            )
             continue
         if question == "/cancel":
             pending = []
