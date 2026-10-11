@@ -64,6 +64,55 @@ def tokens(text: str) -> list[str]:
     return re.findall(r"[A-Za-z_][A-Za-z0-9_]{1,}|[\u4e00-\u9fff]{2,}|\d{2,}", text.lower())
 
 
+class PricingCatalog:
+    def __init__(self, path: Path | None):
+        self.path = path
+        self.entries = []
+        self.error = None
+        if not path:
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.entries = data.get("entries", [])
+        except (OSError, json.JSONDecodeError) as exc:
+            self.error = str(exc)
+
+    def price_for(self, model: str):
+        name = model.lower()
+        candidates = []
+        for entry in self.entries:
+            if "input_usd_per_million" not in entry or "output_usd_per_million" not in entry:
+                continue
+            for alias in entry.get("match", []):
+                if name.startswith(str(alias).lower()):
+                    candidates.append((len(str(alias)), entry))
+        if not candidates:
+            return None
+        entry = max(candidates, key=lambda item: item[0])[1]
+        input_price = float(entry["input_usd_per_million"])
+        output_price = float(entry["output_usd_per_million"])
+        ends = entry.get("promotion_ends")
+        if ends and datetime.now(timezone.utc).date().isoformat() > ends:
+            input_price = float(entry.get("standard_input_usd_per_million", input_price))
+            output_price = float(entry.get("standard_output_usd_per_million", output_price))
+        return {"name": entry.get("display_name", model), "input_price": input_price, "output_price": output_price}
+
+    def estimate(self, model: str, input_tokens: int, output_tokens: int):
+        price = self.price_for(model)
+        if not price:
+            return None
+        return {
+            **price,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cost_usd": input_tokens * price["input_price"] / 1_000_000 + output_tokens * price["output_price"] / 1_000_000,
+        }
+
+
+def format_cost(cost: float) -> str:
+    return f"${cost:.6f}"
+
+
 class ProjectState:
     def __init__(self, state_dir: Path, workspace: Path, session: str):
         self.workspace = workspace.expanduser().resolve()
@@ -78,11 +127,17 @@ class ProjectState:
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
                 if data.get("workspace") == str(self.workspace):
+                    usage = data.setdefault("usage", {})
+                    usage.setdefault("requests", 0)
+                    usage.setdefault("input", 0)
+                    usage.setdefault("output", 0)
+                    usage.setdefault("estimated_cost_usd", 0.0)
+                    usage.setdefault("unpriced_requests", 0)
                     return data
             except (OSError, json.JSONDecodeError):
                 pass
         return {"workspace": str(self.workspace), "session_id": uuid.uuid4().hex,
-                "files": {}, "history": [], "summary": "", "usage": {"requests": 0, "input": 0, "output": 0}}
+                "files": {}, "history": [], "summary": "", "usage": {"requests": 0, "input": 0, "output": 0, "estimated_cost_usd": 0.0, "unpriced_requests": 0}}
 
     def save(self):
         self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -148,12 +203,24 @@ class ProjectState:
         self.data["history"] = self.data["history"][-8:]
         self.save()
 
-    def note_usage(self, usage):
-        self.data["usage"]["requests"] += 1
-        if isinstance(usage, dict):
-            self.data["usage"]["input"] += int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0)
-            self.data["usage"]["output"] += int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0)
+    def note_usage(self, usage, pricing: PricingCatalog, model: str):
+        usage = usage if isinstance(usage, dict) else {}
+        input_tokens = int(usage.get("prompt_tokens", usage.get("input_tokens", usage.get("promptTokenCount", usage.get("inputTokenCount", 0)))) or 0)
+        output_tokens = int(usage.get("completion_tokens", usage.get("output_tokens", usage.get("candidatesTokenCount", usage.get("outputTokenCount", 0)))) or 0)
+        total = input_tokens + output_tokens
+        if not total:
+            return None
+        aggregate = self.data["usage"]
+        aggregate["requests"] += 1
+        aggregate["input"] += input_tokens
+        aggregate["output"] += output_tokens
+        estimate = pricing.estimate(model, input_tokens, output_tokens)
+        if estimate:
+            aggregate["estimated_cost_usd"] += estimate["cost_usd"]
+        else:
+            aggregate["unpriced_requests"] += 1
         self.save()
+        return estimate
 
 
 def symbols(text: str) -> list[str]:
@@ -262,6 +329,7 @@ def main():
     parser.add_argument("--session", default="default")
     parser.add_argument("--model", default=os.getenv("BOSCH_CHAT_MODEL", "gpt-5.5"))
     parser.add_argument("--env-file", help="Existing .env containing Bosch Farm credentials")
+    parser.add_argument("--pricing-file", help="JSON price table; defaults to model_pricing.json beside this script")
     args = parser.parse_args()
     workspace = Path(args.workspace)
     if not workspace.is_dir():
@@ -272,10 +340,16 @@ def main():
     if not key:
         raise SystemExit("Missing BOSCH_FARM_SUBSCRIPTION_KEY in .env or environment.")
     state = ProjectState(Path(args.state_dir), workspace, args.session)
+    pricing_path = Path(args.pricing_file) if args.pricing_file else Path(__file__).resolve().parent / "model_pricing.json"
+    pricing = PricingCatalog(pricing_path)
     count = state.scan()
     llm = LLMConnector(args.model, key, session_id=state.data["session_id"])
     pending = []
     print(f"Code Chat — model={args.model}; indexed {count} files. State: {state.root}")
+    if pricing.error:
+        print(f"Pricing disabled: could not load {pricing_path}: {pricing.error}")
+    elif not pricing.entries:
+        print(f"Pricing disabled: no entries in {pricing_path}")
     print("Ask in Chinese. Commands: /model ID | /scan | /status | /cancel | 确认执行 | /quit")
     while True:
         try:
@@ -292,7 +366,7 @@ def main():
             continue
         if question == "/status":
             u = state.data["usage"]
-            print(f"model={args.model}; files={len(state.data['files'])}; requests={u['requests']}; input={u['input']}; output={u['output']}; pending={len(pending)}")
+            print(f"model={args.model}; files={len(state.data['files'])}; requests={u['requests']}; input={u['input']}; output={u['output']}; estimated={format_cost(float(u.get('estimated_cost_usd', 0.0)))}; unpriced={u.get('unpriced_requests', 0)}; pending={len(pending)}")
             continue
         if question == "/cancel":
             pending = []
@@ -316,8 +390,11 @@ def main():
 
         matches = state.search(question)
         snippets = {relative: excerpt(state, relative, question) for relative in matches}
+        turn_estimates = []
         raw = llm.ask_about_files([], prompt_for(state, question, snippets), SYSTEM, {"maxOutputTokens": 1800, "temperature": 0})
-        state.note_usage(llm.get_last_token_usage())
+        estimate = state.note_usage(llm.get_last_token_usage(), pricing, args.model)
+        if estimate:
+            turn_estimates.append(estimate)
         try:
             action = parse_json(raw)
             requested = [ensure_relative(p) for p in action["read_files"][:4] if isinstance(p, str)]
@@ -332,9 +409,18 @@ def main():
             # on the actual latest file content.
             if full_files:
                 raw = llm.ask_about_files([], prompt_for(state, question, snippets, full_files), SYSTEM, {"maxOutputTokens": 3000, "temperature": 0})
-                state.note_usage(llm.get_last_token_usage())
+                estimate = state.note_usage(llm.get_last_token_usage(), pricing, args.model)
+                if estimate:
+                    turn_estimates.append(estimate)
                 action = parse_json(raw)
             print(f"assistant> {action['answer']}")
+            if turn_estimates:
+                turn_input = sum(item["input_tokens"] for item in turn_estimates)
+                turn_output = sum(item["output_tokens"] for item in turn_estimates)
+                turn_cost = sum(item["cost_usd"] for item in turn_estimates)
+                print(f"usage> 本轮：输入 {turn_input} | 输出 {turn_output} | 估算 {format_cost(turn_cost)}（{turn_estimates[0]['name']}）")
+            elif llm.get_last_token_usage():
+                print("usage> 网关未返回可识别的 token 用量，未计算本轮费用。")
             if action["changes"]:
                 pending = show_changes(state, action["changes"])
                 print("\nReview the diff. Type 确认执行 to write it, or /cancel to discard it.")
@@ -349,4 +435,5 @@ if __name__ == "__main__":
 
 # Run this in the VS Code integrated Terminal (PowerShell):
 # python code_chat_agent.py --workspace "C:\\Users\\XXXXX\\Documents\\Python_Projects\\bosch_chat\\bot_workspace" --state-dir "C:\\Users\\XXXXX\\Documents\\Python_Projects\\bosch_chat\\AI_Bot_State" --model gpt-6-luna-2026-09-22 --env-file "C:\\Users\\XXXXX\\Documents\\Python_Projects\\bosch_chat\\.env"
+# Price table defaults to model_pricing.json beside this script; use --pricing-file to choose another local JSON file.
 # State, indexes and conversation summaries are stored only under --state-dir.
