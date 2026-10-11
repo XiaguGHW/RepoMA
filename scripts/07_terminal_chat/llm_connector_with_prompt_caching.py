@@ -161,7 +161,7 @@ class LLMConnector:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": content})
         config = generation_config or {}
-        reasoning = name.startswith(("gpt-5", "o1", "o3", "deepseek-r1"))
+        reasoning = name.startswith(("gpt-5", "gpt-6", "o1", "o3", "deepseek-r1"))
         tokens = int(config.get("maxOutputTokens", 4096))
         kwargs = {"model": self.model_name, "messages": messages, "timeout": 300,
                   "extra_query": {"api-version": "2024-08-01-preview"} if "openai" in base_url else {}}
