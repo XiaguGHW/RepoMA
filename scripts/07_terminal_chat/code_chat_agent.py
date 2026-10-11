@@ -36,7 +36,8 @@ Return ONLY a JSON object with these fields:
 {
   "answer": "brief Chinese explanation for the user",
   "read_files": ["relative/path"],
-  "changes": [{"path": "relative/path", "content": "complete new UTF-8 file content", "reason": "brief reason"}]
+  "changes": [{"path": "relative/path", "content": "complete new UTF-8 file content", "reason": "brief reason"}],
+  "memory_action": {"operation": "none|add|edit|delete", "id": "memory id or empty", "content": "new memory text or empty"}
 }
 Rules:
 - Paths must be relative to the supplied workspace. Never use .. or an absolute path.
@@ -45,6 +46,9 @@ Rules:
 - A new file may be created directly if its parent path is clear.
 - Keep read_files focused (at most 4). Do not request an entire repository.
 - If evidence is insufficient, explain what is needed and leave changes empty.
+- Set memory_action only when the user explicitly asks you to remember, update, or delete a long-term memory. Never infer a memory action from ordinary discussion.
+- For add use the concise fact/preference in content. For edit/delete, use an exact memory id shown in the supplied long-term memory when available; otherwise use operation none and ask the user to use /memory.
+- Never claim a memory action was completed: the local program requires explicit confirmation.
 - Do not use Markdown fences around the JSON.
 """
 
@@ -330,6 +334,7 @@ def parse_json(answer: str) -> dict:
     data.setdefault("answer", "")
     data.setdefault("read_files", [])
     data.setdefault("changes", [])
+    data.setdefault("memory_action", {"operation": "none", "id": "", "content": ""})
     return data
 
 
@@ -415,6 +420,40 @@ User request: {question}
 """
 
 
+def prepare_memory_action(state: ProjectState, action: dict):
+    if not isinstance(action, dict):
+        return None
+    operation = str(action.get("operation", "none")).lower()
+    item_id = str(action.get("id", "")).strip()
+    content = str(action.get("content", "")).strip()
+    if operation == "add" and content:
+        return {"operation": "add", "content": content}
+    if operation in {"edit", "delete"} and item_id:
+        item = state.find_memory(item_id)
+        if not item:
+            return None
+        if operation == "edit" and not content:
+            return None
+        return {"operation": operation, "id": item_id, "content": content, "before": item["content"]}
+    return None
+
+
+def apply_memory_action(state: ProjectState, pending: dict):
+    if pending["operation"] == "add":
+        item = state.remember(pending["content"])
+        return f"Saved local long-term memory: [{item['id']}]"
+    if pending["operation"] == "edit":
+        item = state.edit_memory(pending["id"], pending["content"])
+        if not item:
+            raise RuntimeError("Memory no longer exists.")
+        return f"Updated local long-term memory: [{item['id']}]"
+    if pending["operation"] == "delete":
+        if not state.delete_memory(pending["id"]):
+            raise RuntimeError("Memory no longer exists.")
+        return f"Deleted local long-term memory: [{pending['id']}]"
+    raise RuntimeError("Unsupported memory operation.")
+
+
 def show_changes(state: ProjectState, changes: list[dict]):
     prepared = []
     for change in changes:
@@ -469,12 +508,13 @@ def main():
     count = state.scan()
     llm = LLMConnector(args.model, key, session_id=state.data["session_id"])
     pending = []
+    pending_memory = None
     print(f"Code Chat — model={args.model}; indexed {count} files. State: {state.root}")
     if pricing.error:
         print(f"Pricing disabled: could not load {pricing_path}: {pricing.error}")
     elif not pricing.entries:
         print(f"Pricing disabled: no entries in {pricing_path}")
-    print("Ask in Chinese. Commands: /model ID | /scan | /status | /context | /remember TEXT | /memory | /cancel | 确认执行 | /quit")
+    print("Ask in Chinese. Commands: /model ID | /scan | /status | /context | /remember TEXT | /memory | /cancel | 确认执行 | 确认记忆 | /quit")
     while True:
         try:
             question = input("you> ").strip()
@@ -545,8 +585,6 @@ def main():
         explicit_memory = None
         if question.startswith("/remember "):
             explicit_memory = question[len("/remember "):].strip()
-        elif question.startswith("记住：") or question.startswith("记住:"):
-            explicit_memory = question.split(":", 1)[-1].strip() if ":" in question else question.split("：", 1)[-1].strip()
         if explicit_memory is not None:
             try:
                 item = state.remember(explicit_memory)
@@ -556,7 +594,18 @@ def main():
             continue
         if question == "/cancel":
             pending = []
-            print("Pending changes discarded.")
+            pending_memory = None
+            print("Pending code changes and memory actions discarded.")
+            continue
+        if question == "确认记忆":
+            if not pending_memory:
+                print("There is no pending memory action.")
+                continue
+            try:
+                print(apply_memory_action(state, pending_memory))
+                pending_memory = None
+            except Exception as exc:
+                print(f"Memory not changed: {exc}")
             continue
         if question == "确认执行":
             if not pending:
@@ -622,6 +671,16 @@ def main():
                 print(f"usage> 本轮：输入 {turn_input} | 输出 {turn_output} | 估算 {format_cost(turn_cost)}（{turn_estimates[0]['name']}）")
             elif llm.get_last_token_usage():
                 print("usage> 网关未返回可识别的 token 用量，未计算本轮费用。")
+            memory_proposal = prepare_memory_action(state, action.get("memory_action", {}))
+            if memory_proposal:
+                pending_memory = memory_proposal
+                if memory_proposal["operation"] == "add":
+                    print(f"\nmemory> 将保存：{memory_proposal['content']}")
+                elif memory_proposal["operation"] == "edit":
+                    print(f"\nmemory> 将修改 [{memory_proposal['id']}]：\n- 原内容：{memory_proposal['before']}\n- 新内容：{memory_proposal['content']}")
+                else:
+                    print(f"\nmemory> 将删除 [{memory_proposal['id']}]：{memory_proposal['before']}")
+                print("Type 确认记忆 to apply this memory action, or /cancel to discard it.")
             if action["changes"]:
                 pending = show_changes(state, action["changes"])
                 print("\nReview the diff. Type 确认执行 to write it, or /cancel to discard it.")
