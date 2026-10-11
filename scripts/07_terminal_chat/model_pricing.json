@@ -1,0 +1,19 @@
+{
+  "_comment": "Estimated public list prices in USD per 1,000,000 tokens. Update only the numeric price fields when prices change. Model matching should use the strings in 'match'.",
+  "currency": "USD",
+  "unit": "per_1m_tokens",
+  "entries": [
+    {"display_name": "Claude Opus 5.5 (New)", "match": ["claude-opus-5-5", "claude-opus-5.5"], "input_usd_per_million": 4.00, "output_usd_per_million": 20.00},
+    {"display_name": "Claude Opus 5", "match": ["claude-opus-5"], "input_usd_per_million": 5.00, "output_usd_per_million": 25.00},
+    {"display_name": "Claude Opus 4.8", "match": ["claude-opus-4-8", "claude-opus-4.8"], "input_usd_per_million": 5.00, "output_usd_per_million": 25.00},
+    {"display_name": "Claude Opus 4.7", "match": ["claude-opus-4-7", "claude-opus-4.7"], "input_usd_per_million": 5.00, "output_usd_per_million": 25.00},
+    {"display_name": "Claude Opus 4.6", "match": ["claude-opus-4-6", "claude-opus-4.6"], "input_usd_per_million": 5.00, "output_usd_per_million": 25.00},
+    {"display_name": "Claude Opus 4.5", "match": ["claude-opus-4-5", "claude-opus-4.5"], "input_usd_per_million": 5.00, "output_usd_per_million": 25.00},
+    {"display_name": "Claude Sonnet 5.5 (New)", "match": ["claude-sonnet-5-5", "claude-sonnet-5.5"], "input_usd_per_million": 2.00, "output_usd_per_million": 10.00},
+    {"display_name": "Claude Sonnet 5", "match": ["claude-sonnet-5"], "input_usd_per_million": 2.00, "output_usd_per_million": 10.00},
+    {"display_name": "Claude Sonnet 4.6", "match": ["claude-sonnet-4-6", "claude-sonnet-4.6"], "input_usd_per_million": 3.00, "output_usd_per_million": 15.00},
+    {"display_name": "Claude Sonnet 4.5", "match": ["claude-sonnet-4-5", "claude-sonnet-4.5"], "input_usd_per_million": 3.00, "output_usd_per_million": 15.00},
+    {"display_name": "Claude Haiku 5.5 (New)", "match": ["claude-haiku-5-5", "claude-haiku-5.5"], "input_usd_per_million": 0.10, "output_usd_per_million": 0.50},
+    {"display_name": "Claude Haiku 4.5", "match": ["claude-haiku-4-5", "claude-haiku-4.5"], "input_usd_per_million": 1.00, "output_usd_per_million": 5.00}
+  ]
+}
