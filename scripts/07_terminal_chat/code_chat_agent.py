@@ -121,7 +121,9 @@ class ProjectState:
         self.root = state_dir.expanduser().resolve() / "projects" / self.key / safe_name(session)
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = self.root / "state.json"
+        self.memory_path = self.root.parent / "memory.json"
         self.data = self._load()
+        self.memory = self._load_memory()
 
     def _load(self):
         if self.path.exists():
@@ -142,6 +144,71 @@ class ProjectState:
 
     def save(self):
         self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _load_memory(self):
+        if self.memory_path.exists():
+            try:
+                data = json.loads(self.memory_path.read_text(encoding="utf-8"))
+                if isinstance(data.get("items"), list):
+                    return data
+            except (OSError, json.JSONDecodeError):
+                pass
+        return {"version": 1, "items": []}
+
+    def save_memory(self):
+        self.memory_path.write_text(json.dumps(self.memory, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def remember(self, content: str):
+        content = content.strip()
+        if not content:
+            raise ValueError("Memory content is empty.")
+        item = {
+            "id": uuid.uuid4().hex[:8],
+            "content": content,
+            "source": "user-confirmed",
+            "created_at": now(),
+            "updated_at": now(),
+        }
+        self.memory["items"].append(item)
+        self.save_memory()
+        return item
+
+    def list_memory(self):
+        return self.memory["items"]
+
+    def find_memory(self, item_id: str):
+        return next((item for item in self.memory["items"] if item["id"] == item_id), None)
+
+    def delete_memory(self, item_id: str):
+        before = len(self.memory["items"])
+        self.memory["items"] = [item for item in self.memory["items"] if item["id"] != item_id]
+        if len(self.memory["items"]) == before:
+            return False
+        self.save_memory()
+        return True
+
+    def edit_memory(self, item_id: str, content: str):
+        item = self.find_memory(item_id)
+        if not item:
+            return None
+        item["content"] = content.strip()
+        item["updated_at"] = now()
+        self.save_memory()
+        return item
+
+    def search_memory(self, question: str, limit: int = 5):
+        query_words = set(tokens(question))
+        query_chars = set(re.findall(r"[\u4e00-\u9fff]", question.lower()))
+        scored = []
+        for item in self.memory["items"]:
+            content = item["content"].lower()
+            word_score = sum(1 for word in query_words if word in content)
+            char_score = min(8, len(query_chars & set(re.findall(r"[\u4e00-\u9fff]", content))))
+            score = word_score * 10 + char_score
+            if score:
+                scored.append((score, item))
+        scored.sort(key=lambda pair: (-pair[0], pair[1]["updated_at"]))
+        return [item for _, item in scored[:limit]]
 
     def relative(self, path: Path) -> str:
         return path.resolve().relative_to(self.workspace).as_posix()
@@ -327,12 +394,16 @@ def ensure_relative(path: str) -> str:
 
 def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], full_files: dict[str, str] | None = None):
     recent = "\n".join(f"{turn['role']}: {turn['content']}" for turn in state.data["history"][-HISTORY_MESSAGES_PER_REQUEST:]) or "(new conversation)"
+    memories = state.search_memory(question)
+    memory_text = "\n".join(f"- [{item['id']}] {item['content']}" for item in memories) or "(No relevant confirmed long-term memory.)"
     indexed = "\n".join(f"- {p}: {', '.join(m.get('symbols', [])[:12])}" for p, m in list(state.data["files"].items())[:250])
     shown = "\n\n".join(f"--- EXCERPT {path} ---\n{text}" for path, text in snippets.items()) or "(No relevant excerpt found.)"
     complete = "\n\n".join(f"--- COMPLETE FILE {path} ---\n{text}" for path, text in (full_files or {}).items()) or "(No complete file was requested yet.)"
     return f"""Workspace: {state.workspace}
 Project summary: {state.data['summary'] or '(none)'}
 Recent conversation:\n{recent}
+
+Relevant confirmed long-term memory (local, user-confirmed):\n{memory_text}
 
 Indexed files and symbols (local metadata only):\n{indexed}
 
@@ -403,7 +474,7 @@ def main():
         print(f"Pricing disabled: could not load {pricing_path}: {pricing.error}")
     elif not pricing.entries:
         print(f"Pricing disabled: no entries in {pricing_path}")
-    print("Ask in Chinese. Commands: /model ID | /scan | /status | /context | /cancel | 确认执行 | /quit")
+    print("Ask in Chinese. Commands: /model ID | /scan | /status | /context | /remember TEXT | /memory | /cancel | 确认执行 | /quit")
     while True:
         try:
             question = input("you> ").strip()
@@ -434,9 +505,54 @@ def main():
                 f"按问题命中的最多 {MAX_SNIPPETS} 个代码片段（每个最多 {MAX_SNIPPET_CHARS} 字符）。"
             )
             print(
+                "另外会按当前问题带入最多 5 条相关的、用户确认的长期记忆。"
+            )
+            print(
                 "若模型请求修改某个文件，下一次调用还会带入该目标文件全文。"
                 "底层模型的最大上下文窗口未由 Model Farm 接口提供，因此脚本不能可靠显示该上限。"
             )
+            continue
+        if question == "/memory":
+            items = state.list_memory()
+            if not items:
+                print("No long-term memory saved for this workspace.")
+            else:
+                print(f"Long-term memory ({len(items)} item(s), local only):")
+                for item in items:
+                    print(f"[{item['id']}] {item['content']}  ({item['updated_at'][:10]})")
+            continue
+        if question.startswith("/memory search "):
+            query = question[len("/memory search "):].strip()
+            results = state.search_memory(query, limit=20)
+            if not results:
+                print("No matching memory.")
+            else:
+                for item in results:
+                    print(f"[{item['id']}] {item['content']}")
+            continue
+        if question.startswith("/memory delete "):
+            item_id = question[len("/memory delete "):].strip()
+            print("Memory deleted." if state.delete_memory(item_id) else "Memory ID not found.")
+            continue
+        if question.startswith("/memory edit "):
+            parts = question.split(maxsplit=3)
+            if len(parts) < 4 or not parts[3].strip():
+                print("Usage: /memory edit ID new text")
+            else:
+                item = state.edit_memory(parts[2], parts[3])
+                print(f"Memory updated: [{item['id']}]" if item else "Memory ID not found.")
+            continue
+        explicit_memory = None
+        if question.startswith("/remember "):
+            explicit_memory = question[len("/remember "):].strip()
+        elif question.startswith("记住：") or question.startswith("记住:"):
+            explicit_memory = question.split(":", 1)[-1].strip() if ":" in question else question.split("：", 1)[-1].strip()
+        if explicit_memory is not None:
+            try:
+                item = state.remember(explicit_memory)
+                print(f"Saved local long-term memory: [{item['id']}]")
+            except ValueError as exc:
+                print(exc)
             continue
         if question == "/cancel":
             pending = []
