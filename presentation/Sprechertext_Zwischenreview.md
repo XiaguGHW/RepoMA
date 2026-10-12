@@ -5,7 +5,7 @@ Die gesamte Präsentation bleibt damit bei etwa 15 Minuten. Die Zeitplanung ist 
 
 ## Folie 1 – Titel (ca. 0:15 | kumuliert: ca. 0:15)
 
-Ich möchte Ihnen heute den aktuellen Stand meiner Masterarbeit vorstellen.  
+Ich möchte euch heute den aktuellen Stand meiner Masterarbeit vorstellen.  
 Der Titel lautet: *Machine-Learning-Experimente zur Datenaufbereitung von Baugruppendaten für die Verbesserung der Wiederverwendung in der mechanischen Entwicklung.*
 
 ## Folie 2 – Zeitplan der Masterarbeit (ca. 0:20 | kumuliert: ca. 0:35)
