@@ -18,19 +18,19 @@ Für diesen ersten Teil wurden die Baugruppendaten aufbereitet und vier Labeling
 
 Das Ziel der Untersuchung ist zu prüfen, wie leistungsfähig eine automatisierte Funktionsklassifikation mit LLMs ist.
 
-Die Untersuchung folgt fünf aufeinander aufbauenden Schritten. So wird die Grundlage geschaffen, um die LLM-Leistung nachvollziehbar zu messen.
+Die Untersuchung folgt fünf aufeinander aufbauenden Schritten.
 
-Zunächst erstellen wir einen einheitlichen Testdatensatz und ein Codebook. Damit sind sowohl die Baugruppen als auch die Regeln für ihre Zuordnung für Menschen und LLMs eindeutig festgelegt.
+Um die Klassifikationsergebnisse von Menschen und LLMs für dieselben Baugruppen unter denselben Regeln vergleichen zu können, benötigen wir eine einheitliche Grundlage. Deshalb erstellen wir zunächst einen Testdatensatz und ein Codebook.
 
-Darauf aufbauend führen wir vier Labeling-Workshops durch, um das Klassenschema in der Anwendung zu überprüfen sowie menschliche Klassifikationsergebnisse und den dafür benötigten Zeitaufwand zu erfassen.
+Dann führen wir vier Labeling-Workshops durch, um die Trennschärfe des Klassenschemas zu überprüfen und menschliche Klassifikationsergebnisse sowie den dafür benötigten Zeitaufwand zu erfassen.
 
-Anschließend werden diese Ergebnisse anhand des Codebooks geprüft. Dadurch wird festgelegt, welche Fälle eindeutig sind und bei welchen mehrere Labels zulässig sind. Diese Regeln bilden später die Grundlage für die LLM-Bewertung.
+Anschließend werden diese Ergebnisse anhand des Codebooks geprüft. Dadurch wird festgelegt, welche Baugruppen eindeutig und welche mehrdeutig sind. Diese validierte Datenbasis bildet später die Grundlage für die LLM-Bewertung.
 
-Erst dann testen wir verschiedene LLM-Modelle, Eingabeformate und Prompt-Konfigurationen unter vergleichbaren Bedingungen.
+Erst dann testen wir verschiedene LLM-Modelle, die Eingabeformate PDF, Bild und Text sowie unterschiedliche Prompt-Konfigurationen unter vergleichbaren Bedingungen.
 
-Zum Schluss werden die LLM-Vorhersagen mit den geprüften Ground Truths und zulässigen Alternativen verglichen. So lässt sich die Leistungsfähigkeit der Modelle auch bei mehrdeutigen Fällen nachvollziehbar einordnen.
+Zum Schluss werden die LLM-Vorhersagen mit den geprüften Ground Truths und zulässigen Alternativen verglichen. Daraus berechnen wir für jedes Modell und jede Konfiguration die jeweilige Accuracy und bewerten damit die Leistungsfähigkeit.
 
-Ich gehe diese fünf Schritte jetzt nacheinander durch. Zuerst zeige ich die gemeinsame Testbasis.
+Ich gehe diese fünf Schritte jetzt nacheinander durch.
 
 ## Folie 4 – Testdatensatz & Codebook (ca. 1:05 | kumuliert: ca. 2:30)
 
