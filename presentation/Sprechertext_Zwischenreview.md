@@ -160,7 +160,7 @@ Als Nächstes vergleiche ich die Eingabeformate bei gleicher Prompt-Konfiguratio
 
 Zunächst sehen wir das PDF-Format. Die Modelle erhalten dabei alle verfügbaren PDF-Dateien einer Baugruppe, zum Beispiel Stücklisten, Datenblätter und Zeichnungen. Die Accuracy liegt je nach Modell zwischen 88,0 und 93,9 Prozent.
 
-Beim Bildformat erhalten die Modelle CAD-Screenshots, die DFC-Struktur und in Bilder umgewandelte PDF-Seiten. Die Werte liegen bei allen vier Modellen unter denen des PDF-Formats.
+Beim Bildformat erhalten die Modelle CAD-Screenshots, die DFC-Struktur und in Bilder umgewandelte PDF-Seiten. Die Accuracy-Werte liegen bei allen vier Modellen deutlich unter denen des PDF-Formats.
 
 Beim Textformat werden die aus PDF- und Bilddateien extrahierten Rohtexte verwendet. Bei Claude Haiku und Gemini 2.5 Flash liegt Text über PDF; bei Claude Opus und Gemini 2.5 Pro liegt PDF dagegen höher.
 
