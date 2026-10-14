@@ -66,13 +66,15 @@ Außerdem wird die Bearbeitungszeit über Zeitstempel automatisch in der Excel-V
 
 ## Folie 6 – Herleitung der Regime E1, E2 und M (ca. 0:50 | kumuliert: ca. 4:35)
 
-Bei der Auswertung zeigte sich, dass einige Baugruppen mehrdeutig sein können. Deshalb wurden die Fälle in E1, E2 und M eingeteilt. So können wir die Ergebnisse der anschließenden LLM-Experimente für eindeutige und mehrdeutige Baugruppen getrennt betrachten.
+Jetzt haben wir sowohl die Baugruppen als auch die menschlichen Klassifikationsergebnisse vorliegen. Wenn wir diese Ergebnisse mit der ursprünglichen Ground Truth vergleichen, sehen wir: Nicht für jede Baugruppe gibt es genau eine eindeutige richtige Klasse. Einige Baugruppen können mehrdeutig sein.
 
-Im ersten Beispiel ordnen alle drei Teilnehmenden die Baugruppe als „Roboter“ ein. Es besteht Konsens, und die Ground Truth „Roboter“ wird nach der Prüfung bestätigt. Das ist E1: ein eindeutiger Fall mit einheitlicher Zuordnung.
+Deshalb wurden alle Baugruppen in die drei Regime E1, E2 und M eingeteilt. So können wir die Ergebnisse der anschließenden LLM-Experimente für eindeutige und mehrdeutige Baugruppen getrennt betrachten. Jetzt schauen wir uns an, wie diese drei Regime festgelegt wurden.
 
-Im zweiten Beispiel wählen zwei Teilnehmende keine der verfügbaren Klassen. Teilnehmer C ordnet die Baugruppe als „Greifer“ ein; sie wurde möglicherweise aufgrund ihrer Form so wahrgenommen. Die Ground Truth bleibt nach der Prüfung Codebook-konform. Das ist E2: eindeutig, aber mit einer abweichenden Einzelmeinung.
+Im ersten Beispiel sehen wir einen Industrieroboter. Alle drei Teilnehmenden ordnen die Baugruppe als „Roboter“ ein. Es besteht Konsens, und die Ground Truth „Roboter“ wird nach der Prüfung bestätigt. Das ist E1: ein eindeutiger Fall mit einheitlicher Zuordnung.
 
-Im dritten Beispiel gibt es unterschiedliche Zuordnungen. Die Ground Truth lautet „Lineareinheit“, aber nach der Prüfung ist auch „Rotationseinheit“ zulässig, weil die Baugruppe zusätzlich einen Rotationsaktor enthält. Das ist M: ein mehrdeutiger Fall. Die Ground Truth ist dabei nicht falsch, sondern eine der zulässigen Antworten.
+Im zweiten Beispiel handelt es sich um eine … . Bei dieser Baugruppe wählen zwei Teilnehmende keine der verfügbaren Klassen. Teilnehmer C ordnet die Baugruppe als „Greifer“ ein; sie wurde möglicherweise aufgrund ihrer Form so wahrgenommen. Nach der Prüfung bleibt die Ground Truth aber richtig. Das ist E2: eindeutig, aber mit einer abweichenden Einzelmeinung.
+
+Im dritten Beispiel sehen wir eine Hubeinheit. Einige Teilnehmende wählen „Lineareinheit“, einer aber „Rotationseinheit“. Die Ground Truth lautet „Lineareinheit“, aber nach der Prüfung ist auch „Rotationseinheit“ zulässig, weil die Baugruppe zusätzlich einen Rotationsaktor enthält. Nach der Entscheidungslogik im Codebook ist diese Zuordnung ebenfalls nachvollziehbar. Das ist M: ein mehrdeutiger Fall. Die Ground Truth ist dabei nicht falsch, sondern eine der zulässigen Antworten.
 
 ## Folie 7 – Auswertung der Workshops (ca. 0:55 | kumuliert: ca. 5:30)
 
