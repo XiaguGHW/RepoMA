@@ -34,17 +34,19 @@ Ich gehe diese fünf Schritte jetzt nacheinander durch.
 
 ## Folie 4 – Testdatensatz & Codebook (ca. 1:05 | kumuliert: ca. 2:30)
 
-Diese Testbasis wurde sowohl für die vier Labeling-Workshops als auch für die späteren LLM-Experimente verwendet. Dadurch beziehen sich menschliche und automatisierte Klassifikation auf dieselben Baugruppen und dieselben Regeln.
+Zuerst zeige ich die gemeinsame Testbasis.
 
-Der Datensatz umfasst 129 Baugruppen aus der Handhabungstechnik bei BMG. Die 129 Baugruppen verteilen sich auf sieben Funktionsklassen. Die Klassen und ihre jeweiligen Anzahlen sind links dargestellt.
+Sie besteht aus einem Testdatensatz und einem Codebook.
 
-Die sieben Klassen beschreiben jeweils die Hauptfunktion einer Baugruppe. Ein Greifer wird zum Beispiel der Klasse „Greifer“ zugeordnet, weil seine Hauptfunktion das Greifen und Halten von Bauteilen ist.
+Der Datensatz umfasst 129 Baugruppen aus der Handhabungstechnik bei BMG.
 
-Je nach Baugruppe standen unterschiedliche Informationsquellen zur Verfügung, zum Beispiel DFC- und CAD-Screenshots, Zeichnungen, Stücklisten und Datenblätter.
+Je nach Baugruppe standen unterschiedliche Informationsquellen zur Verfügung, zum Beispiel DFC- und CAD-Screenshots, Zeichnungen, Stücklisten und Datenblätter. Die verfügbaren Informationen wurden für jede Baugruppe manuell gesammelt und in einer einheitlichen Ordnerstruktur abgelegt.
 
-Die verfügbaren Informationen wurden für jede Baugruppe manuell gesammelt und in einer einheitlichen Ordnerstruktur abgelegt.
+Die 129 Baugruppen verteilen sich auf sieben Funktionsklassen. Die Klassen und ihre jeweiligen Anzahlen sind links dargestellt.
 
-Um eine einheitliche und nachvollziehbare Klassifikation durch Menschen und LLMs zu ermöglichen, wurde ein Codebook erstellt. Es enthält die sieben Klassendefinitionen und eine feste Entscheidungslogik. Sowohl die Teilnehmenden im Workshop als auch die LLMs klassifizieren nach diesem Regelwerk.
+Die sieben Klassen beschreiben jeweils die Hauptfunktion einer Baugruppe. Eine Greifeinheit wird zum Beispiel der Klasse „Greifer“ zugeordnet, weil ihre Hauptfunktion das Greifen und Halten von Bauteilen ist.
+
+Um eine einheitliche und nachvollziehbare Klassifikation durch Menschen und LLMs zu ermöglichen, wurde ein Codebook als gemeinsames Regelwerk erstellt. Es enthält die Definitionen der sieben Klassen und zeigt Schritt für Schritt, wie man anhand der Aktoren einer Baugruppe und weiterer Kriterien zur passenden Klasse kommt.
 
 Auf dieser Testbasis wurden anschließend vier Labeling-Workshops durchgeführt.
 
