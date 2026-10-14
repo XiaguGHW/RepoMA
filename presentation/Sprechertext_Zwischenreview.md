@@ -100,7 +100,9 @@ Damit die Ergebnisse vergleichbar sind, halten wir zwei Punkte konstant: Alle Ex
 
 Verglichen werden drei Randbedingungen. Erstens der Umfang der Codebook-Informationen im Prompt. Zweitens unterschiedliche LLM-Modelle. Drittens unterschiedliche Eingabeformate: PDF, Bild und Text.
 
-Als Bewertungsmetrik verwende ich die Allowed-Label-Set Accuracy, im Folgenden kurz Accuracy. Eine Vorhersage gilt dabei als korrekt, wenn sie der Ground Truth oder einer weiteren geprüften Alternative entspricht.
+Als Bewertungsmetrik verwende ich die Allowed-Label-Set Accuracy, im Folgenden kurz Accuracy. Eine Vorhersage gilt dabei als korrekt, wenn sie der Ground Truth oder einer anhand des Codebooks zulässigen Alternative entspricht. Das ist besonders wichtig für die mehrdeutigen Fälle.
+
+Im Folgenden zeige ich zunächst die Stabilität der Ergebnisse bei wiederholter Durchführung.
 
 ## Folie 9 – Ergebnisstabilität im Vergleich (ca. 0:55 | kumuliert: ca. 7:10)
 
