@@ -80,17 +80,17 @@ Die hier gezeigte Prüfung und Einteilung gehören zu den ersten beiden Schritte
 
 ## Folie 7 – Auswertung der Workshops (ca. 0:55 | kumuliert: ca. 5:30)
 
-Nach den vier Workshops haben Jonas und ich die Annotationsergebnisse ausgewertet und die ursprünglichen Ground Truths anhand des Codebooks geprüft. Anschließend wurden die Baugruppen den gerade erläuterten Regimen E1, E2 und M zugeordnet.
+So haben Jonas und ich die Annotationsergebnisse aus 4 Workshops ausgewertet und die ursprünglichen Ground Truths anhand des Codebooks geprüft. Alle 129 Baugruppen wurden den Regimen E1, E2 und M zugeordnet.
 
 Aus den Workshop-Ergebnissen konnte außerdem ein wichtiger Kennwert berechnet werden: Krippendorffs Alpha. Es ist ein Maß für die Übereinstimmung zwischen mehreren Personen. Je näher der Wert bei 1 liegt, desto stärker stimmen ihre Klassifikationen überein.
 
-Für die eindeutigen Fälle, also E1 und E2, beträgt Alpha 0,806. Damit liegt die Übereinstimmung über dem von Krippendorff vorgeschlagenen Richtwert von 0,800 für zuverlässige Schlussfolgerungen.
+Für die eindeutigen Fälle, also E1 und E2, beträgt Alpha 0,806. Der Wert liegt damit über der Grenze von 0,8 und gilt als zuverlässig.
 
-Für die mehrdeutigen Fälle ist Krippendorffs Alpha dagegen nicht aussagekräftig. Dort können mehrere Labels nach dem Codebook korrekt sein. Unterschiedliche Zuordnungen bedeuten deshalb nicht automatisch, dass die Teilnehmenden oder das Codebook uneinheitlich sind.
+Für die mehrdeutigen Fälle ist Krippendorffs Alpha dagegen nicht aussagekräftig. Dort können mehrere Labels nach dem Codebook zulässig sein.
 
-Auch der Zeitaufwand wurde ausgewertet: Ingenieurinnen und Ingenieure benötigten im Mittel 29 Sekunden pro Baugruppe, Studierende 51 Sekunden. Die Ingenieurinnen und Ingenieure waren damit im Mittel deutlich schneller. Das könnte mit ihrer größeren Erfahrung und Vertrautheit mit den Baugruppen zusammenhängen.
+Auch der Zeitaufwand wurde ausgewertet: Ingenieurinnen und Ingenieure benötigen im Mittel 31 Sekunden pro Baugruppe, Studierende 42 Sekunden. Die Ingenieurinnen und Ingenieure sind damit etwas schneller, was vermutlich mit ihrer größeren Erfahrung und Vertrautheit mit den Baugruppen zusammenhängt.
 
-Damit ist die Auswertung der vier Workshops abgeschlossen.
+Jetzt haben wir die menschlichen Klassifikationsergebnisse. Als Nächstes schauen wir uns an, wie die LLMs abschneiden.
 
 ## Folie 8 – LLM-Experimente: Untersuchungsrahmen (ca. 0:45 | kumuliert: ca. 6:15)
 
