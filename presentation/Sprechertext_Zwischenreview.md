@@ -18,9 +18,9 @@ Für diesen ersten Teil wurden die Baugruppendaten aufbereitet und vier Labeling
 
 Das Ziel der Untersuchung ist zu prüfen, wie leistungsfähig eine automatisierte Funktionsklassifikation mit LLMs ist.
 
-Die Untersuchung folgt fünf aufeinander aufbauenden Schritten.
+Die Untersuchung umfasst fünf Schritte.
 
-Um die Klassifikationsergebnisse von Menschen und LLMs für dieselben Baugruppen unter denselben Regeln vergleichen zu können, benötigen wir eine einheitliche Grundlage. Deshalb erstellen wir zunächst einen Testdatensatz und ein Codebook.
+Um die Klassifikationsergebnisse von Menschen und LLMs für dieselben Baugruppen unter denselben Regeln vergleichen zu können, benötigen wir eine einheitliche Grundlage. Deshalb erstellen wir zunächst einen Testdatensatz und ein Codebook als Regelwerk.
 
 Dann führen wir vier Labeling-Workshops durch, um die Trennschärfe des Klassenschemas zu überprüfen und menschliche Klassifikationsergebnisse sowie den dafür benötigten Zeitaufwand zu erfassen.
 
