@@ -168,6 +168,24 @@ Insgesamt ist das reine Bildformat am schwächsten. Zwischen PDF und Text gibt e
 
 ## Folie 13 – Fazit & Ausblick (ca. 1:00 | kumuliert: ca. 10:35)
 
+### Fazit – Folieninhalt
+
+- **Codebook und validierte Datenbasis**  
+  129 Baugruppen wurden E1, E2 oder M zugeordnet.  
+  E1 und E2 zeigen eine zuverlässige Übereinstimmung (α = 0,806).
+
+- **Prompt-Konfiguration**  
+  Das vollständige Codebook mit Entscheidungslogik verbessert die Accuracy.
+
+- **Eingabeformate**  
+  PDF und Text erzielen bessere Ergebnisse als reine Bilddaten.
+
+- **Modelle im Vergleich**  
+  **Claude Opus 4.8:** Höchste Accuracy.  
+  **Claude Haiku 4.5:** Stabiler und kostengünstiger Kompromiss.
+
+### Sprechertext
+
 Aus Gründen der Übersichtlichkeit zeige ich in dieser Präsentation nur eine Auswahl der getesteten Modelle und jeweils einen zentralen Bewertungsindikator. Die Gesamtauswertung umfasst weitere Modelle und Metriken; die dargestellten Ergebnisse zeigen jedoch bereits die wesentlichen Schlussfolgerungen.
 
 Die Kernaussage ist: Unter klar definierten Randbedingungen erreichen LLMs eine hohe Klassifikationsleistung.
