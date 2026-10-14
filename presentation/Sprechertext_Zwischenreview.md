@@ -122,15 +122,25 @@ Claude Haiku 4.5 liefert damit deutlich konstantere Ergebnisse. Diese Schwankung
 
 ## Folie 10 – Prompt-Konfigurationen im Vergleich (ca. 0:55 | kumuliert: ca. 8:05)
 
-Zuerst betrachte ich den Einfluss der Prompt-Konfiguration. Die Frage ist: Welcher Prompt führt zur besten Klassifikationsleistung?
+Als Nächstes betrachte ich den Einfluss der Prompt-Konfiguration. Die Frage ist: Welcher Prompt führt zur besten Klassifikationsleistung?
 
-Die vier Prompt-Varianten bauen schrittweise aufeinander auf. P1 enthält nur die Klassennamen. P2 ergänzt die Klassendefinitionen aus dem Codebook. P3 ergänzt zusätzlich die Entscheidungslogik aus dem Codebook. P3 erweitert enthält darüber hinaus Beispiele und Ausnahmen.
+Auch in diesem Experiment verwenden wir die PDF-Dateien der Baugruppen als Eingabe. Verglichen werden vier unterschiedliche Prompt-Varianten.
 
-Die Balken zeigen die Accuracy für vier Modelle. Bei Claude Haiku steigt die Accuracy mit jeder zusätzlichen Prompt-Information weiter an. Da dieses Modell in der Stabilitätsanalyse nur geringe Schwankungen zeigte, spricht dieser Anstieg dafür, dass ein größerer Informationsumfang die Klassifikationsleistung tatsächlich verbessert. Bei den drei anderen Modellen bleibt P3 jedoch besser.
+Bei P1 erhält das Modell nur die Namen der sieben möglichen Klassen. Weitere Informationen bekommt es nicht. Schauen wir uns nun die Ergebnisse der vier Modelle an: Claude Haiku 4.5, Claude Opus 4.8, Gemini 2.5 Flash und Gemini 2.5 Pro. Claude Opus 4.8 erzielt hier die höchste Accuracy mit 90,4 Prozent.
 
-Bei Gemini 2.5 Pro ist der Unterschied von P2 zu P3 größer als die zuvor gezeigte Schwankung. Kleinere Unterschiede zwischen den übrigen Prompt-Varianten können dagegen auch durch die natürliche Modellschwankung entstanden sein.
+Bei P2 erhält das Modell zusätzlich die Definitionen der sieben Klassen aus dem Codebook. Wenn wir die Accuracy vergleichen, steigt sie beim ersten und dritten Modell leicht an. Beim zweiten und vierten Modell sinkt sie dagegen leicht. Schauen wir nun auf P3.
 
-Insgesamt zeigt der Vergleich, dass die Entscheidungslogik im Codebook eine wichtige Information für die Klassifikation ist. Für die folgenden Vergleiche verwende ich deshalb P3 als feste Prompt-Konfiguration.
+Bei P3 erhält das Modell das vollständige Codebook, also zusätzlich die Entscheidungslogik. Die Ergebnisse zeigen: Die Accuracy steigt bei allen Modellen an.
+
+Bei P4 erhält das Modell neben dem vollständigen Codebook zusätzlich Beispiele und Ausnahmen. Bei P4 steigt die Accuracy nur bei Claude Haiku. Bei allen anderen Modellen sinkt die Accuracy dagegen.
+
+Insgesamt zeigt der Vergleich, dass P3 die beste und zugleich konsistenteste Prompt-Konfiguration ist. Bei Claude Haiku sehen wir: Je mehr Informationen der Prompt enthält, desto höher wird die Accuracy.
+
+Bei den anderen Modellen gibt es dagegen Schwankungen; besonders bei Gemini 2.5 Pro sind diese deutlich. Das bedeutet nicht, dass zusätzliche Informationen keinen Nutzen haben. Die Unterschiede können teilweise auch auf die Modellschwankung zurückzuführen sein.
+
+Mit Blick auf die Stabilitätsanalyse der vorherigen Folie ist Claude Haiku das stabilere Modell. Bei diesem Modell steigt die Accuracy mit zunehmendem Informationsumfang schrittweise an. Das spricht dafür, dass mehr Informationen im Prompt die Klassifikationsleistung verbessern können.
+
+Für die folgenden Vergleiche verwenden wir deshalb P3 als feste Prompt-Konfiguration.
 
 ## Folie 11 – LLM-Ergebnisse nach Regime (ca. 0:50 | kumuliert: ca. 8:55)
 
