@@ -76,6 +76,8 @@ Im zweiten Beispiel handelt es sich um ein Befestigungsteil. Bei dieser Baugrupp
 
 Im dritten Beispiel sehen wir eine Hubeinheit. Einige Teilnehmende wählen „Lineareinheit“, einer aber „Kombinierte Einheit“. Die Ground Truth lautet „Lineareinheit“, aber nach der Prüfung ist auch „Kombinierte Einheit“ zulässig, weil die Baugruppe neben einem linearen Aktor zusätzlich einen Rotationsaktor enthält. Nach der Entscheidungslogik im Codebook ist die Zuordnung als „Kombinierte Einheit“ ebenfalls nachvollziehbar. Das ist M: ein mehrdeutiger Fall. Die Ground Truth ist dabei nicht falsch, sondern eine der zulässigen Antworten.
 
+Die hier gezeigte Prüfung und Einteilung gehören zu den ersten beiden Schritten der gesamten Auswertung.
+
 ## Folie 7 – Auswertung der Workshops (ca. 0:55 | kumuliert: ca. 5:30)
 
 Nach den vier Workshops haben Jonas und ich die Annotationsergebnisse ausgewertet und die ursprünglichen Ground Truths anhand des Codebooks geprüft. Anschließend wurden die Baugruppen den gerade erläuterten Regimen E1, E2 und M zugeordnet.
