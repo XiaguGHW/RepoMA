@@ -172,11 +172,11 @@ Aus Gründen der Übersichtlichkeit zeige ich in dieser Präsentation nur eine A
 
 Die Kernaussage ist: Unter klar definierten Randbedingungen erreichen LLMs eine hohe Klassifikationsleistung.
 
-Zum Fazit lassen sich vier Punkte festhalten. Erstens wurden mit dem Codebook und den Workshops 129 Baugruppen in die Regime E1, E2 und M eingeordnet. Für E1 und E2 ist die Übereinstimmung mit Alpha gleich 0,806 zuverlässig.
+Zum Fazit lassen sich vier Punkte festhalten. Erstens bilden das Codebook und die validierte Datenbasis die Grundlage: 129 Baugruppen wurden E1, E2 oder M zugeordnet. Für E1 und E2 ist die Übereinstimmung zuverlässig, mit Alpha gleich 0,806.
 
-Zweitens verbessert das vollständige Codebook mit Entscheidungslogik die Accuracy. Drittens sind PDF und Text besser geeignet als reine Bilddaten.
+Zweitens verbessert das vollständige Codebook mit Entscheidungslogik die Accuracy. Drittens erzielen PDF und Text bessere Ergebnisse als reine Bilddaten.
 
-Viertens erzielt Claude Opus 4.8 die höchste Accuracy. Claude Haiku 4.5 ist dagegen ein stabiler und kostengünstiger Kompromiss.
+Bei den Modellen erzielt Claude Opus 4.8 die höchste Accuracy. Claude Haiku 4.5 ist ein stabiler und kostengünstiger Kompromiss.
 
 Im weiteren Verlauf erweitere ich den Datensatz um 70 Baugruppen auf insgesamt 199 Baugruppen. Danach folgen die finale Gesamtauswertung der Funktionsklassifikation sowie die Entwicklung und Evaluation der Metadatenextraktion.
 
