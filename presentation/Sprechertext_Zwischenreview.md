@@ -168,19 +168,17 @@ Insgesamt ist das reine Bildformat am schwächsten. Zwischen PDF und Text gibt e
 
 ## Folie 13 – Fazit & Ausblick (ca. 1:00 | kumuliert: ca. 10:35)
 
-Aus Gründen der Übersichtlichkeit zeige ich in dieser Präsentation nur eine Auswahl der getesteten Modelle und jeweils einen zentralen Bewertungsindikator. Die Gesamtauswertung umfasst weitere Modelle und Metriken; die dargestellten Ergebnisse zeigen jedoch bereits die wesentlichen Tendenzen und stützen die genannten Schlussfolgerungen.
+Aus Gründen der Übersichtlichkeit zeige ich in dieser Präsentation nur eine Auswahl der getesteten Modelle und jeweils einen zentralen Bewertungsindikator. Die Gesamtauswertung umfasst weitere Modelle und Metriken; die dargestellten Ergebnisse zeigen jedoch bereits die wesentlichen Schlussfolgerungen.
 
-Aus den Experimenten lässt sich folgende Aussage ableiten: Unter klar definierten Randbedingungen erreichen LLMs eine hohe Klassifikationsleistung bei der Funktionsklassifikation von Baugruppen.
+Die Kernaussage ist: Unter klar definierten Randbedingungen erreichen LLMs eine hohe Klassifikationsleistung.
 
-Für die Prompt-Gestaltung zeigt sich: Die Entscheidungslogik aus dem Codebook ist besonders wichtig. Bei Claude Haiku ist der Einfluss zusätzlicher Codebook-Informationen klar erkennbar. Bei Gemini 2.5 Pro müssen kleinere Unterschiede wegen der größeren Modellschwankung vorsichtig interpretiert werden.
+Zum Fazit lassen sich vier Punkte festhalten. Erstens wurden mit dem Codebook und den Workshops 129 Baugruppen in die Regime E1, E2 und M eingeordnet. Für E1 und E2 ist die Übereinstimmung mit Alpha gleich 0,806 zuverlässig.
 
-Beim Vergleich der Eingabeformate sind PDF und Text insgesamt besser geeignet als reine Bilder. Das beste Format hängt jedoch auch vom eingesetzten Modell ab.
+Zweitens verbessert das vollständige Codebook mit Entscheidungslogik die Accuracy. Drittens sind PDF und Text besser geeignet als reine Bilddaten.
 
-Bei den untersuchten Modellen erreicht Claude Opus 4.8 die höchsten Werte in den Prompt- und Formatvergleichen. Claude Haiku 4.5 liefert dagegen die stabilsten Ergebnisse bei wiederholter Durchführung und ist zugleich ein kostengünstiger Kompromiss.
+Viertens erzielt Claude Opus 4.8 die höchste Accuracy. Claude Haiku 4.5 ist dagegen ein stabiler und kostengünstiger Kompromiss.
 
-Im weiteren Verlauf erweitere ich den Datensatz um 70 Baugruppen auf insgesamt 199 Baugruppen. Danach überprüfe ich die Ergebnisse erneut auf dieser größeren Testbasis.
-
-Der zweite Schwerpunkt der Arbeit ist die LLM-gestützte Metadatenextraktion. Abschließend werden beide Arbeitspakete gemeinsam ausgewertet und in der Masterarbeit verschriftlicht.
+Im weiteren Verlauf erweitere ich den Datensatz um 70 Baugruppen auf insgesamt 199 Baugruppen. Danach folgen die finale Gesamtauswertung der Funktionsklassifikation sowie die Entwicklung und Evaluation der Metadatenextraktion.
 
 Damit bin ich am Ende meiner Präsentation. Vielen Dank.
 
