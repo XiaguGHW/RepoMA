@@ -72,9 +72,9 @@ Deshalb wurden alle Baugruppen in die drei Regime E1, E2 und M eingeteilt. So k�
 
 Im ersten Beispiel sehen wir einen Industrieroboter. Alle drei Teilnehmenden ordnen die Baugruppe als „Roboter“ ein. Es besteht Konsens, und die Ground Truth „Roboter“ wird nach der Prüfung bestätigt. Das ist E1: ein eindeutiger Fall mit einheitlicher Zuordnung.
 
-Im zweiten Beispiel handelt es sich um eine … . Bei dieser Baugruppe wählen zwei Teilnehmende keine der verfügbaren Klassen. Teilnehmer C ordnet die Baugruppe als „Greifer“ ein; sie wurde möglicherweise aufgrund ihrer Form so wahrgenommen. Nach der Prüfung bleibt die Ground Truth aber richtig. Das ist E2: eindeutig, aber mit einer abweichenden Einzelmeinung.
+Im zweiten Beispiel handelt es sich um ein Befestigungsteil. Bei dieser Baugruppe wählen zwei Teilnehmende keine der verfügbaren Klassen. Teilnehmer C ordnet die Baugruppe als „Greifer“ ein; sie wurde möglicherweise aufgrund ihrer Form so wahrgenommen. Nach der Prüfung bleibt die Ground Truth aber richtig. Das ist E2: eindeutig, aber mit einer abweichenden Einzelmeinung.
 
-Im dritten Beispiel sehen wir eine Hubeinheit. Einige Teilnehmende wählen „Lineareinheit“, einer aber „Rotationseinheit“. Die Ground Truth lautet „Lineareinheit“, aber nach der Prüfung ist auch „Rotationseinheit“ zulässig, weil die Baugruppe zusätzlich einen Rotationsaktor enthält. Nach der Entscheidungslogik im Codebook ist diese Zuordnung ebenfalls nachvollziehbar. Das ist M: ein mehrdeutiger Fall. Die Ground Truth ist dabei nicht falsch, sondern eine der zulässigen Antworten.
+Im dritten Beispiel sehen wir eine Hubeinheit. Einige Teilnehmende wählen „Lineareinheit“, einer aber „Kombinierte Einheit“. Die Ground Truth lautet „Lineareinheit“, aber nach der Prüfung ist auch „Kombinierte Einheit“ zulässig, weil die Baugruppe neben einem linearen Aktor zusätzlich einen Rotationsaktor enthält. Nach der Entscheidungslogik im Codebook ist die Zuordnung als „Kombinierte Einheit“ ebenfalls nachvollziehbar. Das ist M: ein mehrdeutiger Fall. Die Ground Truth ist dabei nicht falsch, sondern eine der zulässigen Antworten.
 
 ## Folie 7 – Auswertung der Workshops (ca. 0:55 | kumuliert: ca. 5:30)
 
