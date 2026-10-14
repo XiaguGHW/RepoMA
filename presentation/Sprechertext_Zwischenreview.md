@@ -172,7 +172,7 @@ Insgesamt ist das reine Bildformat am schwächsten. Zwischen PDF und Text gibt e
 
 - **Codebook und validierte Datenbasis**  
   129 Baugruppen wurden E1, E2 oder M zugeordnet.  
-  E1 und E2 zeigen eine zuverlässige Übereinstimmung (α = 0,806).
+  E1 und E2 zeigen bei der menschlichen Klassifikation eine zuverlässige Übereinstimmung (α = 0,806).
 
 - **Prompt-Konfiguration**  
   Das vollständige Codebook mit Entscheidungslogik verbessert die Accuracy.
@@ -190,11 +190,11 @@ Aus Gründen der Übersichtlichkeit zeige ich in dieser Präsentation nur eine A
 
 Die Kernaussage ist: Unter klar definierten Randbedingungen erreichen LLMs eine hohe Klassifikationsleistung.
 
-Zum Fazit lassen sich vier Punkte festhalten. Erstens bilden das Codebook und die validierte Datenbasis die Grundlage: 129 Baugruppen wurden E1, E2 oder M zugeordnet. E1 und E2 zeigen eine zuverlässige Übereinstimmung (α = 0,806).
+Zum Fazit lassen sich vier Punkte festhalten. Erstens bilden das Codebook und die validierte Datenbasis die Grundlage: 129 Baugruppen wurden E1, E2 oder M zugeordnet. E1 und E2 zeigen bei der menschlichen Klassifikation eine zuverlässige Übereinstimmung (α = 0,806).
 
 Zweitens verbessert das vollständige Codebook mit Entscheidungslogik die Accuracy. Drittens erzielen PDF und Text bessere Ergebnisse als reine Bilddaten.
 
-Bei den Modellen erzielt Claude Opus 4.8 die höchste Accuracy. Claude Haiku 4.5 ist ein stabiler und kostengünstiger Kompromiss.
+Bei den Modellen erzielt Claude Opus 4.8 in den meisten Vergleichen die höchste Accuracy. Claude Haiku 4.5 ist ein stabiler und kostengünstiger Kompromiss.
 
 Im weiteren Verlauf erweitere ich den Datensatz um 70 Baugruppen auf insgesamt 199 Baugruppen. Danach folgen die finale Gesamtauswertung der Funktionsklassifikation sowie die Entwicklung und Evaluation der Metadatenextraktion.
 
