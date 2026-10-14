@@ -20,7 +20,7 @@ Das Ziel der Untersuchung ist zu prüfen, wie leistungsfähig eine automatisiert
 
 Die Untersuchung umfasst fünf Schritte.
 
-Um die Klassifikationsergebnisse von Menschen und LLMs für dieselben Baugruppen unter denselben Regeln vergleichen zu können, benötigen wir eine einheitliche Grundlage. Deshalb erstellen wir zunächst einen Testdatensatz und ein Codebook als Regelwerk.
+Um die Klassifikationsergebnisse von Menschen und LLMs für dieselben Baugruppen unter denselben Regeln vergleichen zu können, haben wir eine einheitliche Grundlage erstellt. Sie umfasst einen Testdatensatz und ein Codebook als Regelwerk.
 
 Dann führen wir vier Labeling-Workshops durch, um das Klassenschema zu überprüfen und menschliche Klassifikationsergebnisse sowie den dafür benötigten Zeitaufwand zu erfassen.
 
