@@ -172,7 +172,7 @@ Aus Gründen der Übersichtlichkeit zeige ich in dieser Präsentation nur eine A
 
 Die Kernaussage ist: Unter klar definierten Randbedingungen erreichen LLMs eine hohe Klassifikationsleistung.
 
-Zum Fazit lassen sich vier Punkte festhalten. Erstens bilden das Codebook und die validierte Datenbasis die Grundlage: 129 Baugruppen wurden E1, E2 oder M zugeordnet. Für E1 und E2 ist die Übereinstimmung zuverlässig, mit Alpha gleich 0,806.
+Zum Fazit lassen sich vier Punkte festhalten. Erstens bilden das Codebook und die validierte Datenbasis die Grundlage: 129 Baugruppen wurden E1, E2 oder M zugeordnet. E1 und E2 zeigen eine zuverlässige Übereinstimmung (α = 0,806).
 
 Zweitens verbessert das vollständige Codebook mit Entscheidungslogik die Accuracy. Drittens erzielen PDF und Text bessere Ergebnisse als reine Bilddaten.
 
