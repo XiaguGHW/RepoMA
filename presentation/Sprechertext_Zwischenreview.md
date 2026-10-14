@@ -52,17 +52,17 @@ Auf dieser Testbasis wurden anschließend vier Labeling-Workshops durchgeführt.
 
 ## Folie 5 – Labeling-Workshop: Durchführung (ca. 1:15 | kumuliert: ca. 3:45)
 
-Das Ziel der vier Workshops war erstens, das Klassenschema in der Anwendung zu überprüfen. Zweitens sollten menschliche Klassifikationen und der dafür benötigte Zeitaufwand erfasst werden.
+Das Ziel der vier Workshops war erstens, die Trennschärfe des Klassenschemas in der Anwendung zu überprüfen. Zweitens sollten menschliche Klassifikationen und der dafür benötigte Zeitaufwand erfasst werden.
 
-Insgesamt haben 16 Personen teilgenommen: davon vier Ingenieurinnen und Ingenieure sowie zwölf Studierende.
+Insgesamt haben wir 16 Teilnehmer: vier Ingenieurinnen und Ingenieure sowie zwölf Studierende.
 
-Zu Beginn haben alle Teilnehmenden das Codebook für ungefähr zehn Minuten gelesen. So hatten alle dieselbe Grundlage für die Klassifikation.
+Der Workshop läuft so ab: Zunächst haben die Teilnehmenden etwa zehn Minuten Zeit, das Codebook zu lesen und zu verstehen. So haben alle dieselbe Grundlage für die Klassifikation.
 
-Danach klassifizierte jede Person die Baugruppen eigenständig in einer Excel-Vorlage. Pflichtangaben waren die gewählte Klasse und die Konfidenz. Die Konfidenz beschreibt, wie sicher die Teilnehmenden bei ihrer Entscheidung waren. Eine Zweitwahl sowie die für die Entscheidung verwendete Quelle konnten zusätzlich angegeben werden.
+Danach klassifiziert jede Person die Baugruppen eigenständig in einer Excel-Vorlage. Pflichtangaben sind die gewählte Klasse und die Konfidenz, also wie sicher die Teilnehmenden bei ihrer Entscheidung sind. Eine Zweitwahl sowie die für die Entscheidung verwendete Quelle können zusätzlich angegeben werden.
 
-Als Informationsquellen standen allen Teilnehmenden DFC und Teamcenter zur Verfügung. Alle dort verfügbaren Informationen konnten zur Klassifikation genutzt werden.
+Als Informationsquellen stehen DFC und Teamcenter zur Verfügung. Alle dort verfügbaren Informationen können zur Klassifikation genutzt werden.
 
-Über Zeitstempel wurde außerdem die Bearbeitungszeit automatisch erfasst, um später den Zeitaufwand berechnen zu können.
+Außerdem wird die Bearbeitungszeit über Zeitstempel automatisch in der Excel-Vorlage erfasst, um später den Zeitaufwand berechnen zu können.
 
 ## Folie 6 – Herleitung der Regime E1, E2 und M (ca. 0:50 | kumuliert: ca. 4:35)
 
