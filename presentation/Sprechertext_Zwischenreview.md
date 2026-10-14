@@ -22,7 +22,7 @@ Die Untersuchung umfasst fünf Schritte.
 
 Um die Klassifikationsergebnisse von Menschen und LLMs für dieselben Baugruppen unter denselben Regeln vergleichen zu können, benötigen wir eine einheitliche Grundlage. Deshalb erstellen wir zunächst einen Testdatensatz und ein Codebook als Regelwerk.
 
-Dann führen wir vier Labeling-Workshops durch, um die Trennschärfe des Klassenschemas zu überprüfen und menschliche Klassifikationsergebnisse sowie den dafür benötigten Zeitaufwand zu erfassen.
+Dann führen wir vier Labeling-Workshops durch, um das Klassenschema zu überprüfen und menschliche Klassifikationsergebnisse sowie den dafür benötigten Zeitaufwand zu erfassen.
 
 Anschließend werden diese Ergebnisse anhand des Codebooks geprüft. Dadurch wird festgelegt, welche Baugruppen eindeutig und welche mehrdeutig sind. Diese validierte Datenbasis bildet später die Grundlage für die LLM-Bewertung.
 
