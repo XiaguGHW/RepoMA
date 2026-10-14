@@ -104,15 +104,21 @@ Als Bewertungsmetrik verwende ich die Allowed-Label-Set Accuracy, im Folgenden k
 
 ## Folie 9 – Ergebnisstabilität im Vergleich (ca. 0:55 | kumuliert: ca. 7:10)
 
-Bevor ich die Prompt- und Formatvergleiche zeige, prüfe ich zunächst die Ergebnisstabilität bei wiederholter Durchführung. Dadurch lässt sich später besser einordnen, ob Unterschiede zwischen Bedingungen tatsächlich belastbar sind oder innerhalb der natürlichen Modellschwankung liegen.
+Bevor ich die Prompt- und Formatvergleiche zeige, möchte ich zunächst die Ergebnisse der Stabilitätsanalyse vorstellen. Dadurch lässt sich später besser einordnen, ob Unterschiede zwischen Bedingungen tatsächlich belastbar sind oder innerhalb der natürlichen Modellschwankung liegen.
 
-Dafür wurden Gemini 2.5 Pro und Claude Haiku 4.5 jeweils zehnmal unter denselben Bedingungen mit PDF und dem vollständigen Codebook im Prompt ausgeführt. Bewertet wird die Allowed-Label-Set Accuracy.
+Die Frage ist: Wie stabil ist die Klassifikationsleistung bei wiederholter Durchführung?
 
-Gemini 2.5 Pro erreicht mit 90,66 Prozent den höheren mittleren Accuracy-Wert. Die Standardabweichung beträgt jedoch 2,05 Prozentpunkte. Die Ergebnisse schwanken damit sichtbar zwischen 86,8 und 93,7 Prozent.
+Dafür wurden Gemini 2.5 Pro und Claude Haiku 4.5 jeweils zehnmal unter denselben Bedingungen ausgeführt. Als Eingabe verwenden wir PDF und das vollständige Codebook im Prompt. Die PDF-Dateien enthalten den größten Teil der verfügbaren Informationen zu einer Baugruppe, zum Beispiel technische Zeichnungen, Stücklisten und Datenblätter wichtiger Komponenten.
 
-Bei Claude Haiku 4.5 liegt der Mittelwert mit 89,35 Prozent nur 1,31 Prozentpunkte darunter. Die Standardabweichung beträgt aber lediglich 0,47 Prozentpunkte. Die zehn Durchläufe liegen deshalb sehr nah beieinander, zwischen 88,9 und 89,8 Prozent.
+Die obere und die untere Grafik zeigen jeweils die Ergebnisse von Gemini 2.5 Pro und Claude Haiku 4.5. Die rote gestrichelte Linie zeigt jeweils den Mittelwert.
 
-Claude Haiku 4.5 liefert damit deutlich konstantere Ergebnisse. Diese Schwankungsbreiten berücksichtige ich nun bei der Interpretation der weiteren Vergleiche.
+Gemini 2.5 Pro erreicht im Durchschnitt eine Accuracy von 90,66 Prozent. Die Standardabweichung beträgt jedoch circa 2 Prozentpunkte. Die Ergebnisse schwanken damit sichtbar zwischen 87 und knapp 94 Prozent.
+
+Bei Claude Haiku 4.5 liegt der Mittelwert bei 89,35 Prozent und damit nur leicht unter dem von Gemini. Die Standardabweichung beträgt aber lediglich 0,47 Prozentpunkte. Die zehn Durchläufe liegen deshalb sehr nah beieinander, zwischen 89 und knapp 90 Prozent.
+
+Claude Haiku 4.5 liefert damit deutlich konstantere Ergebnisse. Diese Schwankungen werden bei der Interpretation der weiteren Vergleiche berücksichtigt.
+
+**【中文备注：这一页需要相应修改 PPT。】**
 
 ## Folie 10 – Prompt-Konfigurationen im Vergleich (ca. 0:55 | kumuliert: ca. 8:05)
 
