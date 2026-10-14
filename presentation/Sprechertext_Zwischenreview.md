@@ -102,7 +102,6 @@ Verglichen werden drei Randbedingungen. Erstens der Umfang der Codebook-Informat
 
 Als Bewertungsmetrik verwende ich die Allowed-Label-Set Accuracy, im Folgenden kurz Accuracy. Eine Vorhersage gilt dabei als korrekt, wenn sie der Ground Truth oder einer anhand des Codebooks zulässigen Alternative entspricht. Das ist besonders wichtig für die mehrdeutigen Fälle.
 
-Im Folgenden zeige ich zunächst die Stabilität der Ergebnisse bei wiederholter Durchführung.
 
 ## Folie 9 – Ergebnisstabilität im Vergleich (ca. 0:55 | kumuliert: ca. 7:10)
 
