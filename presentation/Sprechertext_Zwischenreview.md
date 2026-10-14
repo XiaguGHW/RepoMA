@@ -144,13 +144,13 @@ Für die folgenden Vergleiche verwenden wir deshalb P3 als feste Prompt-Konfigur
 
 ## Folie 11 – LLM-Ergebnisse nach Regime (ca. 0:50 | kumuliert: ca. 8:55)
 
-Jetzt betrachte ich die Ergebnisse getrennt nach den drei bereits erläuterten Regimen. Die Bedingungen sind für alle Modelle gleich: PDF als Eingabe und P3, also das vollständige Codebook, als Prompt. So wird sichtbar, ob sich die Leistung zwischen eindeutigen und mehrdeutigen Baugruppen unterscheidet.
+Jetzt betrachte ich die Ergebnisse getrennt nach den drei bereits erläuterten Regimen. Die Bedingungen sind für alle Modelle gleich: PDF als Eingabe und P3, also das vollständige Codebook, als Prompt. So wird sichtbar, wie sich die Leistung zwischen eindeutigen und mehrdeutigen Baugruppen unterscheidet.
 
-Zunächst sehen wir E1: eindeutige Fälle mit einheitlicher Zuordnung. Hier erreichen die Modelle zwischen 82,4 und 94,6 Prozent.
+Zunächst sehen wir E1: eindeutige Fälle mit einheitlicher Zuordnung. Hier erreicht Claude Opus erneut die höchste Accuracy mit 94,6 Prozent.
 
-Als Nächstes folgt E2. Auch diese Fälle sind nach der Prüfung eindeutig, aber es gab eine abweichende Einzelmeinung. Die Werte liegen bei allen vier Modellen unter den E1-Werten.
+Als Nächstes folgt E2. Diese Fälle sind ebenfalls nach der Prüfung eindeutig, aber es gab abweichende Einzelmeinungen. Auch hier liegt Claude Opus weiterhin vorne.
 
-Bei M sind mehrere Labels zulässig. Auch hier wird eine nach dem Codebook zulässige Alternative als korrekt gewertet. Trotzdem sind die Werte bei allen Modellen am niedrigsten, besonders bei den Gemini-Modellen. Mehrdeutige Baugruppen bleiben damit für die LLMs anspruchsvoller.
+Bei M sind mehrere Labels zulässig. In dieser Kategorie sind die Ergebnisse deutlich am niedrigsten. Die Accuracy liegt teilweise nur bei über 70 Prozent; bei Gemini 2.5 Pro sinkt sie sogar auf 66,7 Prozent. Auch bei den menschlichen Klassifikationen gibt es hier viele abweichende Zuordnungen.
 
 Der letzte Balken zeigt jeweils das Gesamtergebnis über alle Baugruppen. Dadurch wird deutlich, dass der Gesamtwert die Unterschiede zwischen den Regimen verdeckt. Genau deshalb betrachten wir die Regime getrennt.
 
