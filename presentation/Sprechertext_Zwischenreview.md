@@ -94,15 +94,13 @@ Jetzt haben wir die menschlichen Klassifikationsergebnisse. Als Nächstes schaue
 
 ## Folie 8 – LLM-Experimente: Untersuchungsrahmen (ca. 0:45 | kumuliert: ca. 6:15)
 
-Im nächsten Teil stelle ich die LLM-Experimente vor. Ziel ist es zu untersuchen, welchen Einfluss unterschiedliche Randbedingungen auf die Klassifikationsleistung von LLMs haben.
+Das Ziel der gesamten LLM-Experimente ist es, zu untersuchen, welchen Einfluss unterschiedliche Randbedingungen auf die Klassifikationsleistung von LLMs haben.
 
-Damit die Ergebnisse vergleichbar bleiben, bleiben zwei Punkte konstant: Alle Experimente verwenden denselben Testdatensatz wie in den vier Workshops. Außerdem ist die Ausgabe-Konfiguration immer gleich: Das Modell gibt pro Baugruppe genau eine Funktionsklasse aus.
+Damit die Ergebnisse vergleichbar sind, halten wir zwei Punkte konstant: Alle Experimente verwenden denselben Testdatensatz wie in den Workshops. Außerdem ist die Ausgabe-Konfiguration immer gleich: Das Modell darf pro Baugruppe nur eine Funktionsklasse ausgeben.
 
 Verglichen werden drei Randbedingungen. Erstens der Umfang der Codebook-Informationen im Prompt. Zweitens unterschiedliche LLM-Modelle. Drittens unterschiedliche Eingabeformate: PDF, Bild und Text.
 
-Als Bewertungsmetrik verwende ich die Allowed-Label-Set Accuracy, im Folgenden kurz Accuracy. Eine Vorhersage gilt dabei als korrekt, wenn sie der Ground Truth oder einer anhand des Codebooks zulässigen Alternative entspricht. Das ist besonders wichtig für die mehrdeutigen Fälle.
-
-Im Folgenden zeige ich zunächst die Stabilität der Ergebnisse bei wiederholter Durchführung.
+Als Bewertungsmetrik verwende ich die Allowed-Label-Set Accuracy, im Folgenden kurz Accuracy. Eine Vorhersage gilt dabei als korrekt, wenn sie der Ground Truth oder einer weiteren geprüften Alternative entspricht.
 
 ## Folie 9 – Ergebnisstabilität im Vergleich (ca. 0:55 | kumuliert: ca. 7:10)
 
