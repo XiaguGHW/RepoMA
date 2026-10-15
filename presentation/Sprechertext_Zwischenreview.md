@@ -204,3 +204,217 @@ Damit bin ich am Ende meiner Präsentation. Vielen Dank.
 ## Kurze Übungsregel
 
 Bis einschließlich Folie 12 beträgt die geplante Sprechzeit etwa 9:35 Minuten. Mit Folie 13 liegt sie bei etwa 10:35 Minuten. Die Folien nicht vorlesen: nur die obenstehenden Sätze sprechen und bei den sieben Klassen kurz über die Karten zeigen.
+
+## Stichwort-Prompts zum Üben
+
+### Folie 1
+
+- Heute möchte ich euch den ... Masterarbeit
+- Der Titel lautet ... Machine-Learning-Experimente
+
+### Folie 2
+
+- Zunächst gebe ich einen kurzen ... Zeitplan
+- Der erste Schwerpunkt ist die ... Funktionsklassifikation
+- Für diesen ersten Teil wurden ... Baugruppendaten
+- Diese Grundlage und die anschließenden ... LLM-Experimente
+
+### Folie 3
+
+- Das Ziel der Untersuchung ist ... Leistungsfähigkeit
+- Die Untersuchung umfasst fünf ... Schritte
+- Um die Klassifikationsergebnisse von Menschen ... einheitliche Grundlage
+- Sie umfasst einen Testdatensatz und ... Codebook
+- Dann führen wir vier Labeling-Workshops ... Klassenschema
+- Anschließend werden diese Ergebnisse anhand ... Codebook
+- Dadurch wird festgelegt, welche Baugruppen ... eindeutig / mehrdeutig
+- Diese validierte Datenbasis bildet später ... LLM-Bewertung
+- Erst dann testen wir verschiedene ... LLM-Modelle
+- Zum Schluss werden die LLM-Vorhersagen ... Alternativen
+- Daraus berechnen wir für jedes ... Accuracy
+- Ich gehe diese fünf Schritte ... nacheinander
+
+### Folie 4
+
+- Zuerst zeige ich die gemeinsame ... Testbasis
+- Sie besteht aus einem Testdatensatz ... Codebook
+- Der Datensatz umfasst 129 Baugruppen ... BMG
+- Je nach Baugruppe standen unterschiedliche ... Informationsquellen
+- Die verfügbaren Informationen wurden für ... Ordnerstruktur
+- Die 129 Baugruppen verteilen sich ... Funktionsklassen
+- Die Klassen und ihre jeweiligen ... links
+- Die sieben Klassen beschreiben jeweils ... Hauptfunktion
+- Eine Greifeinheit wird zum Beispiel ... Greifer
+- Um eine einheitliche und nachvollziehbare ... Regelwerk
+- Es enthält die Definitionen der ... Entscheidungslogik
+- Auf dieser Testbasis wurden anschließend ... Workshops
+
+### Folie 5
+
+- Das Ziel der vier Workshops ... Klassenschema
+- Zweitens sollten menschliche Klassifikationen und ... Zeitaufwand
+- Insgesamt haben wir 16 Teilnehmer ... Studierende
+- Der Workshop läuft so ab ... zehn Minuten
+- Zunächst haben die Teilnehmenden etwa ... Codebook
+- So haben alle dieselbe Grundlage ... Klassifikation
+- Danach klassifiziert jede Person die ... Excel-Vorlage
+- Pflichtangaben sind die gewählte Klasse ... Konfidenz
+- Eine Zweitwahl sowie die für ... optional
+- Als Informationsquellen stehen DFC und ... Teamcenter
+- Alle dort verfügbaren Informationen können ... Klassifikation
+- Außerdem wird die Bearbeitungszeit über ... Zeitstempel
+
+### Folie 6
+
+- Jetzt haben wir sowohl die ... Klassifikationsergebnisse
+- Wenn wir diese Ergebnisse mit ... Ground Truth
+- Nicht für jede Baugruppe gibt ... richtige Klasse
+- Einige Baugruppen können mehrdeutig ... sein
+- Deshalb wurden alle Baugruppen in ... E1 / E2 / M
+- So können wir die Ergebnisse ... getrennt
+- Jetzt schauen wir uns an ... Regime
+- Im ersten Beispiel sehen wir ... Industrieroboter
+- Alle drei Teilnehmenden ordnen die ... Roboter
+- Es besteht Konsens, und die ... bestätigt
+- Das ist E1: ein eindeutiger ... Konsens
+- Im zweiten Beispiel handelt es ... Befestigungsteil
+- Bei dieser Baugruppe wählen zwei ... Klassen
+- Teilnehmer C ordnet die Baugruppe ... Greifer
+- Nach der Prüfung bleibt die ... richtig
+- Das ist E2: eindeutig, aber ... Einzelmeinung
+- Im dritten Beispiel sehen wir ... Hubeinheit
+- Einige Teilnehmende wählen „Lineareinheit“, einer ... Kombinierte Einheit
+- Die Ground Truth lautet „Lineareinheit“ ... zulässig
+- Nach der Entscheidungslogik im Codebook ... nachvollziehbar
+- Das ist M: ein mehrdeutiger ... Fall
+- Die Ground Truth ist dabei ... zulässige Antwort
+- Die hier gezeigte Prüfung und ... Auswertung
+
+### Folie 7
+
+- So haben Jonas und ich ... Workshops
+- Alle 129 Baugruppen wurden den ... E1 / E2 / M
+- Aus den Workshop-Ergebnissen konnte außerdem ... Krippendorffs Alpha
+- Es ist ein Maß für ... Übereinstimmung
+- Je näher der Wert bei ... Klassifikationen
+- Für die eindeutigen Fälle, also ... 0,806
+- Der Wert liegt damit über ... zuverlässig
+- Für die mehrdeutigen Fälle ist ... nicht aussagekräftig
+- Dort können mehrere Labels nach ... zulässig
+- Auch der Zeitaufwand wurde ausgewertet ... 31 / 42 Sekunden
+- Die Ingenieurinnen und Ingenieure sind ... Erfahrung
+- Jetzt haben wir die menschlichen ... Klassifikationsergebnisse
+- Als Nächstes schauen wir uns ... LLMs
+
+### Folie 8
+
+- Das Ziel der gesamten LLM-Experimente ... Randbedingungen
+- Damit die Ergebnisse vergleichbar sind ... konstant
+- Alle Experimente verwenden denselben Testdatensatz ... Workshops
+- Außerdem ist die Ausgabe-Konfiguration immer ... eine Klasse
+- Verglichen werden drei Randbedingungen ... drei Faktoren
+- Erstens der Umfang der Codebook-Informationen ... Prompt
+- Zweitens unterschiedliche LLM-Modelle ... Modelle
+- Drittens unterschiedliche Eingabeformate: PDF, Bild ... Text
+- Als Bewertungsmetrik verwende ich die ... Accuracy
+- Eine Vorhersage gilt dabei als ... Alternative
+- Das ist besonders wichtig für ... Mehrdeutigkeit
+
+### Folie 9
+
+- Bevor ich die Prompt- und ... Stabilitätsanalyse
+- Dadurch lässt sich später besser ... Modellschwankung
+- Die Frage ist: Wie stabil ... Wiederholung
+- Dafür wurden Gemini 2.5 Pro ... zehnmal
+- Als Eingabe verwenden wir PDF ... vollständiges Codebook
+- Die PDF-Dateien enthalten den größten ... Baugruppe
+- Die obere und die untere ... Modelle
+- Die rote gestrichelte Linie zeigt ... Mittelwert
+- Gemini 2.5 Pro erreicht im ... 90,66 Prozent
+- Die Standardabweichung beträgt jedoch circa ... 2 Prozentpunkte
+- Die Ergebnisse schwanken damit sichtbar ... 87–94 Prozent
+- Bei Claude Haiku 4.5 liegt ... 89,35 Prozent
+- Die Standardabweichung beträgt aber lediglich ... 0,47 Prozentpunkte
+- Die zehn Durchläufe liegen deshalb ... 89–90 Prozent
+- Claude Haiku 4.5 liefert damit ... konstanter
+- Diese Schwankungen werden bei der ... berücksichtigt
+
+### Folie 10
+
+- Als Nächstes betrachte ich den ... Prompt-Konfiguration
+- Die Frage ist: Welcher Prompt ... Klassifikationsleistung
+- Auch in diesem Experiment verwenden ... PDF-Dateien
+- Verglichen werden vier unterschiedliche ... Prompt-Varianten
+- Bei P1 erhält das Modell ... Klassennamen
+- Weitere Informationen bekommt es nicht ... P1
+- Schauen wir uns nun die ... vier Modelle
+- Claude Opus 4.8 erzielt hier ... 90,4 Prozent
+- Bei P2 erhält das Modell ... Definitionen
+- Wenn wir die Accuracy vergleichen ... Vergleich
+- Beim ersten und dritten Modell ... Anstieg
+- Beim zweiten und vierten Modell ... Rückgang
+- Schauen wir nun auf P3 ... P3
+- Bei P3 erhält das Modell ... Entscheidungslogik
+- Die Ergebnisse zeigen: Die Accuracy ... alle Modelle
+- Bei P4 erhält das Modell ... Beispiele / Ausnahmen
+- Bei P4 steigt die Accuracy ... Haiku
+- Bei allen anderen Modellen sinkt ... Accuracy
+- Insgesamt zeigt der Vergleich, dass ... beste Konfiguration
+- Bei Claude Haiku sehen wir ... mehr Informationen
+- Bei den anderen Modellen gibt ... Schwankungen
+- Das bedeutet nicht, dass zusätzliche ... keinen Nutzen
+- Die Unterschiede können teilweise auch ... Modellschwankung
+- Mit Blick auf die Stabilitätsanalyse ... stabilere Modell
+- Bei diesem Modell steigt die ... Informationsumfang
+- Das spricht dafür, dass mehr ... Accuracy
+- Für die folgenden Vergleiche verwenden ... P3
+
+### Folie 11
+
+- Jetzt betrachte ich die Ergebnisse ... Regime
+- Die Bedingungen sind für alle ... PDF / P3
+- So wird sichtbar, wie sich ... Eindeutigkeit
+- Zunächst sehen wir E1: eindeutige ... einheitliche Zuordnung
+- Hier erreicht Claude Opus erneut ... 94,6 Prozent
+- Als Nächstes folgt E2 ... E2
+- Diese Fälle sind ebenfalls nach ... Einzelmeinungen
+- Auch hier liegt Claude Opus ... vorne
+- Bei M sind mehrere Labels ... zulässig
+- In dieser Kategorie sind die ... niedrigsten
+- Die Accuracy liegt teilweise nur ... 66,7 Prozent
+- Auch bei den menschlichen Klassifikationen ... Abweichungen
+- Der letzte Balken zeigt jeweils ... Gesamtergebnis
+- Dadurch wird deutlich, dass der ... Unterschiede
+- Genau deshalb betrachten wir die ... getrennt
+
+### Folie 12
+
+- Als Nächstes vergleiche ich die ... Eingabeformate
+- Die Frage ist: Welches Datenformat ... Klassifikationsleistung
+- Zunächst sehen wir das PDF-Format ... PDF
+- Die Modelle erhalten dabei alle ... PDF-Dateien
+- Die Accuracy liegt je nach ... 88,0–93,9 Prozent
+- Beim Bildformat erhalten die Modelle ... CAD-Screenshots
+- Die Accuracy-Werte liegen bei allen ... unter PDF
+- Beim Textformat werden die aus ... Rohtexte
+- Bei Claude Haiku und Gemini ... Text über PDF
+- Insgesamt ist das reine Bildformat ... schwächsten
+- Zwischen PDF und Text gibt ... kein Gewinner
+- Welches der beiden Formate besser ... Modell
+
+### Folie 13
+
+- Aus Gründen der Übersichtlichkeit zeige ... Auswahl
+- Die Gesamtauswertung umfasst weitere Modelle ... Schlussfolgerungen
+- Die Kernaussage ist: Unter klar ... hohe Leistung
+- Zum Fazit lassen sich vier ... Punkte
+- Erstens bilden das Codebook und ... Datenbasis
+- E1 und E2 zeigen bei ... 0,806
+- Zweitens verbessert das vollständige Codebook ... Accuracy
+- Drittens erzielen PDF und Text ... Bilddaten
+- Bei den Modellen erzielt Claude ... höchste Accuracy
+- Claude Haiku 4.5 ist ein ... Kompromiss
+- Im weiteren Verlauf erweitere ich ... 199 Baugruppen
+- Danach folgen die finale Gesamtauswertung ... Metadatenextraktion
+- Damit bin ich am Ende ... Präsentation
+- Vielen Dank ... Ende
