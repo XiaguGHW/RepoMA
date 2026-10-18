@@ -44,7 +44,7 @@ Je nach Baugruppe standen unterschiedliche Informationsquellen zur Verfügung, z
 
 Die 129 Baugruppen verteilen sich auf sieben Funktionsklassen. Die Klassen und ihre jeweiligen Anzahlen sind links dargestellt.
 
-Die sieben Klassen beschreiben jeweils die Hauptfunktion einer Baugruppe. Eine Hubeinheit wird zum Beispiel als „Lineareinheit“ klassifiziert, weil ihre Hauptfunktion die translatorische Bewegung eines Objekts ist. Entsprechend wird eine Dreheinheit als „Rotationseinheit“ klassifiziert, weil ihre Hauptfunktion die rotatorische Bewegung eines Objekts ist. Wenn keine der verfügbaren Klassen passt, kann dies ebenfalls angegeben werden.
+Die sieben Klassen beschreiben jeweils die Hauptfunktion einer Baugruppe. Eine Hubeinheit wird zum Beispiel als „Lineareinheit“ klassifiziert, weil ihre Hauptfunktion die translatorische Bewegung eines Objekts ist. Entsprechend wird eine Dreheinheit als „Rotationseinheit“ klassifiziert, weil ihre Hauptfunktion die rotatorische Bewegung eines Objekts ist. Wenn die Hauptfunktion einer Baugruppe keiner der zuvor genannten sechs Klassen entspricht, wird sie der Kategorie „Keine der verfügbaren Klassen“ zugeordnet.
 
 Um eine einheitliche und nachvollziehbare Klassifikation durch Menschen und LLMs zu ermöglichen, wurde ein Codebook als gemeinsames Regelwerk erstellt. Es enthält die Definitionen der sieben Klassen und zeigt Schritt für Schritt, wie man anhand der Aktoren einer Baugruppe und weiterer Kriterien zur passenden Klasse kommt.
 
@@ -247,7 +247,7 @@ Folie 4
 • Die sieben Klassen beschreiben jeweils ... Hauptfunktion
 • Eine Hubeinheit wird zum Beispiel ... translatorische Bewegung
 • Entsprechend wird eine Dreheinheit ... rotatorische Bewegung
-• Wenn keine der verfügbaren ... angegeben werden
+• Wenn die Hauptfunktion einer Baugruppe ... keine der verfügbaren Klassen
 • Um eine einheitliche und nachvollziehbare ... Regelwerk
 • Es enthält die Definitionen der ... Entscheidungslogik
 • Auf dieser Testbasis wurden anschließend ... Workshops
