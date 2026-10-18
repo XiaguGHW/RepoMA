@@ -62,7 +62,7 @@ Danach klassifiziert jede Person die Baugruppen eigenständig in einer Excel-Vor
 
 Als Informationsquellen stehen DFC und Teamcenter zur Verfügung. Alle dort verfügbaren Informationen können zur Klassifikation genutzt werden.
 
-Außerdem wird die Bearbeitungszeit über Zeitstempel automatisch in der Excel-Vorlage erfasst, um später den Zeitaufwand berechnen zu können.
+Die Excel-Vorlage wurde so konzipiert, dass bei jedem Eintrag der Teilnehmenden automatisch ein Zeitstempel erfasst wird. Daraus lässt sich später die Bearbeitungszeit berechnen.
 
 ## Folie 6 – Herleitung der Regime E1, E2 und M (ca. 0:50 | kumuliert: ca. 4:35)
 
@@ -265,7 +265,8 @@ Folie 5
 • Eine Zweitwahl sowie die für ... optional
 • Als Informationsquellen stehen DFC und ... Teamcenter
 • Alle dort verfügbaren Informationen können ... Klassifikation
-• Außerdem wird die Bearbeitungszeit über ... Zeitstempel
+• Die Excel-Vorlage wurde so konzipiert ... Zeitstempel
+• Daraus lässt sich später ... Bearbeitungszeit
 
 Folie 6
 
