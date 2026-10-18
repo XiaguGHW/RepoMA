@@ -247,7 +247,7 @@ Folie 4
 • Die sieben Klassen beschreiben jeweils ... Hauptfunktion
 • Eine Hubeinheit wird zum Beispiel ... translatorische Bewegung
 • Entsprechend wird eine Dreheinheit ... rotatorische Bewegung
-• Wenn die Hauptfunktion einer Baugruppe ... keine der verfügbaren Klassen
+• Wenn die Hauptfunktion einer Baugruppe ... Klasse „Keine der verfügbaren Klassen“
 • Um eine einheitliche und nachvollziehbare ... Regelwerk
 • Es enthält die Definitionen der ... Entscheidungslogik
 • Auf dieser Testbasis wurden anschließend ... Workshops
