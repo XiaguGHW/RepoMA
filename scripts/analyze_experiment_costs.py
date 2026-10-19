@@ -23,7 +23,7 @@ from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import column_index_from_string
 
 BLUE = "1F4E78"
-DETAIL_HEADERS = ["Pricing_Model", "Input_Price_USD_per_1M", "Output_Price_USD_per_1M", "Input_Tokens", "Visible_Output_Tokens", "Thinking_Tokens", "Billable_Output_Tokens", "Total_Tokens", "Input_Cost_USD", "Output_Cost_USD", "Total_Cost_USD", "Cost_Parse_Status"]
+DETAIL_HEADERS = ["Pricing_Model", "Input_Price_USD_per_1M", "Output_Price_USD_per_1M", "Input_Tokens", "Cache_Creation_Input_Tokens", "Cache_Read_Input_Tokens", "Visible_Output_Tokens", "Thinking_Tokens", "Billable_Output_Tokens", "Total_Tokens", "Input_Cost_USD", "Cache_Creation_Cost_USD", "Cache_Read_Cost_USD", "Output_Cost_USD", "Total_Cost_USD", "Cost_Parse_Status"]
 SUMMARY_HEADERS = ["Source_File", "Pricing_Model", "Input_Price_USD_per_1M", "Output_Price_USD_per_1M", "Valid_Result_Rows", "Skipped_Rows", "Input_Tokens", "Visible_Output_Tokens", "Thinking_Tokens", "Billable_Output_Tokens", "Total_Tokens", "Input_Cost_USD", "Output_Cost_USD", "Total_Cost_USD", "Output_File", "Status"]
 
 def args() -> argparse.Namespace:
@@ -59,10 +59,19 @@ def usage(value: Any) -> dict[str, int]:
     def n(key: str) -> int:
         try: return max(0, int(data.get(key) or 0))
         except (TypeError, ValueError) as e: raise ValueError(f"invalid {key}") from e
-    inp, vis, think, total = n("promptTokenCount"), n("candidatesTokenCount"), n("thoughtsTokenCount"), n("totalTokenCount")
-    billed = vis + think
-    if total and inp + billed != total and total >= inp: billed = total - inp
-    return {"input":inp, "visible":vis, "thinking":think, "billed":billed, "total":total or inp+billed}
+    # Claude Model Farm records usage in Anthropic field names. Gemini uses
+    # promptTokenCount/candidatesTokenCount/thoughtsTokenCount instead.
+    is_claude = any(key in data for key in ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+    if is_claude:
+        inp, vis = n("input_tokens"), n("output_tokens")
+        cache_creation, cache_read, think = n("cache_creation_input_tokens"), n("cache_read_input_tokens"), 0
+        billed, total = vis, inp + cache_creation + cache_read + vis
+    else:
+        inp, vis, think, total = n("promptTokenCount"), n("candidatesTokenCount"), n("thoughtsTokenCount"), n("totalTokenCount")
+        cache_creation, cache_read = 0, 0
+        billed = vis + think
+    if not is_claude and total and inp + billed != total and total >= inp: billed = total - inp
+    return {"input":inp, "cache_creation":cache_creation, "cache_read":cache_read, "visible":vis, "thinking":think, "billed":billed, "total":total or inp+cache_creation+cache_read+billed}
 
 def pricing(path: Path) -> tuple[str, list[dict[str, Any]]]:
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -76,10 +85,13 @@ def model(file: Path, entries: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 def columns(ws: Any, after_column: int) -> dict[str, int]:
     existing = {h: next((c for c in range(1, ws.max_column+1) if ws.cell(1,c).value == h), None) for h in DETAIL_HEADERS}
-    if any(existing.values()) and not all(existing.values()):
-        raise ValueError("cost columns are incomplete; remove them before rerunning")
-    if all(existing.values()):
-        result = {h: int(existing[h]) for h in DETAIL_HEADERS}
+    if any(existing.values()):
+        result = {h: int(column) for h, column in existing.items() if column}
+        next_column = max(result.values()) + 1
+        for h in DETAIL_HEADERS:
+            if h not in result:
+                result[h] = next_column
+                next_column += 1
     else:
         ws.insert_cols(after_column + 1, amount=len(DETAIL_HEADERS))
         result = {h: after_column + 1 + i for i, h in enumerate(DETAIL_HEADERS)}
@@ -92,23 +104,23 @@ def process(source: Path, ns: argparse.Namespace, entry: dict[str, Any], currenc
     if ns.sheet_name not in wb.sheetnames: raise ValueError(f"worksheet {ns.sheet_name!r} not found")
     ws, c, token_col = wb[ns.sheet_name], None, column_index_from_string(ns.token_column)
     c = columns(ws, token_col); ip, op = float(entry["input_usd_per_million"]), float(entry["output_usd_per_million"])
-    totals = {k:0.0 for k in ["input","visible","thinking","billed","total","ic","oc","cost"]}; valid=0; skipped=[]
+    totals = {k:0.0 for k in ["input","cache_creation","cache_read","visible","thinking","billed","total","ic","cc","cr","oc","cost"]}; valid=0; skipped=[]
     for row in range(2, ws.max_row+1):
         raw = ws.cell(row,token_col).value
         try: u = usage(raw)
         except ValueError as e:
             if raw is not None and str(raw).strip(): skipped.append((row,str(e))); ws.cell(row,c["Cost_Parse_Status"]).value=f"Skipped: {e}"
             continue
-        ic, oc = u["input"]*ip/1e6, u["billed"]*op/1e6
-        values = {"Pricing_Model":entry["display_name"],"Input_Price_USD_per_1M":ip,"Output_Price_USD_per_1M":op,"Input_Tokens":u["input"],"Visible_Output_Tokens":u["visible"],"Thinking_Tokens":u["thinking"],"Billable_Output_Tokens":u["billed"],"Total_Tokens":u["total"],"Input_Cost_USD":ic,"Output_Cost_USD":oc,"Total_Cost_USD":ic+oc,"Cost_Parse_Status":"OK"}
+        ic, cc, cr, oc = u["input"]*ip/1e6, u["cache_creation"]*ip*1.25/1e6, u["cache_read"]*ip*0.10/1e6, u["billed"]*op/1e6
+        values = {"Pricing_Model":entry["display_name"],"Input_Price_USD_per_1M":ip,"Output_Price_USD_per_1M":op,"Input_Tokens":u["input"],"Cache_Creation_Input_Tokens":u["cache_creation"],"Cache_Read_Input_Tokens":u["cache_read"],"Visible_Output_Tokens":u["visible"],"Thinking_Tokens":u["thinking"],"Billable_Output_Tokens":u["billed"],"Total_Tokens":u["total"],"Input_Cost_USD":ic,"Cache_Creation_Cost_USD":cc,"Cache_Read_Cost_USD":cr,"Output_Cost_USD":oc,"Total_Cost_USD":ic+cc+cr+oc,"Cost_Parse_Status":"OK"}
         for h,v in values.items():
             cell=ws.cell(row,c[h]); cell.value=v
             if "Cost" in h: cell.number_format='$ #,##0.0000'
-        for k in ["input","visible","thinking","billed","total"]: totals[k]+=u[k]
-        totals["ic"]+=ic; totals["oc"]+=oc; totals["cost"]+=ic+oc; valid+=1
+        for k in ["input","cache_creation","cache_read","visible","thinking","billed","total"]: totals[k]+=u[k]
+        totals["ic"]+=ic; totals["cc"]+=cc; totals["cr"]+=cr; totals["oc"]+=oc; totals["cost"]+=ic+cc+cr+oc; valid+=1
     if "Cost_Summary" in wb.sheetnames: del wb["Cost_Summary"]
     sm=wb.create_sheet("Cost_Summary"); sm.append(["Cost calculation","Value"])
-    for a,b in [("Source file",source.name),("Matched model",entry["display_name"]),(f"Input price ({currency}/1M)",ip),(f"Output price ({currency}/1M)",op),("Valid rows",valid),("Skipped rows",len(skipped)),("Total input tokens",totals["input"]),("Total visible output tokens",totals["visible"]),("Total Thinking Tokens",totals["thinking"]),("Total billable output tokens",totals["billed"]),("Total tokens",totals["total"]),(f"Total input cost ({currency})",totals["ic"]),(f"Total output cost ({currency})",totals["oc"]),(f"Total cost ({currency})",totals["cost"]),("Created",datetime.now().strftime("%Y-%m-%d %H:%M:%S"))]: sm.append([a,b])
+    for a,b in [("Source file",source.name),("Matched model",entry["display_name"]),(f"Input price ({currency}/1M)",ip),(f"Output price ({currency}/1M)",op),("Valid rows",valid),("Skipped rows",len(skipped)),("Total input tokens",totals["input"]),("Total cache-creation tokens",totals["cache_creation"]),("Total cache-read tokens",totals["cache_read"]),("Total visible output tokens",totals["visible"]),("Total Thinking Tokens",totals["thinking"]),("Total billable output tokens",totals["billed"]),("Total tokens",totals["total"]),(f"Total input cost ({currency})",totals["ic"]),(f"Total cache-creation cost ({currency})",totals["cc"]),(f"Total cache-read cost ({currency})",totals["cr"]),(f"Total output cost ({currency})",totals["oc"]),(f"Total cost ({currency})",totals["cost"]),("Created",datetime.now().strftime("%Y-%m-%d %H:%M:%S"))]: sm.append([a,b])
     style(sm,[1,2]); sm.column_dimensions["A"].width=38; sm.column_dimensions["B"].width=28
     for r in [14,15]: sm.cell(r,2).number_format='$ #,##0.0000'
     wb.save(source)
