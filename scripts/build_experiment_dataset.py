@@ -260,3 +260,50 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+# -----------------------------------------------------------------------------
+# 70 BG: create the unified Experiment_Dataset.xlsx (PowerShell)
+#
+# Prerequisites
+# -------------
+# 1. Run check_129bg_folder_coverage.py first.
+# 2. Store the following files in Downloads\70BG:
+#      - 70BG_Ground_Truth.xlsx
+#      - 129BG_folder_coverage_<date>_<time>.xlsx
+# 3. Run this command from the RepoMA root folder in PowerShell.
+#
+# The following first block automatically selects the newest coverage workbook,
+# so the date/time part of its file name does not need to be typed manually.
+#
+# $coverageFile = Get-ChildItem `
+#   "$env:USERPROFILE\Downloads\70BG\129BG_folder_coverage_*.xlsx" |
+#   Sort-Object LastWriteTime -Descending |
+#   Select-Object -First 1
+#
+# if (-not $coverageFile) {
+#   throw "No file matching 129BG_folder_coverage_*.xlsx was found in Downloads\70BG."
+# }
+#
+# python .\scripts\build_experiment_dataset.py `
+#   --ground-truth-excel "$env:USERPROFILE\Downloads\70BG\70BG_Ground_Truth.xlsx" `
+#   --coverage-excel "$($coverageFile.FullName)" `
+#   --output "$env:USERPROFILE\Downloads\70BG\Experiment_Dataset.xlsx"
+#
+# Result
+# ------
+# Downloads\70BG\Experiment_Dataset.xlsx is created.  Its
+# Experiment_Dataset sheet contains one row per Ground-Truth BG and writes the
+# matched folder location to Data_Folder_Path.
+#
+# Important
+# ---------
+# - The default Ground-Truth sheet must be named "Final_Ground_Truth".
+#   If your Excel sheet has another name, add, for example:
+#       --ground-truth-sheet "Tabelle1"
+# - The coverage workbook must contain the sheets "folder_matches" and
+#   "all_BG_check", which check_129bg_folder_coverage.py creates.
+# - This script does not rename, move, copy, or delete any BG files.  It only
+#   reads both Excel files and creates Experiment_Dataset.xlsx.
+# -----------------------------------------------------------------------------
