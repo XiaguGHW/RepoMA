@@ -120,7 +120,11 @@ def build_pdf(
     max_screenshots: int,
     overwrite: bool,
 ) -> Result:
-    output_path = bg_folder / (\n        f"visual_context_{bg_folder.name}.pdf"\n        if output_name == DEFAULT_OUTPUT_NAME\n        else output_name\n    )
+    output_path = bg_folder / (
+        f"visual_context_{bg_folder.name}.pdf"
+        if output_name == DEFAULT_OUTPUT_NAME
+        else output_name
+    )
     screenshots, dfc_images = collect_images(bg_folder, max_screenshots)
     selected = screenshots + dfc_images
 
