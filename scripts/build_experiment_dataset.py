@@ -5,11 +5,10 @@ The script keeps every Ground-Truth row.  A missing folder path stays empty so
 that the folder-coverage workbook can be completed later and the dataset can
 then be generated again.
 
-Example
--------
-python build_experiment_dataset.py \
-  --ground-truth-excel 129BG.xlsx \
-  --coverage-excel 129BG_folder_coverage_2026-08-31_15-54-18.xlsx
+Default setup for the current 70 BG experiment
+-----------------------------------------------
+The Ground-Truth workbook uses the worksheet "Experiment Dataset".
+Use --ground-truth-sheet only if a different workbook uses another sheet name.
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 
-GROUND_TRUTH_SHEET = "Final_Ground_Truth"
+GROUND_TRUTH_SHEET = "Experiment Dataset"
 FOLDER_MATCHES_SHEET = "folder_matches"
 ALL_BG_CHECK_SHEET = "all_BG_check"
 DEFAULT_OUTPUT = "classification_experiment_dataset.xlsx"
@@ -299,8 +298,9 @@ if __name__ == "__main__":
 #
 # Important
 # ---------
-# - The default Ground-Truth sheet must be named "Final_Ground_Truth".
-#   If your Excel sheet has another name, add, for example:
+# - The default Ground-Truth sheet is "Experiment Dataset", matching
+#   70BG_Ground_Truth.xlsx.  For another workbook with a different sheet,
+#   add, for example:
 #       --ground-truth-sheet "Tabelle1"
 # - The coverage workbook must contain the sheets "folder_matches" and
 #   "all_BG_check", which check_129bg_folder_coverage.py creates.
