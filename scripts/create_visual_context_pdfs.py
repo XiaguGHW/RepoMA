@@ -233,7 +233,7 @@ def main() -> int:
             print(f"SKIP  {bg_folder}: no supported images")
             continue
 
-        output_pdf = bg_folder / f"{bg_folder.name}_visual_context.pdf"
+        output_pdf = bg_folder / f"visual_context_{bg_folder.name}.pdf"
         base_row["output_pdf"] = str(output_pdf)
 
         try:
