@@ -36,7 +36,7 @@ except ImportError as exc:  # pragma: no cover
 IMAGE_SUFFIXES = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 DEFAULT_SHEET = "Experiment_Dataset"
 DEFAULT_PATH_COLUMN = "Data_Folder_Path"
-DEFAULT_OUTPUT_NAME = "PDF_Input.pdf"
+DEFAULT_OUTPUT_NAME = "visual_context.pdf"
 
 
 def normalise_header(value: object) -> str:
@@ -120,7 +120,7 @@ def build_pdf(
     max_screenshots: int,
     overwrite: bool,
 ) -> Result:
-    output_path = bg_folder / output_name
+    output_path = bg_folder / (\n        f"visual_context_{bg_folder.name}.pdf"\n        if output_name == DEFAULT_OUTPUT_NAME\n        else output_name\n    )
     screenshots, dfc_images = collect_images(bg_folder, max_screenshots)
     selected = screenshots + dfc_images
 
@@ -194,7 +194,7 @@ def main() -> int:
     parser.add_argument("--path-column", default=DEFAULT_PATH_COLUMN)
     parser.add_argument("--output-file-name", default=DEFAULT_OUTPUT_NAME)
     parser.add_argument("--max-screenshots", type=int, default=8)
-    parser.add_argument("--overwrite", action="store_true", help="Replace an existing PDF_Input.pdf")
+    parser.add_argument("--overwrite", action="store_true", help="Replace an existing visual-context PDF")
     args = parser.parse_args()
 
     if args.max_screenshots < 1:
@@ -256,7 +256,7 @@ if __name__ == "__main__":
 #
 # Result
 # ------
-# Every BG folder listed in Data_Folder_Path receives PDF_Input.pdf.  Its pages
+# Every BG folder listed in Data_Folder_Path receives\n# visual_context_<BG folder name>.pdf. Its pages
 # are: up to the first eight non-DFC screenshots from Bilder, then all image
 # files whose name contains DFC.  It does not change the original image files.
 #
