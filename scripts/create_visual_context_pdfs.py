@@ -38,10 +38,14 @@ MAX_SCREENSHOTS = 8
 NATURAL_SORT_RE = re.compile(r"(\\d+)")
 
 
-def natural_key(path: Path) -> list[object]:
-    """Sort names as humans expect: image2.png before image10.png."""
+def natural_key(path: Path) -> list[tuple[int, int | str]]:
+    """Sort names as humans expect: image2.png before image10.png.
+
+    Each item begins with a numeric type marker.  This keeps comparisons valid
+    when one filename starts with a digit and another starts with a letter.
+    """
     return [
-        int(part) if part.isdigit() else part.casefold()
+        (0, int(part)) if part.isdigit() else (1, part.casefold())
         for part in NATURAL_SORT_RE.split(path.name)
     ]
 
