@@ -188,12 +188,6 @@ def main() -> int:
         image_folder = direct_image_folder(bg_folder)
         assert image_folder is not None
 
-        screenshot_images = sorted(
-            (path for path in image_folder.iterdir() if is_image(path)),
-            key=natural_key,
-        )
-        selected_screenshots = select_screenshots(screenshot_images)
-
         dfc_images = sorted(
             (
                 path
@@ -202,8 +196,20 @@ def main() -> int:
             ),
             key=natural_key,
         )
-        selected_set = set(selected_screenshots)
-        added_dfc_images = [path for path in dfc_images if path not in selected_set]
+        dfc_set = set(dfc_images)
+        screenshot_images = sorted(
+            (
+                path
+                for path in image_folder.iterdir()
+                if is_image(path) and path not in dfc_set
+            ),
+            key=natural_key,
+        )
+        selected_screenshots = select_screenshots(screenshot_images)
+
+        # DFC pages are deliberately excluded from the regular screenshot
+        # selection and always appended after the selected screenshots.
+        added_dfc_images = dfc_images
         ordered_images = selected_screenshots + added_dfc_images
 
         base_row = {
@@ -256,7 +262,7 @@ def main() -> int:
         log_rows.append(base_row)
         created += 1
         print(
-            f"OK    {bg_folder}: {len(screenshot_images)} screenshots -> "
+            f"OK    {bg_folder}: {len(screenshot_images)} regular screenshots -> "
             f"{len(selected_screenshots)} used; {len(dfc_images)} DFC found -> "
             f"{len(added_dfc_images)} appended"
         )
