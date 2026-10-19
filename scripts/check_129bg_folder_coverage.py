@@ -433,3 +433,13 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# PowerShell example for the new 70-BG PDF experiment.
+# Run from the RepoMA project root after moving 70BG_Ground_Truth.xlsx into
+# Downloads\\70BG. This scans the BG folders and writes the coverage report there:
+#
+# python .\\scripts\\check_129bg_folder_coverage.py `
+#   --input-excel "$env:USERPROFILE\\Downloads\\70BG\\70BG_Ground_Truth.xlsx" `
+#   --search-root "$env:USERPROFILE\\Downloads\\70BG" `
+#   --output-dir "$env:USERPROFILE\\Downloads\\70BG"
