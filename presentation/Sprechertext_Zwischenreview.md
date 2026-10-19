@@ -28,7 +28,7 @@ Anschließend werden diese Ergebnisse anhand des Codebooks geprüft. Dadurch wir
 
 Erst dann testen wir verschiedene LLM-Modelle, die Eingabeformate PDF, Bild und Text sowie unterschiedliche Prompt-Konfigurationen unter vergleichbaren Bedingungen.
 
-Zum Schluss werden die LLM-Vorhersagen mit den geprüften Ground Truths und zulässigen Alternativen verglichen. Daraus berechnen wir für jedes Modell und jede Konfiguration die jeweilige Accuracy und bewerten damit die Leistungsfähigkeit.
+Zum Schluss werden die LLM-Vorhersagen mit den geprüften Ground Truths und zulässigen Alternativen verglichen. Daraus berechnen wir für jedes Modell und jede Konfiguration verschiedene Bewertungsindikatoren und bewerten damit die Leistungsfähigkeit.
 
 Ich gehe diese fünf Schritte jetzt nacheinander durch.
 
@@ -232,7 +232,7 @@ Folie 3
 • Diese validierte Datenbasis bildet später ... LLM-Bewertung
 • Erst dann testen wir verschiedene ... LLM-Modelle
 • Zum Schluss werden die LLM-Vorhersagen ... Alternativen
-• Daraus berechnen wir für jedes ... Accuracy
+• Daraus berechnen wir für jedes ... Bewertungsindikatoren
 • Ich gehe diese fünf Schritte ... nacheinander
 
 Folie 4
