@@ -7,7 +7,7 @@ then be generated again.
 
 Default setup for the current 70 BG experiment
 -----------------------------------------------
-The Ground-Truth workbook uses the worksheet "Experiment Dataset".
+The Ground-Truth workbook uses the worksheet "Experiment_Dataset".
 Use --ground-truth-sheet only if a different workbook uses another sheet name.
 """
 
@@ -23,7 +23,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 
-GROUND_TRUTH_SHEET = "Experiment Dataset"
+GROUND_TRUTH_SHEET = "Experiment_Dataset"
 FOLDER_MATCHES_SHEET = "folder_matches"
 ALL_BG_CHECK_SHEET = "all_BG_check"
 DEFAULT_OUTPUT = "classification_experiment_dataset.xlsx"
@@ -298,7 +298,7 @@ if __name__ == "__main__":
 #
 # Important
 # ---------
-# - The default Ground-Truth sheet is "Experiment Dataset", matching
+# - The default Ground-Truth sheet is "Experiment_Dataset", matching
 #   70BG_Ground_Truth.xlsx.  For another workbook with a different sheet,
 #   add, for example:
 #       --ground-truth-sheet "Tabelle1"
