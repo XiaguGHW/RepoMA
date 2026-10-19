@@ -146,3 +146,16 @@ def main() -> int:
     print(f"\nUpdated: {sum(x.get('Status') == 'OK' for x in rows)}/{len(rows)} files"); return 0 if rows and all(x.get("Status")=="OK" for x in rows) else 1
 
 if __name__ == "__main__": raise SystemExit(main())
+
+
+# PowerShell example (run this from the 70BG_Experimente folder):
+# python .\analyze_experiment_costs.py --input-dir ".\outputs"
+#
+# Required folder structure:
+# 70BG_Experimente
+# ├── analyze_experiment_costs.py
+# ├── model_pricing.json
+# └── outputs\   (experiment result .xlsx files)
+#
+# The original .xlsx files in outputs are updated in place. Token-cost columns
+# are inserted after column Z, and each file receives a Cost_Summary worksheet.
