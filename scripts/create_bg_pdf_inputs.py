@@ -43,9 +43,12 @@ def normalise_header(value: object) -> str:
     return " ".join(str(value or "").strip().casefold().replace("_", " ").split())
 
 
-def natural_key(path: Path) -> list[object]:
+def natural_key(path: Path) -> list[tuple[int, int | str]]:
     """Sort Screenshot_2 before Screenshot_10, independent of upper/lower case."""
-    return [int(part) if part.isdigit() else part.casefold() for part in re.split(r"(\d+)", path.name)]
+    return [
+        (0, int(part)) if part.isdigit() else (1, part.casefold())
+        for part in re.split(r"(\d+)", path.name)
+    ]
 
 
 def is_image(path: Path) -> bool:
