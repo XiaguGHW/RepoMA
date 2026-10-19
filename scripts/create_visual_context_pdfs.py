@@ -11,9 +11,10 @@ containing, in this exact order:
    after the regular screenshots.  Files already included in step 1 are never
    added twice.
 
-No source folder or source file is changed.  The output directory receives one
-PDF per BG plus visual_context_selection_log.csv, which records the exact
-selection for reproducibility.
+The derived visual-context PDF is written directly into its own BG folder so
+the later PDF experiment can collect it together with that BG's original PDFs.
+The root folder receives visual_context_selection_log.csv, which records the
+exact selection for reproducibility.
 """
 
 from __future__ import annotations
@@ -97,15 +98,16 @@ def direct_image_folder(bg_folder: Path) -> Path | None:
     return None
 
 
-def find_bg_folders(bg_root: Path, output_dir: Path) -> list[Path]:
+def find_bg_folders(bg_root: Path) -> list[Path]:
     """Find BG folders at any depth that contain one direct screenshot folder."""
-    folders: list[Path] = []
-    for folder in sorted((path for path in bg_root.rglob("*") if path.is_dir()), key=natural_key):
-        if output_dir == folder or output_dir in folder.parents:
-            continue
-        if direct_image_folder(folder) is not None:
-            folders.append(folder)
-    return folders
+    return [
+        folder
+        for folder in sorted(
+            (path for path in bg_root.rglob("*") if path.is_dir()),
+            key=natural_key,
+        )
+        if direct_image_folder(folder) is not None
+    ]
 
 
 def display_path(path: Path, parent: Path) -> str:
@@ -143,12 +145,6 @@ def parse_args() -> argparse.Namespace:
         help="Root below which the BG folders are located; class/BG nesting is supported.",
     )
     parser.add_argument(
-        "--output-dir",
-        type=Path,
-        required=True,
-        help="Folder for generated PDFs and visual_context_selection_log.csv.",
-    )
-    parser.add_argument(
         "--page-width",
         type=int,
         default=2400,
@@ -166,8 +162,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     bg_root = args.bg_root.expanduser().resolve()
-    output_dir = args.output_dir.expanduser().resolve()
-
     if not bg_root.is_dir():
         print(f"BG root does not exist or is not a folder: {bg_root}", file=sys.stderr)
         return 2
@@ -175,8 +169,7 @@ def main() -> int:
         print("Page width and page height must be at least 1.", file=sys.stderr)
         return 2
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    bg_folders = find_bg_folders(bg_root, output_dir)
+    bg_folders = find_bg_folders(bg_root)
     if not bg_folders:
         print(f"No BG folders with a direct screenshot folder found below: {bg_root}", file=sys.stderr)
         return 2
@@ -236,7 +229,7 @@ def main() -> int:
             print(f"SKIP  {bg_folder}: no supported images")
             continue
 
-        output_pdf = output_dir / f"{bg_folder.name}_visual_context.pdf"
+        output_pdf = bg_folder / f"{bg_folder.name}_visual_context.pdf"
         base_row["output_pdf"] = str(output_pdf)
 
         try:
@@ -267,7 +260,7 @@ def main() -> int:
             f"{len(added_dfc_images)} appended"
         )
 
-    log_path = output_dir / "visual_context_selection_log.csv"
+    log_path = bg_root / "visual_context_selection_log.csv"
     write_log(log_path, log_rows)
     print(f"\nFinished: {created} created, {failed} failed.")
     print(f"Log: {log_path}")
@@ -282,11 +275,10 @@ if __name__ == "__main__":
 # 70 BG: create visual-context PDFs (PowerShell)
 #
 # Run from the 70BG folder.  The command processes all BG folders below the
-# seven class folders.  Each output PDF contains the first eight Bilder
-# screenshots (natural filename order) followed by all additional DFC
-# screenshots found in the same BG folder.
+# seven class folders.  Each PDF is written into its own BG folder and contains
+# the first eight Bilder screenshots (natural filename order), followed by all
+# DFC screenshots found in that BG folder.
 #
 # python .\scripts\create_visual_context_pdfs.py `
-#   --bg-root "$env:USERPROFILE\Downloads\70BG" `
-#   --output-dir "$env:USERPROFILE\Downloads\70BG\visual_context_pdfs"
+#   --bg-root "$env:USERPROFILE\Downloads\70BG"
 # -----------------------------------------------------------------------------
