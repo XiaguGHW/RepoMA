@@ -37,6 +37,8 @@ IMAGE_SUFFIXES = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".we
 DEFAULT_SHEET = "Experiment_Dataset"
 DEFAULT_PATH_COLUMN = "Data_Folder_Path"
 DEFAULT_OUTPUT_NAME = "visual_context.pdf"
+GENERATED_PDF_PATTERNS = ("visual_context_*.pdf", "*_visual_context.pdf")
+LEGACY_GENERATED_PDF_NAMES = {"pdf_input.pdf"}
 
 
 def normalise_header(value: object) -> str:
@@ -68,6 +70,24 @@ def find_bilder_dir(bg_folder: Path) -> Path | None:
         key=natural_key,
     )
     return candidates[0] if candidates else None
+
+
+def delete_previous_generated_pdfs(bg_folder: Path) -> list[Path]:
+    """Delete only PDFs created by this visual-context workflow in one BG folder."""
+    candidates: set[Path] = set()
+    for pattern in GENERATED_PDF_PATTERNS:
+        candidates.update(path for path in bg_folder.glob(pattern) if path.is_file())
+    candidates.update(
+        path
+        for path in bg_folder.iterdir()
+        if path.is_file() and path.name.casefold() in LEGACY_GENERATED_PDF_NAMES
+    )
+
+    deleted: list[Path] = []
+    for pdf_path in sorted(candidates, key=natural_key):
+        pdf_path.unlink()
+        deleted.append(pdf_path)
+    return deleted
 
 
 def collect_images(bg_folder: Path, max_screenshots: int) -> tuple[list[Path], list[Path]]:
@@ -199,6 +219,14 @@ def main() -> int:
     parser.add_argument("--output-file-name", default=DEFAULT_OUTPUT_NAME)
     parser.add_argument("--max-screenshots", type=int, default=8)
     parser.add_argument("--overwrite", action="store_true", help="Replace an existing visual-context PDF")
+    parser.add_argument(
+        "--delete-existing-generated-pdfs",
+        action="store_true",
+        help=(
+            "Before creating PDFs, delete only prior generated visual-context PDFs "
+            "in the listed BG folders."
+        ),
+    )
     args = parser.parse_args()
 
     if args.max_screenshots < 1:
@@ -214,10 +242,16 @@ def main() -> int:
         return 1
 
     results: list[Result] = []
+    deleted_count = 0
     for folder in paths:
         if not folder.is_dir():
             results.append(Result(folder, "SKIPPED_MISSING_FOLDER", detail="Folder does not exist"))
             continue
+        if args.delete_existing_generated_pdfs:
+            deleted = delete_previous_generated_pdfs(folder)
+            deleted_count += len(deleted)
+            for pdf_path in deleted:
+                print(f"DELETED {pdf_path}")
         results.append(
             build_pdf(
                 folder,
@@ -237,6 +271,8 @@ def main() -> int:
     for result in results:
         counts[result.status] = counts.get(result.status, 0) + 1
     print(f"Total BG paths: {len(results)} | " + " | ".join(f"{key}={value}" for key, value in sorted(counts.items())))
+    if args.delete_existing_generated_pdfs:
+        print(f"Deleted prior generated PDFs: {deleted_count}")
     return 0
 
 
@@ -264,9 +300,12 @@ if __name__ == "__main__":
 # are: up to the first eight non-DFC screenshots from Bilder, then all image
 # files whose name contains DFC.  It does not change the original image files.
 #
-# Recreate PDFs after changing screenshots or DFC images
-# ------------------------------------------------------
+# Delete prior generated PDFs, then recreate from the current images
+# ------------------------------------------------------------------
+# This deletes only visual_context_*.pdf, legacy *_visual_context.pdf, and
+# legacy PDF_Input.pdf inside the BG folders listed in the Excel file.
+#
 # python .\scripts\create_bg_pdf_inputs.py `
 #   --input-excel "$env:USERPROFILE\Downloads\70BG\Experiment_Dataset.xlsx" `
-#   --overwrite
+#   --delete-existing-generated-pdfs
 # -----------------------------------------------------------------------------
