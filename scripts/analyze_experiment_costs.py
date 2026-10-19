@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 r"""Batch-calculate token costs from result Excels using model_pricing.json.
 
+Original workbooks are updated in place. Cost columns are inserted immediately
+after the token JSON column (Z by default); no new Excel files are created.
+
 PowerShell, run in 70BG_Experimente:
 python .\scripts\analyze_experiment_costs.py --input-dir .\outputs
 """
@@ -31,7 +34,6 @@ def args() -> argparse.Namespace:
     p.add_argument("--sheet-name", default="Sheet1")
     p.add_argument("--token-column", default="Z")
     p.add_argument("--pricing-json", type=Path, default=Path(__file__).parent / "07_terminal_chat" / "model_pricing.json")
-    p.add_argument("--output-dir", type=Path)
     return p.parse_args()
 
 def style(ws: Any, cols: list[int]) -> None:
@@ -67,20 +69,24 @@ def model(file: Path, entries: list[dict[str, Any]]) -> dict[str, Any] | None:
     matches = [(len(str(m)), e) for e in entries for m in e.get("match", []) if str(m).lower() in name]
     return max(matches, key=lambda x:x[0])[1] if matches else None
 
-def columns(ws: Any) -> dict[str, int]:
-    result = {}
-    for h in DETAIL_HEADERS:
-        found = next((c for c in range(1, ws.max_column+1) if ws.cell(1,c).value == h), None)
-        result[h] = found or ws.max_column+1
-        ws.cell(1,result[h]).value = h
+def columns(ws: Any, after_column: int) -> dict[str, int]:
+    existing = {h: next((c for c in range(1, ws.max_column+1) if ws.cell(1,c).value == h), None) for h in DETAIL_HEADERS}
+    if any(existing.values()) and not all(existing.values()):
+        raise ValueError("cost columns are incomplete; remove them before rerunning")
+    if all(existing.values()):
+        result = {h: int(existing[h]) for h in DETAIL_HEADERS}
+    else:
+        ws.insert_cols(after_column + 1, amount=len(DETAIL_HEADERS))
+        result = {h: after_column + 1 + i for i, h in enumerate(DETAIL_HEADERS)}
+    for h, col in result.items(): ws.cell(1,col).value = h
     style(ws, list(result.values()))
     return result
 
-def process(source: Path, destination: Path, ns: argparse.Namespace, entry: dict[str, Any], currency: str) -> dict[str, Any]:
+def process(source: Path, ns: argparse.Namespace, entry: dict[str, Any], currency: str) -> dict[str, Any]:
     wb = load_workbook(source)
     if ns.sheet_name not in wb.sheetnames: raise ValueError(f"worksheet {ns.sheet_name!r} not found")
     ws, c, token_col = wb[ns.sheet_name], None, column_index_from_string(ns.token_column)
-    c = columns(ws); ip, op = float(entry["input_usd_per_million"]), float(entry["output_usd_per_million"])
+    c = columns(ws, token_col); ip, op = float(entry["input_usd_per_million"]), float(entry["output_usd_per_million"])
     totals = {k:0.0 for k in ["input","visible","thinking","billed","total","ic","oc","cost"]}; valid=0; skipped=[]
     for row in range(2, ws.max_row+1):
         raw = ws.cell(row,token_col).value
@@ -100,8 +106,8 @@ def process(source: Path, destination: Path, ns: argparse.Namespace, entry: dict
     for a,b in [("Source file",source.name),("Matched model",entry["display_name"]),(f"Input price ({currency}/1M)",ip),(f"Output price ({currency}/1M)",op),("Valid rows",valid),("Skipped rows",len(skipped)),("Total input tokens",totals["input"]),("Total visible output tokens",totals["visible"]),("Total Thinking Tokens",totals["thinking"]),("Total billable output tokens",totals["billed"]),("Total tokens",totals["total"]),(f"Total input cost ({currency})",totals["ic"]),(f"Total output cost ({currency})",totals["oc"]),(f"Total cost ({currency})",totals["cost"]),("Created",datetime.now().strftime("%Y-%m-%d %H:%M:%S"))]: sm.append([a,b])
     style(sm,[1,2]); sm.column_dimensions["A"].width=38; sm.column_dimensions["B"].width=28
     for r in [14,15]: sm.cell(r,2).number_format='$ #,##0.0000'
-    destination.parent.mkdir(parents=True,exist_ok=True); wb.save(destination)
-    return {"Source_File":source.name,"Pricing_Model":entry["display_name"],"Input_Price_USD_per_1M":ip,"Output_Price_USD_per_1M":op,"Valid_Result_Rows":valid,"Skipped_Rows":len(skipped),"Input_Tokens":totals["input"],"Visible_Output_Tokens":totals["visible"],"Thinking_Tokens":totals["thinking"],"Billable_Output_Tokens":totals["billed"],"Total_Tokens":totals["total"],"Input_Cost_USD":totals["ic"],"Output_Cost_USD":totals["oc"],"Total_Cost_USD":totals["cost"],"Output_File":destination.name,"Status":"OK"}
+    wb.save(source)
+    return {"Source_File":source.name,"Pricing_Model":entry["display_name"],"Input_Price_USD_per_1M":ip,"Output_Price_USD_per_1M":op,"Valid_Result_Rows":valid,"Skipped_Rows":len(skipped),"Input_Tokens":totals["input"],"Visible_Output_Tokens":totals["visible"],"Thinking_Tokens":totals["thinking"],"Billable_Output_Tokens":totals["billed"],"Total_Tokens":totals["total"],"Input_Cost_USD":totals["ic"],"Output_Cost_USD":totals["oc"],"Total_Cost_USD":totals["cost"],"Output_File":source.name,"Status":"OK"}
 
 def summary(out: Path, rows: list[dict[str, Any]]) -> Path:
     wb=Workbook(); ws=wb.active; ws.title="All_Experiments"; ws.append(SUMMARY_HEADERS); style(ws,list(range(1,len(SUMMARY_HEADERS)+1)))
@@ -121,17 +127,17 @@ def main() -> int:
     if not re.fullmatch(r"[A-Z]{1,3}",ns.token_column): print("--token-column must be a letter, e.g. Z",file=sys.stderr); return 2
     try: currency, entries=pricing(ns.pricing_json)
     except Exception as e: print(f"Could not load pricing: {e}",file=sys.stderr); return 2
-    if ns.input_excel: files=[ns.input_excel]; default=ns.input_excel.parent/"cost_analysis"
+    if ns.input_excel: files=[ns.input_excel]
     else:
         if not ns.input_dir.is_dir(): print(f"Input directory not found: {ns.input_dir}",file=sys.stderr); return 2
-        default=ns.input_dir/"cost_analysis"; files=[f for f in sorted(ns.input_dir.glob("*.xlsx")) if not f.name.startswith("~$") and "_with_costs" not in f.stem and f.name!="all_experiments_cost_summary.xlsx"]
-    out=ns.output_dir or default; out.mkdir(parents=True,exist_ok=True); rows=[]
+        files=[f for f in sorted(ns.input_dir.glob("*.xlsx")) if not f.name.startswith("~$")]
+    rows=[]
     for file in files:
         entry=model(file,entries)
         if not entry: rows.append({"Source_File":file.name,"Status":"ERROR: model not found in pricing JSON"}); print(f"ERROR: no pricing for {file.name}",file=sys.stderr); continue
         try:
-            result=process(file,out/f"{file.stem}_with_costs.xlsx",ns,entry,currency); rows.append(result); print(f"OK: {file.name} ({entry['display_name']})")
+            result=process(file,ns,entry,currency); rows.append(result); print(f"OK: updated {file.name} ({entry['display_name']})")
         except Exception as e: rows.append({"Source_File":file.name,"Pricing_Model":entry["display_name"],"Status":f"ERROR: {e}"}); print(f"ERROR: {file.name}: {e}",file=sys.stderr)
-    total=summary(out,rows); print(f"\nOverall summary: {total}"); return 0 if rows and all(x.get("Status")=="OK" for x in rows) else 1
+    print(f"\nUpdated: {sum(x.get('Status') == 'OK' for x in rows)}/{len(rows)} files"); return 0 if rows and all(x.get("Status")=="OK" for x in rows) else 1
 
 if __name__ == "__main__": raise SystemExit(main())
