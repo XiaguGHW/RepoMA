@@ -33,7 +33,12 @@ def args() -> argparse.Namespace:
     g.add_argument("--input-dir", type=Path)
     p.add_argument("--sheet-name", default="Sheet1")
     p.add_argument("--token-column", default="Z")
-    p.add_argument("--pricing-json", type=Path, default=Path(__file__).parent / "07_terminal_chat" / "model_pricing.json")
+    p.add_argument(
+        "--pricing-json",
+        type=Path,
+        default=Path(__file__).parent / "model_pricing.json",
+        help="Default: model_pricing.json beside this script.",
+    )
     return p.parse_args()
 
 def style(ws: Any, cols: list[int]) -> None:
