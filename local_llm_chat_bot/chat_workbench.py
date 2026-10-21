@@ -9,6 +9,7 @@ import difflib
 import json
 import os
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -115,6 +116,45 @@ def safe_file(value: str) -> Path:
     return path
 
 
+def write_bg_analysis_export(state: ProjectState) -> Path:
+    record = state.data.get("last_bg_analysis")
+    if not isinstance(record, dict):
+        raise HTTPException(400, "当前会话还没有可导出的 Baugruppe 分析结果。")
+    exports = state.root / "exports"
+    exports.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    target = exports / f"bg_analysis_{timestamp}.md"
+    sources = "\n".join(f"- {item}" for item in record.get("sources", [])) or "- （没有可用的材料来源）"
+    bg = record.get("bg_context") or {}
+    token = record.get("token_usage") or {}
+    content = "\n".join([
+        "# Baugruppe 分析结果",
+        "",
+        "- 导出时间：" + str(record.get("created_at", "")),
+        "- 会话：" + str(record.get("session", "")),
+        "- 模型：" + str(record.get("model", "")),
+        "- Codebook：" + str(bg.get("codebook_name", "—")),
+        "- BG 文件夹：" + str(bg.get("folder", "—")),
+        "- 本轮 token：输入 " + str(token.get("input", 0)) + " ｜ 输出 " + str(token.get("output", 0)),
+        "- 本轮预估费用：$" + format(float(token.get("cost_usd", 0)), ".6f"),
+        "",
+        "## 用户问题",
+        "",
+        str(record.get("question", "")),
+        "",
+        "## 模型分析",
+        "",
+        str(record.get("answer", "")),
+        "",
+        "## 实际提供给模型的证据来源",
+        "",
+        sources,
+        "",
+    ])
+    target.write_text(content, encoding="utf-8")
+    return target
+
+
 def build_diff(state: ProjectState, changes: list[dict]) -> list[dict]:
     prepared = []
     for change in changes:
@@ -160,7 +200,7 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
         state.add_turn("user", question)
         state.add_turn("assistant", answer)
         return {"answer": answer, "reasoning": "".join(reasoning), "notices": notices,
-                "sources": evidence, "visuals": visuals, "changes": [],
+                "sources": evidence, "visuals": visuals, "changes": [], "can_export_bg": False,
                 "turn_cost": sum(item["cost_usd"] for item in estimates) if estimates else None,
                 "usage": status_data(data)}
     requested = [ensure_relative(item) for item in action.get("read_files", [])[:4] if isinstance(item, str)]
@@ -179,9 +219,27 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
     changes = build_diff(state, action.get("changes", []))
     data["pending"] = changes
     state.add_turn("user", question); state.add_turn("assistant", action.get("answer", ""))
+    turn_token_usage = {
+        "input": sum(item["input_tokens"] for item in estimates),
+        "output": sum(item["output_tokens"] for item in estimates),
+        "cost_usd": sum(item["cost_usd"] for item in estimates),
+    }
+    if bg_context:
+        state.data["last_bg_analysis"] = {
+            "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "session": state.root.name,
+            "model": data["model"],
+            "question": question,
+            "answer": action.get("answer", ""),
+            "sources": [str(item.get("label", item.get("name", "未知来源"))) for item in evidence],
+            "bg_context": dict(bg_context),
+            "token_usage": turn_token_usage,
+        }
+        state.save()
     return {"answer": action.get("answer", ""), "reasoning": "".join(reasoning), "notices": notices,
             "sources": evidence, "visuals": visuals, "changes": [{k: v for k, v in item.items() if k != "content"} for item in changes],
-            "turn_cost": sum(item["cost_usd"] for item in estimates) if estimates else None,
+            "can_export_bg": bool(bg_context),
+            "turn_cost": turn_token_usage["cost_usd"] if estimates else None,
             "usage": status_data(data)}
 
 
@@ -296,6 +354,12 @@ def clear_bg():
     data = session(); data["state"].data.pop("bg_context", None); data["state"].save(); return status_data(data)
 
 
+@app.post("/api/export/bg-analysis")
+def export_bg_analysis():
+    target = write_bg_analysis_export(session()["state"])
+    return {"path": str(target)}
+
+
 @app.post("/api/chat")
 def chat(request: ChatRequest):
     if not request.question.strip(): raise HTTPException(400, "请输入问题。")
@@ -334,7 +398,7 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 <hr><b>单一文件分析</b><div class="muted">选择一个 PDF / Excel / PNG，加入后可围绕该文件连续提问。</div><div class="field"><label>要分析的文件</label><div class="row"><input id="docpath" placeholder="PDF / Excel / PNG …"><button class="ghost" onclick="pick('file','docpath')">选择</button><button class="ghost" onclick="addDoc()">加入</button></div></div><div id="docs" class="list"></div>
 <hr><b>Baugruppe 文件夹分析</b><div class="muted">选择 Codebook 和一个 BG 文件夹；程序读取其中全部受支持文件，用于分类及错误原因分析。</div><div class="field"><label>Codebook 文件</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><div class="field"><label>BG 文件夹</label><div class="row"><input id="bgfolder" placeholder="选择一个 Baugruppe 文件夹"><button class="ghost" onclick="pick('folder','bgfolder')">选择</button></div></div><button class="ghost" onclick="bg()">开始文件夹分析</button> <button class="ghost" onclick="clearBg()">退出文件夹分析</button><div id="bgstatus" class="muted"></div></aside>
 <main class="main"><div class="chat" id="chat"><div class="message assistant">选择工作区后即可聊天。代码修改会先显示 diff，只有点击“应用修改”才会写入本地文件。</div></div><div class="composer"><input id="question" placeholder="问代码，或根据 Codebook 判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button></div></main>
-<aside class="side right"><b>本轮状态</b><div id="status" class="card muted">尚未打开工作区</div><b>证据来源</b><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><b>待应用修改</b><div id="changes" class="list">无</div></aside></div>
+<aside class="side right"><b>本轮状态</b><div id="status" class="card muted">尚未打开工作区</div><b>BG 分析导出</b><div id="analysisexport" class="card muted">仅在 Baugruppe 分析完成后可导出。</div><b>证据来源</b><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><b>待应用修改</b><div id="changes" class="list">无</div></aside></div>
 <script>
 const $=id=>document.getElementById(id);let busy=false;
 async function restoreLastWorkspace(){
@@ -365,7 +429,8 @@ async function loadDocs(){try{let x=await api('/api/documents');$('docs').innerH
 async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:JSON.stringify({path:$('docpath').value})});$('docpath').value='';loadDocs();$('setupmsg').textContent=`已索引 ${d.name}（${d.chunks} chunks）`}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function bg(){try{let x=await api('/api/bg',{method:'POST',body:JSON.stringify({codebook:$('codebook').value,folder:$('bgfolder').value})});renderStatus(x.status);$('bgstatus').textContent=`已固定 Codebook 与 ${x.sources} 个 BG 文件。`;loadDocs()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function clearBg(){try{renderStatus(await api('/api/bg',{method:'DELETE'}));$('bgstatus').textContent='已退出 BG 模式。'}catch(e){$('bgstatus').textContent=e.message}}
-async function chat(){if(busy||!$('question').value.trim())return;busy=true;let q=$('question').value;$('question').value='';message(q,'user');let wait=message('正在向 Bosch Farm 请求…');try{let x=await api('/api/chat',{method:'POST',body:JSON.stringify({question:q})});wait.remove();message(x.answer);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>模型推理（接口返回）</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');$('sources').innerHTML=x.sources.map(s=>`<div class="card"><b>${s.label}</b><br>${s.visual?'<span class="chip">视觉证据已附带</span>':''}</div>`).join('')||'无可用来源';$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${c.path}</b><br>${c.reason}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button onclick="apply()">应用修改</button>':'无';renderStatus(x.usage)}catch(e){wait.textContent='错误：'+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
+async function chat(){if(busy||!$('question').value.trim())return;busy=true;let q=$('question').value;$('question').value='';message(q,'user');let wait=message('正在向 Bosch Farm 请求…');try{let x=await api('/api/chat',{method:'POST',body:JSON.stringify({question:q})});wait.remove();message(x.answer);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>模型推理（接口返回）</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');$('sources').innerHTML=x.sources.map(s=>`<div class="card"><b>${s.label}</b><br>${s.visual?'<span class="chip">视觉证据已附带</span>':''}</div>`).join('')||'无可用来源';$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${c.path}</b><br>${c.reason}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button onclick="apply()">应用修改</button>':'无';$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">导出本次 BG 分析</button>':'仅在 Baugruppe 分析完成后可导出。';renderStatus(x.usage)}catch(e){wait.textContent='错误：'+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
+async function exportBgAnalysis(){try{let x=await api('/api/export/bg-analysis',{method:'POST'});$('analysisexport').innerHTML='<span class="ok">已导出：'+esc(x.path)+'</span>'}catch(e){$('analysisexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function esc(s){let e=document.createElement('div');e.textContent=s;return e.innerHTML}async function apply(){try{let x=await api('/api/apply',{method:'POST'});$('changes').innerHTML='<span class="ok">已应用 '+x.applied+' 个修改。</span>';message('已写入 '+x.applied+' 个经确认的文件修改。')}catch(e){$('changes').innerHTML='<span class="error">'+e.message+'</span>'}}
 </script></body></html>'''
 
