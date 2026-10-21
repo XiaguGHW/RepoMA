@@ -78,6 +78,43 @@ class LLMConnector:
     def get_last_token_usage(self) -> dict | None:
         return self.last_usage
 
+    def _record_usage(self, usage) -> None:
+        """Store raw provider usage plus a common input/output/total schema."""
+        if usage is None:
+            return
+        if hasattr(usage, "model_dump"):
+            raw = usage.model_dump()
+        elif hasattr(usage, "dict"):
+            raw = usage.dict()
+        elif isinstance(usage, dict):
+            raw = dict(usage)
+        else:
+            raw = vars(usage) if hasattr(usage, "__dict__") else {}
+        if not isinstance(raw, dict):
+            return
+
+        def count(*names):
+            for name in names:
+                value = raw.get(name)
+                if value is not None:
+                    try:
+                        return int(value)
+                    except (TypeError, ValueError):
+                        pass
+            return 0
+
+        input_tokens = count("prompt_tokens", "input_tokens", "promptTokenCount", "inputTokenCount")
+        output_tokens = count("completion_tokens", "output_tokens", "candidatesTokenCount", "outputTokenCount")
+        total_tokens = count("total_tokens", "totalTokenCount") or (input_tokens + output_tokens)
+
+        # Keep provider-specific fields for diagnostics/cache pricing, while
+        # exposing one stable schema to the workbench and terminal client.
+        raw["input_tokens"] = input_tokens
+        raw["output_tokens"] = output_tokens
+        raw["total_tokens"] = total_tokens
+        self.last_usage = raw
+        logging.info("BMF usage: input=%s output=%s total=%s", input_tokens, output_tokens, total_tokens)
+
     def _get_common_headers(self) -> dict:
         return {"X-Session-ID": str(self.session_id)} if self.session_id else {}
 
@@ -137,8 +174,8 @@ class LLMConnector:
     def _extract_claude_text(self, reply: dict) -> str:
         usage = reply.get("usage", {})
         if usage:
-            self.last_usage = usage
-            logging.info("BMF usage: input=%s output=%s cache-write=%s cache-read=%s", usage.get("input_tokens", 0), usage.get("output_tokens", 0), usage.get("cache_creation_input_tokens", 0), usage.get("cache_read_input_tokens", 0))
+            self._record_usage(usage)
+            logging.info("BMF Claude cache: write=%s read=%s", usage.get("cache_creation_input_tokens", 0), usage.get("cache_read_input_tokens", 0))
         content = reply.get("content", [])
         return content[0].get("text", "(no text content)") if content else "(no text content)"
 
@@ -179,7 +216,10 @@ class LLMConnector:
             kwargs.pop("temperature", None)
         use_stream = bool(stream and not self._stream_rejected)
         if use_stream:
+            # OpenAI-compatible Chat Completions only sends final token usage
+            # in streaming mode when this option is requested.
             kwargs["stream"] = True
+            kwargs["stream_options"] = {"include_usage": True}
 
         def emit(kind, text):
             if event_handler and text:
@@ -191,7 +231,7 @@ class LLMConnector:
                 self.last_response_model = model
             usage = getattr(response, "usage", None)
             if usage is not None:
-                self.last_usage = usage.model_dump() if hasattr(usage, "model_dump") else usage
+                self._record_usage(usage)
 
         response_stream = None
         try:
@@ -209,6 +249,7 @@ class LLMConnector:
                 self._stream_rejected = True
                 use_stream = False
                 kwargs.pop("stream", None)
+                kwargs.pop("stream_options", None)
                 emit("notice", "Farm 拒绝流式输出，本次连接改用完整响应；仍显示等待耗时。")
                 result = client.chat.completions.create(**kwargs)
             if not use_stream:
@@ -343,7 +384,7 @@ class LLMConnector:
                 if response.ok:
                     reply = response.json()
                     if "usageMetadata" in reply:
-                        self.last_usage = reply["usageMetadata"]
+                        self._record_usage(reply["usageMetadata"])
                     return extractor(reply)
                 if response.status_code in retryable and attempt < 3:
                     time.sleep(2 ** attempt); continue
