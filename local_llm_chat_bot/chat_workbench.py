@@ -44,15 +44,16 @@ def load_workbench_settings() -> dict[str, str]:
         return {
             "workspace": str(data.get("workspace", "")),
             "session": str(data.get("session", "default")) or "default",
-        } if isinstance(data, dict) else {"workspace": "", "session": "default"}
+            "model": str(data.get("model", "claude-haiku-5.5")) or "claude-haiku-5.5",
+        } if isinstance(data, dict) else {"workspace": "", "session": "default", "model": "claude-haiku-5.5"}
     except (OSError, ValueError):
-        return {"workspace": "", "session": "default"}
+        return {"workspace": "", "session": "default", "model": "claude-haiku-5.5"}
 
 
-def save_workbench_settings(workspace: Path, session_name: str) -> None:
+def save_workbench_settings(workspace: Path, session_name: str, model: str) -> None:
     app_state_home().mkdir(parents=True, exist_ok=True)
     workbench_settings_path().write_text(
-        json.dumps({"workspace": str(workspace), "session": session_name}, ensure_ascii=False, indent=2),
+        json.dumps({"workspace": str(workspace), "session": session_name, "model": model}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -293,7 +294,7 @@ def setup(request: Setup):
                                     "llm": LLMConnector(request.model, key, session_id=state.data["session_id"]),
                                     "pricing": PricingCatalog(price_file), "pending": []})
     state.scan()
-    save_workbench_settings(workspace, state.root.name)
+    save_workbench_settings(workspace, state.root.name, request.model)
     return status_data(ACTIVE)
 
 
@@ -435,6 +436,7 @@ async function restoreLastWorkspace(){
     let s=await api('/api/settings');
     if(!s.workspace)return;
     $('workspace').value=s.workspace;
+    setSelectedModel(s.model||'claude-haiku-5.5');
     $('session').innerHTML='<option>'+ (s.session||'default') +'</option>';
     $('setupmsg').textContent='正在自动打开上次工作区…';
     await setup();
@@ -449,6 +451,7 @@ function message(text,kind='assistant'){let e=document.createElement('div');e.cl
 function renderStatus(s){$('status').innerHTML=`模型：<b>${s.model}</b><br>会话：${s.session_name||'default'}<br>代码：${s.code_files} 文件<br>材料：${s.documents} 个<br>累计请求：${s.requests}<br>累计 Token：${s.input_tokens} / ${s.output_tokens}<br>累计估算：${s.cost}<br>${s.bg_context?'<span class="ok">BG 模式：'+s.bg_context.codebook_name+'</span>':'普通模式'}`}
 function renderUsageDetail(u,model){if(!u)return;$('usagedetail').innerHTML=`实际模型：<b>${esc(model||'—')}</b><br>输入 / 输出 / 总计：${u.input} / ${u.output} / ${u.total}<br>推理：${u.reasoning||0} ｜ Gemini thinking：${u.gemini_thinking||0}<br>Claude 缓存读 / 写：${u.cache_read||0} / ${u.cache_write||0}<br>本轮估算：${Number(u.cost_usd||0).toFixed(6)}`}
 function toggleCustomModel(){let custom=$('model').value==='__custom__';$('custommodel').style.display=custom?'block':'none';if(custom)$('custommodel').focus()}
+function setSelectedModel(model){let known=[...$('model').options].some(option=>option.value===model);$('model').value=known?model:'__custom__';$('custommodel').value=known?'':model;toggleCustomModel()}
 function selectedModel(){let selected=$('model').value;return selected==='__custom__' ? $('custommodel').value.trim() : selected}
 async function loadSessions(){try{let x=await api('/api/sessions');$('session').innerHTML=x.sessions.map(n=>`<option value="${esc(n)}" ${n===x.current?'selected':''}>${esc(n)}</option>`).join('');$('sessionmsg').textContent='聊天记录、BG 状态、代码索引和 token 统计按会话分开；已加入的材料索引按工作区共享。'}catch(e){$('sessionmsg').textContent=e.message}}
 async function setup(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default'})});renderStatus(s);$('setupmsg').textContent='已打开。';loadDocs();loadSessions()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
