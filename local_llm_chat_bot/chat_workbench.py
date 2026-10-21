@@ -335,7 +335,7 @@ def sessions():
 
 @app.get("/api/history")
 def history():
-    records = session()["state"].data.get("history", [])
+    records = session()["state"].full_history()
     return {"history": [
         {"role": item.get("role", "assistant"), "content": str(item.get("content", ""))}
         for item in records if isinstance(item, dict) and item.get("content")
