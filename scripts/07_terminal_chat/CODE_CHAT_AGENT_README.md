@@ -19,6 +19,28 @@ python code_chat_agent.py --workspace "C:\Users\XXXXX\Documents\Python_Projects\
 `--state-dir` is required and may be any directory you choose. State is stored
 under `projects/<hash>/<session>` there; the code project remains clean.
 
+## Local browser workbench
+
+If you prefer a graphical Codex-style workspace, start the local-only browser
+UI instead:
+
+```powershell
+python -m pip install -r requirements.txt
+python chat_workbench.py
+```
+
+Open `http://127.0.0.1:8765` in the browser that opens on the same computer.
+It never listens on the network. Select the code workspace and state directory
+from the left panel (or paste their paths), then choose a local document or
+activate Baugruppe mode with a Codebook and BG folder. The centre is the chat;
+the right panel shows token/cost totals, source evidence and proposed diffs.
+Only the **Apply changes** button writes a proposed code edit.
+
+The workbench shows an expandable **模型推理（接口返回）** panel only when
+the Bosch Farm deployment supplies `reasoning_content`. Some models/Farm
+deployments return no reasoning; the UI leaves this panel absent rather than
+inventing a chain of thought.
+
 ## Usage
 
 Tell the assistant the requested change naturally in Chinese. It locally
