@@ -68,7 +68,7 @@ Run in this order. The first step excludes the 14 BGs marked
 
 ## Local LLM chat bot
 
-`local_llm_chat_bot/` is deliberately standalone. It contains the local
+The root-level `local_llm_chat_bot/` directory is deliberately standalone. It contains the local
 browser workbench, terminal chat tools, a reconstructed connector copy, local
 file memory, its dependency list and usage guides. It does not replace the
 current shared connector used by the research scripts.
