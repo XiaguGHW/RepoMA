@@ -287,7 +287,17 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 <aside class="side right"><b>本轮状态</b><div id="status" class="card muted">尚未打开工作区</div><b>证据来源</b><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><b>待应用修改</b><div id="changes" class="list">无</div></aside></div>
 <script>
 const $=id=>document.getElementById(id);let busy=false;
-async function restoreLastWorkspace(){try{let s=await api('/api/settings');if(s.workspace)$('workspace').value=s.workspace}catch{}}
+async function restoreLastWorkspace(){
+  try{
+    let s=await api('/api/settings');
+    if(!s.workspace)return;
+    $('workspace').value=s.workspace;
+    $('setupmsg').textContent='正在自动打开上次工作区…';
+    await setup();
+  }catch{
+    $('setupmsg').textContent='无法自动打开上次工作区；请重新选择路径。';
+  }
+}
 window.addEventListener('DOMContentLoaded',restoreLastWorkspace);
 async function api(url,opt={}){let r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt});let d=await r.json();if(!r.ok)throw Error(d.detail||'请求失败');return d}
 async function pick(kind,target){try{$(target).value=(await api('/api/pick/'+kind)).path||''}catch(e){alert(e.message)}}
