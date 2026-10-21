@@ -314,6 +314,15 @@ def sessions():
     return {"current": state.root.name, "sessions": available_sessions(state)}
 
 
+@app.get("/api/history")
+def history():
+    records = session()["state"].data.get("history", [])
+    return {"history": [
+        {"role": item.get("role", "assistant"), "content": str(item.get("content", ""))}
+        for item in records if isinstance(item, dict) and item.get("content")
+    ]}
+
+
 @app.post("/api/model-test")
 def model_test(request: ModelTestRequest):
     model = request.model.strip()
@@ -454,7 +463,8 @@ function toggleCustomModel(){let custom=$('model').value==='__custom__';$('custo
 function setSelectedModel(model){let known=[...$('model').options].some(option=>option.value===model);$('model').value=known?model:'__custom__';$('custommodel').value=known?'':model;toggleCustomModel()}
 function selectedModel(){let selected=$('model').value;return selected==='__custom__' ? $('custommodel').value.trim() : selected}
 async function loadSessions(){try{let x=await api('/api/sessions');$('session').innerHTML=x.sessions.map(n=>`<option value="${esc(n)}" ${n===x.current?'selected':''}>${esc(n)}</option>`).join('');$('sessionmsg').textContent='聊天记录、BG 状态、代码索引和 token 统计按会话分开；已加入的材料索引按工作区共享。'}catch(e){$('sessionmsg').textContent=e.message}}
-async function setup(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default'})});renderStatus(s);$('setupmsg').textContent='已打开。';loadDocs();loadSessions()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
+async function loadHistory(){try{let x=await api('/api/history');$('chat').innerHTML='';if(!x.history.length){message('这是一个新会话，可以直接开始提问。');return}for(let item of x.history)message(item.content,item.role==='user'?'user':'assistant')}catch{}}
+async function setup(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default'})});renderStatus(s);$('setupmsg').textContent='已打开。';loadDocs();loadSessions();loadHistory()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function openSession(){if(!$('session').value)return;await setup()}
 async function newSession(){let name=prompt('新会话名称，例如：BG_012 或 token_test');if(!name||!name.trim())return;$('session').innerHTML='<option>'+esc(name.trim())+'</option>';await setup()}
 async function testModel(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');$('setupmsg').textContent='正在发送一次极短的测试请求…';let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});$('setupmsg').innerHTML=x.ok?'<span class="ok">模型可用：'+x.model+'；输入 '+x.input_tokens+' / 输出 '+x.output_tokens+' token。 </span>':'<span class="error">模型测试失败：'+x.message+'</span>'}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
