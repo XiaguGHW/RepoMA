@@ -111,9 +111,17 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
     if estimate: estimates.append(estimate)
     try:
         action = parse_json(raw)
-    except Exception as exc:
-        return {"answer": "模型未返回完整操作 JSON；本轮没有执行任何文件修改。\n" + str(exc),
-                "reasoning": "".join(reasoning), "notices": notices, "sources": evidence, "visuals": visuals, "changes": []}
+    except Exception:
+        # Some Bosch Farm models return a normal natural-language answer despite
+        # the code-action schema. A read-only question must remain useful:
+        # show that answer and never treat it as a file modification.
+        answer = raw.strip() or "模型没有返回可显示的文字。"
+        state.add_turn("user", question)
+        state.add_turn("assistant", answer)
+        return {"answer": answer, "reasoning": "".join(reasoning), "notices": notices,
+                "sources": evidence, "visuals": visuals, "changes": [],
+                "turn_cost": sum(item["cost_usd"] for item in estimates) if estimates else None,
+                "usage": status_data(data)}
     requested = [ensure_relative(item) for item in action.get("read_files", [])[:4] if isinstance(item, str)]
     complete = {}
     for relative in requested:
