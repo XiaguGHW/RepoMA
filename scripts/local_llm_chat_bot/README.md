@@ -1,6 +1,6 @@
 # Bosch Farm Terminal Chat
 
-Download the complete `07_terminal_chat` folder anywhere on your Bosch computer.
+Download the complete `local_llm_chat_bot` folder anywhere on your Bosch computer.
 These Python files must remain together inside it:
 
 - `llm_connector_with_prompt_caching.py`

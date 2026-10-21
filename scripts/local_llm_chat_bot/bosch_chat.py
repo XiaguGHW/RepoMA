@@ -186,7 +186,7 @@ def main():
 
 if __name__ == "__main__": main()
 
-# Independent-folder usage (download this whole 07_terminal_chat folder):
+# Independent-folder usage (download this whole local_llm_chat_bot folder):
 # 1) In this folder, install dependencies once:
 #    python -m pip install -r requirements.txt
 # 2) Simplest setup: put your existing .env in this same folder, then run:

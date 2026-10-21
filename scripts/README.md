@@ -66,9 +66,9 @@ Run in this order. The first step excludes the 14 BGs marked
 - `task3_prompt_development.md`
 - `task3_llm_experiment_status.md`
 
-## 07 — Persistent terminal chat tool
+## Local LLM chat bot
 
-`07_terminal_chat/` is deliberately standalone. It contains a reconstructed
-connector copy, terminal chat with local file memory, its dependency list and
-usage guide. It does not replace the current shared connector used by the
-research scripts.
+`local_llm_chat_bot/` is deliberately standalone. It contains the local
+browser workbench, terminal chat tools, a reconstructed connector copy, local
+file memory, its dependency list and usage guides. It does not replace the
+current shared connector used by the research scripts.

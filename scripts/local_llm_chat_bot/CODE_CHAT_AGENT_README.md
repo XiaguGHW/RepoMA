@@ -6,7 +6,7 @@ the current full content of that one target file. It does not put indexes,
 sessions, or caches in the source repository.
 
 Place it beside the existing `llm_connector_with_prompt_caching.py` **and**
-`model_pricing.json` from RepoMA's `scripts/07_terminal_chat` folder. The
+`model_pricing.json` from RepoMA's `scripts/local_llm_chat_bot` folder. The
 connector and the existing `requirements.txt` are reused.
 
 ## Start on the company computer
