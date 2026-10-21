@@ -53,6 +53,11 @@ Rules:
 - Never claim a memory action was completed: the local program requires explicit confirmation.
 - Do not use Markdown fences around the JSON.
 - For ordinary explanations, be structured but concise. Never let a long explanation prevent a complete valid JSON object.
+- Exception — when the supplied prompt contains BG CLASSIFICATION MODE, give a
+  detailed, evidence-led assessment. It may exceed the normal length limit.
+  Use these exact sections: Empfehlung; Entscheidungsweg nach Codebook;
+  Belege (file/page/sheet/row); Abgrenzung zu Alternativen; Unsicherheit.
+  Do not invent evidence. Separate an observed fact from an inference.
 - Write for a narrow plain terminal, not for Markdown rendering. Use this default shape:
   结论：one short sentence
   1) Short heading — one or two short lines
@@ -408,7 +413,8 @@ def ensure_relative(path: str) -> str:
     return item.as_posix()
 
 
-def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], full_files: dict[str, str] | None = None, document_snippets: list[dict] | None = None):
+def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], full_files: dict[str, str] | None = None,
+               document_snippets: list[dict] | None = None, bg_context: dict | None = None):
     recent = "\n".join(f"{turn['role']}: {turn['content']}" for turn in state.data["history"][-HISTORY_MESSAGES_PER_REQUEST:]) or "(new conversation)"
     memories = state.search_memory(question)
     memory_text = "\n".join(f"- [{item['id']}] {item['content']}" for item in memories) or "(No relevant confirmed long-term memory.)"
@@ -419,6 +425,16 @@ def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], ful
         f"--- DOCUMENT [{item['id']}] {item['label']} ---\n{item['text']}"
         for item in (document_snippets or [])
     ) or "(No relevant locally extracted document excerpt.)"
+    bg_instruction = ""
+    if bg_context:
+        bg_instruction = f"""
+BG CLASSIFICATION MODE (active):
+- Codebook: {bg_context.get('codebook_name', 'unknown')}
+- Baugruppe folder: {bg_context.get('folder', 'unknown')}
+- Give the full detailed classification format required by the system prompt.
+- Treat the Codebook as the rule source. Cite evidence labels exactly as supplied.
+- A source marked visual/scanned may require visual inspection; do not infer text that was not supplied.
+"""
     return f"""Workspace: {state.workspace}
 Project summary: {state.data['summary'] or '(none)'}
 Recent conversation:\n{recent}
@@ -434,6 +450,7 @@ Relevant locally extracted document excerpts:\n{document_text}
 Complete current files supplied in this turn:\n{complete}
 
 User request: {question}
+{bg_instruction}
 """
 
 
@@ -533,7 +550,7 @@ def main():
         print(f"Pricing disabled: could not load {pricing_path}: {pricing.error}")
     elif not pricing.entries:
         print(f"Pricing disabled: no entries in {pricing_path}")
-    print("Ask in Chinese. Commands: /file PATH | /files | /model ID | /scan | /status | /context | /remember TEXT | /memory | /cancel | 确认执行 | 确认记忆 | /quit")
+    print("Ask in Chinese. Commands: /file PATH | /files | /bg CODEBOOK_PATH | BAUGRUPPE_FOLDER | /bg clear | /model ID | /scan | /status | /context | /remember TEXT | /memory | /cancel | 确认执行 | 确认记忆 | /quit")
     while True:
         try:
             question = input("you> ").strip()
@@ -580,6 +597,34 @@ def main():
                 print(f"Local documents ({len(entries)}):")
                 for item in entries:
                     print(f"[{item['id']}] {item['name']} — {len(item.get('chunks', []))} chunks")
+            continue
+        if question == "/bg clear":
+            state.data.pop("bg_context", None)
+            state.save()
+            print("Baugruppe classification mode cleared. Document indexes were kept locally.")
+            continue
+        if question.startswith("/bg "):
+            specification = question[len("/bg "):].strip()
+            if "|" not in specification:
+                print("Usage: /bg \"CODEBOOK_PATH\" | \"BAUGRUPPE_FOLDER\"")
+                continue
+            codebook_value, folder_value = (part.strip().strip('"') for part in specification.split("|", 1))
+            try:
+                codebook = documents.add(codebook_value)
+                sources, skipped = documents.add_folder(folder_value)
+                state.data["bg_context"] = {
+                    "codebook_id": codebook["id"],
+                    "codebook_name": codebook["name"],
+                    "source_ids": [item["id"] for item in sources],
+                    "folder": str(Path(folder_value).expanduser().resolve()),
+                    "created_at": now(),
+                }
+                state.save()
+                print(f"BG mode active: Codebook [{codebook['id']}] + {len(sources)} source file(s).")
+                if skipped:
+                    print(f"Skipped {len(skipped)} file(s); use /files to inspect indexed sources.")
+            except Exception as exc:
+                print(f"BG mode not activated: {exc}")
             continue
         if question == "/file clear":
             print(f"Removed {documents.clear()} local document index(es). Original files were not changed.")
@@ -667,13 +712,18 @@ def main():
             print(f"Switched to {args.model}.")
             continue
 
+        bg_context = state.data.get("bg_context")
         matches = state.search(question)
         snippets = {relative: excerpt(state, relative, question) for relative in matches}
-        document_snippets = documents.search(question)
+        preferred_ids = None
+        if bg_context:
+            preferred_ids = [bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))
+        document_snippets = documents.search(question, preferred_ids=preferred_ids, classification=bool(bg_context))
+        visual_paths = documents.visual_paths(document_snippets, state.root / "visual_cache")
         turn_estimates = []
         stream_handler, streamed = streamed_answer_handler()
         raw = llm.ask_about_files(
-            [], prompt_for(state, question, snippets, document_snippets=document_snippets), SYSTEM,
+            visual_paths, prompt_for(state, question, snippets, document_snippets=document_snippets, bg_context=bg_context), SYSTEM,
             {"maxOutputTokens": 4096, "temperature": 0},
             stream=True, event_handler=stream_handler,
         )
@@ -697,7 +747,7 @@ def main():
             if full_files:
                 stream_handler, streamed = streamed_answer_handler()
                 raw = llm.ask_about_files(
-                    [], prompt_for(state, question, snippets, full_files, document_snippets), SYSTEM,
+                    visual_paths, prompt_for(state, question, snippets, full_files, document_snippets, bg_context), SYSTEM,
                     {"maxOutputTokens": 3000, "temperature": 0},
                     stream=True, event_handler=stream_handler,
                 )

@@ -28,8 +28,10 @@ shows a unified diff for any proposed creation or modification. Type exactly
 
 Useful commands:
 
-- `/file PATH` — locally extract and index a PDF, Word document, Excel workbook, CSV, TXT, or Markdown file. Quote paths containing spaces.
+- `/file PATH` — locally extract and index a PDF, Word document, Excel workbook, CSV, TXT, Markdown file, or PNG/JPEG/WebP image. Quote paths containing spaces.
 - `/files` — list locally indexed documents. Use `/file remove ID` or `/file clear` to remove indexes; original files are never changed.
+- `/bg "CODEBOOK_PATH" | "BAUGRUPPE_FOLDER"` — activate Codebook-guided Baugruppe analysis. The Codebook and every supported document below the selected BG folder are indexed locally and pinned for later questions.
+- `/bg clear` — leave Baugruppe analysis mode while keeping the local indexes for ordinary document questions.
 - `/model MODEL_ID` — switch among models available through Farm.
 - `/scan` — rebuild the local file and symbol index after substantial manual changes.
 - `/status` — show the number of indexed files, cumulative session tokens, and estimated cost.
@@ -61,4 +63,18 @@ Natural-language memory changes are never applied automatically. The model can o
 
 ## Local document questions
 
-Use `/file "C:\\path\\to\\file.pdf"` to index a local PDF, Word (`.docx`), Excel (`.xlsx`/`.xlsm`), CSV, TXT, or Markdown file. Extraction and lexical search occur locally; the source file is not copied or uploaded. When you ask a question, the script sends at most six matching extracted excerpts to the selected model, labelled with the source filename and PDF page or Excel sheet. Image OCR is intentionally not included in this version.
+Use `/file "C:\\path\\to\\file.pdf"` to index a local PDF, Word (`.docx`), Excel (`.xlsx`/`.xlsm`), CSV, TXT, Markdown, or PNG/JPEG/WebP file. Extraction and lexical search occur locally; the source file is not uploaded merely because it was indexed. The default local file limit is 80 MB and PDF text is indexed page by page (up to 900 extracted chunks), so a 100–200-page drawing package is no longer silently cut after the first 160 chunks.
+
+For an answer, the script sends only the matching extracted excerpts. It can also attach up to five visual evidence items to the selected Farm model: an original image, a rendered cited PDF page, or a rendered Excel range. A scanned PDF page is kept as visual evidence even when it has no embedded text; this version does not run local OCR, so the model must inspect that attached page. Excel cell values/formulas are extracted; charts, colours, merged cells and embedded images are preserved only when a relevant range is rendered as a visual table.
+
+## Baugruppe / Codebook mode
+
+Start a dedicated session with, for example:
+
+```powershell
+/bg "C:\\Users\\XXXXX\\Downloads\\Codebook.pdf" | "C:\\Users\\XXXXX\\Downloads\\70BG\\Rotationseinheit\\4711"
+```
+
+Then ask naturally, for example: `请根据 Codebook 完整判断这个 Baugruppe 的类别。说明每一步依据，并解释为什么不是 Gantry、Greifer 或 kombinierte Einheit。`
+
+The answer is instructed to use: **Empfehlung**, **Entscheidungsweg nach Codebook**, **Belege**, **Abgrenzung zu Alternativen**, and **Unsicherheit**. Sources are labelled with PDF page or Excel sheet/range. Later questions such as `为什么不是 Gantry？` stay in the same BG mode and use the pinned Codebook/BG sources again. The result is an evidence-led assistant analysis, not an automatic ground truth: missing or conflicting source material should remain explicit as uncertainty.
