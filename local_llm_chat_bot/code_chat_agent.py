@@ -140,6 +140,7 @@ class ProjectState:
         self.root = state_dir.expanduser().resolve() / "projects" / self.key / safe_name(session)
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = self.root / "state.json"
+        self.transcript_path = self.root / "transcript.jsonl"
         self.memory_path = self.root.parent / "memory.json"
         self.data = self._load()
         self.memory = self._load_memory()
@@ -286,9 +287,31 @@ class ProjectState:
         return [relative for _, relative in scored[:MAX_SNIPPETS]]
 
     def add_turn(self, role: str, content: str):
-        self.data["history"].append({"role": role, "content": content, "time": now()})
+        turn = {"role": role, "content": content, "time": now()}
+        # Keep a complete local archive for review, while sending only the
+        # compact in-state window to the model on later requests.
+        with self.transcript_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(turn, ensure_ascii=False) + "\n")
+        self.data["history"].append(turn)
         self.data["history"] = self.data["history"][-8:]
         self.save()
+
+    def full_history(self, limit: int = 500):
+        if not self.transcript_path.exists():
+            return list(self.data.get("history", []))
+        records = []
+        try:
+            with self.transcript_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        item = json.loads(line)
+                        if isinstance(item, dict) and item.get("role") and item.get("content"):
+                            records.append(item)
+                    except json.JSONDecodeError:
+                        continue
+        except OSError:
+            return list(self.data.get("history", []))
+        return records[-limit:]
 
     def note_usage(self, usage, pricing: PricingCatalog, model: str):
         usage = usage if isinstance(usage, dict) else {}
