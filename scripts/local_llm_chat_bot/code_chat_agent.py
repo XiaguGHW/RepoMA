@@ -1,7 +1,7 @@
 """Low-context, local-first code chat for Bosch Model Farm.
 
 Keep this file beside llm_connector_with_prompt_caching.py from RepoMA's
-07_terminal_chat directory.  All indexes and conversation data live in the
+local_llm_chat_bot directory.  All indexes and conversation data live in the
 directory supplied with --state-dir; nothing is written to the code project
 until the user confirms a displayed change.
 """
