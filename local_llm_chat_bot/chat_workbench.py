@@ -40,15 +40,18 @@ def workbench_settings_path() -> Path:
 def load_workbench_settings() -> dict[str, str]:
     try:
         data = json.loads(workbench_settings_path().read_text(encoding="utf-8"))
-        return {"workspace": str(data.get("workspace", ""))} if isinstance(data, dict) else {"workspace": ""}
+        return {
+            "workspace": str(data.get("workspace", "")),
+            "session": str(data.get("session", "default")) or "default",
+        } if isinstance(data, dict) else {"workspace": "", "session": "default"}
     except (OSError, ValueError):
-        return {"workspace": ""}
+        return {"workspace": "", "session": "default"}
 
 
-def save_workbench_settings(workspace: Path) -> None:
+def save_workbench_settings(workspace: Path, session_name: str) -> None:
     app_state_home().mkdir(parents=True, exist_ok=True)
     workbench_settings_path().write_text(
-        json.dumps({"workspace": str(workspace)}, ensure_ascii=False, indent=2),
+        json.dumps({"workspace": str(workspace), "session": session_name}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -63,6 +66,10 @@ class Setup(BaseModel):
 
 class PathRequest(BaseModel):
     path: str
+
+
+class ModelTestRequest(BaseModel):
+    model: str
 
 
 class BGRequest(BaseModel):
@@ -85,11 +92,20 @@ def status_data(data: dict[str, Any]) -> dict[str, Any]:
     usage = state.data["usage"]
     return {
         "workspace": str(state.workspace), "model": data["model"], "session": state.data["session_id"][:8],
+        "session_name": state.root.name,
         "code_files": len(state.data["files"]), "documents": len(data["documents"].list()),
         "requests": usage["requests"], "input_tokens": usage["input"], "output_tokens": usage["output"],
         "cost": round(float(usage.get("estimated_cost_usd", 0)), 6),
         "bg_context": state.data.get("bg_context"),
     }
+
+
+def available_sessions(state: ProjectState) -> list[str]:
+    root = state.root.parent
+    if not root.is_dir():
+        return [state.root.name]
+    names = sorted((item.name for item in root.iterdir() if item.is_dir()), key=str.lower)
+    return names or [state.root.name]
 
 
 def safe_file(value: str) -> Path:
@@ -190,7 +206,7 @@ def setup(request: Setup):
                                     "llm": LLMConnector(request.model, key, session_id=state.data["session_id"]),
                                     "pricing": PricingCatalog(price_file), "pending": []})
     state.scan()
-    save_workbench_settings(workspace)
+    save_workbench_settings(workspace, state.root.name)
     return status_data(ACTIVE)
 
 
@@ -202,6 +218,39 @@ def status(): return status_data(session())
 def settings():
     # Only the local path is returned. No source documents or credentials leave this computer.
     return load_workbench_settings()
+
+
+@app.get("/api/sessions")
+def sessions():
+    state = session()["state"]
+    return {"current": state.root.name, "sessions": available_sessions(state)}
+
+
+@app.post("/api/model-test")
+def model_test(request: ModelTestRequest):
+    model = request.model.strip()
+    if not model:
+        raise HTTPException(400, "请输入 Bosch Farm 的准确 Model ID。")
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+    key = os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY") or os.getenv("BOSCH_FARM_API_KEY")
+    if not key:
+        raise HTTPException(400, "未找到 BOSCH_FARM_SUBSCRIPTION_KEY。")
+    try:
+        probe = LLMConnector(model, key, session_id=f"model_check_{os.urandom(6).hex()}")
+        answer = probe.ask_about_files(
+            [], "Reply with exactly OK.", "You are a connection test. Follow the user instruction exactly.",
+            {"maxOutputTokens": 32, "temperature": 0}, stream=False,
+        ).strip()
+        if answer.startswith(("Error:", "HTTP error")):
+            return {"ok": False, "model": model, "message": answer, "usage": probe.get_last_token_usage()}
+        usage = probe.get_last_token_usage() or {}
+        return {
+            "ok": True, "model": probe.last_response_model or model, "answer": answer[:120],
+            "input_tokens": usage.get("input_tokens", 0), "output_tokens": usage.get("output_tokens", 0),
+            "message": "连接、回答和 token usage 均已验证。",
+        }
+    except Exception as exc:
+        return {"ok": False, "model": model, "message": str(exc)}
 
 
 @app.get("/api/pick/{kind}")
@@ -280,7 +329,8 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 <option value="gpt-6-luna-2026-09-22">GPT-6 Luna（轻量推理）</option>
 <option value="__custom__">其他：手动输入 Model ID…</option>
 </select>
-<input id="custommodel" placeholder="粘贴准确的 Bosch Farm Model ID" style="display:none;margin-top:7px"></div><button onclick="setup()">打开工作区</button><div id="setupmsg" class="muted"></div>
+<input id="custommodel" placeholder="粘贴准确的 Bosch Farm Model ID" style="display:none;margin-top:7px"></div><div class="row"><button onclick="setup()">打开工作区</button><button class="ghost" onclick="testModel()">测试模型</button></div><div id="setupmsg" class="muted"></div>
+<div class="field"><label>聊天会话</label><div class="row"><select id="session"></select><button class="ghost" onclick="openSession()">切换</button><button class="ghost" onclick="newSession()">新建</button></div><div id="sessionmsg" class="muted"></div></div>
 <hr><b>单一文件分析</b><div class="muted">选择一个 PDF / Excel / PNG，加入后可围绕该文件连续提问。</div><div class="field"><label>要分析的文件</label><div class="row"><input id="docpath" placeholder="PDF / Excel / PNG …"><button class="ghost" onclick="pick('file','docpath')">选择</button><button class="ghost" onclick="addDoc()">加入</button></div></div><div id="docs" class="list"></div>
 <hr><b>Baugruppe 文件夹分析</b><div class="muted">选择 Codebook 和一个 BG 文件夹；程序读取其中全部受支持文件，用于分类及错误原因分析。</div><div class="field"><label>Codebook 文件</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><div class="field"><label>BG 文件夹</label><div class="row"><input id="bgfolder" placeholder="选择一个 Baugruppe 文件夹"><button class="ghost" onclick="pick('folder','bgfolder')">选择</button></div></div><button class="ghost" onclick="bg()">开始文件夹分析</button> <button class="ghost" onclick="clearBg()">退出文件夹分析</button><div id="bgstatus" class="muted"></div></aside>
 <main class="main"><div class="chat" id="chat"><div class="message assistant">选择工作区后即可聊天。代码修改会先显示 diff，只有点击“应用修改”才会写入本地文件。</div></div><div class="composer"><input id="question" placeholder="问代码，或根据 Codebook 判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button></div></main>
@@ -292,6 +342,7 @@ async function restoreLastWorkspace(){
     let s=await api('/api/settings');
     if(!s.workspace)return;
     $('workspace').value=s.workspace;
+    $('session').innerHTML='<option>'+ (s.session||'default') +'</option>';
     $('setupmsg').textContent='正在自动打开上次工作区…';
     await setup();
   }catch{
@@ -302,10 +353,14 @@ window.addEventListener('DOMContentLoaded',restoreLastWorkspace);
 async function api(url,opt={}){let r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt});let d=await r.json();if(!r.ok)throw Error(d.detail||'请求失败');return d}
 async function pick(kind,target){try{$(target).value=(await api('/api/pick/'+kind)).path||''}catch(e){alert(e.message)}}
 function message(text,kind='assistant'){let e=document.createElement('div');e.className='message '+kind;e.textContent=text;$('chat').append(e);$('chat').scrollTop=1e9;return e}
-function renderStatus(s){$('status').innerHTML=`模型：<b>${s.model}</b><br>代码：${s.code_files} 文件<br>材料：${s.documents} 个<br>请求：${s.requests}<br>Token：${s.input_tokens} / ${s.output_tokens}<br>估算：$${s.cost}<br>${s.bg_context?'<span class="ok">BG 模式：'+s.bg_context.codebook_name+'</span>':'普通模式'}`}
+function renderStatus(s){$('status').innerHTML=`模型：<b>${s.model}</b><br>会话：${s.session_name||'default'}<br>代码：${s.code_files} 文件<br>材料：${s.documents} 个<br>请求：${s.requests}<br>Token：${s.input_tokens} / ${s.output_tokens}<br>估算：${s.cost}<br>${s.bg_context?'<span class="ok">BG 模式：'+s.bg_context.codebook_name+'</span>':'普通模式'}`}
 function toggleCustomModel(){let custom=$('model').value==='__custom__';$('custommodel').style.display=custom?'block':'none';if(custom)$('custommodel').focus()}
 function selectedModel(){let selected=$('model').value;return selected==='__custom__' ? $('custommodel').value.trim() : selected}
-async function setup(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model})});renderStatus(s);$('setupmsg').textContent='已打开。';loadDocs()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
+async function loadSessions(){try{let x=await api('/api/sessions');$('session').innerHTML=x.sessions.map(n=>`<option value="${esc(n)}" ${n===x.current?'selected':''}>${esc(n)}</option>`).join('');$('sessionmsg').textContent='当前会话独立保存本地聊天记录、索引和 token 统计。'}catch(e){$('sessionmsg').textContent=e.message}}
+async function setup(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default'})});renderStatus(s);$('setupmsg').textContent='已打开。';loadDocs();loadSessions()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
+async function openSession(){if(!$('session').value)return;await setup()}
+async function newSession(){let name=prompt('新会话名称，例如：BG_012 或 token_test');if(!name||!name.trim())return;$('session').innerHTML='<option>'+esc(name.trim())+'</option>';await setup()}
+async function testModel(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');$('setupmsg').textContent='正在发送一次极短的测试请求…';let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});$('setupmsg').innerHTML=x.ok?'<span class="ok">模型可用：'+x.model+'；输入 '+x.input_tokens+' / 输出 '+x.output_tokens+' token。 </span>':'<span class="error">模型测试失败：'+x.message+'</span>'}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function loadDocs(){try{let x=await api('/api/documents');$('docs').innerHTML=x.map(d=>`<div class="card">${d.name}<br><span class="muted">${d.chunks} chunks</span></div>`).join('')||'尚无材料。'}catch{}}
 async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:JSON.stringify({path:$('docpath').value})});$('docpath').value='';loadDocs();$('setupmsg').textContent=`已索引 ${d.name}（${d.chunks} chunks）`}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function bg(){try{let x=await api('/api/bg',{method:'POST',body:JSON.stringify({codebook:$('codebook').value,folder:$('bgfolder').value})});renderStatus(x.status);$('bgstatus').textContent=`已固定 Codebook 与 ${x.sources} 个 BG 文件。`;loadDocs()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}}
