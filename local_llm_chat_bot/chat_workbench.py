@@ -461,16 +461,29 @@ def model_test(request: ModelTestRequest):
         return result
     try:
         probe = LLMConnector(model, key, session_id=f"model_check_{os.urandom(6).hex()}")
+        notices = []
         answer = probe.ask_about_files(
             [], "Reply with exactly OK.", "You are a connection test. Follow the user instruction exactly.",
-            {"maxOutputTokens": 32, "temperature": 0}, stream=False,
+            {"maxOutputTokens": 32, "temperature": 0}, stream=True,
+            event_handler=lambda kind, text: notices.append(text) if kind == "notice" else None,
         ).strip()
         if answer.startswith(("Error:", "HTTP error")):
             return record(False, answer, model=model, usage=probe.get_last_token_usage() or {})
         usage = probe.get_last_token_usage() or {}
+        if any("拒绝流式" in item for item in notices):
+            streaming = "自动回退为完整响应"
+        elif notices:
+            streaming = "连接器使用非流式输出"
+        else:
+            streaming = "原生流式输出"
+        usage_available = bool(usage) and (
+            "input_tokens" in usage or "output_tokens" in usage or "total_tokens" in usage
+        )
+        message = "连接和回答已验证；token usage 已返回。" if usage_available else "连接和回答已验证；网关未返回 token usage。"
         return record(
-            True, "连接、回答和 token usage 均已验证。",
-            model=probe.last_response_model or model, answer=answer[:120],
+            True, message,
+            model=probe.last_response_model or model, answer=answer[:120], streaming=streaming,
+            usage_available=usage_available,
             input_tokens=usage.get("input_tokens", 0), output_tokens=usage.get("output_tokens", 0),
         )
     except Exception as exc:
@@ -603,8 +616,8 @@ async function newSession(){let name=prompt('新会话名称，例如：BG_012 �
 async function renameSession(){try{let name=prompt('输入新的会话名称：',$('session').value);if(!name||!name.trim())return;let s=await api('/api/session/rename',{method:'POST',body:JSON.stringify({name:name.trim()})});renderStatus(s);$('sessionmsg').textContent='会话已重命名。';loadSessions()}catch(e){$('sessionmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function deleteSession(){if(!confirm('确定删除当前会话吗？只会删除本地聊天记录、索引和导出文件，不会删除代码工作区或原始材料。'))return;try{let s=await api('/api/session/delete',{method:'POST',body:JSON.stringify({confirmed:true})});renderStatus(s);$('sessionmsg').textContent='当前会话已删除，已切换到其他会话。';loadSessions();loadHistory()}catch(e){$('sessionmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function switchModel(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/model',{method:'POST',body:JSON.stringify({model})});renderStatus(s);$('setupmsg').innerHTML='<span class="ok">已切换至 '+esc(model)+'；当前会话与材料保持不变。</span>'}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
-async function loadModelStatus(){try{let x=await api('/api/model-tests');let r=x.tests[selectedModel()];if(!r){$('modelstatus').textContent='尚未测试此模型。';return}$('modelstatus').innerHTML=r.ok?'<span class="ok">上次测试可用：'+esc(r.tested_at)+'；实际模型 '+esc(r.model||r.requested_model)+'</span>':'<span class="error">上次测试失败：'+esc(r.tested_at)+'</span>'}catch{}}
-async function testModel(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');$('setupmsg').textContent='正在发送一次极短的测试请求…';let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});$('setupmsg').innerHTML=x.ok?'<span class="ok">模型可用：'+x.model+'；输入 '+x.input_tokens+' / 输出 '+x.output_tokens+' token。 </span>':'<span class="error">模型测试失败：'+x.message+'</span>';loadModelStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
+async function loadModelStatus(){try{let x=await api('/api/model-tests');let r=x.tests[selectedModel()];if(!r){$('modelstatus').textContent='尚未测试此模型。';return}if(!r.ok){$('modelstatus').innerHTML='<span class="error">上次测试失败：'+esc(r.tested_at)+'</span>';return}$('modelstatus').innerHTML='<span class="ok">上次可用：'+esc(r.tested_at)+'；'+esc(r.streaming||'未记录流式状态')+'；usage '+(r.usage_available===false?'未返回':'已返回')+'</span>'}catch{}}
+async function testModel(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');$('setupmsg').textContent='正在发送一次极短的测试请求…';let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});$('setupmsg').innerHTML=x.ok?'<span class="ok">模型可用：'+x.model+'；'+(x.streaming||'')+'；输入 '+x.input_tokens+' / 输出 '+x.output_tokens+' token。 '+(x.usage_available===false?'网关未返回 usage。':'')+'</span>':'<span class="error">模型测试失败：'+x.message+'</span>';loadModelStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function loadDocs(){try{let x=await api('/api/documents');$('docs').innerHTML=x.map(d=>`<div class="card">${d.name}<br><span class="muted">${d.chunks} chunks</span></div>`).join('')||'尚无材料。'}catch{}}
 async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:JSON.stringify({path:$('docpath').value})});$('docpath').value='';loadDocs();$('setupmsg').textContent=`已索引 ${d.name}（${d.chunks} chunks）`}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function bg(){try{let x=await api('/api/bg',{method:'POST',body:JSON.stringify({codebook:$('codebook').value,folder:$('bgfolder').value})});renderStatus(x.status);$('bgstatus').textContent=`已固定 Codebook 与 ${x.sources} 个 BG 文件。`;loadDocs()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}}
