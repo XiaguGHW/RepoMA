@@ -288,6 +288,11 @@ class ProjectState:
 
     def add_turn(self, role: str, content: str):
         turn = {"role": role, "content": content, "time": now()}
+        # Migrate the compact legacy window into the archive on first use.
+        if not self.transcript_path.exists() and self.data.get("history"):
+            with self.transcript_path.open("w", encoding="utf-8") as handle:
+                for prior in self.data["history"]:
+                    handle.write(json.dumps(prior, ensure_ascii=False) + "\n")
         # Keep a complete local archive for review, while sending only the
         # compact in-state window to the model on later requests.
         with self.transcript_path.open("a", encoding="utf-8") as handle:
