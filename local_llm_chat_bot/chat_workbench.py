@@ -188,7 +188,8 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
     raw = llm.ask_about_files(visuals, prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context),
                                SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=events)
     estimates = []
-    estimate = state.note_usage(llm.get_last_token_usage(), data["pricing"], data["model"])
+    usage_records = [llm.get_last_token_usage() or {}]
+    estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
     if estimate: estimates.append(estimate)
     try:
         action = parse_json(raw)
@@ -213,15 +214,16 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
     if complete:
         raw = llm.ask_about_files(visuals, prompt_for(state, question, snippets, complete, evidence, bg_context),
                                    SYSTEM, {"maxOutputTokens": 3000, "temperature": 0}, stream=True, event_handler=events)
-        estimate = state.note_usage(llm.get_last_token_usage(), data["pricing"], data["model"])
+        usage_records.append(llm.get_last_token_usage() or {})
+        estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
         if estimate: estimates.append(estimate)
         action = parse_json(raw)
     changes = build_diff(state, action.get("changes", []))
     data["pending"] = changes
     state.add_turn("user", question); state.add_turn("assistant", action.get("answer", ""))
     turn_token_usage = {
-        "input": sum(item["input_tokens"] for item in estimates),
-        "output": sum(item["output_tokens"] for item in estimates),
+        "input": sum(int(item.get("input_tokens", 0) or 0) for item in usage_records),
+        "output": sum(int(item.get("output_tokens", 0) or 0) for item in usage_records),
         "cost_usd": sum(item["cost_usd"] for item in estimates),
     }
     if bg_context:
