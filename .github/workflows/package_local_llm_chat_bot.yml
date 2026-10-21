@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "local_llm_chat_bot/**"
+      - "local_llm_chat_bot.zip"
       - ".github/workflows/package_local_llm_chat_bot.yml"
   workflow_dispatch:
 
