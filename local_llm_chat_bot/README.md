@@ -8,6 +8,43 @@ These Python files must remain together inside it:
 - `excel_agent.py` — precise Excel inspection and safe writing tool
 - `excel_chat_agent.py` — recommended Chinese conversational Excel agent
 
+## Recommended Bosch-computer setup and later updates
+
+This downloads only this folder, while preserving the normal `git pull` update
+workflow. In VS Code's PowerShell terminal, run these commands once:
+
+```powershell
+cd $env:USERPROFILE\Documents
+git clone --filter=blob:none --no-checkout https://github.com/XiaguGHW/RepoMA.git BoschTools
+cd .\BoschTools
+git sparse-checkout init --cone
+git sparse-checkout set local_llm_chat_bot
+git checkout main
+```
+
+The resulting structure is deliberately short:
+
+```text
+Documents
+└── BoschTools
+    └── local_llm_chat_bot
+```
+
+For every later update, run only:
+
+```powershell
+cd $env:USERPROFILE\Documents\BoschTools
+git pull
+```
+
+Then start the graphical workbench:
+
+```powershell
+cd .\local_llm_chat_bot
+python -m pip install -r requirements.txt
+python .\chat_workbench.py
+```
+
 Put your existing Farm `.env` file in this downloaded tool folder (or provide
 its location with `--env-file`). Do not put its secret into any Python file:
 
