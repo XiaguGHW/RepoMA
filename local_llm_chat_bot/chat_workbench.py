@@ -146,6 +146,31 @@ def summarize_usage(records: list[dict]) -> dict[str, int | float]:
     return summary
 
 
+def write_session_export(data: dict[str, Any]) -> Path:
+    state = data["state"]
+    exports = state.root / "exports"
+    exports.mkdir(parents=True, exist_ok=True)
+    target = exports / f"session_transcript_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+    usage = state.data.get("usage", {})
+    transcript = state.full_history()
+    lines = [
+        "# Local LLM Chat – 会话导出", "",
+        f"- 导出时间：{datetime.now().astimezone().isoformat(timespec='seconds')}",
+        f"- 会话：{state.root.name}",
+        f"- 当前模型：{data['model']}",
+        f"- 累计请求：{usage.get('requests', 0)}",
+        f"- 累计 token：输入 {usage.get('input', 0)} ｜ 输出 {usage.get('output', 0)}",
+        "- 累计预估费用：$" + f"{float(usage.get('estimated_cost_usd', 0)):.6f}",
+        "", "## 对话记录", "",
+    ]
+    for item in transcript:
+        role = "用户" if item.get("role") == "user" else "助手"
+        timestamp = item.get("time", "")
+        lines.extend([f"### {role} {timestamp}", "", str(item.get("content", "")), ""])
+    target.write_text("\n".join(lines), encoding="utf-8")
+    return target
+
+
 def write_bg_analysis_export(state: ProjectState) -> Path:
     record = state.data.get("last_bg_analysis")
     if not isinstance(record, dict):
@@ -412,6 +437,12 @@ def clear_bg():
     data = session(); data["state"].data.pop("bg_context", None); data["state"].save(); return status_data(data)
 
 
+@app.post("/api/export/session")
+def export_session():
+    target = write_session_export(session())
+    return {"path": str(target)}
+
+
 @app.post("/api/export/bg-analysis")
 def export_bg_analysis():
     target = write_bg_analysis_export(session()["state"])
@@ -456,7 +487,7 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 <hr><b>单一文件分析</b><div class="muted">选择一个 PDF / Excel / PNG，加入后可围绕该文件连续提问。</div><div class="field"><label>要分析的文件</label><div class="row"><input id="docpath" placeholder="PDF / Excel / PNG …"><button class="ghost" onclick="pick('file','docpath')">选择</button><button class="ghost" onclick="addDoc()">加入</button></div></div><div id="docs" class="list"></div>
 <hr><b>Baugruppe 文件夹分析</b><div class="muted">选择 Codebook 和一个 BG 文件夹；程序读取其中全部受支持文件，用于分类及错误原因分析。</div><div class="field"><label>Codebook 文件</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><div class="field"><label>BG 文件夹</label><div class="row"><input id="bgfolder" placeholder="选择一个 Baugruppe 文件夹"><button class="ghost" onclick="pick('folder','bgfolder')">选择</button></div></div><button class="ghost" onclick="bg()">开始文件夹分析</button> <button class="ghost" onclick="clearBg()">退出文件夹分析</button><div id="bgstatus" class="muted"></div></aside>
 <main class="main"><div class="chat" id="chat"><div class="message assistant">选择工作区后即可聊天。代码修改会先显示 diff，只有点击“应用修改”才会写入本地文件。</div></div><div class="composer"><input id="question" placeholder="问代码，或根据 Codebook 判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button></div></main>
-<aside class="side right"><b>本轮状态</b><div id="status" class="card muted">尚未打开工作区</div><b>本轮 token 明细</b><div id="usagedetail" class="card muted">完成一次请求后显示。</div><b>BG 分析导出</b><div id="analysisexport" class="card muted">仅在 Baugruppe 分析完成后可导出。</div><b>证据来源</b><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><b>待应用修改</b><div id="changes" class="list">无</div></aside></div>
+<aside class="side right"><b>本轮状态</b><div id="status" class="card muted">尚未打开工作区</div><b>会话导出</b><div id="sessionexport" class="card"><button class="ghost" onclick="exportSession()">导出完整会话</button></div><b>本轮 token 明细</b><div id="usagedetail" class="card muted">完成一次请求后显示。</div><b>BG 分析导出</b><div id="analysisexport" class="card muted">仅在 Baugruppe 分析完成后可导出。</div><b>证据来源</b><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><b>待应用修改</b><div id="changes" class="list">无</div></aside></div>
 <script>
 const $=id=>document.getElementById(id);let busy=false;
 async function restoreLastWorkspace(){
@@ -493,6 +524,7 @@ async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:
 async function bg(){try{let x=await api('/api/bg',{method:'POST',body:JSON.stringify({codebook:$('codebook').value,folder:$('bgfolder').value})});renderStatus(x.status);$('bgstatus').textContent=`已固定 Codebook 与 ${x.sources} 个 BG 文件。`;loadDocs()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function clearBg(){try{renderStatus(await api('/api/bg',{method:'DELETE'}));$('bgstatus').textContent='已退出 BG 模式。'}catch(e){$('bgstatus').textContent=e.message}}
 async function chat(){if(busy||!$('question').value.trim())return;busy=true;let q=$('question').value;$('question').value='';message(q,'user');let wait=message('正在向 Bosch Farm 请求…');try{let x=await api('/api/chat',{method:'POST',body:JSON.stringify({question:q})});wait.remove();message(x.answer);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>模型推理（接口返回）</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');$('sources').innerHTML=x.sources.map(s=>`<div class="card"><b>${s.label}</b><br>${s.visual?'<span class="chip">视觉证据已附带</span>':''}</div>`).join('')||'无可用来源';$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${c.path}</b><br>${c.reason}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button onclick="apply()">应用修改</button>':'无';$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">导出本次 BG 分析</button>':'仅在 Baugruppe 分析完成后可导出。';renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}catch(e){wait.textContent='错误：'+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
+async function exportSession(){try{let x=await api('/api/export/session',{method:'POST'});$('sessionexport').innerHTML='<span class="ok">已导出：'+esc(x.path)+'</span>'}catch(e){$('sessionexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function exportBgAnalysis(){try{let x=await api('/api/export/bg-analysis',{method:'POST'});$('analysisexport').innerHTML='<span class="ok">已导出：'+esc(x.path)+'</span>'}catch(e){$('analysisexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function esc(s){let e=document.createElement('div');e.textContent=s;return e.innerHTML}async function apply(){try{let x=await api('/api/apply',{method:'POST'});$('changes').innerHTML='<span class="ok">已应用 '+x.applied+' 个修改。</span>';message('已写入 '+x.applied+' 个经确认的文件修改。')}catch(e){$('changes').innerHTML='<span class="error">'+e.message+'</span>'}}
 </script></body></html>'''
