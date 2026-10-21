@@ -34,6 +34,12 @@ def args() -> argparse.Namespace:
     p.add_argument("--sheet-name", default="Sheet1")
     p.add_argument("--token-column", default="Z")
     p.add_argument(
+        "--include-all-xlsx",
+        action="store_true",
+        help="Also consider every .xlsx file. By default, batch mode only processes "
+             "workbooks whose selected sheet has Token_Usage_JSON in --token-column.",
+    )
+    p.add_argument(
         "--pricing-json",
         type=Path,
         default=Path(__file__).parent / "model_pricing.json",
@@ -139,6 +145,25 @@ def summary(out: Path, rows: list[dict[str, Any]]) -> Path:
         if "Cost" in str(gt.cell(r,1).value): gt.cell(r,2).number_format='$ #,##0.0000'
     target=out/"all_experiments_cost_summary.xlsx"; wb.save(target); return target
 
+def is_experiment_workbook(path: Path, sheet_name: str, token_column: str) -> bool:
+    """Return True only for a workbook with the expected experiment token column.
+
+    This read-only check protects unrelated Excel files that happen to live in
+    the same directory as experimental result workbooks.
+    """
+    wb = None
+    try:
+        wb = load_workbook(path, read_only=True, data_only=False)
+        if sheet_name not in wb.sheetnames:
+            return False
+        ws = wb[sheet_name]
+        return ws.cell(1, column_index_from_string(token_column)).value == "Token_Usage_JSON"
+    except Exception:
+        return False
+    finally:
+        if wb is not None:
+            wb.close()
+
 def main() -> int:
     ns=args(); ns.token_column=ns.token_column.upper()
     if not re.fullmatch(r"[A-Z]{1,3}",ns.token_column): print("--token-column must be a letter, e.g. Z",file=sys.stderr); return 2
@@ -147,7 +172,15 @@ def main() -> int:
     if ns.input_excel: files=[ns.input_excel]
     else:
         if not ns.input_dir.is_dir(): print(f"Input directory not found: {ns.input_dir}",file=sys.stderr); return 2
-        files=[f for f in sorted(ns.input_dir.glob("*.xlsx")) if not f.name.startswith("~$")]
+        candidates=[f for f in sorted(ns.input_dir.glob("*.xlsx")) if not f.name.startswith("~$")]
+        if ns.include_all_xlsx:
+            files=candidates
+        else:
+            files=[f for f in candidates if is_experiment_workbook(f, ns.sheet_name, ns.token_column)]
+            skipped_count=len(candidates)-len(files)
+            if skipped_count:
+                print(f"Skipped {skipped_count} non-experiment workbook(s): expected "
+                      f"{ns.sheet_name}!{ns.token_column}1 = Token_Usage_JSON")
     rows=[]
     for file in files:
         entry=model(file,entries)
