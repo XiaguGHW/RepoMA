@@ -74,6 +74,10 @@ class ModelTestRequest(BaseModel):
     model: str
 
 
+class ModelSwitchRequest(BaseModel):
+    model: str
+
+
 class BGRequest(BaseModel):
     codebook: str
     folder: str
@@ -302,6 +306,21 @@ def setup(request: Setup):
 def status(): return status_data(session())
 
 
+@app.post("/api/model")
+def switch_model(request: ModelSwitchRequest):
+    model = request.model.strip()
+    if not model:
+        raise HTTPException(400, "请输入 Bosch Farm 的准确 Model ID。")
+    data = session()
+    try:
+        data["llm"] = LLMConnector(model, data["llm"].api_key, session_id=data["state"].data["session_id"])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    data["model"] = model
+    save_workbench_settings(data["state"].workspace, data["state"].root.name, model)
+    return status_data(data)
+
+
 @app.get("/api/settings")
 def settings():
     # Only the local path is returned. No source documents or credentials leave this computer.
@@ -432,7 +451,7 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 <option value="gpt-6-luna-2026-09-22">GPT-6 Luna（轻量推理）</option>
 <option value="__custom__">其他：手动输入 Model ID…</option>
 </select>
-<input id="custommodel" placeholder="粘贴准确的 Bosch Farm Model ID" style="display:none;margin-top:7px"></div><div class="row"><button onclick="setup()">打开工作区</button><button class="ghost" onclick="testModel()">测试模型</button></div><div id="setupmsg" class="muted"></div>
+<input id="custommodel" placeholder="粘贴准确的 Bosch Farm Model ID" style="display:none;margin-top:7px"></div><div class="row"><button onclick="setup()">打开工作区</button><button class="ghost" onclick="switchModel()">切换模型</button><button class="ghost" onclick="testModel()">测试模型</button></div><div id="setupmsg" class="muted"></div>
 <div class="field"><label>聊天会话</label><div class="row"><select id="session"></select><button class="ghost" onclick="openSession()">切换</button><button class="ghost" onclick="newSession()">新建</button></div><div id="sessionmsg" class="muted"></div></div>
 <hr><b>单一文件分析</b><div class="muted">选择一个 PDF / Excel / PNG，加入后可围绕该文件连续提问。</div><div class="field"><label>要分析的文件</label><div class="row"><input id="docpath" placeholder="PDF / Excel / PNG …"><button class="ghost" onclick="pick('file','docpath')">选择</button><button class="ghost" onclick="addDoc()">加入</button></div></div><div id="docs" class="list"></div>
 <hr><b>Baugruppe 文件夹分析</b><div class="muted">选择 Codebook 和一个 BG 文件夹；程序读取其中全部受支持文件，用于分类及错误原因分析。</div><div class="field"><label>Codebook 文件</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><div class="field"><label>BG 文件夹</label><div class="row"><input id="bgfolder" placeholder="选择一个 Baugruppe 文件夹"><button class="ghost" onclick="pick('folder','bgfolder')">选择</button></div></div><button class="ghost" onclick="bg()">开始文件夹分析</button> <button class="ghost" onclick="clearBg()">退出文件夹分析</button><div id="bgstatus" class="muted"></div></aside>
@@ -467,6 +486,7 @@ async function loadHistory(){try{let x=await api('/api/history');$('chat').inner
 async function setup(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default'})});renderStatus(s);$('setupmsg').textContent='已打开。';loadDocs();loadSessions();loadHistory()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function openSession(){if(!$('session').value)return;await setup()}
 async function newSession(){let name=prompt('新会话名称，例如：BG_012 或 token_test');if(!name||!name.trim())return;$('session').innerHTML='<option>'+esc(name.trim())+'</option>';await setup()}
+async function switchModel(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/model',{method:'POST',body:JSON.stringify({model})});renderStatus(s);$('setupmsg').innerHTML='<span class="ok">已切换至 '+esc(model)+'；当前会话与材料保持不变。</span>'}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function testModel(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');$('setupmsg').textContent='正在发送一次极短的测试请求…';let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});$('setupmsg').innerHTML=x.ok?'<span class="ok">模型可用：'+x.model+'；输入 '+x.input_tokens+' / 输出 '+x.output_tokens+' token。 </span>':'<span class="error">模型测试失败：'+x.message+'</span>'}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function loadDocs(){try{let x=await api('/api/documents');$('docs').innerHTML=x.map(d=>`<div class="card">${d.name}<br><span class="muted">${d.chunks} chunks</span></div>`).join('')||'尚无材料。'}catch{}}
 async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:JSON.stringify({path:$('docpath').value})});$('docpath').value='';loadDocs();$('setupmsg').textContent=`已索引 ${d.name}（${d.chunks} chunks）`}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
