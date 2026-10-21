@@ -6,6 +6,7 @@ files, credentials and session data stay on the computer that starts it.
 from __future__ import annotations
 
 import difflib
+import json
 import os
 import threading
 from pathlib import Path
@@ -38,7 +39,6 @@ def workbench_settings_path() -> Path:
 
 def load_workbench_settings() -> dict[str, str]:
     try:
-        import json
         data = json.loads(workbench_settings_path().read_text(encoding="utf-8"))
         return {"workspace": str(data.get("workspace", ""))} if isinstance(data, dict) else {"workspace": ""}
     except (OSError, ValueError):
@@ -48,7 +48,7 @@ def load_workbench_settings() -> dict[str, str]:
 def save_workbench_settings(workspace: Path) -> None:
     app_state_home().mkdir(parents=True, exist_ok=True)
     workbench_settings_path().write_text(
-        __import__("json").dumps({"workspace": str(workspace)}, ensure_ascii=False, indent=2),
+        json.dumps({"workspace": str(workspace)}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
