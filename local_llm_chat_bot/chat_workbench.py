@@ -8,6 +8,7 @@ from __future__ import annotations
 import difflib
 import json
 import os
+import shutil
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +21,7 @@ import uvicorn
 
 from dotenv import load_dotenv
 from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative,
-                             excerpt, parse_json, prompt_for, sha256)
+                             excerpt, parse_json, prompt_for, safe_name, sha256)
 from local_document_library import LocalDocumentLibrary
 from llm_connector_with_prompt_caching import LLMConnector
 
@@ -95,6 +96,14 @@ class ModelTestRequest(BaseModel):
 
 class ModelSwitchRequest(BaseModel):
     model: str
+
+
+class SessionRenameRequest(BaseModel):
+    name: str
+
+
+class SessionDeleteRequest(BaseModel):
+    confirmed: bool = False
 
 
 class BGRequest(BaseModel):
@@ -365,6 +374,49 @@ def switch_model(request: ModelSwitchRequest):
     return status_data(data)
 
 
+def activate_local_session(data: dict[str, Any], session_name: str) -> dict:
+    state = ProjectState(app_state_home(), data["state"].workspace, session_name)
+    data["state"] = state
+    data["documents"] = LocalDocumentLibrary(state.root.parent / "documents.json")
+    data["llm"] = LLMConnector(data["model"], data["llm"].api_key, session_id=state.data["session_id"])
+    data["pending"] = []
+    save_workbench_settings(state.workspace, state.root.name, data["model"])
+    return status_data(data)
+
+
+@app.post("/api/session/rename")
+def rename_session(request: SessionRenameRequest):
+    data = session()
+    name = safe_name(request.name.strip())
+    state = data["state"]
+    target = state.root.parent / name
+    if target == state.root:
+        return status_data(data)
+    if target.exists():
+        raise HTTPException(409, "已存在同名会话。")
+    try:
+        state.root.rename(target)
+    except OSError as exc:
+        raise HTTPException(500, f"无法重命名会话：{exc}") from exc
+    return activate_local_session(data, name)
+
+
+@app.post("/api/session/delete")
+def delete_session(request: SessionDeleteRequest):
+    if not request.confirmed:
+        raise HTTPException(400, "必须确认后才可删除会话。")
+    data = session()
+    state = data["state"]
+    current = state.root
+    parent = current.parent
+    try:
+        shutil.rmtree(current)
+    except OSError as exc:
+        raise HTTPException(500, f"无法删除会话：{exc}") from exc
+    remaining = sorted((item.name for item in parent.iterdir() if item.is_dir()), key=str.lower) if parent.is_dir() else []
+    return activate_local_session(data, remaining[0] if remaining else "default")
+
+
 @app.get("/api/settings")
 def settings():
     # Only the local path is returned. No source documents or credentials leave this computer.
@@ -514,7 +566,7 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 <option value="__custom__">其他：手动输入 Model ID…</option>
 </select>
 <input id="custommodel" placeholder="粘贴准确的 Bosch Farm Model ID" style="display:none;margin-top:7px"></div><div id="modelstatus" class="muted"></div><div class="row"><button onclick="setup()">打开工作区</button><button class="ghost" onclick="switchModel()">切换模型</button><button class="ghost" onclick="testModel()">测试模型</button></div><div id="setupmsg" class="muted"></div>
-<div class="field"><label>聊天会话</label><div class="row"><select id="session"></select><button class="ghost" onclick="openSession()">切换</button><button class="ghost" onclick="newSession()">新建</button></div><div id="sessionmsg" class="muted"></div></div>
+<div class="field"><label>聊天会话</label><div class="row"><select id="session"></select><button class="ghost" onclick="openSession()">切换</button><button class="ghost" onclick="newSession()">新建</button><button class="ghost" onclick="renameSession()">改名</button><button class="ghost" onclick="deleteSession()">删除</button></div><div id="sessionmsg" class="muted"></div></div>
 <hr><b>单一文件分析</b><div class="muted">选择一个 PDF / Excel / PNG，加入后可围绕该文件连续提问。</div><div class="field"><label>要分析的文件</label><div class="row"><input id="docpath" placeholder="PDF / Excel / PNG …"><button class="ghost" onclick="pick('file','docpath')">选择</button><button class="ghost" onclick="addDoc()">加入</button></div></div><div id="docs" class="list"></div>
 <hr><b>Baugruppe 文件夹分析</b><div class="muted">选择 Codebook 和一个 BG 文件夹；程序读取其中全部受支持文件，用于分类及错误原因分析。</div><div class="field"><label>Codebook 文件</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><div class="field"><label>BG 文件夹</label><div class="row"><input id="bgfolder" placeholder="选择一个 Baugruppe 文件夹"><button class="ghost" onclick="pick('folder','bgfolder')">选择</button></div></div><button class="ghost" onclick="bg()">开始文件夹分析</button> <button class="ghost" onclick="clearBg()">退出文件夹分析</button><div id="bgstatus" class="muted"></div></aside>
 <main class="main"><div class="chat" id="chat"><div class="message assistant">选择工作区后即可聊天。代码修改会先显示 diff，只有点击“应用修改”才会写入本地文件。</div></div><div class="composer"><input id="question" placeholder="问代码，或根据 Codebook 判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button></div></main>
@@ -548,6 +600,8 @@ async function loadHistory(){try{let x=await api('/api/history');$('chat').inner
 async function setup(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default'})});renderStatus(s);$('setupmsg').textContent='已打开。';loadDocs();loadSessions();loadHistory()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function openSession(){if(!$('session').value)return;await setup()}
 async function newSession(){let name=prompt('新会话名称，例如：BG_012 或 token_test');if(!name||!name.trim())return;$('session').innerHTML='<option>'+esc(name.trim())+'</option>';await setup()}
+async function renameSession(){try{let name=prompt('输入新的会话名称：',$('session').value);if(!name||!name.trim())return;let s=await api('/api/session/rename',{method:'POST',body:JSON.stringify({name:name.trim()})});renderStatus(s);$('sessionmsg').textContent='会话已重命名。';loadSessions()}catch(e){$('sessionmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
+async function deleteSession(){if(!confirm('确定删除当前会话吗？只会删除本地聊天记录、索引和导出文件，不会删除代码工作区或原始材料。'))return;try{let s=await api('/api/session/delete',{method:'POST',body:JSON.stringify({confirmed:true})});renderStatus(s);$('sessionmsg').textContent='当前会话已删除，已切换到其他会话。';loadSessions();loadHistory()}catch(e){$('sessionmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function switchModel(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/model',{method:'POST',body:JSON.stringify({model})});renderStatus(s);$('setupmsg').innerHTML='<span class="ok">已切换至 '+esc(model)+'；当前会话与材料保持不变。</span>'}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function loadModelStatus(){try{let x=await api('/api/model-tests');let r=x.tests[selectedModel()];if(!r){$('modelstatus').textContent='尚未测试此模型。';return}$('modelstatus').innerHTML=r.ok?'<span class="ok">上次测试可用：'+esc(r.tested_at)+'；实际模型 '+esc(r.model||r.requested_model)+'</span>':'<span class="error">上次测试失败：'+esc(r.tested_at)+'</span>'}catch{}}
 async function testModel(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');$('setupmsg').textContent='正在发送一次极短的测试请求…';let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});$('setupmsg').innerHTML=x.ok?'<span class="ok">模型可用：'+x.model+'；输入 '+x.input_tokens+' / 输出 '+x.output_tokens+' token。 </span>':'<span class="error">模型测试失败：'+x.message+'</span>';loadModelStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
