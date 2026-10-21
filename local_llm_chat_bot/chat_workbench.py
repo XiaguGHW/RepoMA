@@ -28,6 +28,31 @@ LOCK = threading.Lock()
 ACTIVE: dict[str, Any] = {}
 
 
+def app_state_home() -> Path:
+    return Path(__file__).resolve().parent / "AI_Bot_State"
+
+
+def workbench_settings_path() -> Path:
+    return app_state_home() / "workbench_settings.json"
+
+
+def load_workbench_settings() -> dict[str, str]:
+    try:
+        import json
+        data = json.loads(workbench_settings_path().read_text(encoding="utf-8"))
+        return {"workspace": str(data.get("workspace", ""))} if isinstance(data, dict) else {"workspace": ""}
+    except (OSError, ValueError):
+        return {"workspace": ""}
+
+
+def save_workbench_settings(workspace: Path) -> None:
+    app_state_home().mkdir(parents=True, exist_ok=True)
+    workbench_settings_path().write_text(
+        __import__("json").dumps({"workspace": str(workspace)}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 class Setup(BaseModel):
     workspace: str
     state_dir: str
@@ -157,7 +182,7 @@ def setup(request: Setup):
     load_dotenv(env_file)
     key = os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY") or os.getenv("BOSCH_FARM_API_KEY")
     if not key: raise HTTPException(400, f"未在 {env_file} 找到 BOSCH_FARM_SUBSCRIPTION_KEY。")
-    state_home = Path(__file__).resolve().parent / "AI_Bot_State"
+    state_home = app_state_home()
     state = ProjectState(state_home, workspace, request.session)
     documents = LocalDocumentLibrary(state.root.parent / "documents.json")
     price_file = Path(__file__).resolve().parent / "model_pricing.json"
@@ -165,11 +190,18 @@ def setup(request: Setup):
                                     "llm": LLMConnector(request.model, key, session_id=state.data["session_id"]),
                                     "pricing": PricingCatalog(price_file), "pending": []})
     state.scan()
+    save_workbench_settings(workspace)
     return status_data(ACTIVE)
 
 
 @app.get("/api/status")
 def status(): return status_data(session())
+
+
+@app.get("/api/settings")
+def settings():
+    # Only the local path is returned. No source documents or credentials leave this computer.
+    return load_workbench_settings()
 
 
 @app.get("/api/pick/{kind}")
@@ -255,6 +287,8 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 <aside class="side right"><b>本轮状态</b><div id="status" class="card muted">尚未打开工作区</div><b>证据来源</b><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><b>待应用修改</b><div id="changes" class="list">无</div></aside></div>
 <script>
 const $=id=>document.getElementById(id);let busy=false;
+async function restoreLastWorkspace(){try{let s=await api('/api/settings');if(s.workspace)$('workspace').value=s.workspace}catch{}}
+window.addEventListener('DOMContentLoaded',restoreLastWorkspace);
 async function api(url,opt={}){let r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt});let d=await r.json();if(!r.ok)throw Error(d.detail||'请求失败');return d}
 async function pick(kind,target){try{$(target).value=(await api('/api/pick/'+kind)).path||''}catch(e){alert(e.message)}}
 function message(text,kind='assistant'){let e=document.createElement('div');e.className='message '+kind;e.textContent=text;$('chat').append(e);$('chat').scrollTop=1e9;return e}
