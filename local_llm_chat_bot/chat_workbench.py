@@ -534,12 +534,70 @@ def coverage_path(state: ProjectState) -> Path:
     return state.root / "analysis_coverage.json"
 
 
+MATERIAL_SUMMARY_CACHE_VERSION = "material-summary-v1"
+
+
+def material_summary_cache_path(document: dict, model: str, full: bool, read_pages: list[int]) -> Path:
+    """A content-addressed local cache, never written beside BG source files."""
+    digest = str(document.get("sha256") or "unknown")
+    identity = json.dumps({"version": MATERIAL_SUMMARY_CACHE_VERSION, "sha256": digest,
+                           "model": model, "full": full, "pages": read_pages},
+                          ensure_ascii=False, sort_keys=True)
+    key = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+    return app_state_home() / "material_cache" / digest / f"{key}.json"
+
+
+def load_material_summary_cache(document: dict, model: str, full: bool, read_pages: list[int]) -> dict | None:
+    path = material_summary_cache_path(document, model, full, read_pages)
+    try:
+        cached = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(cached, dict) or cached.get("version") != MATERIAL_SUMMARY_CACHE_VERSION:
+        return None
+    if cached.get("sha256") != document.get("sha256") or cached.get("model") != model:
+        return None
+    if cached.get("full") is not full or cached.get("pages") != read_pages:
+        return None
+    record = cached.get("record")
+    return record if isinstance(record, dict) else None
+
+
+def save_material_summary_cache(document: dict, model: str, full: bool, read_pages: list[int], record: dict) -> None:
+    path = material_summary_cache_path(document, model, full, read_pages)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"version": MATERIAL_SUMMARY_CACHE_VERSION, "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+               "sha256": document.get("sha256"), "model": model, "full": full, "pages": read_pages,
+               "record": record}
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def load_coverage(state: ProjectState) -> dict:
     try:
         data = json.loads(coverage_path(state).read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def coverage_matches_current_selection(data: dict[str, Any], coverage: dict | None = None) -> bool:
+    """A session report is current only for the exact selected material hashes/model."""
+    coverage = coverage if coverage is not None else load_coverage(data["state"])
+    if not coverage.get("complete") or coverage.get("model") != data["model"]:
+        return False
+    active = set(data["state"].data.get("active_source_ids") or [])
+    selected = [item for item in data["documents"].list() if item.get("id") in active]
+    expected = {(item.get("id"), item.get("sha256")) for item in selected}
+    actual = {(item.get("id"), item.get("sha256")) for item in coverage.get("files", []) if isinstance(item, dict)}
+    return bool(expected) and actual == expected
+
+
+def coverage_for_ui(data: dict[str, Any]) -> dict:
+    coverage = load_coverage(data["state"])
+    if coverage:
+        coverage = dict(coverage)
+        coverage["current_selection"] = coverage_matches_current_selection(data, coverage)
+    return coverage
 
 
 def document_pages(document: dict) -> list[int]:
@@ -590,7 +648,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False) -> dict:
     selected = [item for item in documents.list() if item.get("id") in active_ids]
     if not selected:
         raise HTTPException(400, "请先选择一个要分析的文件或文件夹。")
-    records, total_calls = [], 0
+    records, total_calls, reused_files, created_files = [], 0, 0, 0
     summary_system = "You are a careful technical evidence extractor. Use only the supplied file content. Write concise Chinese factual notes. Do not classify the Baugruppe and do not invent missing information."
     for document in selected:
         # Complete analysis prepares OCR locally for visual pages. It adds no
@@ -598,6 +656,20 @@ def prepare_coverage(data: dict[str, Any], full: bool = False) -> dict:
         # auditable page/chunk coverage as native-text pages.
         documents.ensure_document_ocr(document)
         read_chunks, reading_scope, read_pages, unread_pages = selected_reading_chunks(document, full=full)
+        cached = load_material_summary_cache(document, data["model"], full, read_pages)
+        if cached:
+            # Cached facts remain tied to the exact source hash, model and
+            # reading scope.  Rebind display metadata in case a same-content
+            # file was moved or reselected under a different path.
+            record = dict(cached)
+            record.update({"id": document["id"], "name": document["name"], "path": document["path"],
+                           "sha256": document.get("sha256"), "pages_total": len(document_pages(document)),
+                           "pages_read": read_pages, "pages_unread": unread_pages,
+                           "full_coverage": not unread_pages, "reading_scope": reading_scope,
+                           "dfc_structure": documents.dfc_audit(document), "cache_status": "reused"})
+            records.append(record)
+            reused_files += 1
+            continue
         groups = summary_groups(document, read_chunks)
         notes, failures = [], []
         for number, group in enumerate(groups, start=1):
@@ -623,16 +695,22 @@ def prepare_coverage(data: dict[str, Any], full: bool = False) -> dict:
                 summary = "\n\n".join(notes); failures.append(f"汇总: {exc}")
         else:
             summary = notes[0] if notes else ""
-        records.append({"id": document["id"], "name": document["name"], "path": document["path"],
-                        "sha256": document.get("sha256"), "pages_total": len(document_pages(document)),
-                        "pages_read": read_pages, "pages_unread": unread_pages,
-                        "full_coverage": not unread_pages,
-                        "text_chunks_total": len(document.get("chunks", [])), "text_chunks_selected": len(read_chunks),
-                        "reading_scope": reading_scope, "text_groups_total": len(groups),
-                        "text_groups_processed": len(notes), "complete": bool(notes) and not failures,
-                        "failures": failures, "dfc_structure": documents.dfc_audit(document), "summary": summary})
+        record = {"id": document["id"], "name": document["name"], "path": document["path"],
+                  "sha256": document.get("sha256"), "pages_total": len(document_pages(document)),
+                  "pages_read": read_pages, "pages_unread": unread_pages,
+                  "full_coverage": not unread_pages,
+                  "text_chunks_total": len(document.get("chunks", [])), "text_chunks_selected": len(read_chunks),
+                  "reading_scope": reading_scope, "text_groups_total": len(groups),
+                  "text_groups_processed": len(notes), "complete": bool(notes) and not failures,
+                  "failures": failures, "dfc_structure": documents.dfc_audit(document), "summary": summary,
+                  "cache_status": "created"}
+        records.append(record)
+        if record["complete"]:
+            save_material_summary_cache(document, data["model"], full, read_pages, record)
+            created_files += 1
     report = {"created_at": datetime.now().astimezone().isoformat(timespec="seconds"), "model": data["model"], "requested_full_coverage": full,
-              "files": records, "complete": all(item["complete"] for item in records), "model_calls": total_calls}
+              "files": records, "complete": all(item["complete"] for item in records), "model_calls": total_calls,
+              "reused_files": reused_files, "created_files": created_files}
     coverage_path(state).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report
 
@@ -778,7 +856,7 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
     coverage = load_coverage(state)
     auto_prepared = False
     classification_request = bool(bg_context) and needs_bg_preparation(question, bg_context)
-    if not coverage.get("complete") and classification_request:
+    if not coverage_matches_current_selection(data, coverage) and classification_request:
         coverage = prepare_coverage(data)
         auto_prepared = True
     coverage_summaries = coverage.get("files", []) if coverage.get("complete") else []
@@ -1192,15 +1270,12 @@ def analyze_target(request: TargetRequest):
     else:
         data["state"].data.pop("bg_context", None)
     data["state"].data["active_source_ids"] = [item["id"] for item in sources]
-    try:
-        coverage_path(data["state"]).unlink()
-    except FileNotFoundError:
-        pass
     data["state"].save()
     return {"sources": len(sources), "skipped": skipped[:10], "skipped_count": len(skipped), "target_kind": target_kind,
             "files": [{"name": item["name"], "chunks": len(item.get("chunks", [])), "bytes": item.get("bytes", 0),
                        "material_role": item.get("material_role", "other"),
-                       "material_role_label": material_role_label(item.get("material_role", "other"))} for item in sources],
+                       "material_role_label": material_role_label(item.get("material_role", "other")),
+                       "index_cache_status": item.get("index_cache_status", "unknown")} for item in sources],
             "classification": bool(codebook_path), "status": status_data(data)}
 
 
@@ -1269,7 +1344,7 @@ def codebook_clear():
 
 @app.get("/api/coverage")
 def coverage_status():
-    return load_coverage(session()["state"])
+    return coverage_for_ui(session())
 
 
 @app.post("/api/coverage")
@@ -1393,8 +1468,8 @@ async function loadModelStatus(){try{let x=await api('/api/model-tests');let r=x
 async function testModel(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');$('setupmsg').textContent='正在发送一次极短的测试请求…';let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});$('setupmsg').innerHTML=x.ok?'<span class="ok">模型可用：'+x.model+'；'+(x.streaming||'')+'；输入 '+x.input_tokens+' / 输出 '+x.output_tokens+' token。 '+(x.usage_available===false?'网关未返回 usage。':'')+'</span>':'<span class="error">模型测试失败：'+x.message+'</span>';loadModelStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function loadDocs(){try{let x=await api('/api/documents');$('docs').innerHTML=x.map(d=>`<div class="card">${d.name}<br><span class="muted">${d.material_role_label||'其他资料'} · ${d.chunks} chunks</span></div>`).join('')||'尚无材料。'}catch{}}
 async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:JSON.stringify({path:$('docpath').value})});$('docpath').value='';loadDocs();$('setupmsg').textContent=`已索引 ${d.name}（${d.chunks} chunks）`}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
-function renderScanReport(x){let files=x.files.map(f=>`<div class="card"><b>${esc(f.name)}</b><br><span class="muted">${esc(f.material_role_label||'其他资料')} · 成功提取 ${f.chunks} 个文本片段 · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB</span></div>`).join('');let skipped=x.skipped_count?`<div class="card error">跳过 / 失败 ${x.skipped_count} 个<br><span class="muted">${x.skipped.map(esc).join('<br>')}${x.skipped_count>x.skipped.length?'<br>其余失败项未展开。':''}</span></div>`:'';$('scanreport').innerHTML='<b>扫描报告</b><div class="muted">成功 '+x.sources+' 个；本次选定材料范围已锁定。</div>'+files+skipped}
-function renderCoverageReport(x){if(!x||!x.files){$('coveragestatus').textContent='分类/Codebook 问题会自动准备证据；也可在提问前手动准备。';return}let done=x.files.filter(f=>f.complete).length;let details=x.files.map(f=>{let pages=f.pages_total?`页：已读 ${(f.pages_read||[]).join('、')||'—'}${(f.pages_unread||[]).length?'；未读 '+f.pages_unread.join('、'):''}`:'无页码';let dfc=f.dfc_structure?` · <span class="chip">DFC Struktur：${esc(f.dfc_structure.ocr_status||'—')}，${esc(f.dfc_structure.segments_total||0)} 段</span>`:'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${f.text_groups_processed}/${f.text_groups_total} 个文本组 · ${esc(f.reading_scope||'')} · ${esc(pages)}${dfc}${f.failures?.length?'（'+esc(f.failures.join('；'))+'）':''}`}).join('');$('coveragestatus').innerHTML=(x.complete?'<span class="ok">分类证据已准备：</span>':'<span class="error">分类证据不完整：</span>')+` ${done}/${x.files.length} 个文件；${x.model_calls||0} 次模型调用。`+details}
+function renderScanReport(x){let files=x.files.map(f=>{let index=f.index_cache_status==='reused'?' · 本地索引已复用':f.index_cache_status==='changed'?' · 内容变化，已重新索引':f.index_cache_status==='new'?' · 已建立本地索引':'';return `<div class="card"><b>${esc(f.name)}</b><br><span class="muted">${esc(f.material_role_label||'其他资料')} · 成功提取 ${f.chunks} 个文本片段 · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB${index}</span></div>`}).join('');let skipped=x.skipped_count?`<div class="card error">跳过 / 失败 ${x.skipped_count} 个<br><span class="muted">${x.skipped.map(esc).join('<br>')}${x.skipped_count>x.skipped.length?'<br>其余失败项未展开。':''}</span></div>`:'';$('scanreport').innerHTML='<b>扫描报告</b><div class="muted">成功 '+x.sources+' 个；本次选定材料范围已锁定。</div>'+files+skipped}
+function renderCoverageReport(x){if(!x||!x.files){$('coveragestatus').textContent='分类/Codebook 问题会自动准备证据；也可在提问前手动准备。';return}if(x.current_selection===false){$('coveragestatus').innerHTML='<span class="muted">材料选择或模型已更新；下次分类准备时会复用未变文件的本地摘要，仅预读新增/变更文件。</span>';return}let done=x.files.filter(f=>f.complete).length;let details=x.files.map(f=>{let pages=f.pages_total?`页：已读 ${(f.pages_read||[]).join('、')||'—'}${(f.pages_unread||[]).length?'；未读 '+f.pages_unread.join('、'):''}`:'无页码';let dfc=f.dfc_structure?` · <span class="chip">DFC Struktur：${esc(f.dfc_structure.ocr_status||'—')}，${esc(f.dfc_structure.segments_total||0)} 段</span>`:'';let cache=f.cache_status==='reused'?' · <span class="chip">本地摘要已复用</span>':f.cache_status==='created'?' · <span class="chip">本轮新预读</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${f.text_groups_processed}/${f.text_groups_total} 个文本组 · ${esc(f.reading_scope||'')} · ${esc(pages)}${cache}${dfc}${f.failures?.length?'（'+esc(f.failures.join('；'))+'）':''}`}).join('');$('coveragestatus').innerHTML=(x.complete?'<span class="ok">分类证据已准备：</span>':'<span class="error">分类证据不完整：</span>')+` ${done}/${x.files.length} 个文件；复用 ${x.reused_files||0} 个，新预读 ${x.created_files||0} 个；本次 ${x.model_calls||0} 次模型调用。`+details}
 async function loadCoverage(){try{renderCoverageReport(await api('/api/coverage'))}catch{}}
 function clearTargetTree(){savedTargetSelection=new Set();treeRestoreNote='';$('targettree').textContent='选择文件夹后显示可展开的文件树。';$('targettree').classList.add('muted');$('treestatus').textContent=''}
 async function pickFolderForTree(){await pick('folder','targetpath');if($('targetpath').value)loadTargetTree()}
@@ -1406,7 +1481,7 @@ function recommendedTreePaths(node,paths=[]){if(node.type==='file'){if(node.reco
 function makeTreeNode(node,depth=0){if(node.type==='folder'){let details=document.createElement('details');details.open=depth<1;let summary=document.createElement('summary');let box=document.createElement('input');box.type='checkbox';box.className='tree-folder';box.addEventListener('click',e=>e.stopPropagation());box.addEventListener('change',()=>{details.querySelectorAll('input.tree-file:not(:disabled)').forEach(x=>x.checked=box.checked);refreshAllFolderStates()});let label=document.createElement('label');label.textContent='📁 '+node.name;summary.append(box,label);details.append(summary);let children=document.createElement('div');children.className='tree-children';node.children.forEach(child=>children.append(makeTreeNode(child,depth+1)));details.append(children);return details}let row=document.createElement('div');row.className='tree-file'+(node.supported?'':' unsupported');let box=document.createElement('input');box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.checked=!!node.supported&&savedTargetSelection.has(node.relative);box.disabled=!node.supported;box.addEventListener('change',refreshAllFolderStates);let label=document.createElement('label');let role=node.material_role_label?` · ${node.material_role_label}`:'';let hint=node.supported&&!node.recommended?' · 默认不选':'';label.textContent='📄 '+node.name+(node.supported?` · ${(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1)} MB${role}${hint}`:` · 不支持${role}`);row.append(box,label);return row}
 async function loadTargetTree(){let target=$('targetpath').value.trim();if(!target){$('treestatus').innerHTML='<span class="error">请先选择或粘贴一个 BG 文件夹路径。</span>';return}try{$('treestatus').textContent='正在仅读取文件夹结构…';let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(x.saved_selection||[]);let notes=[];if(savedTargetSelection.size)notes.push(`已恢复上次的 ${savedTargetSelection.size} 项选择。`);else{savedTargetSelection=new Set(recommendedTreePaths(x.tree));notes.push(`已按资料类型默认选择 ${savedTargetSelection.size} 项原始资料；派生重复资料默认未选。`)}if(x.changed_saved_files)notes.push(`${x.changed_saved_files} 个已选文件内容已变化。`);if(x.missing_saved_files)notes.push(`${x.missing_saved_files} 个原选文件不存在，未恢复。`);treeRestoreNote=notes.join(' ');let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates();if(x.truncated)$('treestatus').innerHTML='<span class="error">文件树超过 5000 项，已截断；请进入更具体的 BG 文件夹。</span>'}catch(e){$('treestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function selectedTargetPaths(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].map(x=>x.dataset.path)}
-async function analyzeTarget(){try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error('请先在文件树中勾选至少一个材料。');let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});renderStatus(x.status);$('bgstatus').textContent=x.classification?`已加入 ${x.target_kind}中的 ${x.sources} 个选定材料，并启用 Codebook 分类。`:`已加入 ${x.target_kind}中的 ${x.sources} 个选定材料；当前为普通材料问答。`;renderScanReport(x);$('coveragestatus').textContent='材料范围已锁定；首次分类/Codebook 问题会自动准备分类证据。';loadDocs()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}}
+async function analyzeTarget(){try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error('请先在文件树中勾选至少一个材料。');let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});renderStatus(x.status);$('bgstatus').textContent=x.classification?`已加入 ${x.target_kind}中的 ${x.sources} 个选定材料，并启用 Codebook 分类。`:`已加入 ${x.target_kind}中的 ${x.sources} 个选定材料；当前为普通材料问答。`;renderScanReport(x);$('coveragestatus').textContent='材料范围已更新；首次分类/Codebook 问题会复用未变文件的本地摘要，仅预读新增或变更文件。';loadCoverage();loadDocs()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function prepareCoverage(full=false){if(busy)return;busy=true;$('coveragestatus').textContent=full?'正在完整覆盖所有页并生成可审计摘要；会消耗相应 token 与费用…':'正在按文件角色准备分类证据；大型 Datasheet 默认只预读前 15 页，并计入 token 与费用…';try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full})});renderCoverageReport(x)}catch(e){$('coveragestatus').innerHTML='<span class="error">分类证据准备失败：'+esc(e.message)+'</span>'}finally{busy=false}}
 async function clearBg(){try{renderStatus(await api('/api/bg',{method:'DELETE'}));$('bgstatus').textContent='已退出 BG 模式。'}catch(e){$('bgstatus').textContent=e.message}}
 const compareOptions=[['claude-haiku-5.5','Claude Haiku 5.5'],['claude-opus-4','Claude Opus 4'],['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite'],['gemini-2.5-pro','Gemini 2.5 Pro'],['gpt-6-luna-2026-09-22','GPT-6 Luna'],['gpt-5.5','GPT-5.5']];
