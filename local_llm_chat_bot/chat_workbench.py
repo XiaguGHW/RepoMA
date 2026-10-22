@@ -24,7 +24,8 @@ import uvicorn
 from dotenv import load_dotenv
 from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative,
                              excerpt, parse_json, prompt_for, safe_name, sha256)
-from local_document_library import LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS
+from local_document_library import (LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS,
+                                    material_is_recommended, material_role, material_role_label)
 from llm_connector_with_prompt_caching import LLMConnector
 
 
@@ -272,9 +273,12 @@ def target_tree(folder: Path, maximum_nodes: int = 5000) -> tuple[dict, bool]:
                 size = path.stat().st_size
             except OSError:
                 size = 0
+            role = material_role(path)
             return {"type": "file", "name": path.name, "path": str(path),
                     "relative": path.relative_to(folder).as_posix(),
-                    "supported": suffix in SUPPORTED_DOCUMENT_EXTENSIONS, "bytes": size}
+                    "supported": suffix in SUPPORTED_DOCUMENT_EXTENSIONS, "bytes": size,
+                    "material_role": role, "material_role_label": material_role_label(role),
+                    "recommended": suffix in SUPPORTED_DOCUMENT_EXTENSIONS and material_is_recommended(path)}
         children = []
         try:
             entries = sorted(path.iterdir(), key=lambda item: (not item.is_dir(), item.name.casefold()))
@@ -550,7 +554,7 @@ def document_pages(document: dict) -> list[int]:
 def selected_reading_chunks(document: dict, full: bool = False) -> tuple[list[dict], str, list[int], list[int]]:
     """Use a human-like first pass for large component manuals, not blind full-PDF upload."""
     name = str(document.get("name", "")).casefold()
-    is_datasheet = any(term in name for term in ("datenblatt", "datasheet", "catalog", "katalog"))
+    is_datasheet = document.get("material_role") == "datasheet" or any(term in name for term in ("datenblatt", "datasheet", "catalog", "katalog"))
     chunks = list(document.get("chunks", []))
     all_pages = document_pages(document)
     if not is_datasheet or full:
@@ -1126,14 +1130,18 @@ def pick(kind: str):
 
 @app.get("/api/documents")
 def documents():
-    return [{"id": item["id"], "name": item["name"], "path": item["path"], "chunks": len(item.get("chunks", []))}
+    return [{"id": item["id"], "name": item["name"], "path": item["path"], "chunks": len(item.get("chunks", [])),
+             "material_role": item.get("material_role", "other"),
+             "material_role_label": material_role_label(item.get("material_role", "other"))}
             for item in session()["documents"].list()]
 
 
 @app.post("/api/document")
 def add_document(request: PathRequest):
     item = session()["documents"].add(str(safe_file(request.path)))
-    return {"id": item["id"], "name": item["name"], "chunks": len(item["chunks"])}
+    return {"id": item["id"], "name": item["name"], "chunks": len(item["chunks"]),
+            "material_role": item.get("material_role", "other"),
+            "material_role_label": material_role_label(item.get("material_role", "other"))}
 
 
 @app.post("/api/bg")
@@ -1190,7 +1198,9 @@ def analyze_target(request: TargetRequest):
         pass
     data["state"].save()
     return {"sources": len(sources), "skipped": skipped[:10], "skipped_count": len(skipped), "target_kind": target_kind,
-            "files": [{"name": item["name"], "chunks": len(item.get("chunks", [])), "bytes": item.get("bytes", 0)} for item in sources],
+            "files": [{"name": item["name"], "chunks": len(item.get("chunks", [])), "bytes": item.get("bytes", 0),
+                       "material_role": item.get("material_role", "other"),
+                       "material_role_label": material_role_label(item.get("material_role", "other"))} for item in sources],
             "classification": bool(codebook_path), "status": status_data(data)}
 
 
@@ -1381,9 +1391,9 @@ async function deleteSession(){if(!confirm('确定删除当前会话吗？只会
 async function switchModel(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/model',{method:'POST',body:JSON.stringify({model})});renderStatus(s);$('setupmsg').innerHTML='<span class="ok">已切换至 '+esc(model)+'；当前会话与材料保持不变。</span>'}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function loadModelStatus(){try{let x=await api('/api/model-tests');let r=x.tests[selectedModel()];if(!r){$('modelstatus').textContent='尚未测试此模型。';return}if(!r.ok){$('modelstatus').innerHTML='<span class="error">上次测试失败：'+esc(r.tested_at)+'</span>';return}$('modelstatus').innerHTML='<span class="ok">上次可用：'+esc(r.tested_at)+'；'+esc(r.streaming||'未记录流式状态')+'；usage '+(r.usage_available===false?'未返回':'已返回')+'</span>'}catch{}}
 async function testModel(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');$('setupmsg').textContent='正在发送一次极短的测试请求…';let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});$('setupmsg').innerHTML=x.ok?'<span class="ok">模型可用：'+x.model+'；'+(x.streaming||'')+'；输入 '+x.input_tokens+' / 输出 '+x.output_tokens+' token。 '+(x.usage_available===false?'网关未返回 usage。':'')+'</span>':'<span class="error">模型测试失败：'+x.message+'</span>';loadModelStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
-async function loadDocs(){try{let x=await api('/api/documents');$('docs').innerHTML=x.map(d=>`<div class="card">${d.name}<br><span class="muted">${d.chunks} chunks</span></div>`).join('')||'尚无材料。'}catch{}}
+async function loadDocs(){try{let x=await api('/api/documents');$('docs').innerHTML=x.map(d=>`<div class="card">${d.name}<br><span class="muted">${d.material_role_label||'其他资料'} · ${d.chunks} chunks</span></div>`).join('')||'尚无材料。'}catch{}}
 async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:JSON.stringify({path:$('docpath').value})});$('docpath').value='';loadDocs();$('setupmsg').textContent=`已索引 ${d.name}（${d.chunks} chunks）`}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
-function renderScanReport(x){let files=x.files.map(f=>`<div class="card"><b>${esc(f.name)}</b><br><span class="muted">成功提取 ${f.chunks} 个文本片段 · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB</span></div>`).join('');let skipped=x.skipped_count?`<div class="card error">跳过 / 失败 ${x.skipped_count} 个<br><span class="muted">${x.skipped.map(esc).join('<br>')}${x.skipped_count>x.skipped.length?'<br>其余失败项未展开。':''}</span></div>`:'';$('scanreport').innerHTML='<b>扫描报告</b><div class="muted">成功 '+x.sources+' 个；本次选定材料范围已锁定。</div>'+files+skipped}
+function renderScanReport(x){let files=x.files.map(f=>`<div class="card"><b>${esc(f.name)}</b><br><span class="muted">${esc(f.material_role_label||'其他资料')} · 成功提取 ${f.chunks} 个文本片段 · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB</span></div>`).join('');let skipped=x.skipped_count?`<div class="card error">跳过 / 失败 ${x.skipped_count} 个<br><span class="muted">${x.skipped.map(esc).join('<br>')}${x.skipped_count>x.skipped.length?'<br>其余失败项未展开。':''}</span></div>`:'';$('scanreport').innerHTML='<b>扫描报告</b><div class="muted">成功 '+x.sources+' 个；本次选定材料范围已锁定。</div>'+files+skipped}
 function renderCoverageReport(x){if(!x||!x.files){$('coveragestatus').textContent='分类/Codebook 问题会自动准备证据；也可在提问前手动准备。';return}let done=x.files.filter(f=>f.complete).length;let details=x.files.map(f=>{let pages=f.pages_total?`页：已读 ${(f.pages_read||[]).join('、')||'—'}${(f.pages_unread||[]).length?'；未读 '+f.pages_unread.join('、'):''}`:'无页码';let dfc=f.dfc_structure?` · <span class="chip">DFC Struktur：${esc(f.dfc_structure.ocr_status||'—')}，${esc(f.dfc_structure.segments_total||0)} 段</span>`:'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${f.text_groups_processed}/${f.text_groups_total} 个文本组 · ${esc(f.reading_scope||'')} · ${esc(pages)}${dfc}${f.failures?.length?'（'+esc(f.failures.join('；'))+'）':''}`}).join('');$('coveragestatus').innerHTML=(x.complete?'<span class="ok">分类证据已准备：</span>':'<span class="error">分类证据不完整：</span>')+` ${done}/${x.files.length} 个文件；${x.model_calls||0} 次模型调用。`+details}
 async function loadCoverage(){try{renderCoverageReport(await api('/api/coverage'))}catch{}}
 function clearTargetTree(){savedTargetSelection=new Set();treeRestoreNote='';$('targettree').textContent='选择文件夹后显示可展开的文件树。';$('targettree').classList.add('muted');$('treestatus').textContent=''}
@@ -1392,8 +1402,9 @@ function treeFileCount(){return [...$('targettree').querySelectorAll('input.tree
 function updateTreeStatus(){let count=treeFileCount();$('treestatus').textContent=(count?`已选择 ${count} 个受支持文件。`:'尚未选择材料；勾选文件或整个子文件夹。')+(treeRestoreNote?' '+treeRestoreNote:'')}
 function refreshFolderState(folder){let files=[...folder.querySelectorAll('input.tree-file:not(:disabled)')];let box=folder.querySelector(':scope > summary input.tree-folder');if(!box||!files.length)return;let checked=files.filter(x=>x.checked).length;box.checked=checked===files.length;box.indeterminate=checked>0&&checked<files.length}
 function refreshAllFolderStates(){[...$('targettree').querySelectorAll('details')].reverse().forEach(refreshFolderState);updateTreeStatus()}
-function makeTreeNode(node,depth=0){if(node.type==='folder'){let details=document.createElement('details');details.open=depth<1;let summary=document.createElement('summary');let box=document.createElement('input');box.type='checkbox';box.className='tree-folder';box.addEventListener('click',e=>e.stopPropagation());box.addEventListener('change',()=>{details.querySelectorAll('input.tree-file:not(:disabled)').forEach(x=>x.checked=box.checked);refreshAllFolderStates()});let label=document.createElement('label');label.textContent='📁 '+node.name;summary.append(box,label);details.append(summary);let children=document.createElement('div');children.className='tree-children';node.children.forEach(child=>children.append(makeTreeNode(child,depth+1)));details.append(children);return details}let row=document.createElement('div');row.className='tree-file'+(node.supported?'':' unsupported');let box=document.createElement('input');box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.checked=!!node.supported&&savedTargetSelection.has(node.relative);box.disabled=!node.supported;box.addEventListener('change',refreshAllFolderStates);let label=document.createElement('label');label.textContent='📄 '+node.name+(node.supported?` · ${(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1)} MB`:' · 不支持');row.append(box,label);return row}
-async function loadTargetTree(){let target=$('targetpath').value.trim();if(!target){$('treestatus').innerHTML='<span class="error">请先选择或粘贴一个 BG 文件夹路径。</span>';return}try{$('treestatus').textContent='正在仅读取文件夹结构…';let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(x.saved_selection||[]);let notes=[];if(savedTargetSelection.size)notes.push(`已恢复上次的 ${savedTargetSelection.size} 项选择。`);if(x.changed_saved_files)notes.push(`${x.changed_saved_files} 个已选文件内容已变化。`);if(x.missing_saved_files)notes.push(`${x.missing_saved_files} 个原选文件不存在，未恢复。`);treeRestoreNote=notes.join(' ');let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates();if(x.truncated)$('treestatus').innerHTML='<span class="error">文件树超过 5000 项，已截断；请进入更具体的 BG 文件夹。</span>'}catch(e){$('treestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+function recommendedTreePaths(node,paths=[]){if(node.type==='file'){if(node.recommended)paths.push(node.relative);return paths}(node.children||[]).forEach(child=>recommendedTreePaths(child,paths));return paths}
+function makeTreeNode(node,depth=0){if(node.type==='folder'){let details=document.createElement('details');details.open=depth<1;let summary=document.createElement('summary');let box=document.createElement('input');box.type='checkbox';box.className='tree-folder';box.addEventListener('click',e=>e.stopPropagation());box.addEventListener('change',()=>{details.querySelectorAll('input.tree-file:not(:disabled)').forEach(x=>x.checked=box.checked);refreshAllFolderStates()});let label=document.createElement('label');label.textContent='📁 '+node.name;summary.append(box,label);details.append(summary);let children=document.createElement('div');children.className='tree-children';node.children.forEach(child=>children.append(makeTreeNode(child,depth+1)));details.append(children);return details}let row=document.createElement('div');row.className='tree-file'+(node.supported?'':' unsupported');let box=document.createElement('input');box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.checked=!!node.supported&&savedTargetSelection.has(node.relative);box.disabled=!node.supported;box.addEventListener('change',refreshAllFolderStates);let label=document.createElement('label');let role=node.material_role_label?` · ${node.material_role_label}`:'';let hint=node.supported&&!node.recommended?' · 默认不选':'';label.textContent='📄 '+node.name+(node.supported?` · ${(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1)} MB${role}${hint}`:` · 不支持${role}`);row.append(box,label);return row}
+async function loadTargetTree(){let target=$('targetpath').value.trim();if(!target){$('treestatus').innerHTML='<span class="error">请先选择或粘贴一个 BG 文件夹路径。</span>';return}try{$('treestatus').textContent='正在仅读取文件夹结构…';let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(x.saved_selection||[]);let notes=[];if(savedTargetSelection.size)notes.push(`已恢复上次的 ${savedTargetSelection.size} 项选择。`);else{savedTargetSelection=new Set(recommendedTreePaths(x.tree));notes.push(`已按资料类型默认选择 ${savedTargetSelection.size} 项原始资料；派生重复资料默认未选。`)}if(x.changed_saved_files)notes.push(`${x.changed_saved_files} 个已选文件内容已变化。`);if(x.missing_saved_files)notes.push(`${x.missing_saved_files} 个原选文件不存在，未恢复。`);treeRestoreNote=notes.join(' ');let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates();if(x.truncated)$('treestatus').innerHTML='<span class="error">文件树超过 5000 项，已截断；请进入更具体的 BG 文件夹。</span>'}catch(e){$('treestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function selectedTargetPaths(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].map(x=>x.dataset.path)}
 async function analyzeTarget(){try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error('请先在文件树中勾选至少一个材料。');let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});renderStatus(x.status);$('bgstatus').textContent=x.classification?`已加入 ${x.target_kind}中的 ${x.sources} 个选定材料，并启用 Codebook 分类。`:`已加入 ${x.target_kind}中的 ${x.sources} 个选定材料；当前为普通材料问答。`;renderScanReport(x);$('coveragestatus').textContent='材料范围已锁定；首次分类/Codebook 问题会自动准备分类证据。';loadDocs()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function prepareCoverage(full=false){if(busy)return;busy=true;$('coveragestatus').textContent=full?'正在完整覆盖所有页并生成可审计摘要；会消耗相应 token 与费用…':'正在按文件角色准备分类证据；大型 Datasheet 默认只预读前 15 页，并计入 token 与费用…';try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full})});renderCoverageReport(x)}catch(e){$('coveragestatus').innerHTML='<span class="error">分类证据准备失败：'+esc(e.message)+'</span>'}finally{busy=false}}
