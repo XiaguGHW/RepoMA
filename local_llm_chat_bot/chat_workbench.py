@@ -480,6 +480,47 @@ def needs_bg_preparation(question: str, bg_context: dict | None) -> bool:
     return any(term in text for term in ("分类", "类别", "codebook", "baugruppe", "classify", "gantry", "greifer", "roboter", "rotationseinheit", "kombinierte"))
 
 
+def codebook_text(documents: LocalDocumentLibrary, bg_context: dict | None) -> str:
+    codebook_id = (bg_context or {}).get("codebook_id")
+    document = next((item for item in documents.list() if item.get("id") == codebook_id), None)
+    return "\n".join(str(chunk.get("text", "")) for chunk in (document or {}).get("chunks", []))
+
+
+def validate_classification(action: dict, evidence: list[dict], codebook: str) -> str | None:
+    """Validate the machine-readable part without judging technical correctness."""
+    classification = action.get("classification")
+    if not isinstance(classification, dict):
+        return "缺少 classification 对象"
+    label = classification.get("label")
+    if not isinstance(label, str) or not label.strip():
+        return "缺少类别 label"
+    if codebook and label.casefold() not in codebook.casefold():
+        return "类别名称未在当前 Codebook 中找到"
+    if classification.get("confidence") not in {"high", "medium", "low"}:
+        return "confidence 必须为 high、medium 或 low"
+    evidence_labels = classification.get("evidence_labels")
+    supplied = {str(item.get("label", "")) for item in evidence}
+    if not isinstance(evidence_labels, list) or not evidence_labels:
+        return "缺少 evidence_labels"
+    if not all(isinstance(item, str) and item in supplied for item in evidence_labels):
+        return "evidence_labels 必须完全匹配本轮提供的证据标签"
+    alternative = classification.get("alternative_label", "")
+    if alternative and (not isinstance(alternative, str) or (codebook and alternative.casefold() not in codebook.casefold())):
+        return "备选类别未在当前 Codebook 中找到"
+    uncertainties = classification.get("uncertainties", [])
+    if not isinstance(uncertainties, list) or not all(isinstance(item, str) for item in uncertainties):
+        return "uncertainties 必须为文字列表"
+    return None
+
+
+def classification_repair_prompt(base_prompt: str, reason: str) -> str:
+    return base_prompt + f"""
+
+IMPORTANT: Your preceding classification response was rejected locally: {reason}.
+Return the complete JSON action again, with a valid `classification` object. Do not omit any required fields. Copy the exact class name from the supplied Codebook and copy evidence_labels exactly from the supplied document labels. Do not add commentary outside JSON.
+"""
+
+
 def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
     state, documents, llm = data["state"], data["documents"], data["llm"]
     bg_context = state.data.get("bg_context")
@@ -507,18 +548,43 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
 
     coverage = load_coverage(state)
     auto_prepared = False
-    if not coverage.get("complete") and needs_bg_preparation(question, bg_context):
+    classification_request = bool(bg_context) and needs_bg_preparation(question, bg_context)
+    if not coverage.get("complete") and classification_request:
         coverage = prepare_coverage(data)
         auto_prepared = True
     coverage_summaries = coverage.get("files", []) if coverage.get("complete") else []
-    raw = llm.ask_about_files(visuals, prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context, coverage_summaries=coverage_summaries),
+    model_prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context, coverage_summaries=coverage_summaries)
+    raw = llm.ask_about_files(visuals, model_prompt,
                                SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=events)
     estimates = []
     usage_records = [llm.get_last_token_usage() or {}]
     estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
     if estimate: estimates.append(estimate)
+    def validated_action(raw_response: str, request_prompt: str) -> dict:
+        try:
+            action = parse_json(raw_response)
+            problem = validate_classification(action, evidence, codebook_text(documents, bg_context)) if classification_request else None
+        except Exception as exc:
+            if not classification_request:
+                raise
+            action, problem = None, str(exc)
+        if not problem:
+            return action
+        notices.append(f"分类 JSON 校验未通过（{problem}），已自动重试一次。")
+        repaired = llm.ask_about_files(visuals, classification_repair_prompt(request_prompt, problem),
+                                       SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=events)
+        usage_records.append(llm.get_last_token_usage() or {})
+        estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
+        if estimate: estimates.append(estimate)
+        action = parse_json(repaired)
+        problem = validate_classification(action, evidence, codebook_text(documents, bg_context)) if classification_request else None
+        if problem:
+            raise ValueError(f"自动重试后仍无有效分类 JSON：{problem}")
+        notices.append("分类 JSON 已在自动重试后通过校验。")
+        return action
+
     try:
-        action = parse_json(raw)
+        action = validated_action(raw, model_prompt)
     except Exception:
         # Some Bosch Farm models return a normal natural-language answer despite
         # the code-action schema. A read-only question must remain useful:
@@ -530,6 +596,7 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
             notices.insert(0, f"已在回答前自动准备 {len(coverage.get('files', []))} 个文件的分类证据（{coverage.get('model_calls', 0)} 次预读调用）。")
         return {"answer": answer, "reasoning": "".join(reasoning), "notices": notices,
                 "sources": evidence, "visuals": visuals, "changes": [], "can_export_bg": False,
+                "classification": None,
                 "turn_cost": sum(item["cost_usd"] for item in estimates) if estimates else None,
                 "usage": status_data(data)}
     requested = [ensure_relative(item) for item in action.get("read_files", [])[:4] if isinstance(item, str)]
@@ -540,12 +607,17 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
             complete[relative] = path.read_text(encoding="utf-8", errors="replace")
             state.refresh_file(relative)
     if complete:
-        raw = llm.ask_about_files(visuals, prompt_for(state, question, snippets, complete, evidence, bg_context, coverage_summaries),
+        model_prompt = prompt_for(state, question, snippets, complete, evidence, bg_context, coverage_summaries)
+        raw = llm.ask_about_files(visuals, model_prompt,
                                    SYSTEM, {"maxOutputTokens": 3000, "temperature": 0}, stream=True, event_handler=events)
         usage_records.append(llm.get_last_token_usage() or {})
         estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
         if estimate: estimates.append(estimate)
-        action = parse_json(raw)
+        try:
+            action = validated_action(raw, model_prompt)
+        except Exception as exc:
+            notices.append(f"补充读取后的分类输出未通过校验：{exc}；未显示分类结论卡。")
+            action = {"answer": raw.strip() or "模型没有返回可显示的文字。", "changes": [], "classification": None}
     changes = build_diff(state, action.get("changes", []))
     data["pending"] = changes
     state.add_turn("user", question); state.add_turn("assistant", action.get("answer", ""))
@@ -571,6 +643,7 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
             "turn_usage": turn_token_usage,
             "model_response": llm.last_response_model or data["model"],
             "turn_cost": turn_token_usage["cost_usd"] if estimates else None,
+            "classification": action.get("classification") if classification_request else None,
             "usage": status_data(data)}
 
 
@@ -611,18 +684,32 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
                 visuals, prompt, SYSTEM, {"maxOutputTokens": 4096, "temperature": 0},
                 stream=True, event_handler=events,
             )
-            usage = connector.get_last_token_usage() or {}
-            token_usage = summarize_usage([usage])
+            usage_records = [connector.get_last_token_usage() or {}]
             actual_model = connector.last_response_model or model
-            estimate = data["pricing"].estimate(actual_model, token_usage["input"], token_usage["output"])
-            token_usage["cost_usd"] = float(estimate["cost_usd"]) if estimate else None
+            classification = None
             try:
                 action = parse_json(raw)
+                problem = validate_classification(action, evidence, codebook_text(documents, bg_context))
+                if problem:
+                    notices.append(f"分类 JSON 校验未通过（{problem}），已自动重试一次。")
+                    raw = connector.ask_about_files(visuals, classification_repair_prompt(prompt, problem), SYSTEM,
+                                                     {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=events)
+                    usage_records.append(connector.get_last_token_usage() or {})
+                    action = parse_json(raw)
+                    problem = validate_classification(action, evidence, codebook_text(documents, bg_context))
+                    if problem:
+                        raise ValueError(f"自动重试后仍无有效分类 JSON：{problem}")
+                    notices.append("分类 JSON 已在自动重试后通过校验。")
                 answer = str(action.get("answer", "")).strip() or raw.strip()
-            except Exception:
+                classification = action.get("classification")
+            except Exception as exc:
                 answer = raw.strip() or "模型没有返回可显示的文字。"
+                notices.append(f"未显示该模型的分类结论卡：{exc}")
+            token_usage = summarize_usage(usage_records)
+            estimate = data["pricing"].estimate(actual_model, token_usage["input"], token_usage["output"])
+            token_usage["cost_usd"] = float(estimate["cost_usd"]) if estimate else None
             results.append({"requested_model": model, "model_response": actual_model, "ok": True,
-                            "answer": answer, "usage": token_usage, "notices": notices})
+                            "answer": answer, "classification": classification, "usage": token_usage, "notices": notices})
         except Exception as exc:
             results.append({"requested_model": model, "model_response": model, "ok": False,
                             "answer": "", "error": str(exc), "usage": None, "notices": notices})
@@ -948,7 +1035,7 @@ def apply():
 
 HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bosch Local Workbench</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#111827;color:#e5e7eb;font:14px Inter,Segoe UI,Arial,sans-serif}button,input,select{font:inherit}button{background:#2563eb;color:white;border:0;border-radius:7px;padding:8px 10px;cursor:pointer}button.ghost{background:#263244;color:#cbd5e1}.shell{height:100vh;display:grid;grid-template-columns:270px minmax(420px,1fr) 300px}.side{background:#172033;border-right:1px solid #334155;padding:16px;overflow:auto}.right{border-left:1px solid #334155;border-right:0}.main{display:flex;flex-direction:column;min-width:0}.brand{font-weight:700;font-size:16px;margin-bottom:16px}.muted{color:#94a3b8;font-size:12px}.field{margin:10px 0}.field label{display:block;font-size:12px;color:#a9b6c8;margin-bottom:5px}input{width:100%;background:#0f172a;border:1px solid #3b4960;border-radius:6px;padding:8px;color:#f8fafc}.row{display:flex;gap:7px}.row>*{min-width:0}.row input{flex:1}.chat{flex:1;overflow:auto;padding:24px max(32px,8%)}.message{max-width:920px;margin:0 auto 18px;padding:13px 15px;border-radius:10px;white-space:pre-wrap;line-height:1.55}.user{background:#1e3a5f;margin-left:auto;max-width:78%}.assistant{background:#1e293b}.reason{margin:8px auto 18px;max-width:920px;background:#171e2d;border:1px solid #334155;border-radius:8px;padding:9px}.reason summary{cursor:pointer;color:#b9c9e2}.reason pre{white-space:pre-wrap;font-size:12px;color:#aab7c8}.composer{border-top:1px solid #334155;padding:13px 8%;display:flex;gap:8px;background:#111827}.composer input{padding:12px}.composer button{padding:10px 17px}.card{border:1px solid #334155;border-radius:8px;padding:10px;margin:10px 0;background:#141d2d}.list{font-size:12px;line-height:1.5;word-break:break-word}.diff{white-space:pre-wrap;background:#0b1220;border-radius:6px;padding:8px;max-height:230px;overflow:auto;color:#d7e1ed}.ok{color:#86efac}.error{color:#fca5a5}.chip{display:inline-block;padding:3px 6px;border-radius:5px;background:#22314a;color:#bcd5ff;margin:2px;font-size:11px}.check{display:block;margin:5px 0;color:#dbeafe;font-size:12px}.check input{width:auto;margin-right:5px}.comparison{max-width:1180px;margin:0 auto 20px}.comparison-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:10px}.comparison .card{margin:0}.comparison .answer{white-space:pre-wrap;line-height:1.5;max-height:440px;overflow:auto}.target-tree{max-height:360px;overflow:auto;border:1px solid #334155;border-radius:7px;padding:7px;background:#0f172a}.target-tree details{margin:3px 0}.target-tree summary{cursor:pointer;list-style:none}.target-tree summary::-webkit-details-marker{display:none}.target-tree summary:before{content:'▸';display:inline-block;width:13px;color:#94a3b8}.target-tree details[open]>summary:before{content:'▾'}.target-tree label{cursor:pointer;margin-left:4px}.target-tree input{width:auto;vertical-align:middle}.tree-children{margin-left:17px;border-left:1px solid #29374d;padding-left:7px}.tree-file{margin:3px 0}.unsupported{color:#64748b}
+*{box-sizing:border-box}body{margin:0;background:#111827;color:#e5e7eb;font:14px Inter,Segoe UI,Arial,sans-serif}button,input,select{font:inherit}button{background:#2563eb;color:white;border:0;border-radius:7px;padding:8px 10px;cursor:pointer}button.ghost{background:#263244;color:#cbd5e1}.shell{height:100vh;display:grid;grid-template-columns:270px minmax(420px,1fr) 300px}.side{background:#172033;border-right:1px solid #334155;padding:16px;overflow:auto}.right{border-left:1px solid #334155;border-right:0}.main{display:flex;flex-direction:column;min-width:0}.brand{font-weight:700;font-size:16px;margin-bottom:16px}.muted{color:#94a3b8;font-size:12px}.field{margin:10px 0}.field label{display:block;font-size:12px;color:#a9b6c8;margin-bottom:5px}input{width:100%;background:#0f172a;border:1px solid #3b4960;border-radius:6px;padding:8px;color:#f8fafc}.row{display:flex;gap:7px}.row>*{min-width:0}.row input{flex:1}.chat{flex:1;overflow:auto;padding:24px max(32px,8%)}.message{max-width:920px;margin:0 auto 18px;padding:13px 15px;border-radius:10px;white-space:pre-wrap;line-height:1.55}.user{background:#1e3a5f;margin-left:auto;max-width:78%}.assistant{background:#1e293b}.reason{margin:8px auto 18px;max-width:920px;background:#171e2d;border:1px solid #334155;border-radius:8px;padding:9px}.reason summary{cursor:pointer;color:#b9c9e2}.reason pre{white-space:pre-wrap;font-size:12px;color:#aab7c8}.composer{border-top:1px solid #334155;padding:13px 8%;display:flex;gap:8px;background:#111827}.composer input{padding:12px}.composer button{padding:10px 17px}.card{border:1px solid #334155;border-radius:8px;padding:10px;margin:10px 0;background:#141d2d}.list{font-size:12px;line-height:1.5;word-break:break-word}.diff{white-space:pre-wrap;background:#0b1220;border-radius:6px;padding:8px;max-height:230px;overflow:auto;color:#d7e1ed}.ok{color:#86efac}.error{color:#fca5a5}.chip{display:inline-block;padding:3px 6px;border-radius:5px;background:#22314a;color:#bcd5ff;margin:2px;font-size:11px}.check{display:block;margin:5px 0;color:#dbeafe;font-size:12px}.check input{width:auto;margin-right:5px}.comparison{max-width:1180px;margin:0 auto 20px}.comparison-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:10px}.comparison .card{margin:0}.comparison .answer{white-space:pre-wrap;line-height:1.5;max-height:440px;overflow:auto}.target-tree{max-height:360px;overflow:auto;border:1px solid #334155;border-radius:7px;padding:7px;background:#0f172a}.target-tree details{margin:3px 0}.target-tree summary{cursor:pointer;list-style:none}.target-tree summary::-webkit-details-marker{display:none}.target-tree summary:before{content:'▸';display:inline-block;width:13px;color:#94a3b8}.target-tree details[open]>summary:before{content:'▾'}.target-tree label{cursor:pointer;margin-left:4px}.target-tree input{width:auto;vertical-align:middle}.tree-children{margin-left:17px;border-left:1px solid #29374d;padding-left:7px}.tree-file{margin:3px 0}.unsupported{color:#64748b}.classification-card{max-width:920px;margin:-8px auto 18px;border:1px solid #38bdf8;border-radius:10px;padding:13px 15px;background:#10263a;line-height:1.55}.classification-card h3{margin:0 0 8px;color:#bae6fd;font-size:14px}.classification-card ul{margin:5px 0 0;padding-left:20px}.classification-card .result{font-size:16px;color:#f8fafc}
 </style></head><body><div class="shell"><aside class="side"><div class="brand">Bosch Local Workbench</div><div class="muted">仅本机 127.0.0.1 · 缓存固定保存在程序目录 AI_Bot_State</div>
 <div class="field"><label>代码工作区文件夹</label><div class="row"><input id="workspace" placeholder="C:\\...\\项目文件夹"><button class="ghost" onclick="pick('folder','workspace')">选择</button></div></div><div class="field"><label>模型</label>
 <select id="model" onchange="toggleCustomModel();loadModelStatus()">
@@ -982,6 +1069,7 @@ window.addEventListener('DOMContentLoaded',()=>{renderCompareSlots();restoreLast
 async function api(url,opt={}){let r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt});let d=await r.json();if(!r.ok)throw Error(d.detail||'请求失败');return d}
 async function pick(kind,target){try{$(target).value=(await api('/api/pick/'+kind)).path||''}catch(e){alert(e.message)}}
 function message(text,kind='assistant'){let e=document.createElement('div');e.className='message '+kind;e.textContent=text;$('chat').append(e);$('chat').scrollTop=1e9;return e}
+function classificationCard(c){let card=document.createElement('section');card.className='classification-card';let alternative=c.alternative_label?'<br>备选类别：'+esc(c.alternative_label):'';let evidence=(c.evidence_labels||[]).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>未提供</li>';let uncertainty=(c.uncertainties||[]).filter(Boolean).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>未报告明显不确定性</li>';card.innerHTML='<h3>本次分类结论（已校验）</h3><div class="result">类别：<b>'+esc(c.label||'—')+'</b></div><div>置信度：'+esc(c.confidence||'—')+alternative+'</div><div><b>证据</b><ul>'+evidence+'</ul></div><div><b>不确定性</b><ul>'+uncertainty+'</ul></div>';return card}
 function renderStatus(s){$('status').innerHTML=`模型：<b>${s.model}</b><br>会话：${s.session_name||'default'}<br>代码：${s.code_files} 文件<br>材料：${s.documents} 个<br>累计请求：${s.requests}<br>累计 Token：${s.input_tokens} / ${s.output_tokens}<br>累计估算：${s.cost}<br>${s.bg_context?'<span class="ok">BG 模式：'+s.bg_context.codebook_name+'</span>':'普通模式'}`}
 function renderUsageDetail(u,model){if(!u)return;$('usagedetail').innerHTML=`实际模型：<b>${esc(model||'—')}</b><br>输入 / 输出 / 总计：${u.input} / ${u.output} / ${u.total}<br>推理：${u.reasoning||0} ｜ Gemini thinking：${u.gemini_thinking||0}<br>Claude 缓存读 / 写：${u.cache_read||0} / ${u.cache_write||0}<br>本轮估算：${Number(u.cost_usd||0).toFixed(6)}`}
 function toggleCustomModel(){let custom=$('model').value==='__custom__';$('custommodel').style.display=custom?'block':'none';if(custom)$('custommodel').focus()}
@@ -1020,8 +1108,8 @@ function changeCompareModel(index){let select=$('cmpsel'+index);compareSlots[ind
 function addCompareModel(){if(compareSlots.length>=4){$('comparestatus').textContent='最多只能同时对比 4 个模型。';return}compareSlots.push({value:'',custom:''});renderCompareSlots();$('cmpsel'+(compareSlots.length-1)).focus()}
 function removeCompareModel(index){compareSlots.splice(index,1);renderCompareSlots();$('comparestatus').textContent=''}
 function selectedCompareModels(){return compareSlots.map((slot,index)=>slot.value==='__custom__'?$('cmpcustom'+index).value.trim():slot.value).filter(Boolean)}
-async function compareModels(){if(busy)return;let q=$('question').value.trim()||lastQuestion;if(!q){$('comparestatus').innerHTML='<span class="error">先在下方输入问题，或先发送一次问题。</span>';return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){$('comparestatus').innerHTML='<span class="error">请选择 2–4 个不同模型；“其他”中输入准确的 Bosch Farm Model ID。</span>';return}busy=true;lastQuestion=q;$('comparestatus').textContent='正在按顺序请求 '+models.length+' 个模型…';let wait=message('正在进行多模型对比：'+models.join(' · '));try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models})});wait.remove();let box=document.createElement('section');box.className='comparison';box.innerHTML='<div class="message assistant"><b>多模型对比</b><br>同一问题：'+esc(q)+'<br><span class="muted">相同证据：'+x.sources.map(esc).join(' · ')+'</span></div><div class="comparison-grid"></div>';let grid=box.querySelector('.comparison-grid');for(let r of x.results){let card=document.createElement('article');card.className='card';if(!r.ok){card.innerHTML='<b>'+esc(r.requested_model)+'</b><p class="error">请求失败</p><div class="muted">'+esc(r.error||'未知错误')+'</div>';grid.append(card);continue}let u=r.usage||{};let cost=u.cost_usd===null||u.cost_usd===undefined?'未配置价格':'$'+Number(u.cost_usd).toFixed(6);card.innerHTML='<b>'+esc(r.model_response)+'</b>'+(r.model_response!==r.requested_model?'<div class="muted">请求：'+esc(r.requested_model)+'</div>':'')+'<div class="muted ok">成功 · Token '+(u.input||0)+' / '+(u.output||0)+' · '+cost+'</div><hr><div class="answer"></div>'+(r.notices?.length?'<div class="muted">'+r.notices.map(esc).join('<br>')+'</div>':'');card.querySelector('.answer').textContent=r.answer;grid.append(card)}$('chat').append(box);$('comparestatus').innerHTML='<span class="ok">对比完成；结果仅显示在当前页面，不写入普通会话。</span>'}catch(e){wait.textContent='多模型对比错误：'+e.message;wait.classList.add('error');$('comparestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{busy=false;$('chat').scrollTop=1e9}}
-async function chat(){if(busy||!$('question').value.trim())return;busy=true;let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');let wait=message('正在向 Bosch Farm 请求…');try{let x=await api('/api/chat',{method:'POST',body:JSON.stringify({question:q})});wait.remove();message(x.answer);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>模型推理（接口返回）</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');$('sources').innerHTML=x.sources.map(s=>`<div class="card"><b>${s.label}</b><br>${s.visual?'<span class="chip">视觉证据已附带</span>':''}</div>`).join('')||'无可用来源';$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${c.path}</b><br>${c.reason}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button onclick="apply()">应用修改</button>':'无';$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">导出本次 BG 分析</button>':'仅在 Baugruppe 分析完成后可导出。';renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}catch(e){wait.textContent='错误：'+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
+async function compareModels(){if(busy)return;let q=$('question').value.trim()||lastQuestion;if(!q){$('comparestatus').innerHTML='<span class="error">先在下方输入问题，或先发送一次问题。</span>';return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){$('comparestatus').innerHTML='<span class="error">请选择 2–4 个不同模型；“其他”中输入准确的 Bosch Farm Model ID。</span>';return}busy=true;lastQuestion=q;$('comparestatus').textContent='正在按顺序请求 '+models.length+' 个模型…';let wait=message('正在进行多模型对比：'+models.join(' · '));try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models})});wait.remove();let box=document.createElement('section');box.className='comparison';box.innerHTML='<div class="message assistant"><b>多模型对比</b><br>同一问题：'+esc(q)+'<br><span class="muted">相同证据：'+x.sources.map(esc).join(' · ')+'</span></div><div class="comparison-grid"></div>';let grid=box.querySelector('.comparison-grid');for(let r of x.results){let card=document.createElement('article');card.className='card';if(!r.ok){card.innerHTML='<b>'+esc(r.requested_model)+'</b><p class="error">请求失败</p><div class="muted">'+esc(r.error||'未知错误')+'</div>';grid.append(card);continue}let u=r.usage||{};let cost=u.cost_usd===null||u.cost_usd===undefined?'未配置价格':'$'+Number(u.cost_usd).toFixed(6);let classification=r.classification?'<div class="chip">已校验类别：'+esc(r.classification.label)+' · '+esc(r.classification.confidence)+'</div>':'';card.innerHTML='<b>'+esc(r.model_response)+'</b>'+(r.model_response!==r.requested_model?'<div class="muted">请求：'+esc(r.requested_model)+'</div>':'')+'<div class="muted ok">成功 · Token '+(u.input||0)+' / '+(u.output||0)+' · '+cost+'</div>'+classification+'<hr><div class="answer"></div>'+(r.notices?.length?'<div class="muted">'+r.notices.map(esc).join('<br>')+'</div>':'');card.querySelector('.answer').textContent=r.answer;grid.append(card)}$('chat').append(box);$('comparestatus').innerHTML='<span class="ok">对比完成；结果仅显示在当前页面，不写入普通会话。</span>'}catch(e){wait.textContent='多模型对比错误：'+e.message;wait.classList.add('error');$('comparestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{busy=false;$('chat').scrollTop=1e9}}
+async function chat(){if(busy||!$('question').value.trim())return;busy=true;let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');let wait=message('正在向 Bosch Farm 请求…');try{let x=await api('/api/chat',{method:'POST',body:JSON.stringify({question:q})});wait.remove();message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>模型推理（接口返回）</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');$('sources').innerHTML=x.sources.map(s=>`<div class="card"><b>${s.label}</b><br>${s.visual?'<span class="chip">视觉证据已附带</span>':''}</div>`).join('')||'无可用来源';$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${c.path}</b><br>${c.reason}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button onclick="apply()">应用修改</button>':'无';$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">导出本次 BG 分析</button>':'仅在 Baugruppe 分析完成后可导出。';renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}catch(e){wait.textContent='错误：'+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
 async function exportSession(){try{let x=await api('/api/export/session',{method:'POST'});$('sessionexport').innerHTML='<span class="ok">已导出：'+esc(x.path)+'</span>'}catch(e){$('sessionexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function exportBgAnalysis(){try{let x=await api('/api/export/bg-analysis',{method:'POST'});$('analysisexport').innerHTML='<span class="ok">已导出：'+esc(x.path)+'</span>'}catch(e){$('analysisexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function esc(s){let e=document.createElement('div');e.textContent=s;return e.innerHTML}async function apply(){try{let x=await api('/api/apply',{method:'POST'});$('changes').innerHTML='<span class="ok">已应用 '+x.applied+' 个修改。</span>';message('已写入 '+x.applied+' 个经确认的文件修改。')}catch(e){$('changes').innerHTML='<span class="error">'+e.message+'</span>'}}
