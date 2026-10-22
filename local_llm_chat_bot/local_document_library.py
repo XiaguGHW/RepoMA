@@ -131,7 +131,7 @@ class LocalDocumentLibrary:
         self._save()
         return count
 
-    def search(self, question: str, limit: int = 6, preferred_ids=None, classification=False):
+    def search(self, question: str, limit: int = 6, preferred_ids=None, classification=False, allowed_ids=None):
         """Return local evidence. Preferred documents are kept in the result.
 
         Chinese questions and German technical material rarely share literal
@@ -141,8 +141,10 @@ class LocalDocumentLibrary:
         """
         words = set(_tokens(question))
         chars = set(re.findall(r"[\u4e00-\u9fff]", question.lower()))
+        allowed = set(allowed_ids or [])
+        documents = [item for item in self.data["documents"] if not allowed or item["id"] in allowed]
         scored = []
-        for document in self.data["documents"]:
+        for document in documents:
             for index, chunk in enumerate(document.get("chunks", [])):
                 text = chunk["text"].lower()
                 word_score = sum(1 for word in words if word in text)
@@ -163,7 +165,7 @@ class LocalDocumentLibrary:
         if classification and preferred:
             # A Codebook or a visual-only DFC has no matching words for a
             # Chinese question. Include one representative chunk per source.
-            for document in self.data["documents"]:
+            for document in documents:
                 if document["id"] not in preferred or not document.get("chunks"):
                     continue
                 candidates = [(score, doc, index, chunk) for score, doc, index, chunk in scored if doc["id"] == document["id"]]
@@ -171,8 +173,8 @@ class LocalDocumentLibrary:
                 key = (item[1]["id"], item[2])
                 if key not in used:
                     selected.append(item); used.add(key)
-        if not selected and self.data["documents"]:
-            for document in self.data["documents"][:2]:
+        if not selected and documents:
+            for document in documents[:2]:
                 if document.get("chunks"):
                     selected.append((0, document, 0, document["chunks"][0]))
         # Classification favours coverage; normal chat retains the old small context.
