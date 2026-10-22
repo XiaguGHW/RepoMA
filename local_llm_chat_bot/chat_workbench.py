@@ -341,35 +341,60 @@ def parse_codebook_draft(raw: str) -> dict:
     for item in draft["classes"]:
         if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not item["name"].strip():
             continue
+        def rules(values, prefix):
+            result = []
+            for index, value in enumerate(values if isinstance(values, list) else [], start=1):
+                if isinstance(value, str):
+                    result.append({"id": f"{prefix}-{index}", "text": value, "pages": []})
+                elif isinstance(value, dict) and str(value.get("text", "")).strip():
+                    result.append({"id": str(value.get("id") or f"{prefix}-{index}"),
+                                   "text": str(value["text"]).strip(),
+                                   "pages": [int(page) for page in value.get("pages", []) if str(page).isdigit()]})
+            return result
+        name = item["name"].strip()
+        key = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-") or "class"
         classes.append({
-            "name": item["name"].strip(), "definition": str(item.get("definition", "")).strip(),
-            "decision_rules": item.get("decision_rules", []), "boundaries": item.get("boundaries", []),
-            "evidence_pages": item.get("evidence_pages", []),
+            "name": name, "definition": str(item.get("definition", "")).strip(),
+            "decision_rules": rules(item.get("decision_rules", []), f"{key}-rule"),
+            "boundaries": rules(item.get("boundaries", []), f"{key}-boundary"),
+            "evidence_pages": [int(page) for page in item.get("evidence_pages", []) if str(page).isdigit()],
         })
     if not classes:
         raise ValueError("Codebook JSON 未包含有效类别")
-    return {"classes": classes, "global_rules": draft.get("global_rules", []),
-            "table_rules": draft.get("table_rules", []), "uncertainties": draft.get("uncertainties", [])}
+    def profile_rules(values, prefix):
+        result = []
+        for index, value in enumerate(values if isinstance(values, list) else [], start=1):
+            if isinstance(value, str): result.append({"id": f"{prefix}-{index}", "text": value, "pages": []})
+            elif isinstance(value, dict) and str(value.get("text", "")).strip():
+                result.append({"id": str(value.get("id") or f"{prefix}-{index}"), "text": str(value["text"]).strip(),
+                               "pages": [int(page) for page in value.get("pages", []) if str(page).isdigit()],
+                               "table": value.get("table") if isinstance(value.get("table"), dict) else None})
+        return result
+    return {"classes": classes, "global_rules": profile_rules(draft.get("global_rules", []), "global"),
+            "table_rules": profile_rules(draft.get("table_rules", []), "table"), "uncertainties": draft.get("uncertainties", [])}
 
 
-CODEBOOK_PAGE_SYSTEM = """You extract a technical classification Codebook. Use only supplied page text and images. Return ONLY JSON: {\"page_notes\":[{\"page\":number,\"facts\":[\"...\"],\"tables\":[\"preserve row/column meaning\"],\"uncertainties\":[\"...\"]}]}. Do not classify a Baugruppe."""
-CODEBOOK_MERGE_SYSTEM = """You consolidate Codebook page notes. Return ONLY JSON: {\"classes\":[{\"name\":\"exact official class name\",\"definition\":\"...\",\"decision_rules\":[\"...\"],\"boundaries\":[\"...\"],\"evidence_pages\":[1]}],\"global_rules\":[\"...\"],\"table_rules\":[\"...\"],\"uncertainties\":[\"...\"]}. Preserve exact class names and page numbers. Do not invent missing rules."""
+CODEBOOK_PAGE_SYSTEM = """You transcribe exactly one technical classification Codebook page using supplied native text, OCR text and the full-page image. Return ONLY JSON: {\"page\":number,\"official_names\":[\"exact wording\"],\"definitions\":[\"...\"],\"decision_rules\":[\"...\"],\"boundaries\":[\"...\"],\"tables\":[{\"title\":\"...\",\"columns\":[\"...\"],\"rows\":[[\"cell\"]]}],\"uncertainties\":[\"...\"]}. Preserve table row/column meaning, do not invent text, and use the page number supplied in the prompt."""
+CODEBOOK_MERGE_SYSTEM = """You consolidate page-by-page Codebook transcriptions. Return ONLY JSON: {\"classes\":[{\"name\":\"exact official class name\",\"definition\":\"...\",\"decision_rules\":[{\"id\":\"class-rule-1\",\"text\":\"...\",\"pages\":[1]}],\"boundaries\":[{\"id\":\"class-boundary-1\",\"text\":\"...\",\"pages\":[1]}],\"evidence_pages\":[1]}],\"global_rules\":[{\"id\":\"global-1\",\"text\":\"...\",\"pages\":[1]}],\"table_rules\":[{\"id\":\"table-1\",\"text\":\"meaning of the table rule\",\"pages\":[1],\"table\":{\"columns\":[\"...\"],\"rows\":[[\"...\"]]}}],\"uncertainties\":[\"...\"]}. Preserve exact names, rule IDs and page numbers. Do not invent missing rules."""
 
 
 def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str) -> dict:
     document = data["documents"].add(str(path))
     connector = LLMConnector(model, data["llm"].api_key, session_id=f"codebook_{os.urandom(6).hex()}")
+    records = data["documents"].codebook_page_records(path, app_state_home() / "codebook_visual_cache") if path.suffix.lower() == ".pdf" else []
     groups, notes, usages = codebook_page_groups(document), [], []
-    if not groups:
+    if not records and not groups:
         raise HTTPException(400, "Codebook 没有可读取的页面。")
-    for index, group in enumerate(groups, start=1):
-        snippets = [{"label": item["label"], "text": item["text"], "visual": item.get("visual")} for item in group]
-        visuals = data["documents"].visual_paths(snippets, app_state_home() / "codebook_visual_cache", limit=5)
-        pages = ", ".join(str((item.get("visual") or {}).get("page", "?")) for item in group)
-        prompt = "Codebook page group " + str(index) + "/" + str(len(groups)) + "; pages " + pages + ".\n\n" + "\n\n".join(
-            f"--- {item['label']} ---\n{item['text']}" for item in snippets)
-        raw = connector.ask_about_files(visuals, prompt, CODEBOOK_PAGE_SYSTEM, {"maxOutputTokens": 1800, "temperature": 0}, stream=True)
-        notes.append(raw); usages.append(connector.get_last_token_usage() or {})
+    if records:
+        for record in records:
+            prompt = f"Codebook page {record['page']} of {len(records)}. Page type: {record['page_type']}.\n--- NATIVE TEXT ---\n{record['native_text'] or '[none]'}\n--- OCR TEXT ({record['ocr_status']}) ---\n{record['ocr_text'] or '[none]'}"
+            raw = connector.ask_about_files([record["image_path"]], prompt, CODEBOOK_PAGE_SYSTEM, {"maxOutputTokens": 2200, "temperature": 0}, stream=True)
+            notes.append(raw); usages.append(connector.get_last_token_usage() or {})
+    else:
+        for index, group in enumerate(groups, start=1):
+            prompt = f"Codebook DOCX section {index}/{len(groups)}.\n" + "\n\n".join(f"--- {item['label']} ---\n{item['text']}" for item in group)
+            raw = connector.ask_about_files([], prompt, CODEBOOK_PAGE_SYSTEM, {"maxOutputTokens": 2200, "temperature": 0}, stream=True)
+            notes.append(raw); usages.append(connector.get_last_token_usage() or {})
     merge_prompt = "Consolidate every Codebook page note below. All classes, tables and boundary rules must be retained.\n\n" + "\n\n".join(
         f"--- PAGE GROUP {index} ---\n{note}" for index, note in enumerate(notes, start=1))
     merged = connector.ask_about_files([], merge_prompt, CODEBOOK_MERGE_SYSTEM, {"maxOutputTokens": 3500, "temperature": 0}, stream=True)
@@ -382,8 +407,10 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str) -> di
     page_count = len([number for number in page_numbers if isinstance(number, int)]) or len(document.get("chunks", []))
     return {"status": "draft", "source_path": str(path), "source_name": path.name, "sha256": file_digest(path),
             "prepared_at": datetime.now().astimezone().isoformat(timespec="seconds"), "parser_model": connector.last_response_model or model,
-            "page_count": page_count,
-            "page_groups": len(groups), "usage": usage, "draft": draft, "document_id": document["id"]}
+            "page_count": len(records) or page_count,
+            "page_groups": len(records) or len(groups), "usage": usage, "draft": draft, "document_id": document["id"],
+            "page_records": [{key: record[key] for key in ("page", "page_type", "ocr_status", "embedded_image_count")} for record in records],
+            "page_transcriptions": notes}
 
 
 def summarize_usage(records: list[dict]) -> dict[str, int | float]:
@@ -598,7 +625,48 @@ def codebook_text(documents: LocalDocumentLibrary, bg_context: dict | None) -> s
     return profile_text + "\n" + "\n".join(str(chunk.get("text", "")) for chunk in (document or {}).get("chunks", []))
 
 
-def validate_classification(action: dict, evidence: list[dict], codebook: str) -> str | None:
+def relevant_codebook_page_evidence(question: str, bg_context: dict | None, maximum_pages: int = 3) -> list[dict]:
+    """Attach original pages for the rules most relevant to this question.
+
+    The locked profile remains the normal prompt context.  These page images
+    are a targeted audit trail for the model, not a repeated full Codebook
+    upload.
+    """
+    profile = (bg_context or {}).get("locked_profile") or {}
+    path = Path(str((bg_context or {}).get("codebook_path", "")))
+    if not path.is_file() or path.suffix.lower() != ".pdf":
+        return []
+    words = {word for word in re.findall(r"[\wäöüß-]{3,}", question.casefold())}
+    candidates = []
+    groups = list(profile.get("global_rules", [])) + list(profile.get("table_rules", []))
+    for cls in profile.get("classes", []):
+        if isinstance(cls, dict):
+            groups.extend(cls.get("decision_rules", [])); groups.extend(cls.get("boundaries", []))
+    for rule in groups:
+        if not isinstance(rule, dict):
+            continue
+        pages = [int(page) for page in rule.get("pages", []) if str(page).isdigit()]
+        if not pages:
+            continue
+        text = str(rule.get("text", ""))
+        score = sum(word in text.casefold() for word in words)
+        candidates.append((score, pages, str(rule.get("id", "rule")), text))
+    candidates.sort(key=lambda item: (-item[0], item[2]))
+    selected, seen = [], set()
+    for _score, pages, rule_id, text in candidates:
+        for page in pages:
+            if page in seen:
+                continue
+            selected.append({"id": "locked-codebook-page", "name": path.name,
+                             "label": f"{path.name} — Codebook rule {rule_id}, page {page}",
+                             "text": text, "visual": {"kind": "pdf_page", "path": str(path), "page": page}})
+            seen.add(page)
+            if len(selected) >= maximum_pages:
+                return selected
+    return selected
+
+
+def validate_classification(action: dict, evidence: list[dict], codebook: str, profile: dict | None = None) -> str | None:
     """Validate the machine-readable part without judging technical correctness."""
     classification = action.get("classification")
     if not isinstance(classification, dict):
@@ -616,6 +684,20 @@ def validate_classification(action: dict, evidence: list[dict], codebook: str) -
         return "缺少 evidence_labels"
     if not all(isinstance(item, str) and item in supplied for item in evidence_labels):
         return "evidence_labels 必须完全匹配本轮提供的证据标签"
+    rule_ids = classification.get("codebook_rule_ids")
+    known_rules = set()
+    for group in ((profile or {}).get("global_rules", []), (profile or {}).get("table_rules", [])):
+        known_rules.update(str(item.get("id")) for item in group if isinstance(item, dict))
+    for item in (profile or {}).get("classes", []):
+        if isinstance(item, dict):
+            for group in (item.get("decision_rules", []), item.get("boundaries", [])):
+                known_rules.update(str(rule.get("id")) for rule in group if isinstance(rule, dict))
+    if known_rules and (not isinstance(rule_ids, list) or not rule_ids or not all(str(item) in known_rules for item in rule_ids)):
+        return "codebook_rule_ids 必须引用锁定 Codebook 中实际存在的规则 ID"
+    if known_rules and (not isinstance(classification.get("codebook_rule_pages"), list) or not classification["codebook_rule_pages"]):
+        return "缺少 codebook_rule_pages"
+    if not isinstance(classification.get("bg_evidence_pages"), list) or not classification["bg_evidence_pages"]:
+        return "缺少 bg_evidence_pages"
     alternative = classification.get("alternative_label", "")
     if alternative and (not isinstance(alternative, str) or (codebook and alternative.casefold() not in codebook.casefold())):
         return "备选类别未在当前 Codebook 中找到"
@@ -629,7 +711,7 @@ def classification_repair_prompt(base_prompt: str, reason: str) -> str:
     return base_prompt + f"""
 
 IMPORTANT: Your preceding classification response was rejected locally: {reason}.
-Return the complete JSON action again, with a valid `classification` object. Do not omit any required fields. Copy the exact class name from the supplied Codebook and copy evidence_labels exactly from the supplied document labels. Do not add commentary outside JSON.
+Return the complete JSON action again, with a valid `classification` object. Do not omit any required fields. Copy the exact class name and rule IDs from the supplied Codebook and copy evidence_labels exactly from the supplied document labels. Include separate codebook_rule_pages and bg_evidence_pages. Do not add commentary outside JSON.
 """
 
 
@@ -642,6 +724,9 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
     preferred = ([bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))) if bg_context else active_source_ids
     allowed = list(bg_context.get("source_ids", [])) + [bg_context.get("codebook_id")] if bg_context else active_source_ids
     evidence = documents.search(question, preferred_ids=preferred, classification=bool(bg_context), allowed_ids=allowed)
+    if bg_context:
+        existing = {(item.get("visual") or {}).get("page") for item in evidence if item.get("name") == bg_context.get("codebook_name")}
+        evidence.extend(item for item in relevant_codebook_page_evidence(question, bg_context) if (item.get("visual") or {}).get("page") not in existing)
     visuals = documents.visual_paths(evidence, state.root / "visual_cache",
                                      bilder_images=documents.bilder_image_paths(allowed))
     reasoning, notices = [], []
@@ -675,7 +760,7 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
     def validated_action(raw_response: str, request_prompt: str) -> dict:
         try:
             action = parse_json(raw_response)
-            problem = validate_classification(action, evidence, codebook_text(documents, bg_context)) if classification_request else None
+            problem = validate_classification(action, evidence, codebook_text(documents, bg_context), (bg_context or {}).get("locked_profile")) if classification_request else None
         except Exception as exc:
             if not classification_request:
                 raise
@@ -689,7 +774,7 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
         estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
         if estimate: estimates.append(estimate)
         action = parse_json(repaired)
-        problem = validate_classification(action, evidence, codebook_text(documents, bg_context)) if classification_request else None
+        problem = validate_classification(action, evidence, codebook_text(documents, bg_context), (bg_context or {}).get("locked_profile")) if classification_request else None
         if problem:
             raise ValueError(f"自动重试后仍无有效分类 JSON：{problem}")
         notices.append("分类 JSON 已在自动重试后通过校验。")
@@ -769,6 +854,7 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
     snippets = {item: excerpt(state, item, question) for item in matches}
     preferred = [bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))
     evidence = documents.search(question, preferred_ids=preferred, classification=True, allowed_ids=preferred)
+    evidence.extend(relevant_codebook_page_evidence(question, bg_context))
     visuals = documents.visual_paths(evidence, state.root / "visual_cache",
                                      bilder_images=documents.bilder_image_paths(preferred))
     visual_report = documents.last_visual_report
@@ -801,14 +887,14 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
             classification = None
             try:
                 action = parse_json(raw)
-                problem = validate_classification(action, evidence, codebook_text(documents, bg_context))
+                problem = validate_classification(action, evidence, codebook_text(documents, bg_context), (bg_context or {}).get("locked_profile"))
                 if problem:
                     notices.append(f"分类 JSON 校验未通过（{problem}），已自动重试一次。")
                     raw = connector.ask_about_files(visuals, classification_repair_prompt(prompt, problem), SYSTEM,
                                                      {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=events)
                     usage_records.append(connector.get_last_token_usage() or {})
                     action = parse_json(raw)
-                    problem = validate_classification(action, evidence, codebook_text(documents, bg_context))
+                    problem = validate_classification(action, evidence, codebook_text(documents, bg_context), (bg_context or {}).get("locked_profile"))
                     if problem:
                         raise ValueError(f"自动重试后仍无有效分类 JSON：{problem}")
                     notices.append("分类 JSON 已在自动重试后通过校验。")
@@ -1059,7 +1145,7 @@ def analyze_target(request: TargetRequest):
         data["state"].data["bg_context"] = {
             "codebook_id": codebook["id"], "codebook_name": codebook["name"],
             "source_ids": [item["id"] for item in sources], "folder": str(target),
-            "locked_profile": profile.get("draft", {}),
+            "locked_profile": profile.get("draft", {}), "codebook_path": str(codebook_path),
         }
     else:
         data["state"].data.pop("bg_context", None)
@@ -1235,13 +1321,13 @@ window.addEventListener('DOMContentLoaded',()=>{renderCompareSlots();loadCodeboo
 async function api(url,opt={}){let r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt});let d=await r.json();if(!r.ok)throw Error(d.detail||'请求失败');return d}
 async function pick(kind,target){try{$(target).value=(await api('/api/pick/'+kind)).path||''}catch(e){alert(e.message)}}
 function message(text,kind='assistant'){let e=document.createElement('div');e.className='message '+kind;e.textContent=text;$('chat').append(e);$('chat').scrollTop=1e9;return e}
-function classificationCard(c){let card=document.createElement('section');card.className='classification-card';let alternative=c.alternative_label?'<br>备选类别：'+esc(c.alternative_label):'';let evidence=(c.evidence_labels||[]).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>未提供</li>';let uncertainty=(c.uncertainties||[]).filter(Boolean).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>未报告明显不确定性</li>';card.innerHTML='<h3>本次分类结论（已校验）</h3><div class="result">类别：<b>'+esc(c.label||'—')+'</b></div><div>置信度：'+esc(c.confidence||'—')+alternative+'</div><div><b>证据</b><ul>'+evidence+'</ul></div><div><b>不确定性</b><ul>'+uncertainty+'</ul></div>';return card}
+function classificationCard(c){let card=document.createElement('section');card.className='classification-card';let alternative=c.alternative_label?'<br>备选类别：'+esc(c.alternative_label):'';let evidence=(c.evidence_labels||[]).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>未提供</li>';let uncertainty=(c.uncertainties||[]).filter(Boolean).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>未报告明显不确定性</li>';let rules=(c.codebook_rule_ids||[]).map(esc).join('、')||'未返回';let rulePages=(c.codebook_rule_pages||[]).map(esc).join('、')||'未返回';let bgPages=(c.bg_evidence_pages||[]).map(esc).join('、')||'未返回';card.innerHTML='<h3>本次分类结论（已校验）</h3><div class="result">类别：<b>'+esc(c.label||'—')+'</b></div><div>置信度：'+esc(c.confidence||'—')+alternative+'</div><div><b>Codebook 规则</b>：'+rules+'（页 '+rulePages+'）</div><div><b>BG 页面证据</b>：'+bgPages+'</div><div><b>证据</b><ul>'+evidence+'</ul></div><div><b>不确定性</b><ul>'+uncertainty+'</ul></div>';return card}
 function renderStatus(s){$('status').innerHTML=`模型：<b>${s.model}</b><br>会话：${s.session_name||'default'}<br>代码：${s.code_files} 文件<br>材料：${s.documents} 个<br>累计请求：${s.requests}<br>累计 Token：${s.input_tokens} / ${s.output_tokens}<br>累计估算：${s.cost}<br>${s.bg_context?'<span class="ok">BG 模式：'+s.bg_context.codebook_name+'</span>':'普通模式'}`}
 function renderUsageDetail(u,model){if(!u)return;$('usagedetail').innerHTML=`实际模型：<b>${esc(model||'—')}</b><br>输入 / 输出 / 总计：${u.input} / ${u.output} / ${u.total}<br>推理：${u.reasoning||0} ｜ Gemini thinking：${u.gemini_thinking||0}<br>Claude 缓存读 / 写：${u.cache_read||0} / ${u.cache_write||0}<br>本轮估算：${Number(u.cost_usd||0).toFixed(6)}`}
 function toggleCustomModel(){let custom=$('model').value==='__custom__';$('custommodel').style.display=custom?'block':'none';if(custom)$('custommodel').focus()}
 function setSelectedModel(model){let known=[...$('model').options].some(option=>option.value===model);$('model').value=known?model:'__custom__';$('custommodel').value=known?'':model;toggleCustomModel();loadModelStatus()}
 function selectedModel(){let selected=$('model').value;return selected==='__custom__' ? $('custommodel').value.trim() : selected}
-function codebookList(items){let values=Array.isArray(items)?items.filter(Boolean):[];return values.length?'<ul>'+values.map(item=>'<li>'+esc(String(item))+'</li>').join('')+'</ul>':'<div class="muted">未提取到。</div>'}
+function codebookList(items){let values=Array.isArray(items)?items.filter(Boolean):[];return values.length?'<ul>'+values.map(item=>{if(item&&typeof item==='object'){let text=esc(item.text||item.title||JSON.stringify(item));let id=item.id?' <span class="muted">['+esc(item.id)+']</span>':'';let pages=Array.isArray(item.pages)&&item.pages.length?' <span class="muted">（页 '+esc(item.pages.join('、'))+'）</span>':'';return '<li>'+text+id+pages+'</li>'}return '<li>'+esc(String(item))+'</li>'}).join('')+'</ul>':'<div class="muted">未提取到。</div>'}
 function renderCodebookStatus(profile){let host=$('codebookstatus');if(!profile||profile.status==='none'||!profile.status){host.textContent='尚未准备 Codebook；普通材料问答仍可直接使用。';return}let lock=profile.status==='locked';host.innerHTML=(lock?'<span class="ok">已锁定</span>':'<span class="error">草稿待确认</span>')+'：<b>'+esc(profile.source_name||'Codebook')+'</b><br>'+esc(profile.page_count||0)+' 页/片段 · '+esc(profile.parser_model||'—')+(lock?'<br>切换模型、会话或材料后仍会自动沿用。':'<br>请在中间区域核对后一次确认锁定。')}
 async function loadCodebookStatus(){try{renderCodebookStatus(await api('/api/codebook'))}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function leaveCodebookWorkspace(){let composer=$('composer');composer.style.display='flex';$('chat').classList.remove('codebook-workspace');loadHistory()}
