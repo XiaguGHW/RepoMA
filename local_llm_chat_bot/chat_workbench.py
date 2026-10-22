@@ -8,6 +8,7 @@ from __future__ import annotations
 import difflib
 import json
 import os
+import re
 import shutil
 import threading
 from datetime import datetime
@@ -279,9 +280,26 @@ def load_coverage(state: ProjectState) -> dict:
         return {}
 
 
-def summary_groups(document: dict, limit: int = 24_000) -> list[str]:
+def selected_reading_chunks(document: dict) -> tuple[list[dict], str]:
+    """Use a human-like first pass for large component manuals, not blind full-PDF upload."""
+    name = str(document.get("name", "")).casefold()
+    is_datasheet = any(term in name for term in ("datenblatt", "datasheet", "catalog", "katalog"))
+    chunks = list(document.get("chunks", []))
+    if not is_datasheet:
+        return chunks, "完整文本预读"
+    first_pages = []
+    for chunk in chunks:
+        match = re.search(r"page\s+(\d+)", str(chunk.get("label", "")), re.I)
+        if match and int(match.group(1)) <= 15:
+            first_pages.append(chunk)
+    if first_pages and len(first_pages) < len(chunks):
+        return first_pages, "Datasheet 前 15 页预读（其余页默认低分类相关性）"
+    return chunks, "完整文本预读"
+
+
+def summary_groups(document: dict, chunks: list[dict], limit: int = 24_000) -> list[str]:
     groups, current = [], ""
-    for chunk in document.get("chunks", []):
+    for chunk in chunks:
         part = f"--- {chunk.get('label', document.get('name', 'file'))} ---\n{chunk.get('text', '')}\n"
         if current and len(current) + len(part) > limit:
             groups.append(current); current = part
@@ -293,7 +311,7 @@ def summary_groups(document: dict, limit: int = 24_000) -> list[str]:
 
 
 def prepare_coverage(data: dict[str, Any]) -> dict:
-    """Read every extracted text chunk once and save one auditable note per selected file."""
+    """Prepare auditable, document-aware evidence before a BG classification question."""
     state, documents, llm = data["state"], data["documents"], data["llm"]
     active_ids = state.data.get("active_source_ids") or []
     selected = [item for item in documents.list() if item.get("id") in active_ids]
@@ -302,7 +320,8 @@ def prepare_coverage(data: dict[str, Any]) -> dict:
     records, total_calls = [], 0
     summary_system = "You are a careful technical evidence extractor. Use only the supplied file content. Write concise Chinese factual notes. Do not classify the Baugruppe and do not invent missing information."
     for document in selected:
-        groups = summary_groups(document)
+        read_chunks, reading_scope = selected_reading_chunks(document)
+        groups = summary_groups(document, read_chunks)
         notes, failures = [], []
         for number, group in enumerate(groups, start=1):
             try:
@@ -328,13 +347,21 @@ def prepare_coverage(data: dict[str, Any]) -> dict:
         else:
             summary = notes[0] if notes else ""
         records.append({"id": document["id"], "name": document["name"], "path": document["path"],
-                        "text_chunks_total": len(document.get("chunks", [])), "text_groups_total": len(groups),
+                        "text_chunks_total": len(document.get("chunks", [])), "text_chunks_selected": len(read_chunks),
+                        "reading_scope": reading_scope, "text_groups_total": len(groups),
                         "text_groups_processed": len(notes), "complete": bool(notes) and not failures,
                         "failures": failures, "summary": summary})
     report = {"created_at": datetime.now().astimezone().isoformat(timespec="seconds"), "model": data["model"],
               "files": records, "complete": all(item["complete"] for item in records), "model_calls": total_calls}
     coverage_path(state).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report
+
+
+def needs_bg_preparation(question: str, bg_context: dict | None) -> bool:
+    if not bg_context:
+        return False
+    text = question.casefold()
+    return any(term in text for term in ("分类", "类别", "codebook", "baugruppe", "classify", "gantry", "greifer", "roboter", "rotationseinheit", "kombinierte"))
 
 
 def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
@@ -354,6 +381,10 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
         elif kind == "notice": notices.append(text)
 
     coverage = load_coverage(state)
+    auto_prepared = False
+    if not coverage.get("complete") and needs_bg_preparation(question, bg_context):
+        coverage = prepare_coverage(data)
+        auto_prepared = True
     coverage_summaries = coverage.get("files", []) if coverage.get("complete") else []
     raw = llm.ask_about_files(visuals, prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context, coverage_summaries=coverage_summaries),
                                SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=events)
@@ -370,6 +401,8 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
         answer = raw.strip() or "模型没有返回可显示的文字。"
         state.add_turn("user", question)
         state.add_turn("assistant", answer)
+        if auto_prepared:
+            notices.insert(0, f"已在回答前自动准备 {len(coverage.get('files', []))} 个文件的分类证据（{coverage.get('model_calls', 0)} 次预读调用）。")
         return {"answer": answer, "reasoning": "".join(reasoning), "notices": notices,
                 "sources": evidence, "visuals": visuals, "changes": [], "can_export_bg": False,
                 "turn_cost": sum(item["cost_usd"] for item in estimates) if estimates else None,
@@ -405,6 +438,8 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
             "token_usage": turn_token_usage,
         }
         state.save()
+    if auto_prepared:
+        notices.insert(0, f"已在回答前自动准备 {len(coverage.get('files', []))} 个文件的分类证据（{coverage.get('model_calls', 0)} 次预读调用）。")
     return {"answer": action.get("answer", ""), "reasoning": "".join(reasoning), "notices": notices,
             "sources": evidence, "visuals": visuals, "changes": [{k: v for k, v in item.items() if k != "content"} for item in changes],
             "can_export_bg": bool(bg_context),
@@ -767,7 +802,7 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 </select>
 <input id="custommodel" placeholder="粘贴准确的 Bosch Farm Model ID" style="display:none;margin-top:7px"></div><div id="modelstatus" class="muted"></div><div class="row"><button onclick="setup()">打开工作区</button><button class="ghost" onclick="switchModel()">切换模型</button><button class="ghost" onclick="testModel()">测试模型</button></div><div id="setupmsg" class="muted"></div>
 <div class="field"><label>聊天会话</label><div class="row"><select id="session"></select><button class="ghost" onclick="openSession()">切换</button><button class="ghost" onclick="newSession()">新建</button><button class="ghost" onclick="renameSession()">改名</button><button class="ghost" onclick="deleteSession()">删除</button></div><div id="sessionmsg" class="muted"></div></div>
-<hr><b>材料分析</b><div class="muted">填一个文件路径时只分析该文件；填一个文件夹路径时分析其全部受支持文件。Codebook 仅在需要 Baugruppe 分类时添加。</div><div class="field"><label>分析目标：文件或文件夹</label><div class="row"><input id="targetpath" placeholder="PDF / Excel / PNG，或 Baugruppe 文件夹"><button class="ghost" onclick="pick('file','targetpath')">文件</button><button class="ghost" onclick="pick('folder','targetpath')">文件夹</button></div></div><div class="field"><label>Codebook（可选：用于 Baugruppe 分类）</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><button class="ghost" onclick="analyzeTarget()">扫描并开始分析</button> <button class="ghost" onclick="clearBg()">退出分类模式</button><div id="bgstatus" class="muted"></div><div id="scanreport" class="list"></div><button class="ghost" onclick="prepareCoverage()">完整预读：逐文件摘要</button><div id="coveragestatus" class="muted">先扫描材料；完整预读会逐个处理所有成功提取的文本片段。</div><div id="docs" class="list"></div>
+<hr><b>材料分析</b><div class="muted">填一个文件路径时只分析该文件；填一个文件夹路径时分析其全部受支持文件。Codebook 仅在需要 Baugruppe 分类时添加。</div><div class="field"><label>分析目标：文件或文件夹</label><div class="row"><input id="targetpath" placeholder="PDF / Excel / PNG，或 Baugruppe 文件夹"><button class="ghost" onclick="pick('file','targetpath')">文件</button><button class="ghost" onclick="pick('folder','targetpath')">文件夹</button></div></div><div class="field"><label>Codebook（可选：用于 Baugruppe 分类）</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><button class="ghost" onclick="analyzeTarget()">扫描并开始分析</button> <button class="ghost" onclick="clearBg()">退出分类模式</button><div id="bgstatus" class="muted"></div><div id="scanreport" class="list"></div><button class="ghost" onclick="prepareCoverage()">预先准备分类证据</button><div id="coveragestatus" class="muted">分类/Codebook 问题会自动准备证据；也可在提问前手动准备。</div><div id="docs" class="list"></div>
 <hr><b>多模型对比</b><div class="muted">同一条问题、同一份 BG 证据；逐个选择 2–4 个模型后顺序请求。结果不会写进普通聊天会话。</div><div id="comparemodels"></div><div class="row"><button class="ghost" id="addcompare" onclick="addCompareModel()">＋ 添加对比模型</button><button class="ghost" onclick="compareModels()">开始对比</button></div><div id="comparestatus" class="muted"></div></aside>
 <main class="main"><div class="chat" id="chat"><div class="message assistant">选择工作区后即可聊天。代码修改会先显示 diff，只有点击“应用修改”才会写入本地文件。</div></div><div class="composer"><input id="question" placeholder="问代码，或根据 Codebook 判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button></div></main>
 <aside class="side right"><b>本轮状态</b><div id="status" class="card muted">尚未打开工作区</div><b>会话导出</b><div id="sessionexport" class="card"><button class="ghost" onclick="exportSession()">导出完整会话</button></div><b>本轮 token 明细</b><div id="usagedetail" class="card muted">完成一次请求后显示。</div><b>BG 分析导出</b><div id="analysisexport" class="card muted">仅在 Baugruppe 分析完成后可导出。</div><b>证据来源</b><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><b>待应用修改</b><div id="changes" class="list">无</div></aside></div>
@@ -808,10 +843,10 @@ async function testModel(){try{let model=selectedModel();if(!model)throw Error('
 async function loadDocs(){try{let x=await api('/api/documents');$('docs').innerHTML=x.map(d=>`<div class="card">${d.name}<br><span class="muted">${d.chunks} chunks</span></div>`).join('')||'尚无材料。'}catch{}}
 async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:JSON.stringify({path:$('docpath').value})});$('docpath').value='';loadDocs();$('setupmsg').textContent=`已索引 ${d.name}（${d.chunks} chunks）`}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 function renderScanReport(x){let files=x.files.map(f=>`<div class="card"><b>${esc(f.name)}</b><br><span class="muted">成功提取 ${f.chunks} 个文本片段 · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB</span></div>`).join('');let skipped=x.skipped_count?`<div class="card error">跳过 / 失败 ${x.skipped_count} 个<br><span class="muted">${x.skipped.map(esc).join('<br>')}${x.skipped_count>x.skipped.length?'<br>其余失败项未展开。':''}</span></div>`:'';$('scanreport').innerHTML='<b>扫描报告</b><div class="muted">成功 '+x.sources+' 个；本次选定材料范围已锁定。</div>'+files+skipped}
-function renderCoverageReport(x){if(!x||!x.files){$('coveragestatus').textContent='先扫描材料；完整预读会逐个处理所有成功提取的文本片段。';return}let done=x.files.filter(f=>f.complete).length;let details=x.files.map(f=>`<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${f.text_groups_processed}/${f.text_groups_total} 个文本组${f.failures?.length?'（'+esc(f.failures.join('；'))+'）':''}`).join('');$('coveragestatus').innerHTML=(x.complete?'<span class="ok">完整预读完成：</span>':'<span class="error">完整预读不完整：</span>')+` ${done}/${x.files.length} 个文件；${x.model_calls||0} 次模型调用。`+details}
+function renderCoverageReport(x){if(!x||!x.files){$('coveragestatus').textContent='分类/Codebook 问题会自动准备证据；也可在提问前手动准备。';return}let done=x.files.filter(f=>f.complete).length;let details=x.files.map(f=>`<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${f.text_groups_processed}/${f.text_groups_total} 个文本组 · ${esc(f.reading_scope||'')} ${f.failures?.length?'（'+esc(f.failures.join('；'))+'）':''}`).join('');$('coveragestatus').innerHTML=(x.complete?'<span class="ok">分类证据已准备：</span>':'<span class="error">分类证据不完整：</span>')+` ${done}/${x.files.length} 个文件；${x.model_calls||0} 次模型调用。`+details}
 async function loadCoverage(){try{renderCoverageReport(await api('/api/coverage'))}catch{}}
-async function analyzeTarget(){try{let x=await api('/api/target',{method:'POST',body:JSON.stringify({target:$('targetpath').value,codebook:$('codebook').value})});renderStatus(x.status);$('bgstatus').textContent=x.classification?`已加入 ${x.target_kind}中的 ${x.sources} 个材料，并启用 Codebook 分类。`:`已加入 ${x.target_kind}中的 ${x.sources} 个材料；当前为普通材料问答。`;renderScanReport(x);$('coveragestatus').textContent='材料范围已锁定。需要综合全部成功文本时，请执行“完整预读”。';loadDocs()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}}
-async function prepareCoverage(){if(busy)return;busy=true;$('coveragestatus').textContent='正在逐文件处理所有成功提取的文本片段；文件多时会较久，并计入 token 与费用…';try{let x=await api('/api/coverage',{method:'POST'});renderCoverageReport(x)}catch(e){$('coveragestatus').innerHTML='<span class="error">完整预读失败：'+esc(e.message)+'</span>'}finally{busy=false}}
+async function analyzeTarget(){try{let x=await api('/api/target',{method:'POST',body:JSON.stringify({target:$('targetpath').value,codebook:$('codebook').value})});renderStatus(x.status);$('bgstatus').textContent=x.classification?`已加入 ${x.target_kind}中的 ${x.sources} 个材料，并启用 Codebook 分类。`:`已加入 ${x.target_kind}中的 ${x.sources} 个材料；当前为普通材料问答。`;renderScanReport(x);$('coveragestatus').textContent='材料范围已锁定；首次分类/Codebook 问题会自动准备分类证据。';loadDocs()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}}
+async function prepareCoverage(){if(busy)return;busy=true;$('coveragestatus').textContent='正在按文件角色准备分类证据；大型 Datasheet 默认只预读前 15 页，并计入 token 与费用…';try{let x=await api('/api/coverage',{method:'POST'});renderCoverageReport(x)}catch(e){$('coveragestatus').innerHTML='<span class="error">分类证据准备失败：'+esc(e.message)+'</span>'}finally{busy=false}}
 async function clearBg(){try{renderStatus(await api('/api/bg',{method:'DELETE'}));$('bgstatus').textContent='已退出 BG 模式。'}catch(e){$('bgstatus').textContent=e.message}}
 const compareOptions=[['claude-haiku-5.5','Claude Haiku 5.5'],['claude-opus-4','Claude Opus 4'],['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite'],['gemini-2.5-pro','Gemini 2.5 Pro'],['gpt-6-luna-2026-09-22','GPT-6 Luna'],['gpt-5.5','GPT-5.5']];
 function renderCompareSlots(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">选择模型…</option>'+compareOptions.map(([value,label])=>'<option value="'+value+'" '+(slot.value===value?'selected':'')+'>'+label+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>其他：手动输入 Model ID…</option>';return '<div class="field"><label>对比模型 '+(index+1)+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+esc(slot.custom||'')+'" placeholder="输入准确的 Bosch Farm Model ID" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?'最多 4 个模型':'＋ 添加对比模型';if(compareSlots.length>=4)$('comparestatus').textContent='已达到最多 4 个对比模型。'}
