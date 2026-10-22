@@ -12,12 +12,13 @@ import os
 import re
 import shutil
 import threading
+from queue import Empty, Queue
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 
@@ -773,7 +774,7 @@ def summary_groups(document: dict, chunks: list[dict], limit: int = 24_000) -> l
     return groups
 
 
-def prepare_coverage(data: dict[str, Any], full: bool = False) -> dict:
+def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None) -> dict:
     """Prepare auditable, document-aware evidence before a BG classification question."""
     state, documents, llm = data["state"], data["documents"], data["llm"]
     active_ids = state.data.get("active_source_ids") or []
@@ -785,7 +786,11 @@ def prepare_coverage(data: dict[str, Any], full: bool = False) -> dict:
     previous_records = {(item.get("id"), item.get("sha256")): item for item in previous_report.get("files", [])
                         if isinstance(item, dict)} if previous_report.get("model") == data["model"] and previous_report.get("requested_full_coverage") is full else {}
     summary_system = "You are a careful technical evidence extractor. Use only the supplied file content. Write concise Chinese factual notes. Do not classify the Baugruppe and do not invent missing information."
-    for document in selected:
+    total_documents = len(selected)
+    for file_index, document in enumerate(selected, start=1):
+        if progress:
+            progress("reading", f"正在读取并理解文件 {file_index}/{total_documents}：{document['name']}",
+                     12 + int((file_index - 1) / max(total_documents, 1) * 48))
         # Complete analysis prepares OCR locally for visual pages. It adds no
         # Farm token cost and lets a scanned page participate in the same
         # auditable page/chunk coverage as native-text pages.
@@ -812,11 +817,17 @@ def prepare_coverage(data: dict[str, Any], full: bool = False) -> dict:
                            "dfc_structure": documents.dfc_audit(document), "cache_status": "reused"})
             records.append(record)
             reused_files += 1
+            if progress:
+                progress("reading", f"已复用 {file_index}/{total_documents}：{document['name']} 的本地理解结果",
+                         12 + int(file_index / max(total_documents, 1) * 48))
             continue
         groups = summary_groups(document, read_chunks)
         notes, failures = [], []
         for number, group in enumerate(groups, start=1):
             try:
+                if progress:
+                    progress("reading", f"正在理解 {document['name']}（文本组 {number}/{len(groups)}）",
+                             12 + int((file_index - 1 + number / max(len(groups), 1)) / max(total_documents, 1) * 48))
                 raw = llm.ask_about_files([], f"文件：{document['name']}。这是第 {number}/{len(groups)} 个完整文本片段组。提取结构、部件、驱动、运动、接口、尺寸和不确定处，并保留页面/表格标签。\n\n{group}",
                                          summary_system, {"maxOutputTokens": 900, "temperature": 0}, stream=True)
                 notes.append(raw.strip())
@@ -851,11 +862,37 @@ def prepare_coverage(data: dict[str, Any], full: bool = False) -> dict:
         if record["complete"]:
             save_material_summary_cache(document, data["model"], full, read_pages, record)
             created_files += 1
+        if progress:
+            progress("reading", f"已完成 {file_index}/{total_documents}：{document['name']}",
+                     12 + int(file_index / max(total_documents, 1) * 48))
     report = {"created_at": datetime.now().astimezone().isoformat(timespec="seconds"), "model": data["model"], "requested_full_coverage": full,
               "files": records, "complete": all(item["complete"] for item in records), "model_calls": total_calls,
               "reused_files": reused_files, "created_files": created_files}
     coverage_path(state).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report
+
+
+def coverage_summary_for_answer(coverage: dict | None) -> dict | None:
+    """Local, auditable reading facts shown next to a classification answer."""
+    if not coverage or not coverage.get("files"):
+        return None
+    files = []
+    for item in coverage.get("files", []):
+        if not isinstance(item, dict):
+            continue
+        files.append({
+            "name": item.get("name", "未知文件"),
+            "scope": item.get("reading_scope", "已读取"),
+            "pages_total": item.get("pages_total", 0),
+            "pages_read": item.get("pages_read", []),
+            "pages_unread": item.get("pages_unread", []),
+            "cache_status": item.get("cache_status", ""),
+            "complete": bool(item.get("complete")),
+        })
+    return {"files": files, "complete": bool(coverage.get("complete")),
+            "reused_files": int(coverage.get("reused_files", 0)),
+            "created_files": int(coverage.get("created_files", 0)),
+            "model_calls": int(coverage.get("model_calls", 0))}
 
 
 def needs_bg_preparation(question: str, bg_context: dict | None) -> bool:
@@ -963,18 +1000,25 @@ Return the complete JSON action again, with a valid `classification` object. Do 
 """
 
 
-def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
+def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, Any]:
     state, documents, llm = data["state"], data["documents"], data["llm"]
+    def report(phase: str, text: str, percent: int | None = None) -> None:
+        if progress:
+            progress(phase, text, percent)
+
+    report("search", "正在检查当前材料与已有理解结果…", 5)
     bg_context = state.data.get("bg_context")
     active_source_ids = state.data.get("active_source_ids")
     matches = state.search(question)
     snippets = {item: excerpt(state, item, question) for item in matches}
     preferred = ([bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))) if bg_context else active_source_ids
     allowed = list(bg_context.get("source_ids", [])) + [bg_context.get("codebook_id")] if bg_context else active_source_ids
+    report("search", "正在检索与当前问题相关的本地证据…", 10)
     evidence = documents.search(question, preferred_ids=preferred, classification=bool(bg_context), allowed_ids=allowed)
     if bg_context:
         existing = {(item.get("visual") or {}).get("page") for item in evidence if item.get("name") == bg_context.get("codebook_name")}
         evidence.extend(item for item in relevant_codebook_page_evidence(question, bg_context) if (item.get("visual") or {}).get("page") not in existing)
+    report("search", "正在核对文字、OCR 与视觉证据…", 12)
     evidence = documents.ensure_ocr_for_snippets(evidence, question, classification=bool(bg_context))
     visuals = documents.visual_paths(evidence, state.root / "visual_cache",
                                      bilder_images=documents.bilder_image_paths(allowed))
@@ -1000,12 +1044,17 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
     auto_prepared = False
     classification_request = bool(bg_context) and needs_bg_preparation(question, bg_context)
     if not coverage_matches_current_selection(data, coverage) and classification_request:
-        coverage = prepare_coverage(data)
+        report("reading", "正在进行文件的读取与理解…", 12)
+        coverage = prepare_coverage(data, progress=report)
         auto_prepared = True
+        report("reading", "文件读取与理解完成。", 62)
+    elif classification_request:
+        report("reading", "已复用当前材料的读取与理解结果。", 62)
     coverage_summaries = coverage.get("files", []) if coverage.get("complete") else []
     dossier, usage_records, estimates = None, [], []
     if coverage_summaries:
         try:
+            report("dossier", "正在整理 Baugruppe 综合证据档案…", 70)
             dossier, dossier_usage, dossier_created = prepare_bg_dossier(data, coverage)
             if dossier_usage:
                 usage_records.append(dossier_usage)
@@ -1015,13 +1064,24 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
                 notices.append("已生成并保存 BG 综合证据档案；后续追问将复用该档案，仅补充本问题命中的原始证据。")
             elif dossier:
                 notices.append("已复用 BG 综合证据档案；本轮未重复发送全部逐文件摘要。")
+            report("dossier", "BG 综合证据档案已准备完成。", 80)
         except Exception as exc:
             notices.append(f"BG 综合证据档案未能生成，已回退为逐文件摘要：{exc}")
             dossier = None
     model_prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
                               coverage_summaries=[] if dossier else coverage_summaries, bg_dossier=dossier)
+    report("model", f"正在连接 {data['model']} 并提交问题…", 86)
+    model_started = False
+    def model_events(kind: str, text: str):
+        nonlocal model_started
+        events(kind, text)
+        if not model_started:
+            model_started = True
+            report("model", "模型正在生成回答…", 92)
+
+    report("model", "正在等待模型输出…", 90)
     raw = llm.ask_about_files(visuals, model_prompt,
-                               SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=events)
+                               SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=model_events)
     usage_records.append(llm.get_last_token_usage() or {})
     estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
     if estimate: estimates.append(estimate)
@@ -1036,8 +1096,9 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
         if not problem:
             return action
         notices.append(f"分类 JSON 校验未通过（{problem}），已自动重试一次。")
+        report("validation", "正在校验分类证据与 Codebook 规则；模型输出需补全，正在自动重试…", 96)
         repaired = llm.ask_about_files(visuals, classification_repair_prompt(request_prompt, problem),
-                                       SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=events)
+                                       SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=model_events)
         usage_records.append(llm.get_last_token_usage() or {})
         estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
         if estimate: estimates.append(estimate)
@@ -1049,6 +1110,7 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
         return action
 
     try:
+        report("validation", "正在核验模型分类输出…", 96)
         action = validated_action(raw, model_prompt)
     except Exception:
         # Some Bosch Farm models return a normal natural-language answer despite
@@ -1059,9 +1121,10 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
         state.add_turn("assistant", answer)
         if auto_prepared:
             notices.insert(0, f"已在回答前自动准备 {len(coverage.get('files', []))} 个文件的分类证据（{coverage.get('model_calls', 0)} 次预读调用）。")
+        report("complete", "处理完成。", 100)
         return {"answer": answer, "reasoning": "".join(reasoning), "notices": notices,
                 "sources": evidence, "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [], "can_export_bg": False,
-                "classification": None,
+                "classification": None, "coverage_summary": coverage_summary_for_answer(coverage) if classification_request else None,
                 "turn_cost": sum(item["cost_usd"] for item in estimates) if estimates else None,
                 "usage": status_data(data)}
     requested = [ensure_relative(item) for item in action.get("read_files", [])[:4] if isinstance(item, str)]
@@ -1074,8 +1137,9 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
     if complete:
         model_prompt = prompt_for(state, question, snippets, complete, evidence, bg_context,
                                   [] if dossier else coverage_summaries, dossier)
+        report("model", "正在补充读取模型请求的本地文件并生成回答…", 93)
         raw = llm.ask_about_files(visuals, model_prompt,
-                                   SYSTEM, {"maxOutputTokens": 3000, "temperature": 0}, stream=True, event_handler=events)
+                                   SYSTEM, {"maxOutputTokens": 3000, "temperature": 0}, stream=True, event_handler=model_events)
         usage_records.append(llm.get_last_token_usage() or {})
         estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
         if estimate: estimates.append(estimate)
@@ -1104,6 +1168,7 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
         state.save()
     if auto_prepared:
         notices.insert(0, f"已在回答前自动准备 {len(coverage.get('files', []))} 个文件的分类证据（{coverage.get('model_calls', 0)} 次预读调用）。")
+    report("complete", "处理完成。", 100)
     return {"answer": action.get("answer", ""), "reasoning": "".join(reasoning), "notices": notices,
             "sources": evidence, "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [{k: v for k, v in item.items() if k != "content"} for item in changes],
             "can_export_bg": bool(bg_context),
@@ -1111,6 +1176,7 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
             "model_response": llm.last_response_model or data["model"],
             "turn_cost": turn_token_usage["cost_usd"] if estimates else None,
             "classification": action.get("classification") if classification_request else None,
+            "coverage_summary": coverage_summary_for_answer(coverage) if classification_request else None,
             "usage": status_data(data)}
 
 
@@ -1591,6 +1657,44 @@ def chat(request: ChatRequest):
     with LOCK: return call_model(session(), request.question.strip())
 
 
+@app.post("/api/chat/stream")
+def chat_stream(request: ChatRequest):
+    """Expose local processing stages to the browser while retaining one serialized model call."""
+    question = request.question.strip()
+    if not question:
+        raise HTTPException(400, "请输入问题。")
+    events: Queue[dict[str, Any]] = Queue()
+
+    def publish(phase: str, text: str, percent: int | None = None) -> None:
+        events.put({"type": "progress", "phase": phase, "text": text, "percent": percent})
+
+    def worker() -> None:
+        try:
+            with LOCK:
+                result = call_model(session(), question, progress=publish)
+            events.put({"type": "result", "data": result})
+        except Exception as exc:
+            events.put({"type": "error", "message": str(exc)})
+        finally:
+            events.put({"type": "end"})
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def event_stream():
+        while True:
+            try:
+                event = events.get(timeout=15)
+            except Empty:
+                yield ": keep-alive\n\n"
+                continue
+            yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+            if event.get("type") == "end":
+                break
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @app.post("/api/compare")
 def compare(request: CompareRequest):
     question = request.question.strip()
@@ -1632,8 +1736,8 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 </select>
 <input id="custommodel" placeholder="粘贴准确的 Bosch Farm Model ID" style="display:none;margin-top:7px"></div><div id="modelstatus" class="muted"></div><div class="row"><button onclick="setup()">打开工作区</button><button class="ghost" onclick="switchModel()">切换模型</button><button class="ghost" onclick="testModel()">测试模型</button></div><div id="setupmsg" class="muted"></div>
 <div class="field"><label>聊天会话</label><div class="row"><select id="session"></select><button class="ghost" onclick="openSession()">切换</button><button class="ghost" onclick="newSession()">新建</button><button class="ghost" onclick="renameSession()">改名</button><button class="ghost" onclick="deleteSession()">删除</button></div><div id="sessionmsg" class="muted"></div></div>
-<hr><b>Codebook</b><div id="codebookstatus" class="muted">尚未锁定 Codebook。</div><div class="field"><label>Codebook 文件（首次准备或更换时选择）</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf / .docx"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><div class="row"><button class="ghost" onclick="prepareCodebook()">准备 Codebook</button><button class="ghost" onclick="viewCodebook()">查看</button><button class="ghost" onclick="changeCodebook()">更换</button></div><hr><b>材料分析</b><div class="muted">文件直接分析；文件夹先显示结构，再明确勾选要用的材料。已锁定 Codebook 会自动用于分类。</div><div class="field"><label>分析目标：文件或文件夹</label><div class="row"><input id="targetpath" placeholder="PDF / Excel / PNG，或 Baugruppe 文件夹" oninput="clearTargetTree()"><button class="ghost" onclick="pick('file','targetpath')">文件</button><button class="ghost" onclick="pickFolderForTree()">文件夹</button></div></div><div class="row"><button class="ghost" onclick="loadTargetTree()">显示文件夹结构</button><button class="ghost" onclick="analyzeTarget()">用选中材料开始分析</button></div><div id="treestatus" class="muted"></div><div id="targettree" class="target-tree muted">选择文件夹后显示可展开的文件树。</div><button class="ghost" onclick="clearBg()">退出分类模式</button><div id="bgstatus" class="muted"></div><div id="scanreport" class="list"></div><button class="ghost" onclick="prepareCoverage()">预先准备分类证据</button><div id="coveragestatus" class="muted">分类/Codebook 问题会自动准备证据；也可在提问前手动准备。</div><div id="docs" class="list"></div>
-<div class="row"><button class="ghost" onclick="prepareCoverage(true)">完整覆盖全部页</button></div><hr><b>多模型对比</b><div class="muted">同一条问题、同一份 BG 证据；逐个选择 2–4 个模型后顺序请求。结果不会写进普通聊天会话。</div><div id="comparemodels"></div><div class="row"><button class="ghost" id="addcompare" onclick="addCompareModel()">＋ 添加对比模型</button><button class="ghost" onclick="compareModels()">开始对比</button></div><div id="comparestatus" class="muted"></div></aside>
+<hr><b>Codebook</b><div id="codebookstatus" class="muted">尚未锁定 Codebook。</div><div class="field"><label>Codebook 文件（首次准备或更换时选择）</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf / .docx"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><div class="row"><button class="ghost" onclick="prepareCodebook()">准备 Codebook</button><button class="ghost" onclick="viewCodebook()">查看</button><button class="ghost" onclick="changeCodebook()">更换</button></div><hr><b>材料分析</b><div class="muted">文件直接分析；文件夹先显示结构，再明确勾选要用的材料。已锁定 Codebook 会自动用于分类。</div><div class="field"><label>分析目标：文件或文件夹</label><div class="row"><input id="targetpath" placeholder="PDF / Excel / PNG，或 Baugruppe 文件夹" oninput="clearTargetTree()"><button class="ghost" onclick="pick('file','targetpath')">文件</button><button class="ghost" onclick="pickFolderForTree()">文件夹</button></div></div><div class="row"><button class="ghost" onclick="loadTargetTree()">显示文件夹结构</button><button class="ghost" onclick="analyzeTarget()">用选中材料开始分析</button></div><div id="treestatus" class="muted"></div><div id="targettree" class="target-tree muted">选择文件夹后显示可展开的文件树。</div><button class="ghost" onclick="clearBg()">退出分类模式</button><div id="bgstatus" class="muted"></div><div id="scanreport" class="list"></div><div id="coveragestatus" class="muted">首次分类提问会自动读取并理解所选材料；无需预先操作。</div><div id="docs" class="list"></div>
+<hr><b>多模型对比</b><div class="muted">同一条问题、同一份 BG 证据；逐个选择 2–4 个模型后顺序请求。结果不会写进普通聊天会话。</div><div id="comparemodels"></div><div class="row"><button class="ghost" id="addcompare" onclick="addCompareModel()">＋ 添加对比模型</button><button class="ghost" onclick="compareModels()">开始对比</button></div><div id="comparestatus" class="muted"></div></aside>
 <main class="main"><div class="chat" id="chat"><div class="message assistant">选择工作区后即可聊天。代码修改会先显示 diff，只有点击“应用修改”才会写入本地文件。</div></div><div class="composer" id="composer"><input id="question" placeholder="问代码，或根据 Codebook 判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button></div></main>
 <aside class="side right"><b>本轮状态</b><div id="status" class="card muted">尚未打开工作区</div><b>会话导出</b><div id="sessionexport" class="card"><button class="ghost" onclick="exportSession()">导出完整会话</button></div><b>本轮 token 明细</b><div id="usagedetail" class="card muted">完成一次请求后显示。</div><b>BG 分析导出</b><div id="analysisexport" class="card muted">仅在 Baugruppe 分析完成后可导出。</div><b>证据来源</b><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><b>待应用修改</b><div id="changes" class="list">无</div></aside></div>
 <script>
@@ -1656,6 +1760,7 @@ async function api(url,opt={}){let r=await fetch(url,{headers:{'Content-Type':'a
 async function pick(kind,target){try{$(target).value=(await api('/api/pick/'+kind)).path||''}catch(e){alert(e.message)}}
 function message(text,kind='assistant'){let e=document.createElement('div');e.className='message '+kind;e.textContent=text;$('chat').append(e);$('chat').scrollTop=1e9;return e}
 function classificationCard(c){let card=document.createElement('section');card.className='classification-card';let alternative=c.alternative_label?'<br>备选类别：'+esc(c.alternative_label):'';let evidence=(c.evidence_labels||[]).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>未提供</li>';let uncertainty=(c.uncertainties||[]).filter(Boolean).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>未报告明显不确定性</li>';let rules=(c.codebook_rule_ids||[]).map(esc).join('、')||'未返回';let rulePages=(c.codebook_rule_pages||[]).map(esc).join('、')||'未返回';let bgPages=(c.bg_evidence_pages||[]).map(esc).join('、')||'未返回';card.innerHTML='<h3>本次分类结论（已校验）</h3><div class="result">类别：<b>'+esc(c.label||'—')+'</b></div><div>置信度：'+esc(c.confidence||'—')+alternative+'</div><div><b>Codebook 规则</b>：'+rules+'（页 '+rulePages+'）</div><div><b>BG 页面证据</b>：'+bgPages+'</div><div><b>证据</b><ul>'+evidence+'</ul></div><div><b>不确定性</b><ul>'+uncertainty+'</ul></div>';return card}
+function coverageSummaryCard(summary){if(!summary?.files?.length)return null;let card=document.createElement('section');card.className='classification-card';card.style.borderColor='#475569';let rows=summary.files.map(f=>{let read=Array.isArray(f.pages_read)?f.pages_read.length:0,unread=Array.isArray(f.pages_unread)?f.pages_unread.length:0;let pages=f.pages_total?(' · 已读 '+read+'/'+f.pages_total+' 页'+(unread?'；未读 '+unread+' 页':'')):'';let cache=f.cache_status==='reused'?'已复用':'本次读取';return '<li><b>'+esc(f.name)+'</b>：'+esc(f.scope||'已读取')+pages+' · '+cache+'</li>'}).join('');card.innerHTML='<h3>本次资料处理情况（本地记录）</h3><div class="muted">已处理 '+summary.files.length+' 个文件；复用 '+(summary.reused_files||0)+' 个，本次读取 '+(summary.created_files||0)+' 个；预读模型调用 '+(summary.model_calls||0)+' 次。</div><ul>'+rows+'</ul>';return card}
 function renderStatus(s){$('status').innerHTML=`模型：<b>${s.model}</b><br>会话：${s.session_name||'default'}<br>代码：${s.code_files} 文件<br>材料：${s.documents} 个<br>累计请求：${s.requests}<br>累计 Token：${s.input_tokens} / ${s.output_tokens}<br>累计估算：${s.cost}<br>${s.bg_context?'<span class="ok">BG 模式：'+s.bg_context.codebook_name+'</span>':'普通模式'}`}
 function renderUsageDetail(u,model){if(!u)return;$('usagedetail').innerHTML=`实际模型：<b>${esc(model||'—')}</b><br>输入 / 输出 / 总计：${u.input} / ${u.output} / ${u.total}<br>推理：${u.reasoning||0} ｜ Gemini thinking：${u.gemini_thinking||0}<br>Claude 缓存读 / 写：${u.cache_read||0} / ${u.cache_write||0}<br>本轮估算：${Number(u.cost_usd||0).toFixed(6)}`}
 function renderEvidenceSources(sources,dfcEvidence){let normal=(sources||[]).map(s=>`<div class="card"><b>${esc(s.label||s.name||'未知来源')}</b><br>${s.visual?'<span class="chip">视觉证据已附带</span>':''}</div>`).join('');let dfc=(dfcEvidence||[]).map(d=>{let parts=(d.segments_used||[]).join('、')||'无';return `<div class="card"><b>DFC Struktur</b><br>${esc(d.name||'—')}<br><span class="chip">OCR：${esc(d.ocr_status||'—')}</span><span class="chip">本轮：第 ${esc(parts)} 段 / 共 ${esc(d.segments_total||0)} 段</span></div>`}).join('');$('sources').innerHTML=(dfc+normal)||'无可用来源'}
@@ -1687,7 +1792,7 @@ function renderScanReport(x){setScanReportAvailable(x);renderScanDrawer(x)}
 function renderCoverageReport(x){if(!x||!x.files){$('coveragestatus').textContent='分类/Codebook 问题会自动准备证据；也可在提问前手动准备。';return}if(x.current_selection===false){$('coveragestatus').innerHTML='<span class="muted">材料选择或模型已更新；下次分类准备时会复用未变文件的本地摘要，仅预读新增/变更文件。</span>';return}let done=x.files.filter(f=>f.complete).length;let details=x.files.map(f=>{let pages=f.pages_total?`页：已读 ${(f.pages_read||[]).join('、')||'—'}${(f.pages_unread||[]).length?'；未读 '+f.pages_unread.join('、'):''}`:'无页码';let dfc=f.dfc_structure?` · <span class="chip">DFC Struktur：${esc(f.dfc_structure.ocr_status||'—')}，${esc(f.dfc_structure.segments_total||0)} 段</span>`:'';let cache=f.cache_status==='reused'?' · <span class="chip">本地摘要已复用</span>':f.cache_status==='created'?' · <span class="chip">本轮新预读</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${f.text_groups_processed}/${f.text_groups_total} 个文本组 · ${esc(f.reading_scope||'')} · ${esc(pages)}${cache}${dfc}${f.failures?.length?'（'+esc(f.failures.join('；'))+'）':''}`}).join('');let dossier=x.bg_dossier?.ready?' · <span class="chip">BG 综合证据档案已缓存</span>':' · <span class="chip">首次分类后生成 BG 综合证据档案</span>';$('coveragestatus').innerHTML=(x.complete?'<span class="ok">分类证据已准备：</span>':'<span class="error">分类证据不完整：</span>')+` ${done}/${x.files.length} 个文件；复用 ${x.reused_files||0} 个，新预读 ${x.created_files||0} 个；本次 ${x.model_calls||0} 次模型调用。`+dossier+details}
 async function loadCoverage(){try{renderCoverageReport(await api('/api/coverage'))}catch{}}
 function ensureCacheAuditPanel(){if($('cacheauditpanel'))return;let panel=document.createElement('details');panel.id='cacheauditpanel';panel.className='card';panel.innerHTML='<summary>材料缓存与审计</summary><div class="muted">查看当前材料的索引、OCR、摘要与 BG 档案状态。</div><div class="row"><button class="ghost" onclick="loadCacheAudit()">刷新</button><button class="ghost" onclick="rebuildDossier()">重建 BG 档案</button><button class="ghost" onclick="clearSummaryCaches()">清除摘要缓存</button></div><div id="cacheaudit" class="list muted">选择材料后可查看。</div>';let anchor=$('coveragestatus');anchor.insertAdjacentElement('afterend',panel)}
-function ensureMaterialFlow(){if($('materialactions'))return;let style=document.createElement('style');style.textContent='#materialactions{display:flex;gap:7px;margin:8px 0}.scan-backdrop{position:fixed;inset:0;background:rgba(2,6,23,.28);z-index:20;opacity:0;pointer-events:none;transition:opacity .18s}.scan-backdrop.open{opacity:1;pointer-events:auto}.scan-drawer{position:absolute;left:270px;top:72px;bottom:20px;width:min(680px,calc(100vw - 310px));background:#172033;border:1px solid #3b4960;border-left:3px solid #38bdf8;border-radius:0 12px 12px 0;box-shadow:12px 16px 45px rgba(0,0,0,.45);transform:translateX(-34px);opacity:0;transition:transform .22s ease,opacity .18s;display:flex;flex-direction:column}.scan-backdrop.open .scan-drawer{transform:translateX(0);opacity:1}.scan-drawer-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #334155}.scan-drawer-body{overflow:auto;padding:12px 16px}.scan-drawer-foot{padding:12px 16px;border-top:1px solid #334155;background:#141d2d}.scan-drawer .file-card{border:1px solid #334155;border-radius:8px;padding:10px;margin:9px 0;background:#111827;line-height:1.5}.scan-drawer .file-card b{word-break:break-word}@media(max-width:760px){.scan-drawer{left:0;top:0;bottom:0;width:min(94vw,680px);border-radius:0 12px 12px 0}}';document.head.append(style);let tree=$('targettree'),confirm=document.querySelector('button[onclick="analyzeTarget()"]');let actions=document.createElement('div');actions.id='materialactions';confirm.id='confirmmaterials';confirm.textContent='确认选中材料';let report=document.createElement('button');report.id='viewscanreport';report.className='ghost';report.disabled=true;report.textContent='查看扫描报告';report.onclick=openScanReport;actions.append(confirm,report);tree.insertAdjacentElement('afterend',actions);$('scanreport').style.display='none';let backdrop=document.createElement('div');backdrop.id='scanbackdrop';backdrop.className='scan-backdrop';backdrop.innerHTML='<section class="scan-drawer" role="dialog" aria-modal="true" aria-label="扫描报告"><div class="scan-drawer-head"><div><b>本次材料扫描报告</b><div class="muted">仅本地读取与索引；不消耗模型 token。</div></div><button class="ghost" onclick="closeScanReport()">×</button></div><div id="scanreportbody" class="scan-drawer-body"></div><div id="scanreportactions" class="scan-drawer-foot"></div></section>';backdrop.addEventListener('click',e=>{if(e.target===backdrop)closeScanReport()});document.body.append(backdrop);let pre=document.querySelector('button[onclick="prepareCoverage()"]'),full=document.querySelector('button[onclick="prepareCoverage(true)"]');if(pre){pre.textContent='预先准备分类证据（会消耗 token）';$('scanreportactions').append(pre)}if(full){full.textContent='完整覆盖全部页（会消耗 token）';$('scanreportactions').append(full)}document.addEventListener('keydown',e=>{if(e.key==='Escape')closeScanReport()});updateMaterialFlowButtons()}
+function ensureMaterialFlow(){if($('materialactions'))return;let style=document.createElement('style');style.textContent='#materialactions{display:flex;gap:7px;margin:8px 0}.scan-backdrop{position:fixed;inset:0;background:rgba(2,6,23,.28);z-index:20;opacity:0;pointer-events:none;transition:opacity .18s}.scan-backdrop.open{opacity:1;pointer-events:auto}.scan-drawer{position:absolute;left:270px;top:72px;bottom:20px;width:min(680px,calc(100vw - 310px));background:#172033;border:1px solid #3b4960;border-left:3px solid #38bdf8;border-radius:0 12px 12px 0;box-shadow:12px 16px 45px rgba(0,0,0,.45);transform:translateX(-34px);opacity:0;transition:transform .22s ease,opacity .18s;display:flex;flex-direction:column}.scan-backdrop.open .scan-drawer{transform:translateX(0);opacity:1}.scan-drawer-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #334155}.scan-drawer-body{overflow:auto;padding:12px 16px}.scan-drawer .file-card{border:1px solid #334155;border-radius:8px;padding:10px;margin:9px 0;background:#111827;line-height:1.5}.scan-drawer .file-card b{word-break:break-word}@media(max-width:760px){.scan-drawer{left:0;top:0;bottom:0;width:min(94vw,680px);border-radius:0 12px 12px 0}}';document.head.append(style);let tree=$('targettree'),confirm=document.querySelector('button[onclick="analyzeTarget()"]');let actions=document.createElement('div');actions.id='materialactions';confirm.id='confirmmaterials';confirm.textContent='确认选中材料';let report=document.createElement('button');report.id='viewscanreport';report.className='ghost';report.disabled=true;report.textContent='查看扫描报告';report.onclick=openScanReport;actions.append(confirm,report);tree.insertAdjacentElement('afterend',actions);$('scanreport').style.display='none';let backdrop=document.createElement('div');backdrop.id='scanbackdrop';backdrop.className='scan-backdrop';backdrop.innerHTML='<section class="scan-drawer" role="dialog" aria-modal="true" aria-label="扫描报告"><div class="scan-drawer-head"><div><b>本次材料扫描报告</b><div class="muted">仅本地读取与索引；不消耗模型 token。</div></div><button class="ghost" onclick="closeScanReport()">×</button></div><div id="scanreportbody" class="scan-drawer-body"></div></section>';backdrop.addEventListener('click',e=>{if(e.target===backdrop)closeScanReport()});document.body.append(backdrop);document.addEventListener('keydown',e=>{if(e.key==='Escape')closeScanReport()});updateMaterialFlowButtons()}
 function updateMaterialFlowButtons(){let confirm=$('confirmmaterials'),report=$('viewscanreport');if(confirm)confirm.disabled=treeFileCount()===0;if(report&&!lastScanReport){report.disabled=true;report.textContent='查看扫描报告'} }
 function setScanReportAvailable(report){lastScanReport=report||null;let button=$('viewscanreport');if(button){button.disabled=!lastScanReport;button.textContent=lastScanReport?'查看扫描报告':'查看扫描报告'}}
 function openScanReport(){if(!lastScanReport)return;renderScanDrawer(lastScanReport);$('scanbackdrop').classList.add('open')}
@@ -1708,7 +1813,7 @@ function recommendedTreePaths(node,paths=[]){if(node.type==='file'){if(node.reco
 function makeTreeNode(node,depth=0){if(node.type==='folder'){let details=document.createElement('details');details.open=depth<1;let summary=document.createElement('summary');let box=document.createElement('input');box.type='checkbox';box.className='tree-folder';box.addEventListener('click',e=>e.stopPropagation());box.addEventListener('change',()=>{details.querySelectorAll('input.tree-file:not(:disabled)').forEach(x=>x.checked=box.checked);refreshAllFolderStates()});let label=document.createElement('label');label.textContent='📁 '+node.name;summary.append(box,label);details.append(summary);let children=document.createElement('div');children.className='tree-children';node.children.forEach(child=>children.append(makeTreeNode(child,depth+1)));details.append(children);return details}let row=document.createElement('div');row.className='tree-file'+(node.supported?'':' unsupported');let box=document.createElement('input');box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.checked=!!node.supported&&savedTargetSelection.has(node.relative);box.disabled=!node.supported;box.addEventListener('change',refreshAllFolderStates);let label=document.createElement('label');let role=node.material_role_label?` · ${node.material_role_label}`:'';let hint=node.supported&&!node.recommended?' · 默认不选':'';label.textContent='📄 '+node.name+(node.supported?` · ${(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1)} MB${role}${hint}`:` · 不支持${role}`);row.append(box,label);return row}
 async function loadTargetTree(){let target=$('targetpath').value.trim();if(!target){$('treestatus').innerHTML='<span class="error">请先选择或粘贴一个 BG 文件夹路径。</span>';return}try{$('treestatus').textContent='正在仅读取文件夹结构…';let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(x.saved_selection||[]);let notes=[];if(savedTargetSelection.size)notes.push(`已恢复上次的 ${savedTargetSelection.size} 项选择。`);else{savedTargetSelection=new Set(recommendedTreePaths(x.tree));notes.push(`已按资料类型默认选择 ${savedTargetSelection.size} 项原始资料；派生重复资料默认未选。`)}if(x.changed_saved_files)notes.push(`${x.changed_saved_files} 个已选文件内容已变化。`);if(x.missing_saved_files)notes.push(`${x.missing_saved_files} 个原选文件不存在，未恢复。`);treeRestoreNote=notes.join(' ');let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates();if(x.truncated)$('treestatus').innerHTML='<span class="error">文件树超过 5000 项，已截断；请进入更具体的 BG 文件夹。</span>'}catch(e){$('treestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function selectedTargetPaths(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].map(x=>x.dataset.path)}
-async function analyzeTarget(){let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent='正在本地读取…'}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error('请先在文件树中勾选至少一个材料。');let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');renderStatus(x.status);$('bgstatus').textContent=x.classification?`已确认 ${x.target_kind}中的 ${x.sources} 个选定材料；Codebook 分类已就绪。`:`已确认 ${x.target_kind}中的 ${x.sources} 个选定材料；可直接开始普通材料问答。`;renderScanReport(x);$('coveragestatus').textContent='材料范围已更新；首次分类/Codebook 问题会复用未变文件的本地摘要，仅预读新增或变更文件。';loadCoverage();loadDocs();loadCacheAudit()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}finally{if(confirm)confirm.textContent='确认选中材料';updateMaterialFlowButtons()}}
+async function analyzeTarget(){let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent='正在本地读取…'}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error('请先在文件树中勾选至少一个材料。');let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');renderStatus(x.status);$('bgstatus').textContent=x.classification?`已确认 ${x.target_kind}中的 ${x.sources} 个选定材料；Codebook 分类已就绪。`:`已确认 ${x.target_kind}中的 ${x.sources} 个选定材料；可直接开始普通材料问答。`;renderScanReport(x);$('coveragestatus').textContent='材料范围已更新；首次分类提问会自动读取并理解新增或变化的材料。';loadDocs();loadCacheAudit()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}finally{if(confirm)confirm.textContent='确认选中材料';updateMaterialFlowButtons()}}
 async function prepareCoverage(full=false){if(busy)return;busy=true;$('coveragestatus').textContent=full?'正在完整覆盖所有页并生成可审计摘要；会消耗相应 token 与费用…':'正在按文件角色准备分类证据；大型 Datasheet 默认只预读前 15 页，并计入 token 与费用…';try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full})});renderCoverageReport(x)}catch(e){$('coveragestatus').innerHTML='<span class="error">分类证据准备失败：'+esc(e.message)+'</span>'}finally{busy=false}}
 async function clearBg(){try{renderStatus(await api('/api/bg',{method:'DELETE'}));$('bgstatus').textContent='已退出 BG 模式。'}catch(e){$('bgstatus').textContent=e.message}}
 const compareOptions=[['claude-haiku-5.5','Claude Haiku 5.5'],['claude-opus-4','Claude Opus 4'],['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite'],['gemini-2.5-pro','Gemini 2.5 Pro'],['gpt-6-luna-2026-09-22','GPT-6 Luna'],['gpt-5.5','GPT-5.5']];
@@ -1718,7 +1823,10 @@ function addCompareModel(){if(compareSlots.length>=4){$('comparestatus').textCon
 function removeCompareModel(index){compareSlots.splice(index,1);renderCompareSlots();$('comparestatus').textContent=''}
 function selectedCompareModels(){return compareSlots.map((slot,index)=>slot.value==='__custom__'?$('cmpcustom'+index).value.trim():slot.value).filter(Boolean)}
 async function compareModels(){if(busy)return;let q=$('question').value.trim()||lastQuestion;if(!q){$('comparestatus').innerHTML='<span class="error">先在下方输入问题，或先发送一次问题。</span>';return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){$('comparestatus').innerHTML='<span class="error">请选择 2–4 个不同模型；“其他”中输入准确的 Bosch Farm Model ID。</span>';return}busy=true;lastQuestion=q;$('comparestatus').textContent='正在按顺序请求 '+models.length+' 个模型…';let wait=message('正在进行多模型对比：'+models.join(' · '));try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models})});wait.remove();let box=document.createElement('section');box.className='comparison';box.innerHTML='<div class="message assistant"><b>多模型对比</b><br>同一问题：'+esc(q)+'<br><span class="muted">相同证据：'+x.sources.map(esc).join(' · ')+'</span></div><div class="comparison-grid"></div>';let grid=box.querySelector('.comparison-grid');for(let r of x.results){let card=document.createElement('article');card.className='card';if(!r.ok){card.innerHTML='<b>'+esc(r.requested_model)+'</b><p class="error">请求失败</p><div class="muted">'+esc(r.error||'未知错误')+'</div>';grid.append(card);continue}let u=r.usage||{};let cost=u.cost_usd===null||u.cost_usd===undefined?'未配置价格':'$'+Number(u.cost_usd).toFixed(6);let classification=r.classification?'<div class="chip">已校验类别：'+esc(r.classification.label)+' · '+esc(r.classification.confidence)+'</div>':'';card.innerHTML='<b>'+esc(r.model_response)+'</b>'+(r.model_response!==r.requested_model?'<div class="muted">请求：'+esc(r.requested_model)+'</div>':'')+'<div class="muted ok">成功 · Token '+(u.input||0)+' / '+(u.output||0)+' · '+cost+'</div>'+classification+'<hr><div class="answer"></div>'+(r.notices?.length?'<div class="muted">'+r.notices.map(esc).join('<br>')+'</div>':'');card.querySelector('.answer').textContent=r.answer;grid.append(card)}$('chat').append(box);$('comparestatus').innerHTML='<span class="ok">对比完成；结果仅显示在当前页面，不写入普通会话。</span>'}catch(e){wait.textContent='多模型对比错误：'+e.message;wait.classList.add('error');$('comparestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{busy=false;$('chat').scrollTop=1e9}}
-async function chat(){if(busy||!$('question').value.trim())return;busy=true;let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');let wait=message('正在向 Bosch Farm 请求…');try{let x=await api('/api/chat',{method:'POST',body:JSON.stringify({question:q})});wait.remove();message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>模型推理（接口返回）</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${c.path}</b><br>${c.reason}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button onclick="apply()">应用修改</button>':'无';$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">导出本次 BG 分析</button>':'仅在 Baugruppe 分析完成后可导出。';renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}catch(e){wait.textContent='错误：'+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
+function processingCard(){let card=document.createElement('section');card.className='message assistant';card.style.border='1px solid #334155';card.innerHTML='<b>正在处理你的问题</b><div class="muted" data-process-text>正在建立本地处理连接…</div><div style="height:7px;background:#0b1220;border-radius:8px;overflow:hidden;margin-top:9px"><div data-process-bar style="height:100%;width:4%;background:#38bdf8;transition:width .25s ease"></div></div>';$('chat').append(card);return card}
+function updateProcessing(card,event){let text=card.querySelector('[data-process-text]'),bar=card.querySelector('[data-process-bar]');text.textContent=event.text||'正在处理…';if(typeof event.percent==='number')bar.style.width=Math.max(4,Math.min(100,event.percent))+'%';if(event.phase==='complete'){card.style.borderColor='#22c55e';bar.style.background='#22c55e'}}
+function showChatResult(x){message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>模型推理（接口返回）</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${c.path}</b><br>${c.reason}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button onclick="apply()">应用修改</button>':'无';$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">导出本次 BG 分析</button>':'仅在 Baugruppe 分析完成后可导出。';renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}
+async function chat(){if(busy||!$('question').value.trim())return;busy=true;let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');let wait=processingCard(),buffer='',result=null;try{let response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});if(!response.ok)throw Error((await response.json()).detail||'请求失败');let reader=response.body.getReader(),decoder=new TextDecoder();while(true){let part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});let blocks=buffer.split('\n\n');buffer=blocks.pop();for(let block of blocks){let line=block.split('\n').find(item=>item.startsWith('data: '));if(!line)continue;let event=JSON.parse(line.slice(6));if(event.type==='progress')updateProcessing(wait,event);else if(event.type==='result')result=event.data;else if(event.type==='error')throw Error(event.message||'处理失败')}}if(!result)throw Error('请求未返回结果');updateProcessing(wait,{phase:'complete',text:'处理完成。',percent:100});showChatResult(result)}catch(e){wait.querySelector('[data-process-text]').textContent='错误：'+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
 async function exportSession(){try{let x=await api('/api/export/session',{method:'POST'});$('sessionexport').innerHTML='<span class="ok">已导出：'+esc(x.path)+'</span>'}catch(e){$('sessionexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function exportBgAnalysis(){try{let x=await api('/api/export/bg-analysis',{method:'POST'});$('analysisexport').innerHTML='<span class="ok">已导出：'+esc(x.path)+'</span>'}catch(e){$('analysisexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function esc(s){let e=document.createElement('div');e.textContent=s;return e.innerHTML}async function apply(){try{let x=await api('/api/apply',{method:'POST'});$('changes').innerHTML='<span class="ok">已应用 '+x.applied+' 个修改。</span>';message('已写入 '+x.applied+' 个经确认的文件修改。')}catch(e){$('changes').innerHTML='<span class="error">'+e.message+'</span>'}}
