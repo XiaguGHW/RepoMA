@@ -27,6 +27,7 @@ MAX_VISUAL_BYTES_PER_REQUEST = 2_400_000
 MAX_VISUAL_BYTES_PER_FILE = 700_000
 MAX_SHORT_PDF_PAGES = 5
 MAX_IMAGE_GROUP_DETAIL_VIEWS = 3
+MAX_DFC_SEGMENTS_PER_REQUEST = 4
 # DFC exports are often one very tall Teamcenter hierarchy screenshot.  Keep
 # the source untouched and cache readable, overlapping crops for a later
 # structure-aware reading pass.
@@ -181,16 +182,50 @@ class LocalDocumentLibrary:
         except Exception:
             return []
 
-    def ensure_ocr_for_snippets(self, snippets: list[dict]) -> list[dict]:
-        """OCR only selected visual/low-text PDF pages and persist the result."""
+    def ensure_ocr_for_snippets(self, snippets: list[dict], question: str = "", classification: bool = False) -> list[dict]:
+        """OCR selected visual PDF pages and DFC image segments locally.
+
+        DFC OCR is deliberately segment-aware: its text remains tied to the
+        exact image crop that will be shown to the model, rather than becoming
+        an untraceable flattened list of component names.
+        """
         changed = False
         by_path = {item.get("path"): item for item in self.data["documents"]}
         cache_dir = self.path.parent / "pdf_ocr_cache"
         for snippet in snippets:
             visual = snippet.get("visual") or {}
+            document = by_path.get(str(visual.get("path", "")))
+            if visual.get("kind") == "dfc_structure_screenshot":
+                if not document:
+                    continue
+                manifest = document.get("dfc_structure")
+                if not isinstance(manifest, dict):
+                    manifest = self.dfc_segment_manifest(Path(document["path"]))
+                    document["dfc_structure"] = manifest; changed = True
+                segments = manifest.get("segments", []) if isinstance(manifest, dict) else []
+                for segment in segments:
+                    if segment.get("ocr_status") not in {None, "not_requested"}:
+                        continue
+                    text, status = self._ocr_page_image(Path(segment["path"]))
+                    segment["ocr_text"], segment["ocr_status"] = text, status
+                    changed = True
+                selected = self._select_dfc_segments(segments, question, classification)
+                ocr_parts = []
+                for segment in selected:
+                    text = str(segment.get("ocr_text", "")).strip()
+                    if text:
+                        ocr_parts.append(f"[DFC Struktur, Abschnitt {segment.get('part')}]\n{text}")
+                if ocr_parts and "[DFC Struktur OCR]" not in snippet.get("text", ""):
+                    snippet["text"] += "\n\n[DFC Struktur OCR]\n" + "\n\n".join(ocr_parts)
+                visual["dfc_segment_count"] = len(segments)
+                visual["dfc_segments"] = [
+                    {key: segment.get(key) for key in ("part", "path", "top_px", "bottom_px", "ocr_status")}
+                    for segment in selected
+                ]
+                visual["dfc_ocr_status"] = self._dfc_ocr_status(segments)
+                continue
             if visual.get("kind") != "pdf_page":
                 continue
-            document = by_path.get(str(visual.get("path", "")))
             page_number = visual.get("page")
             if not document or not isinstance(page_number, int):
                 continue
@@ -222,8 +257,8 @@ class LocalDocumentLibrary:
     def ensure_document_ocr(self, document: dict) -> None:
         """Prepare every visual/mixed page locally for an exhaustive reading pass."""
         snippets = [{"text": "", "visual": chunk.get("visual")} for chunk in document.get("chunks", [])
-                    if (chunk.get("visual") or {}).get("kind") == "pdf_page"]
-        self.ensure_ocr_for_snippets(snippets)
+                    if (chunk.get("visual") or {}).get("kind") in {"pdf_page", "dfc_structure_screenshot"}]
+        self.ensure_ocr_for_snippets(snippets, classification=True)
 
     def bilder_image_paths(self, allowed_ids=None) -> list[Path]:
         """Return explicitly selected CAD screenshots from direct Bilder folders."""
@@ -233,7 +268,8 @@ class LocalDocumentLibrary:
             if allowed and document.get("id") not in allowed:
                 continue
             path = Path(document.get("path", ""))
-            if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} and path.parent.name.casefold() == "bilder" and path.is_file():
+            if (path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} and path.parent.name.casefold() == "bilder"
+                    and document.get("image_type") != "dfc_structure_screenshot" and path.is_file()):
                 paths.append(path)
         return sorted(set(paths), key=lambda item: item.name.casefold())
 
@@ -309,6 +345,53 @@ class LocalDocumentLibrary:
             manifest["status"] = f"unavailable: {str(exc)[:120]}"
             manifest["segments"] = []
         return manifest
+
+    @staticmethod
+    def dfc_audit(document: dict) -> dict | None:
+        """Small serialisable audit record; never exposes the cached OCR text."""
+        manifest = document.get("dfc_structure")
+        if document.get("image_type") != "dfc_structure_screenshot" or not isinstance(manifest, dict):
+            return None
+        segments = manifest.get("segments", [])
+        return {
+            "type": "DFC Struktur",
+            "status": manifest.get("status", "unknown"),
+            "segments_total": len(segments),
+            "ocr_status": LocalDocumentLibrary._dfc_ocr_status(segments),
+            "ocr_ready_segments": [item.get("part") for item in segments if item.get("ocr_status") == "ok"],
+            "ocr_failed_segments": [item.get("part") for item in segments if item.get("ocr_status") not in {"ok", None, "not_requested"}],
+        }
+
+    @staticmethod
+    def _dfc_ocr_status(segments: list[dict]) -> str:
+        if not segments:
+            return "not_needed"
+        statuses = [str(item.get("ocr_status", "not_requested")) for item in segments]
+        if all(status == "ok" for status in statuses):
+            return "ok"
+        if any(status == "ok" for status in statuses):
+            return "partial"
+        return statuses[0]
+
+    @staticmethod
+    def _select_dfc_segments(segments: list[dict], question: str, classification: bool) -> list[dict]:
+        """Choose OCR-matched crops, with deterministic whole-structure fallback."""
+        if len(segments) <= MAX_DFC_SEGMENTS_PER_REQUEST:
+            return list(segments)
+        terms = _expanded_tokens(question)
+        ranked = []
+        for segment in segments:
+            text = str(segment.get("ocr_text", "")).casefold()
+            score = sum(1 for term in terms if term in text)
+            ranked.append((score, int(segment.get("part", 0)), segment))
+        matched = [item for item in ranked if item[0] > 0]
+        if matched:
+            return [item[2] for item in sorted(matched, key=lambda item: (-item[0], item[1]))[:MAX_DFC_SEGMENTS_PER_REQUEST]]
+        # A first classification should see the full hierarchy from top to
+        # bottom, even when the Chinese question has no lexical OCR match.
+        indexes = {round(index * (len(segments) - 1) / (MAX_DFC_SEGMENTS_PER_REQUEST - 1))
+                   for index in range(MAX_DFC_SEGMENTS_PER_REQUEST)}
+        return [segment for index, segment in enumerate(segments) if index in indexes]
 
     def remove(self, document_id: str):
         before = len(self.data["documents"])
@@ -406,7 +489,7 @@ class LocalDocumentLibrary:
         cache_dir.mkdir(parents=True, exist_ok=True)
         paths, seen, used_bytes, skipped = [], set(), 0, []
         grouped_image_sources = {Path(item) for item in (bilder_images or []) if Path(item).is_file()}
-        image_group_reports, title_blocks = [], []
+        image_group_reports, title_blocks, dfc_reports = [], [], []
         short_pdfs: list[Path] = []
         for snippet in snippets:
             visual = snippet.get("visual") or {}
@@ -433,6 +516,39 @@ class LocalDocumentLibrary:
                 return False
             paths.append(str(output)); used_bytes += size
             return True
+
+        # DFC is a priority-1 structural source, not another CAD screenshot.
+        # Attach its selected original-image crops before visual overviews use
+        # the request budget.  OCR text for the same numbered crops is already
+        # part of the textual evidence supplied to the model.
+        dfc_seen = set()
+        for snippet in snippets:
+            visual = snippet.get("visual") or {}
+            if visual.get("kind") != "dfc_structure_screenshot":
+                continue
+            source = Path(visual.get("path", ""))
+            key = str(source)
+            if key in dfc_seen:
+                continue
+            dfc_seen.add(key)
+            selected = visual.get("dfc_segments") or []
+            attached_parts = []
+            for segment in selected:
+                part = segment.get("part")
+                try:
+                    output = self._prepare_image(Path(str(segment.get("path", ""))), cache_dir,
+                                                 max_bytes=520_000, max_edge=2600)
+                except Exception:
+                    skipped.append(f"{source.name} DFC 第 {part} 段无法转换")
+                    continue
+                if attach(output, f"{source.name} DFC 第 {part} 段"):
+                    attached_parts.append(part)
+            dfc_reports.append({
+                "name": source.name,
+                "segments_total": visual.get("dfc_segment_count", len(selected)),
+                "segments_used": attached_parts,
+                "ocr_status": visual.get("dfc_ocr_status", "not_requested"),
+            })
 
         # For a 1–5 page PDF, an individual retrieved page is not sufficient:
         # the title block, view, BOM and revision can be on different sheets.
@@ -481,7 +597,7 @@ class LocalDocumentLibrary:
             kind = visual.get("kind")
             source = Path(visual.get("path", ""))
             key = (kind, str(source), visual.get("page"), visual.get("sheet"), visual.get("start_row"))
-            if key in seen or not source.is_file() or (kind == "pdf_page" and source in short_pdfs) or (kind in {"image", "dfc_structure_screenshot"} and source in grouped_image_sources):
+            if key in seen or not source.is_file() or kind == "dfc_structure_screenshot" or (kind == "pdf_page" and source in short_pdfs) or (kind == "image" and source in grouped_image_sources):
                 continue
             try:
                 if kind in {"image", "dfc_structure_screenshot"}:
@@ -501,7 +617,7 @@ class LocalDocumentLibrary:
         self.last_visual_report = {
             "attachments": len(paths), "bytes": used_bytes, "budget": MAX_VISUAL_BYTES_PER_REQUEST,
             "short_drawings": [item.name for item in short_pdfs], "image_groups": image_group_reports,
-            "skipped": skipped,
+            "dfc": dfc_reports, "skipped": skipped,
         }
         return paths
 
@@ -734,15 +850,15 @@ class LocalDocumentLibrary:
         return cls._save_safe_jpeg(pix, cache_dir / f"{key}_p{page_number}_title_block.jpg", max_bytes=420_000, max_edge=1700)
 
     @classmethod
-    def _prepare_image(cls, source: Path, cache_dir: Path):
-        key = hashlib.sha256(f"{source}|{source.stat().st_mtime_ns}".encode()).hexdigest()[:12]
+    def _prepare_image(cls, source: Path, cache_dir: Path, max_bytes=MAX_VISUAL_BYTES_PER_FILE, max_edge=2000):
+        key = hashlib.sha256(f"{source}|{source.stat().st_mtime_ns}|{max_bytes}|{max_edge}".encode()).hexdigest()[:12]
         target = cache_dir / f"image_{key}.jpg"
-        if target.exists() and target.stat().st_size <= MAX_VISUAL_BYTES_PER_FILE:
+        if target.exists() and target.stat().st_size <= max_bytes:
             return target
         from PIL import Image
         with Image.open(source) as image:
             image.load()
-            return cls._save_image_jpeg(image, target)
+            return cls._save_image_jpeg(image, target, max_bytes=max_bytes, max_edge=max_edge)
 
     @classmethod
     def _save_safe_jpeg(cls, pix, target: Path, max_bytes=MAX_VISUAL_BYTES_PER_FILE, max_edge=2000):
