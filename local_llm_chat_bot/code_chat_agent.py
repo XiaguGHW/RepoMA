@@ -34,7 +34,7 @@ SYSTEM = """You are a careful local workspace and document assistant. You never 
 The local program gives you code excerpts, locally extracted document excerpts, and, when necessary, current full files.
 Return ONLY a JSON object with these fields:
 {
-  "answer": "concise Chinese explanation for the user (normally <= 1200 Chinese characters; complete the JSON even if you must shorten)",
+  "answer": "concise explanation in the response language requested in the user prompt (normally <= 1200 Chinese characters or equivalent; complete the JSON even if you must shorten)",
   "read_files": ["relative/path"],
   "changes": [{"path": "relative/path", "content": "complete new UTF-8 file content", "reason": "brief reason"}],
   "memory_action": {"operation": "none|add|edit|delete", "id": "memory id or empty", "content": "new memory text or empty"},
@@ -54,13 +54,16 @@ Rules:
 - Never claim a memory action was completed: the local program requires explicit confirmation.
 - Do not use Markdown fences around the JSON.
 - For ordinary explanations, be structured but concise. Never let a long explanation prevent a complete valid JSON object.
+- Write the natural-language answer in the response language requested in the user prompt.
+  Keep official Codebook category names, filenames, part numbers, source quotations,
+  supplied table labels, and supplied technical evidence exactly as provided.
 - Exception — when the supplied prompt contains BG CLASSIFICATION MODE, give a
   detailed, evidence-led assessment. It may exceed the normal length limit.
-  Use these exact sections: Empfehlung; Entscheidungsweg nach Codebook;
-  Belege (file/page/sheet/row); Abgrenzung zu Alternativen; Unsicherheit.
+  Use concise equivalent sections in the requested response language: recommendation;
+  Codebook decision path; evidence (file/page/sheet/row); alternatives; uncertainty.
   Do not invent evidence. Separate an observed fact from an inference.
-- Write for a narrow plain terminal, not for Markdown rendering. Use this default shape:
-  结论：one short sentence
+- Write for a narrow plain terminal, not for Markdown rendering. Use this default shape in the requested language:
+  Short conclusion: one sentence
   1) Short heading — one or two short lines
   2) Short heading — one or two short lines
   下一步：only when the user needs an action
@@ -445,7 +448,8 @@ def ensure_relative(path: str) -> str:
 
 def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], full_files: dict[str, str] | None = None,
                document_snippets: list[dict] | None = None, bg_context: dict | None = None,
-               coverage_summaries: list[dict] | None = None, bg_dossier: dict | None = None):
+               coverage_summaries: list[dict] | None = None, bg_dossier: dict | None = None,
+               response_language: str = "zh"):
     recent = "\n".join(f"{turn['role']}: {turn['content']}" for turn in state.data["history"][-HISTORY_MESSAGES_PER_REQUEST:]) or "(new conversation)"
     memories = state.search_memory(question)
     memory_text = "\n".join(f"- [{item['id']}] {item['content']}" for item in memories) or "(No relevant confirmed long-term memory.)"
@@ -478,6 +482,7 @@ BG CLASSIFICATION MODE (active):
 - Copy the class and evidence-label spelling exactly. Use only evidence labels supplied in this prompt. A non-empty evidence_labels list is mandatory for a classification.
 - A non-empty codebook_rule_ids list is mandatory; it must name the actual locked rule(s) used for the decision. Keep Codebook-rule pages and BG-evidence pages separate.
 """
+    language_name = {"zh": "Chinese", "en": "English", "de": "German"}.get(str(response_language).lower(), "Chinese")
     return f"""Workspace: {state.workspace}
 Project summary: {state.data['summary'] or '(none)'}
 Recent conversation:\n{recent}
@@ -495,6 +500,10 @@ BG comprehensive evidence dossier (compiled from the selected files' local summa
 Prepared per-file evidence summaries (fallback only when no dossier is available; do not claim unread pages were inspected):\n{coverage_text}
 
 Complete current files supplied in this turn:\n{complete}
+
+Response language: Write the natural-language `answer` primarily in {language_name}.
+Do not translate official Codebook category names, filenames, part numbers, source quotations,
+table labels, or the supplied material evidence; preserve their original spelling verbatim.
 
 User request: {question}
 {bg_instruction}
