@@ -180,10 +180,18 @@ class LocalDocumentLibrary:
         if len(raw) > MAX_DOCUMENT_BYTES:
             raise ValueError(f"File is larger than {MAX_DOCUMENT_BYTES // (1024 * 1024)} MB.")
         digest = hashlib.sha256(raw).hexdigest()
+        previous = next((item for item in self.data["documents"] if item["path"] == str(path)), None)
+        # Re-opening the same unchanged BG selection must not repeat local PDF
+        # extraction, OCR or DFC preparation.  The document record already
+        # carries those local artefacts and is safe to reuse by content hash.
+        if previous and previous.get("sha256") == digest:
+            previous["material_role"] = material_role(path)
+            previous["index_cache_status"] = "reused"
+            self._save()
+            return previous
         chunks = self._extract(path)
         if not chunks:
             raise ValueError("No extractable text was found in this file.")
-        previous = next((item for item in self.data["documents"] if item["path"] == str(path)), None)
         document = {
             "id": previous["id"] if previous else hashlib.sha256(str(path).encode()).hexdigest()[:8],
             "name": path.name,
@@ -193,6 +201,7 @@ class LocalDocumentLibrary:
             "indexed_at": _now(),
             "chunks": chunks[:MAX_CHUNKS_PER_DOCUMENT],
             "material_role": material_role(path),
+            "index_cache_status": "new" if previous is None else "changed",
         }
         if path.suffix.lower() == ".pdf":
             document["page_inventory"] = self.pdf_page_inventory(path)
