@@ -480,7 +480,7 @@ Relevant code excerpts:\n{shown}
 
 Relevant locally extracted document excerpts:\n{document_text}
 
-Complete per-file coverage summaries (prepared from every extracted text chunk in the selected material):\n{coverage_text}
+Prepared per-file evidence summaries (the reading scope is recorded for each file; do not claim unread pages were inspected):\n{coverage_text}
 
 Complete current files supplied in this turn:\n{complete}
 
