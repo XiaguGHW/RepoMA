@@ -150,15 +150,20 @@ def load_workbench_settings() -> dict[str, str]:
             "workspace": str(data.get("workspace", "")),
             "session": str(data.get("session", "default")) or "default",
             "model": str(data.get("model", "claude-haiku-5.5")) or "claude-haiku-5.5",
-        } if isinstance(data, dict) else {"workspace": "", "session": "default", "model": "claude-haiku-5.5"}
+            "language": normalize_language(data.get("language", "zh")),
+        } if isinstance(data, dict) else {"workspace": "", "session": "default", "model": "claude-haiku-5.5", "language": "zh"}
     except (OSError, ValueError):
-        return {"workspace": "", "session": "default", "model": "claude-haiku-5.5"}
+        return {"workspace": "", "session": "default", "model": "claude-haiku-5.5", "language": "zh"}
 
 
-def save_workbench_settings(workspace: Path, session_name: str, model: str) -> None:
+def normalize_language(value: Any) -> str:
+    return str(value or "zh").lower() if str(value or "zh").lower() in {"zh", "en", "de"} else "zh"
+
+
+def save_workbench_settings(workspace: Path, session_name: str, model: str, language: str = "zh") -> None:
     app_state_home().mkdir(parents=True, exist_ok=True)
     workbench_settings_path().write_text(
-        json.dumps({"workspace": str(workspace), "session": session_name, "model": model}, ensure_ascii=False, indent=2),
+        json.dumps({"workspace": str(workspace), "session": session_name, "model": model, "language": normalize_language(language)}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -169,6 +174,7 @@ class Setup(BaseModel):
     model: str = "gpt-5.5"
     session: str = "default"
     env_file: str = ""
+    language: str = "zh"
 
 
 class PathRequest(BaseModel):
@@ -181,6 +187,10 @@ class ModelTestRequest(BaseModel):
 
 class ModelSwitchRequest(BaseModel):
     model: str
+
+
+class LanguageRequest(BaseModel):
+    language: str
 
 
 class SessionRenameRequest(BaseModel):
@@ -1073,7 +1083,8 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
             notices.append(f"BG 综合证据档案未能生成，已回退为逐文件摘要：{exc}")
             dossier = None
     model_prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
-                              coverage_summaries=[] if dossier else coverage_summaries, bg_dossier=dossier)
+                              coverage_summaries=[] if dossier else coverage_summaries, bg_dossier=dossier,
+                              response_language=data.get("language", "zh"))
     report("model", f"正在连接 {data['model']} 并提交问题…", 86)
     model_started = False
     def model_events(kind: str, text: str):
@@ -1140,7 +1151,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
             state.refresh_file(relative)
     if complete:
         model_prompt = prompt_for(state, question, snippets, complete, evidence, bg_context,
-                                  [] if dossier else coverage_summaries, dossier)
+                                  [] if dossier else coverage_summaries, dossier, data.get("language", "zh"))
         report("model", "正在补充读取模型请求的本地文件并生成回答…", 93)
         raw = llm.ask_about_files(visuals, model_prompt,
                                    SYSTEM, {"maxOutputTokens": 3000, "temperature": 0}, stream=True, event_handler=model_events)
@@ -1203,7 +1214,7 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
     dossier = load_bg_dossier_cache(coverage, data["model"]) if coverage_matches_current_selection(data, coverage) else None
     prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
                         coverage_summaries=[] if dossier else (coverage.get("files", []) if coverage.get("complete") else []),
-                        bg_dossier=dossier)
+                        bg_dossier=dossier, response_language=data.get("language", "zh"))
     results = []
     for index, model in enumerate(models, start=1):
         notices: list[str] = []
@@ -1279,11 +1290,12 @@ def setup(request: Setup):
     state = ProjectState(state_home, workspace, request.session)
     documents = LocalDocumentLibrary(state.root.parent / "documents.json")
     price_file = Path(__file__).resolve().parent / "model_pricing.json"
-    ACTIVE.clear(); ACTIVE.update({"state": state, "documents": documents, "model": request.model,
+    language = normalize_language(request.language)
+    ACTIVE.clear(); ACTIVE.update({"state": state, "documents": documents, "model": request.model, "language": language,
                                     "llm": LLMConnector(request.model, key, session_id=state.data["session_id"]),
                                     "pricing": PricingCatalog(price_file), "pending": []})
     state.scan()
-    save_workbench_settings(workspace, state.root.name, request.model)
+    save_workbench_settings(workspace, state.root.name, request.model, language)
     return status_data(ACTIVE)
 
 
@@ -1302,7 +1314,7 @@ def switch_model(request: ModelSwitchRequest):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     data["model"] = model
-    save_workbench_settings(data["state"].workspace, data["state"].root.name, model)
+    save_workbench_settings(data["state"].workspace, data["state"].root.name, model, data.get("language", "zh"))
     return status_data(data)
 
 
@@ -1312,7 +1324,7 @@ def activate_local_session(data: dict[str, Any], session_name: str) -> dict:
     data["documents"] = LocalDocumentLibrary(state.root.parent / "documents.json")
     data["llm"] = LLMConnector(data["model"], data["llm"].api_key, session_id=state.data["session_id"])
     data["pending"] = []
-    save_workbench_settings(state.workspace, state.root.name, data["model"])
+    save_workbench_settings(state.workspace, state.root.name, data["model"], data.get("language", "zh"))
     return status_data(data)
 
 
@@ -1353,6 +1365,15 @@ def delete_session(request: SessionDeleteRequest):
 def settings():
     # Only the local path is returned. No source documents or credentials leave this computer.
     return load_workbench_settings()
+
+
+@app.post("/api/language")
+def set_language(request: LanguageRequest):
+    language = normalize_language(request.language)
+    data = session()
+    data["language"] = language
+    save_workbench_settings(data["state"].workspace, data["state"].root.name, data["model"], language)
+    return {"language": language}
 
 
 @app.get("/api/sessions")
@@ -1729,8 +1750,8 @@ def apply():
 
 HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bosch Local Workbench</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#111827;color:#e5e7eb;font:14px Inter,Segoe UI,Arial,sans-serif}button,input,select{font:inherit}button{background:#2563eb;color:white;border:0;border-radius:7px;padding:8px 10px;cursor:pointer}button.ghost{background:#263244;color:#cbd5e1}.shell{height:100vh;display:grid;grid-template-columns:270px minmax(420px,1fr) 300px}.side{background:#172033;border-right:1px solid #334155;padding:16px;overflow:auto}.right{border-left:1px solid #334155;border-right:0}.main{display:flex;flex-direction:column;min-width:0}.brand{font-weight:700;font-size:16px;margin-bottom:16px}.muted{color:#94a3b8;font-size:12px}.field{margin:10px 0}.field label{display:block;font-size:12px;color:#a9b6c8;margin-bottom:5px}input{width:100%;background:#0f172a;border:1px solid #3b4960;border-radius:6px;padding:8px;color:#f8fafc}.row{display:flex;gap:7px}.row>*{min-width:0}.row input{flex:1}.chat{flex:1;overflow:auto;padding:24px max(32px,8%)}.message{max-width:920px;margin:0 auto 18px;padding:13px 15px;border-radius:10px;white-space:pre-wrap;line-height:1.55}.user{background:#1e3a5f;margin-left:auto;max-width:78%}.assistant{background:#1e293b}.reason{margin:8px auto 18px;max-width:920px;background:#171e2d;border:1px solid #334155;border-radius:8px;padding:9px}.reason summary{cursor:pointer;color:#b9c9e2}.reason pre{white-space:pre-wrap;font-size:12px;color:#aab7c8}.composer{border-top:1px solid #334155;padding:13px 8%;display:flex;gap:8px;background:#111827}.composer input{padding:12px}.composer button{padding:10px 17px}.card{border:1px solid #334155;border-radius:8px;padding:10px;margin:10px 0;background:#141d2d}.list{font-size:12px;line-height:1.5;word-break:break-word}.diff{white-space:pre-wrap;background:#0b1220;border-radius:6px;padding:8px;max-height:230px;overflow:auto;color:#d7e1ed}.ok{color:#86efac}.error{color:#fca5a5}.chip{display:inline-block;padding:3px 6px;border-radius:5px;background:#22314a;color:#bcd5ff;margin:2px;font-size:11px}.check{display:block;margin:5px 0;color:#dbeafe;font-size:12px}.check input{width:auto;margin-right:5px}.comparison{max-width:1180px;margin:0 auto 20px}.comparison-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:10px}.comparison .card{margin:0}.comparison .answer{white-space:pre-wrap;line-height:1.5;max-height:440px;overflow:auto}.target-tree{max-height:360px;overflow:auto;border:1px solid #334155;border-radius:7px;padding:7px;background:#0f172a}.target-tree details{margin:3px 0}.target-tree summary{cursor:pointer;list-style:none}.target-tree summary::-webkit-details-marker{display:none}.target-tree summary:before{content:'▸';display:inline-block;width:13px;color:#94a3b8}.target-tree details[open]>summary:before{content:'▾'}.target-tree label{cursor:pointer;margin-left:4px}.target-tree input{width:auto;vertical-align:middle}.tree-children{margin-left:17px;border-left:1px solid #29374d;padding-left:7px}.tree-file{margin:3px 0}.unsupported{color:#64748b}.classification-card{max-width:920px;margin:-8px auto 18px;border:1px solid #38bdf8;border-radius:10px;padding:13px 15px;background:#10263a;line-height:1.55}.classification-card h3{margin:0 0 8px;color:#bae6fd;font-size:14px}.classification-card ul{margin:5px 0 0;padding-left:20px}.classification-card .result{font-size:16px;color:#f8fafc}.codebook-workspace{padding-top:28px}.codebook-workspace .workspace-inner{max-width:980px;margin:auto}.codebook-workspace h1{font-size:22px;margin:0 0 7px}.codebook-workspace h2{font-size:16px;margin:22px 0 8px}.codebook-class{border-left:3px solid #38bdf8}.codebook-class h3{margin:0 0 7px}.codebook-class ul{margin:7px 0;padding-left:20px;line-height:1.55}.workspace-actions{display:flex;gap:8px;position:sticky;bottom:0;padding:12px 0;background:#111827}
-</style></head><body><div class="shell"><aside class="side"><div class="brand">Bosch Local Workbench</div><div class="muted">仅本机 127.0.0.1 · 缓存固定保存在程序目录 AI_Bot_State</div>
+*{box-sizing:border-box}body{margin:0;background:#111827;color:#e5e7eb;font:14px Inter,Segoe UI,Arial,sans-serif}button,input,select{font:inherit}button{background:#2563eb;color:white;border:0;border-radius:7px;padding:8px 10px;cursor:pointer}button.ghost{background:#263244;color:#cbd5e1}.shell{height:100vh;display:grid;grid-template-columns:270px minmax(420px,1fr) 300px}.side{background:#172033;border-right:1px solid #334155;padding:16px;overflow:auto}.right{border-left:1px solid #334155;border-right:0}.main{display:flex;flex-direction:column;min-width:0}.brand{font-weight:700;font-size:16px;margin-bottom:16px}.muted{color:#94a3b8;font-size:12px}.field{margin:10px 0}.field label{display:block;font-size:12px;color:#a9b6c8;margin-bottom:5px}input{width:100%;background:#0f172a;border:1px solid #3b4960;border-radius:6px;padding:8px;color:#f8fafc}.row{display:flex;gap:7px}.row>*{min-width:0}.row input{flex:1}.chat{flex:1;overflow:auto;padding:24px max(32px,8%)}.message{max-width:920px;margin:0 auto 18px;padding:13px 15px;border-radius:10px;white-space:pre-wrap;line-height:1.55}.user{background:#1e3a5f;margin-left:auto;max-width:78%}.assistant{background:#1e293b}.reason{margin:8px auto 18px;max-width:920px;background:#171e2d;border:1px solid #334155;border-radius:8px;padding:9px}.reason summary{cursor:pointer;color:#b9c9e2}.reason pre{white-space:pre-wrap;font-size:12px;color:#aab7c8}.composer{border-top:1px solid #334155;padding:13px 8%;display:flex;gap:8px;background:#111827}.composer input{padding:12px}.composer button{padding:10px 17px}.card{border:1px solid #334155;border-radius:8px;padding:10px;margin:10px 0;background:#141d2d}.list{font-size:12px;line-height:1.5;word-break:break-word}.diff{white-space:pre-wrap;background:#0b1220;border-radius:6px;padding:8px;max-height:230px;overflow:auto;color:#d7e1ed}.ok{color:#86efac}.error{color:#fca5a5}.chip{display:inline-block;padding:3px 6px;border-radius:5px;background:#22314a;color:#bcd5ff;margin:2px;font-size:11px}.check{display:block;margin:5px 0;color:#dbeafe;font-size:12px}.check input{width:auto;margin-right:5px}.comparison{max-width:1180px;margin:0 auto 20px}.comparison-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:10px}.comparison .card{margin:0}.comparison .answer{white-space:pre-wrap;line-height:1.5;max-height:440px;overflow:auto}.target-tree{max-height:360px;overflow:auto;border:1px solid #334155;border-radius:7px;padding:7px;background:#0f172a}.target-tree details{margin:3px 0}.target-tree summary{cursor:pointer;list-style:none}.target-tree summary::-webkit-details-marker{display:none}.target-tree summary:before{content:'▸';display:inline-block;width:13px;color:#94a3b8}.target-tree details[open]>summary:before{content:'▾'}.target-tree label{cursor:pointer;margin-left:4px}.target-tree input{width:auto;vertical-align:middle}.tree-children{margin-left:17px;border-left:1px solid #29374d;padding-left:7px}.tree-file{margin:3px 0}.unsupported{color:#64748b}.classification-card{max-width:920px;margin:-8px auto 18px;border:1px solid #38bdf8;border-radius:10px;padding:13px 15px;background:#10263a;line-height:1.55}.classification-card h3{margin:0 0 8px;color:#bae6fd;font-size:14px}.classification-card ul{margin:5px 0 0;padding-left:20px}.classification-card .result{font-size:16px;color:#f8fafc}.codebook-workspace{padding-top:28px}.codebook-workspace .workspace-inner{max-width:980px;margin:auto}.codebook-workspace h1{font-size:22px;margin:0 0 7px}.codebook-workspace h2{font-size:16px;margin:22px 0 8px}.codebook-class{border-left:3px solid #38bdf8}.codebook-class h3{margin:0 0 7px}.codebook-class ul{margin:7px 0;padding-left:20px;line-height:1.55}.workspace-actions{display:flex;gap:8px;position:sticky;bottom:0;padding:12px 0;background:#111827}.language-picker{position:fixed;top:11px;right:14px;z-index:50;display:flex;align-items:center;gap:5px;padding:5px 7px;background:#172033;border:1px solid #3b4960;border-radius:7px;color:#cbd5e1;font-size:12px}.language-picker select{width:auto;background:#0f172a;border:0;color:#f8fafc;padding:3px}
+</style></head><body><div class="language-picker"><span>GUI:</span><select id="language" onchange="changeLanguage()"><option value="zh">ZH</option><option value="en">EN</option><option value="de">DE</option></select></div><div class="shell"><aside class="side"><div class="brand">Bosch Local Workbench</div><div class="muted">仅本机 127.0.0.1 · 缓存固定保存在程序目录 AI_Bot_State</div>
 <div class="field"><label>代码工作区文件夹</label><div class="row"><input id="workspace" placeholder="C:\\...\\项目文件夹"><button class="ghost" onclick="pick('folder','workspace')">选择</button></div></div><div class="field"><label>模型</label>
 <select id="model" onchange="toggleCustomModel();loadModelStatus()">
 <option value="claude-haiku-5.5">Claude Haiku 5.5（推荐：日常、便宜）</option>
@@ -1745,10 +1766,15 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 <main class="main"><div class="chat" id="chat"><div class="message assistant">选择工作区后即可聊天。代码修改会先显示 diff，只有点击“应用修改”才会写入本地文件。</div></div><div class="composer" id="composer"><input id="question" placeholder="问代码，或根据 Codebook 判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button></div></main>
 <aside class="side right"><b>本轮状态</b><div id="status" class="card muted">尚未打开工作区</div><b>会话导出</b><div id="sessionexport" class="card"><button class="ghost" onclick="exportSession()">导出完整会话</button></div><b>本轮 token 明细</b><div id="usagedetail" class="card muted">完成一次请求后显示。</div><b>BG 分析导出</b><div id="analysisexport" class="card muted">仅在 Baugruppe 分析完成后可导出。</div><b>证据来源</b><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><b>待应用修改</b><div id="changes" class="list">无</div></aside></div>
 <script>
-const $=id=>document.getElementById(id);let busy=false,lastQuestion='',compareSlots=[{value:'claude-haiku-5.5',custom:''}],savedTargetSelection=new Set(),treeRestoreNote='',lastScanReport=null,scannedSelection='';
+const $=id=>document.getElementById(id);let busy=false,lastQuestion='',compareSlots=[{value:'claude-haiku-5.5',custom:''}],savedTargetSelection=new Set(),treeRestoreNote='',lastScanReport=null,scannedSelection='',uiLanguage='zh';
+const UI={en:{'代码工作区文件夹':'Code workspace folder','选择':'Browse','模型':'Model','打开工作区':'Open workspace','切换模型':'Switch model','测试模型':'Test model','聊天会话':'Chat session','切换':'Switch','新建':'New','改名':'Rename','删除':'Delete','材料分析':'Material analysis','分析目标：文件或文件夹':'Analysis target: file or folder','文件':'File','文件夹':'Folder','显示文件夹结构':'Show folder tree','用选中材料开始分析':'Analyze selected materials','退出分类模式':'Exit classification mode','多模型对比':'Multi-model comparison','开始对比':'Compare','发送':'Send','本轮状态':'Current status','会话导出':'Session export','导出完整会话':'Export full session','本轮 token 明细':'Current token detail','BG 分析导出':'BG analysis export','证据来源':'Evidence sources','待应用修改':'Pending changes','Codebook 文件（首次准备或更换时选择）':'Codebook file (select when preparing or replacing)','准备 Codebook':'Prepare Codebook','查看':'View','更换':'Replace','＋ 添加对比模型':'＋ Add comparison model','最多 4 个模型':'Maximum 4 models','无':'None','尚未打开工作区':'No workspace open','完成一次请求后显示。':'Shown after a request completes.','回答后会显示实际传给模型的来源。':'Sources actually sent to the model appear after an answer.','仅在 Baugruppe 分析完成后可导出。':'Available after a Baugruppe analysis completes.','选择工作区后即可聊天。代码修改会先显示 diff，只有点击“应用修改”才会写入本地文件。':'Choose a workspace to start chatting. Code edits are shown as a diff and are written only after you click “Apply changes”.'},de:{'代码工作区文件夹':'Code-Arbeitsordner','选择':'Auswählen','模型':'Modell','打开工作区':'Arbeitsordner öffnen','切换模型':'Modell wechseln','测试模型':'Modell testen','聊天会话':'Chat-Sitzung','切换':'Wechseln','新建':'Neu','改名':'Umbenennen','删除':'Löschen','材料分析':'Materialanalyse','分析目标：文件或文件夹':'Analyseziel: Datei oder Ordner','文件':'Datei','文件夹':'Ordner','显示文件夹结构':'Ordnerstruktur anzeigen','用选中材料开始分析':'Ausgewählte Materialien analysieren','退出分类模式':'Klassifizierungsmodus verlassen','多模型对比':'Modellvergleich','开始对比':'Vergleichen','发送':'Senden','本轮状态':'Aktueller Status','会话导出':'Sitzung exportieren','导出完整会话':'Vollständige Sitzung exportieren','本轮 token 明细':'Token-Details dieser Runde','BG 分析导出':'BG-Analyse exportieren','证据来源':'Evidenzquellen','待应用修改':'Ausstehende Änderungen','Codebook 文件（首次准备或更换时选择）':'Codebook-Datei (beim Vorbereiten/Ersetzen wählen)','准备 Codebook':'Codebook vorbereiten','查看':'Ansehen','更换':'Ersetzen','＋ 添加对比模型':'＋ Vergleichsmodell hinzufügen','最多 4 个模型':'Maximal 4 Modelle','无':'Keine','尚未打开工作区':'Kein Arbeitsordner geöffnet','完成一次请求后显示。':'Wird nach Abschluss einer Anfrage angezeigt.','回答后会显示实际传给模型的来源。':'Nach einer Antwort werden die tatsächlich an das Modell gesendeten Quellen angezeigt.','仅在 Baugruppe 分析完成后可导出。':'Nach Abschluss einer Baugruppenanalyse verfügbar.','选择工作区后即可聊天。代码修改会先显示 diff，只有点击“应用修改”才会写入本地文件。':'Arbeitsordner wählen, dann chatten. Codeänderungen werden zuerst als Diff gezeigt und erst nach „Änderungen anwenden“ lokal geschrieben.'}};
+const originalText=new WeakMap(),originalAttr=new WeakMap();
+function applyLanguage(){let dict=UI[uiLanguage]||{};document.documentElement.lang=uiLanguage;document.title='Bosch Local Workbench';let walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);for(let node;node=walker.nextNode();){let source=originalText.get(node);if(source===undefined){source=node.nodeValue;originalText.set(node,source)}let key=source.trim(),translated=dict[key];if(translated){let lead=source.match(/^\s*/)[0],tail=source.match(/\s*$/)[0];node.nodeValue=lead+translated+tail}}for(let el of document.querySelectorAll('[placeholder],[title]'))for(let attr of ['placeholder','title'])if(el.hasAttribute(attr)){let saved=originalAttr.get(el)||{};if(!(attr in saved)){saved[attr]=el.getAttribute(attr);originalAttr.set(el,saved)}el.setAttribute(attr,dict[saved[attr]]||saved[attr])}}
+async function changeLanguage(){uiLanguage=$('language').value;applyLanguage();try{if($('workspace').value.trim())await api('/api/language',{method:'POST',body:JSON.stringify({language:uiLanguage})})}catch(e){console.warn('Could not persist UI language',e)}}
 async function restoreLastWorkspace(){
   try{
     let s=await api('/api/settings');
+    uiLanguage=['zh','en','de'].includes(s.language)?s.language:'zh';$('language').value=uiLanguage;applyLanguage();
     if(!s.workspace)return;
     $('workspace').value=s.workspace;
     setSelectedModel(s.model||'claude-haiku-5.5');
@@ -1759,7 +1785,7 @@ async function restoreLastWorkspace(){
     $('setupmsg').textContent='无法自动打开上次工作区；请重新选择路径。';
   }
 }
-window.addEventListener('DOMContentLoaded',()=>{renderCompareSlots();loadCodebookStatus();ensureMaterialFlow();restoreLastWorkspace()});
+window.addEventListener('DOMContentLoaded',()=>{applyLanguage();renderCompareSlots();loadCodebookStatus();ensureMaterialFlow();restoreLastWorkspace()});
 async function api(url,opt={}){let r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt});let d=await r.json();if(!r.ok)throw Error(d.detail||'请求失败');return d}
 async function pick(kind,target){try{$(target).value=(await api('/api/pick/'+kind)).path||''}catch(e){alert(e.message)}}
 function message(text,kind='assistant'){let e=document.createElement('div');e.className='message '+kind;e.textContent=text;$('chat').append(e);$('chat').scrollTop=1e9;return e}
@@ -1782,7 +1808,7 @@ async function lockCodebook(){if(!confirm('确认锁定此 Codebook？之后切�
 async function changeCodebook(){if(!confirm('更换 Codebook 会解除当前锁定；不会删除原始文件或已完成的聊天记录。继续吗？'))return;try{await api('/api/codebook',{method:'DELETE'});$('codebook').value='';renderCodebookStatus({status:'none'});leaveCodebookWorkspace();$('setupmsg').textContent='已解除 Codebook 锁定，请选择新文件并准备。'}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function loadSessions(){try{let x=await api('/api/sessions');$('session').innerHTML=x.sessions.map(n=>`<option value="${esc(n)}" ${n===x.current?'selected':''}>${esc(n)}</option>`).join('');$('sessionmsg').textContent='聊天记录、BG 状态、代码索引和 token 统计按会话分开；已加入的材料索引按工作区共享。'}catch(e){$('sessionmsg').textContent=e.message}}
 async function loadHistory(){try{let x=await api('/api/history');$('chat').innerHTML='';if(!x.history.length){message('这是一个新会话，可以直接开始提问。');return}for(let item of x.history)message(item.content,item.role==='user'?'user':'assistant')}catch{}}
-async function setup(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default'})});renderStatus(s);$('setupmsg').textContent='已打开。';loadDocs();loadSessions();loadHistory();loadCodebookStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
+async function setup(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default',language:uiLanguage})});renderStatus(s);$('setupmsg').textContent='已打开。';loadDocs();loadSessions();loadHistory();loadCodebookStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function openSession(){if(!$('session').value)return;await setup()}
 async function newSession(){let name=prompt('新会话名称，例如：BG_012 或 token_test');if(!name||!name.trim())return;$('session').innerHTML='<option>'+esc(name.trim())+'</option>';await setup()}
 async function renameSession(){try{let name=prompt('输入新的会话名称：',$('session').value);if(!name||!name.trim())return;let s=await api('/api/session/rename',{method:'POST',body:JSON.stringify({name:name.trim()})});renderStatus(s);$('sessionmsg').textContent='会话已重命名。';loadSessions()}catch(e){$('sessionmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
