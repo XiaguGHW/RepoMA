@@ -535,6 +535,7 @@ def coverage_path(state: ProjectState) -> Path:
 
 
 MATERIAL_SUMMARY_CACHE_VERSION = "material-summary-v1"
+BG_DOSSIER_CACHE_VERSION = "bg-dossier-v1"
 
 
 def material_summary_cache_path(document: dict, model: str, full: bool, read_pages: list[int]) -> Path:
@@ -572,6 +573,59 @@ def save_material_summary_cache(document: dict, model: str, full: bool, read_pag
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def bg_dossier_identity(coverage: dict, model: str) -> dict:
+    """Only source facts belong here; Codebook stays independently versioned."""
+    files = [{"sha256": item.get("sha256"), "name": item.get("name"),
+              "pages_read": item.get("pages_read", []), "pages_unread": item.get("pages_unread", []),
+              "reading_scope": item.get("reading_scope", "")}
+             for item in coverage.get("files", []) if isinstance(item, dict)]
+    return {"version": BG_DOSSIER_CACHE_VERSION, "model": model,
+            "files": sorted(files, key=lambda item: (str(item["sha256"]), str(item["name"]))) }
+
+
+def bg_dossier_cache_path(coverage: dict, model: str) -> Path:
+    encoded = json.dumps(bg_dossier_identity(coverage, model), ensure_ascii=False, sort_keys=True)
+    key = hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:24]
+    return app_state_home() / "bg_dossier_cache" / f"{key}.json"
+
+
+def load_bg_dossier_cache(coverage: dict, model: str) -> dict | None:
+    try:
+        payload = json.loads(bg_dossier_cache_path(coverage, model).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("identity") != bg_dossier_identity(coverage, model):
+        return None
+    return payload if str(payload.get("summary", "")).strip() else None
+
+
+def prepare_bg_dossier(data: dict[str, Any], coverage: dict) -> tuple[dict | None, dict | None, bool]:
+    """Consolidate reusable per-file facts once; raw evidence remains query-specific."""
+    cached = load_bg_dossier_cache(coverage, data["model"])
+    if cached:
+        cached = dict(cached); cached["cache_status"] = "reused"
+        return cached, None, False
+    records = [item for item in coverage.get("files", []) if isinstance(item, dict) and item.get("summary")]
+    if not records:
+        return None, None, False
+    sources = "\n\n".join(
+        f"--- SOURCE FILE: {item.get('name', 'unknown')} | read pages: {item.get('pages_read', []) or 'n/a'} | unread pages: {item.get('pages_unread', []) or 'none'} ---\n{item.get('summary', '')}"
+        for item in records)
+    system_prompt = "You are a careful technical evidence consolidator. Use only supplied file summaries. Write concise Chinese factual evidence for later Baugruppe questions; do not classify it and do not invent facts. Preserve every source file name and page/section label, distinguish confirmed facts from uncertainty, and omit irrelevant detail."
+    request = "Create one reusable BG comprehensive evidence dossier with sections: composition/BOM; motion and main functional chain; actuators/transmission; relevant geometry/interfaces; DFC hierarchy; conflicts or limitations; source evidence. Every factual bullet must retain its source file and page/section label.\n\n" + sources
+    raw = data["llm"].ask_about_files([], request, system_prompt, {"maxOutputTokens": 2400, "temperature": 0}, stream=True).strip()
+    usage = data["llm"].get_last_token_usage() or {}
+    dossier = {"version": BG_DOSSIER_CACHE_VERSION, "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+               "identity": bg_dossier_identity(coverage, data["model"]), "model": data["model"],
+               "summary": raw, "source_files": [{"name": item.get("name"), "sha256": item.get("sha256"),
+                                                     "pages_read": item.get("pages_read", [])} for item in records],
+               "cache_status": "created"}
+    path = bg_dossier_cache_path(coverage, data["model"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(dossier, ensure_ascii=False, indent=2), encoding="utf-8")
+    return dossier, usage, True
+
+
 def load_coverage(state: ProjectState) -> dict:
     try:
         data = json.loads(coverage_path(state).read_text(encoding="utf-8"))
@@ -597,6 +651,9 @@ def coverage_for_ui(data: dict[str, Any]) -> dict:
     if coverage:
         coverage = dict(coverage)
         coverage["current_selection"] = coverage_matches_current_selection(data, coverage)
+        if coverage["current_selection"]:
+            dossier = load_bg_dossier_cache(coverage, data["model"])
+            coverage["bg_dossier"] = {"ready": bool(dossier), "created_at": dossier.get("created_at", "") if dossier else ""}
     return coverage
 
 
@@ -871,11 +928,26 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
         coverage = prepare_coverage(data)
         auto_prepared = True
     coverage_summaries = coverage.get("files", []) if coverage.get("complete") else []
-    model_prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context, coverage_summaries=coverage_summaries)
+    dossier, usage_records, estimates = None, [], []
+    if coverage_summaries:
+        try:
+            dossier, dossier_usage, dossier_created = prepare_bg_dossier(data, coverage)
+            if dossier_usage:
+                usage_records.append(dossier_usage)
+                estimate = state.note_usage(dossier_usage, data["pricing"], data["model"])
+                if estimate: estimates.append(estimate)
+            if dossier_created:
+                notices.append("已生成并保存 BG 综合证据档案；后续追问将复用该档案，仅补充本问题命中的原始证据。")
+            elif dossier:
+                notices.append("已复用 BG 综合证据档案；本轮未重复发送全部逐文件摘要。")
+        except Exception as exc:
+            notices.append(f"BG 综合证据档案未能生成，已回退为逐文件摘要：{exc}")
+            dossier = None
+    model_prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
+                              coverage_summaries=[] if dossier else coverage_summaries, bg_dossier=dossier)
     raw = llm.ask_about_files(visuals, model_prompt,
                                SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=events)
-    estimates = []
-    usage_records = [llm.get_last_token_usage() or {}]
+    usage_records.append(llm.get_last_token_usage() or {})
     estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
     if estimate: estimates.append(estimate)
     def validated_action(raw_response: str, request_prompt: str) -> dict:
@@ -925,7 +997,8 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
             complete[relative] = path.read_text(encoding="utf-8", errors="replace")
             state.refresh_file(relative)
     if complete:
-        model_prompt = prompt_for(state, question, snippets, complete, evidence, bg_context, coverage_summaries)
+        model_prompt = prompt_for(state, question, snippets, complete, evidence, bg_context,
+                                  [] if dossier else coverage_summaries, dossier)
         raw = llm.ask_about_files(visuals, model_prompt,
                                    SYSTEM, {"maxOutputTokens": 3000, "temperature": 0}, stream=True, event_handler=events)
         usage_records.append(llm.get_last_token_usage() or {})
@@ -982,8 +1055,10 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
                                      bilder_images=documents.bilder_image_paths(preferred))
     visual_report = documents.last_visual_report
     coverage = load_coverage(state)
+    dossier = load_bg_dossier_cache(coverage, data["model"]) if coverage_matches_current_selection(data, coverage) else None
     prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
-                        coverage_summaries=coverage.get("files", []) if coverage.get("complete") else [])
+                        coverage_summaries=[] if dossier else (coverage.get("files", []) if coverage.get("complete") else []),
+                        bg_dossier=dossier)
     results = []
     for index, model in enumerate(models, start=1):
         notices: list[str] = []
@@ -1480,7 +1555,7 @@ async function testModel(){try{let model=selectedModel();if(!model)throw Error('
 async function loadDocs(){try{let x=await api('/api/documents');$('docs').innerHTML=x.map(d=>`<div class="card">${d.name}<br><span class="muted">${d.material_role_label||'其他资料'} · ${d.chunks} chunks</span></div>`).join('')||'尚无材料。'}catch{}}
 async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:JSON.stringify({path:$('docpath').value})});$('docpath').value='';loadDocs();$('setupmsg').textContent=`已索引 ${d.name}（${d.chunks} chunks）`}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 function renderScanReport(x){let files=x.files.map(f=>{let index=f.index_cache_status==='reused'?' · 本地索引已复用':f.index_cache_status==='changed'?' · 内容变化，已重新索引':f.index_cache_status==='new'?' · 已建立本地索引':'';return `<div class="card"><b>${esc(f.name)}</b><br><span class="muted">${esc(f.material_role_label||'其他资料')} · 成功提取 ${f.chunks} 个文本片段 · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB${index}</span></div>`}).join('');let skipped=x.skipped_count?`<div class="card error">跳过 / 失败 ${x.skipped_count} 个<br><span class="muted">${x.skipped.map(esc).join('<br>')}${x.skipped_count>x.skipped.length?'<br>其余失败项未展开。':''}</span></div>`:'';$('scanreport').innerHTML='<b>扫描报告</b><div class="muted">成功 '+x.sources+' 个；本次选定材料范围已锁定。</div>'+files+skipped}
-function renderCoverageReport(x){if(!x||!x.files){$('coveragestatus').textContent='分类/Codebook 问题会自动准备证据；也可在提问前手动准备。';return}if(x.current_selection===false){$('coveragestatus').innerHTML='<span class="muted">材料选择或模型已更新；下次分类准备时会复用未变文件的本地摘要，仅预读新增/变更文件。</span>';return}let done=x.files.filter(f=>f.complete).length;let details=x.files.map(f=>{let pages=f.pages_total?`页：已读 ${(f.pages_read||[]).join('、')||'—'}${(f.pages_unread||[]).length?'；未读 '+f.pages_unread.join('、'):''}`:'无页码';let dfc=f.dfc_structure?` · <span class="chip">DFC Struktur：${esc(f.dfc_structure.ocr_status||'—')}，${esc(f.dfc_structure.segments_total||0)} 段</span>`:'';let cache=f.cache_status==='reused'?' · <span class="chip">本地摘要已复用</span>':f.cache_status==='created'?' · <span class="chip">本轮新预读</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${f.text_groups_processed}/${f.text_groups_total} 个文本组 · ${esc(f.reading_scope||'')} · ${esc(pages)}${cache}${dfc}${f.failures?.length?'（'+esc(f.failures.join('；'))+'）':''}`}).join('');$('coveragestatus').innerHTML=(x.complete?'<span class="ok">分类证据已准备：</span>':'<span class="error">分类证据不完整：</span>')+` ${done}/${x.files.length} 个文件；复用 ${x.reused_files||0} 个，新预读 ${x.created_files||0} 个；本次 ${x.model_calls||0} 次模型调用。`+details}
+function renderCoverageReport(x){if(!x||!x.files){$('coveragestatus').textContent='分类/Codebook 问题会自动准备证据；也可在提问前手动准备。';return}if(x.current_selection===false){$('coveragestatus').innerHTML='<span class="muted">材料选择或模型已更新；下次分类准备时会复用未变文件的本地摘要，仅预读新增/变更文件。</span>';return}let done=x.files.filter(f=>f.complete).length;let details=x.files.map(f=>{let pages=f.pages_total?`页：已读 ${(f.pages_read||[]).join('、')||'—'}${(f.pages_unread||[]).length?'；未读 '+f.pages_unread.join('、'):''}`:'无页码';let dfc=f.dfc_structure?` · <span class="chip">DFC Struktur：${esc(f.dfc_structure.ocr_status||'—')}，${esc(f.dfc_structure.segments_total||0)} 段</span>`:'';let cache=f.cache_status==='reused'?' · <span class="chip">本地摘要已复用</span>':f.cache_status==='created'?' · <span class="chip">本轮新预读</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${f.text_groups_processed}/${f.text_groups_total} 个文本组 · ${esc(f.reading_scope||'')} · ${esc(pages)}${cache}${dfc}${f.failures?.length?'（'+esc(f.failures.join('；'))+'）':''}`}).join('');let dossier=x.bg_dossier?.ready?' · <span class="chip">BG 综合证据档案已缓存</span>':' · <span class="chip">首次分类后生成 BG 综合证据档案</span>';$('coveragestatus').innerHTML=(x.complete?'<span class="ok">分类证据已准备：</span>':'<span class="error">分类证据不完整：</span>')+` ${done}/${x.files.length} 个文件；复用 ${x.reused_files||0} 个，新预读 ${x.created_files||0} 个；本次 ${x.model_calls||0} 次模型调用。`+dossier+details}
 async function loadCoverage(){try{renderCoverageReport(await api('/api/coverage'))}catch{}}
 function clearTargetTree(){savedTargetSelection=new Set();treeRestoreNote='';$('targettree').textContent='选择文件夹后显示可展开的文件树。';$('targettree').classList.add('muted');$('treestatus').textContent=''}
 async function pickFolderForTree(){await pick('folder','targetpath');if($('targetpath').value)loadTargetTree()}
