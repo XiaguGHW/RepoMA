@@ -1043,12 +1043,16 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
     coverage = load_coverage(state)
     auto_prepared = False
     classification_request = bool(bg_context) and needs_bg_preparation(question, bg_context)
-    if not coverage_matches_current_selection(data, coverage) and classification_request:
+    # Once a material range is confirmed as a Baugruppe, its first question
+    # should transparently prepare the shared understanding, even if the user
+    # phrases it as a natural question rather than using a classification word.
+    preparation_request = bool(bg_context)
+    if not coverage_matches_current_selection(data, coverage) and preparation_request:
         report("reading", "正在进行文件的读取与理解…", 12)
         coverage = prepare_coverage(data, progress=report)
         auto_prepared = True
         report("reading", "文件读取与理解完成。", 62)
-    elif classification_request:
+    elif preparation_request:
         report("reading", "已复用当前材料的读取与理解结果。", 62)
     coverage_summaries = coverage.get("files", []) if coverage.get("complete") else []
     dossier, usage_records, estimates = None, [], []
