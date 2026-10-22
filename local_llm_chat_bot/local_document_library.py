@@ -28,6 +28,19 @@ MAX_VISUAL_BYTES_PER_FILE = 700_000
 MAX_SHORT_PDF_PAGES = 5
 MAX_IMAGE_GROUP_DETAIL_VIEWS = 3
 
+QUERY_EXPANSIONS = {
+    "rotation": ("rotation", "rotieren", "drehen", "dreh", "schwenk", "achse"),
+    "旋转": ("rotation", "rotieren", "drehen", "dreh", "schwenk", "achse"),
+    "linear": ("linear", "hub", "translator", "schlitten", "führung", "fuehrung"),
+    "直线": ("linear", "hub", "translator", "schlitten", "führung", "fuehrung"),
+    "greifer": ("greifer", "greif", "end-effektor", "endeffektor", "gripper"),
+    "夹": ("greifer", "greif", "end-effektor", "endeffektor", "gripper"),
+    "motor": ("motor", "servo", "antrieb", "getriebe", "pneumatik"),
+    "驱动": ("motor", "servo", "antrieb", "getriebe", "pneumatik"),
+    "interface": ("schnittstelle", "interface", "anschluss", "stecker", "io"),
+    "接口": ("schnittstelle", "interface", "anschluss", "stecker", "io"),
+}
+
 
 def _now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -35,6 +48,15 @@ def _now():
 
 def _tokens(text):
     return re.findall(r"[A-Za-z_][A-Za-z0-9_]{1,}|[\u4e00-\u9fff]{2,}|\d{2,}", text.lower())
+
+
+def _expanded_tokens(question: str) -> set[str]:
+    lowered = question.casefold()
+    result = set(_tokens(question))
+    for trigger, additions in QUERY_EXPANSIONS.items():
+        if trigger in lowered:
+            result.update(additions)
+    return result
 
 
 def _chunks(label, text):
@@ -104,6 +126,8 @@ class LocalDocumentLibrary:
             "indexed_at": _now(),
             "chunks": chunks[:MAX_CHUNKS_PER_DOCUMENT],
         }
+        if path.suffix.lower() == ".pdf":
+            document["page_inventory"] = self.pdf_page_inventory(path)
         self.data["documents"] = [item for item in self.data["documents"] if item["path"] != str(path)]
         self.data["documents"].append(document)
         self._save()
@@ -128,6 +152,66 @@ class LocalDocumentLibrary:
 
     def list(self):
         return self.data["documents"]
+
+    @staticmethod
+    def pdf_page_inventory(path: Path) -> list[dict]:
+        """Cheap local inventory; it never renders pages or calls OCR/LLM."""
+        try:
+            import fitz
+            records = []
+            with fitz.open(path) as document:
+                for number, page in enumerate(document, start=1):
+                    chars, images = len(page.get_text("text").strip()), len(page.get_images(full=True))
+                    kind = "visual" if chars < 40 else ("mixed" if images or chars < 260 else "text")
+                    records.append({"page": number, "native_chars": chars, "page_type": kind,
+                                    "embedded_image_count": images, "ocr_status": "not_requested"})
+            return records
+        except Exception:
+            return []
+
+    def ensure_ocr_for_snippets(self, snippets: list[dict]) -> list[dict]:
+        """OCR only selected visual/low-text PDF pages and persist the result."""
+        changed = False
+        by_path = {item.get("path"): item for item in self.data["documents"]}
+        cache_dir = self.path.parent / "pdf_ocr_cache"
+        for snippet in snippets:
+            visual = snippet.get("visual") or {}
+            if visual.get("kind") != "pdf_page":
+                continue
+            document = by_path.get(str(visual.get("path", "")))
+            page_number = visual.get("page")
+            if not document or not isinstance(page_number, int):
+                continue
+            if not document.get("page_inventory"):
+                document["page_inventory"] = self.pdf_page_inventory(Path(document["path"]))
+                changed = True
+            record = next((item for item in document.get("page_inventory", []) if item.get("page") == page_number), {})
+            if record.get("page_type") == "text" or record.get("ocr_status") not in {"not_requested", None}:
+                if record.get("ocr_text"):
+                    snippet["text"] += "\n\n[Local OCR]\n" + record["ocr_text"]
+                continue
+            try:
+                image = self._render_pdf_page(Path(document["path"]), page_number, cache_dir)
+                text, status = self._ocr_page_image(image)
+                record["ocr_status"], record["ocr_text"] = status, text
+                if text:
+                    snippet["text"] += "\n\n[Local OCR]\n" + text
+                    for chunk in document.get("chunks", []):
+                        chunk_visual = chunk.get("visual") or {}
+                        if chunk_visual.get("kind") == "pdf_page" and chunk_visual.get("page") == page_number and "[Local OCR]" not in chunk.get("text", ""):
+                            chunk["text"] += "\n\n[Local OCR]\n" + text
+                changed = True
+            except Exception as exc:
+                record["ocr_status"] = f"unavailable: {str(exc)[:120]}"; changed = True
+        if changed:
+            self._save()
+        return snippets
+
+    def ensure_document_ocr(self, document: dict) -> None:
+        """Prepare every visual/mixed page locally for an exhaustive reading pass."""
+        snippets = [{"text": "", "visual": chunk.get("visual")} for chunk in document.get("chunks", [])
+                    if (chunk.get("visual") or {}).get("kind") == "pdf_page"]
+        self.ensure_ocr_for_snippets(snippets)
 
     def bilder_image_paths(self, allowed_ids=None) -> list[Path]:
         """Return explicitly selected CAD screenshots from direct Bilder folders."""
@@ -163,7 +247,7 @@ class LocalDocumentLibrary:
         diverse baseline from the selected Codebook/BG sources instead of
         silently returning only page one.
         """
-        words = set(_tokens(question))
+        words = _expanded_tokens(question)
         chars = set(re.findall(r"[\u4e00-\u9fff]", question.lower()))
         allowed = set(allowed_ids or [])
         documents = [item for item in self.data["documents"] if not allowed or item["id"] in allowed]
@@ -201,6 +285,18 @@ class LocalDocumentLibrary:
             for document in documents[:2]:
                 if document.get("chunks"):
                     selected.append((0, document, 0, document["chunks"][0]))
+        if selected and not classification:
+            # A page in isolation is a frequent source of wrong technical
+            # answers. Keep its immediate local context before taking more
+            # distant keyword hits.
+            contextual, contextual_used = [], set()
+            for _score, document, index, _chunk in selected[:3]:
+                for neighbour in range(max(0, index - 1), min(len(document.get("chunks", [])), index + 2)):
+                    key = (document["id"], neighbour)
+                    if key not in contextual_used:
+                        contextual.append((_score if neighbour == index else max(0, _score - 1), document, neighbour, document["chunks"][neighbour]))
+                        contextual_used.add(key)
+            selected = contextual + [item for item in selected if (item[1]["id"], item[2]) not in contextual_used]
         # Classification favours coverage; normal chat retains the old small context.
         result_limit = max(limit, 12) if classification and preferred else limit
         return [
