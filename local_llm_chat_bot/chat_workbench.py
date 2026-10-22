@@ -195,10 +195,21 @@ class LanguageRequest(BaseModel):
 
 class SessionRenameRequest(BaseModel):
     name: str
+    source: str = ""
 
 
 class SessionDeleteRequest(BaseModel):
     confirmed: bool = False
+    name: str = ""
+
+
+class SessionOpenRequest(BaseModel):
+    name: str
+
+
+class SessionPinRequest(BaseModel):
+    name: str
+    pinned: bool
 
 
 class BGRequest(BaseModel):
@@ -258,12 +269,40 @@ def status_data(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def available_sessions(state: ProjectState) -> list[str]:
+def session_list_item(root: Path) -> dict[str, Any]:
+    """Small, local-only metadata for the ChatGPT-style session sidebar."""
+    state_file = root / "state.json"
+    data: dict[str, Any] = {}
+    try:
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    title = str(data.get("sidebar_title") or root.name)
+    try:
+        updated = state_file.stat().st_mtime
+    except OSError:
+        updated = 0.0
+    return {"name": root.name, "title": title[:100], "pinned": bool(data.get("sidebar_pinned", False)),
+            "updated_at": updated}
+
+
+def available_sessions(state: ProjectState) -> list[dict[str, Any]]:
     root = state.root.parent
     if not root.is_dir():
-        return [state.root.name]
-    names = sorted((item.name for item in root.iterdir() if item.is_dir()), key=str.lower)
-    return names or [state.root.name]
+        return [session_list_item(state.root)]
+    records = [session_list_item(item) for item in root.iterdir() if item.is_dir()]
+    records.sort(key=lambda item: (not item["pinned"], -item["updated_at"], item["name"].casefold()))
+    return records or [session_list_item(state.root)]
+
+
+def title_session_from_question(state: ProjectState, question: str) -> None:
+    current = str(state.data.get("sidebar_title", "")).strip()
+    if current and current != "新聊天":
+        return
+    title = " ".join(str(question).strip().split())[:72]
+    if title:
+        state.data["sidebar_title"] = title
+        state.save()
 
 
 def safe_file(value: str) -> Path:
@@ -1154,6 +1193,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
         # the code-action schema. A read-only question must remain useful:
         # show that answer and never treat it as a file modification.
         answer = raw.strip() or "模型没有返回可显示的文字。"
+        title_session_from_question(state, question)
         state.add_turn("user", question)
         state.add_turn("assistant", answer)
         if auto_prepared:
@@ -1187,6 +1227,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
             action = {"answer": raw.strip() or "模型没有返回可显示的文字。", "changes": [], "classification": None}
     changes = build_diff(state, action.get("changes", []))
     data["pending"] = changes
+    title_session_from_question(state, question)
     state.add_turn("user", question); state.add_turn("assistant", action.get("answer", ""))
     turn_token_usage = summarize_usage(usage_records)
     turn_token_usage["cost_usd"] = sum(item["cost_usd"] for item in estimates)
@@ -1317,6 +1358,8 @@ def setup(request: Setup):
                                     "llm": LLMConnector(request.model, key, session_id=state.data["session_id"]),
                                     "pricing": PricingCatalog(price_file), "pending": []})
     state.scan()
+    state.data["selected_model"] = request.model
+    state.save()
     save_workbench_settings(workspace, state.root.name, request.model, language)
     return status_data(ACTIVE)
 
@@ -1336,6 +1379,8 @@ def switch_model(request: ModelSwitchRequest):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     data["model"] = model
+    data["state"].data["selected_model"] = model
+    data["state"].save()
     save_workbench_settings(data["state"].workspace, data["state"].root.name, model, data.get("language", "zh"))
     return status_data(data)
 
@@ -1344,6 +1389,7 @@ def activate_local_session(data: dict[str, Any], session_name: str) -> dict:
     state = ProjectState(app_state_home(), data["state"].workspace, session_name)
     data["state"] = state
     data["documents"] = LocalDocumentLibrary(state.root.parent / "documents.json")
+    data["model"] = str(state.data.get("selected_model") or data["model"])
     data["llm"] = LLMConnector(data["model"], data["llm"].api_key, session_id=state.data["session_id"])
     data["pending"] = []
     save_workbench_settings(state.workspace, state.root.name, data["model"], data.get("language", "zh"))
@@ -1354,7 +1400,9 @@ def activate_local_session(data: dict[str, Any], session_name: str) -> dict:
 def rename_session(request: SessionRenameRequest):
     data = session()
     name = safe_name(request.name.strip())
-    state = data["state"]
+    state = data["state"] if not request.source.strip() else ProjectState(app_state_home(), data["state"].workspace, safe_name(request.source.strip()))
+    if not state.root.is_dir():
+        raise HTTPException(404, "会话不存在。")
     target = state.root.parent / name
     if target == state.root:
         return status_data(data)
@@ -1364,7 +1412,7 @@ def rename_session(request: SessionRenameRequest):
         state.root.rename(target)
     except OSError as exc:
         raise HTTPException(500, f"无法重命名会话：{exc}") from exc
-    return activate_local_session(data, name)
+    return activate_local_session(data, name) if state.root == data["state"].root else status_data(data)
 
 
 @app.post("/api/session/delete")
@@ -1372,15 +1420,17 @@ def delete_session(request: SessionDeleteRequest):
     if not request.confirmed:
         raise HTTPException(400, "必须确认后才可删除会话。")
     data = session()
-    state = data["state"]
+    state = data["state"] if not request.name.strip() else ProjectState(app_state_home(), data["state"].workspace, safe_name(request.name.strip()))
+    if not state.root.is_dir():
+        raise HTTPException(404, "会话不存在。")
     current = state.root
     parent = current.parent
     try:
         shutil.rmtree(current)
     except OSError as exc:
         raise HTTPException(500, f"无法删除会话：{exc}") from exc
-    remaining = sorted((item.name for item in parent.iterdir() if item.is_dir()), key=str.lower) if parent.is_dir() else []
-    return activate_local_session(data, remaining[0] if remaining else "default")
+    remaining = available_sessions(ProjectState(app_state_home(), data["state"].workspace, "default")) if parent.is_dir() else []
+    return activate_local_session(data, str(remaining[0]["name"]) if remaining else "default") if current == data["state"].root else status_data(data)
 
 
 @app.get("/api/settings")
@@ -1399,9 +1449,38 @@ def set_language(request: LanguageRequest):
 
 
 @app.get("/api/sessions")
-def sessions():
+def sessions(offset: int = 0, limit: int = 10):
     state = session()["state"]
-    return {"current": state.root.name, "sessions": available_sessions(state)}
+    records = available_sessions(state)
+    start, amount = max(0, offset), max(1, min(20, limit))
+    return {"current": state.root.name, "sessions": records[start:start + amount], "has_more": start + amount < len(records)}
+
+
+@app.post("/api/session/open")
+def open_saved_session(request: SessionOpenRequest):
+    data = session(); name = safe_name(request.name.strip())
+    target = data["state"].root.parent / name
+    if not target.is_dir():
+        raise HTTPException(404, "会话不存在。")
+    return activate_local_session(data, name)
+
+
+@app.post("/api/session/new")
+def create_session():
+    data = session()
+    stamp = datetime.now().astimezone().strftime("新聊天_%Y%m%d_%H%M%S")
+    return activate_local_session(data, stamp)
+
+
+@app.post("/api/session/pin")
+def pin_session(request: SessionPinRequest):
+    data = session(); name = safe_name(request.name.strip())
+    target = data["state"].root.parent / name
+    if not target.is_dir():
+        raise HTTPException(404, "会话不存在。")
+    saved = ProjectState(app_state_home(), data["state"].workspace, name)
+    saved.data["sidebar_pinned"] = bool(request.pinned); saved.save()
+    return {"name": name, "pinned": bool(request.pinned)}
 
 
 @app.get("/api/history")
@@ -1411,6 +1490,14 @@ def history():
         {"role": item.get("role", "assistant"), "content": str(item.get("content", ""))}
         for item in records if isinstance(item, dict) and item.get("content")
     ]}
+
+
+@app.get("/api/session/context")
+def session_context():
+    data = session(); state = data["state"]
+    return {"model": data["model"], "target": state.data.get("selected_target", {}),
+            "codebook_path": state.data.get("selected_codebook_path", ""),
+            "bg_context": state.data.get("bg_context")}
 
 
 @app.get("/api/model-tests")
@@ -1544,6 +1631,11 @@ def analyze_target(request: TargetRequest):
     else:
         data["state"].data.pop("bg_context", None)
     data["state"].data["active_source_ids"] = [item["id"] for item in sources]
+    data["state"].data["selected_target"] = {
+        "path": str(target), "kind": target_kind,
+        "selected_paths": [item.relative_to(target).as_posix() for item in selected] if target.is_dir() else [str(target)],
+        "codebook_path": str(codebook_path) if profile.get("status") == "locked" else str(data["state"].data.get("selected_codebook_path", "")),
+    }
     data["state"].save()
     return {"sources": len(sources), "skipped": skipped[:10], "skipped_count": len(skipped), "target_kind": target_kind,
             "files": [{"name": item["name"], "chunks": len(item.get("chunks", [])), "bytes": item.get("bytes", 0),
@@ -1584,6 +1676,8 @@ def codebook_prepare(request: CodebookPrepareRequest):
         except Exception as exc:
             raise HTTPException(400, f"Codebook 准备失败：{exc}") from exc
         save_codebook_profile(profile)
+        data["state"].data["selected_codebook_path"] = str(path)
+        data["state"].save()
     return profile
 
 
@@ -1598,6 +1692,9 @@ def codebook_lock():
     profile["status"] = "locked"
     profile["locked_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
     save_codebook_profile(profile)
+    if ACTIVE:
+        ACTIVE["state"].data["selected_codebook_path"] = str(path)
+        ACTIVE["state"].save()
     return profile
 
 
@@ -1809,7 +1906,7 @@ async function restoreLastWorkspace(){
 }
 function setLeftPanelWidth(width){let available=Math.max(240,window.innerWidth-420-300-8);let bounded=Math.max(235,Math.min(Number(width)||270,Math.min(600,available)));document.documentElement.style.setProperty('--left-panel-width',bounded+'px');let drawerStyle=$('scan-drawer-position')||Object.assign(document.createElement('style'),{id:'scan-drawer-position'});drawerStyle.textContent='#scanbackdrop .scan-drawer{left:'+bounded+'px!important}';if(!drawerStyle.parentNode)document.head.append(drawerStyle);localStorage.setItem('bosch-workbench-left-panel-width',String(bounded))}
 function initLeftSplitter(){let splitter=$('leftsplitter');if(!splitter)return;let saved=Number(localStorage.getItem('bosch-workbench-left-panel-width'));if(saved)setLeftPanelWidth(saved);let dragging=false;function stop(){if(!dragging)return;dragging=false;splitter.classList.remove('dragging');document.body.style.userSelect=''}splitter.addEventListener('pointerdown',event=>{dragging=true;splitter.classList.add('dragging');splitter.setPointerCapture(event.pointerId);document.body.style.userSelect='none';event.preventDefault()});splitter.addEventListener('pointermove',event=>{if(dragging)setLeftPanelWidth(event.clientX)});splitter.addEventListener('pointerup',stop);splitter.addEventListener('pointercancel',stop);window.addEventListener('resize',()=>setLeftPanelWidth(Number(getComputedStyle(document.documentElement).getPropertyValue('--left-panel-width').replace('px',''))||270))}
-window.addEventListener('DOMContentLoaded',()=>{applyLanguage();initLeftSplitter();renderCompareSlots();loadCodebookStatus();ensureMaterialFlow();restoreLastWorkspace()});
+window.addEventListener('DOMContentLoaded',()=>{applyLanguage();initLeftSplitter();initSessionSidebar();renderCompareSlots();loadCodebookStatus();ensureMaterialFlow();restoreLastWorkspace()});
 async function api(url,opt={}){let r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt});let d=await r.json();if(!r.ok)throw Error(d.detail||'请求失败');return d}
 async function pick(kind,target){try{$(target).value=(await api('/api/pick/'+kind)).path||''}catch(e){alert(e.message)}}
 async function pickWorkspace(){try{let path=(await api('/api/pick/folder')).path||'';if(!path)return;$('workspace').value=path;await setup()}catch(e){$('setupmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
@@ -1833,13 +1930,22 @@ async function prepareCodebook(){let path=$('codebook').value.trim();if(!path){$
 async function viewCodebook(){try{let profile=await api('/api/codebook');if(!profile||!profile.status)throw Error('尚未准备 Codebook。');renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function lockCodebook(){if(!confirm('确认锁定此 Codebook？之后切换文件夹、会话或模型都会继续使用它；只有你手动更换或原文件变化时才会失效。'))return;try{let profile=await api('/api/codebook/lock',{method:'POST'});renderCodebookStatus(profile);showCodebookWorkspace(profile);$('setupmsg').innerHTML='<span class="ok">Codebook 已锁定。</span>'}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function changeCodebook(){if(!confirm('更换 Codebook 会解除当前锁定；不会删除原始文件或已完成的聊天记录。继续吗？'))return;try{await api('/api/codebook',{method:'DELETE'});$('codebook').value='';renderCodebookStatus({status:'none'});leaveCodebookWorkspace();$('setupmsg').textContent='已解除 Codebook 锁定，请选择新文件并准备。'}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-async function loadSessions(){try{let x=await api('/api/sessions');$('session').innerHTML=x.sessions.map(n=>`<option value="${esc(n)}" ${n===x.current?'selected':''}>${esc(n)}</option>`).join('');$('sessionmsg').textContent='聊天记录、BG 状态、代码索引和 token 统计按会话分开；已加入的材料索引按工作区共享。'}catch(e){$('sessionmsg').textContent=e.message}}
+let sessionOffset=0,sessionHasMore=false,sessionLoading=false,currentSessionName='';
+function initSessionSidebar(){if($('sessionpanel'))return;let left=document.querySelector('.shell > .side');if(!left)return;let style=document.createElement('style');style.textContent='.side.left{display:flex;flex-direction:column;overflow:hidden;padding-bottom:10px}.left-content{overflow:auto;min-height:0;padding-right:2px}.session-panel{border-top:1px solid #334155;margin-top:10px;padding-top:10px;display:flex;flex-direction:column;min-height:155px;max-height:42vh}.session-new{width:100%;margin-bottom:8px;text-align:left}.session-list{overflow:auto;min-height:0}.session-row{display:flex;align-items:center;gap:4px;border-radius:7px;margin:2px 0;padding:6px 5px;cursor:pointer;color:#dbeafe}.session-row:hover,.session-row.active{background:#263244}.session-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.session-more{visibility:hidden;width:25px;padding:2px 3px;background:transparent;color:#cbd5e1}.session-row:hover .session-more,.session-row.active .session-more{visibility:visible}.session-pin{font-size:10px;color:#7dd3fc}.session-loading{text-align:center;padding:8px;color:#94a3b8}.session-menu{position:fixed;z-index:100;min-width:130px;padding:5px;background:#1e293b;border:1px solid #475569;border-radius:8px;box-shadow:0 12px 30px rgba(0,0,0,.4)}.session-menu button{display:block;width:100%;text-align:left;background:transparent;color:#e5e7eb;padding:7px 9px}.session-menu button:hover{background:#334155}.session-menu button.delete{color:#fca5a5}';document.head.append(style);left.classList.add('left');let content=document.createElement('div');content.className='left-content';while(left.firstChild)content.append(left.firstChild);left.append(content);let old=$('session')?.closest('.field');if(old)old.style.display='none';let panel=document.createElement('section');panel.id='sessionpanel';panel.className='session-panel';panel.innerHTML='<button class="ghost session-new" onclick="newSession()">＋ 新聊天</button><div id="sessionlist" class="session-list"></div>';left.append(panel);$('sessionlist').addEventListener('scroll',()=>{let el=$('sessionlist');if(sessionHasMore&&!sessionLoading&&el.scrollTop+el.clientHeight>=el.scrollHeight-18)loadSessions(false)});document.addEventListener('click',event=>{if(!event.target.closest('.session-more')&&!event.target.closest('#sessionmenu'))closeSessionMenu()})}
+function closeSessionMenu(){$('sessionmenu')?.remove()}
+function renderSessionRows(items,append){let list=$('sessionlist');if(!append)list.innerHTML='';for(let item of items){let row=document.createElement('div');row.className='session-row'+(item.name===currentSessionName?' active':'');row.onclick=()=>openSessionByName(item.name);let title=document.createElement('span');title.className='session-title';title.textContent=item.title;row.append(title);if(item.pinned){let pin=document.createElement('span');pin.className='session-pin';pin.textContent='●';pin.title='已置顶';row.append(pin)}let more=document.createElement('button');more.className='session-more';more.textContent='•••';more.title='更多';more.onclick=e=>{e.stopPropagation();openSessionMenu(e,item)};row.append(more);list.append(row)}if(sessionLoading){let loading=document.createElement('div');loading.id='sessionloading';loading.className='session-loading';loading.textContent='正在加载…';list.append(loading)}}
+async function loadSessions(reset=true){if(sessionLoading)return;if(reset){sessionOffset=0;sessionHasMore=false;renderSessionRows([],true)}sessionLoading=true;try{let x=await api('/api/sessions?offset='+sessionOffset+'&limit=10');currentSessionName=x.current;let existingCount=$('sessionlist').querySelectorAll('.session-row').length,items=x.sessions;renderSessionRows(items,!reset);let rows=[...$('sessionlist').querySelectorAll('.session-row')];items.forEach((item,index)=>rows[existingCount+index].dataset.name=item.name);sessionOffset+=items.length;sessionHasMore=!!x.has_more}catch(e){$('sessionmsg').textContent=e.message}finally{sessionLoading=false;$('sessionloading')?.remove()}}
+async function restoreSessionTree(target,paths){$('treestatus').textContent='正在恢复该会话的材料范围…';let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(paths||[]);treeRestoreNote='已恢复此会话最后确认的材料范围。';let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates()}
+async function restoreSessionContext(){try{let x=await api('/api/session/context');setSelectedModel(x.model);let target=x.target||{};$('targetpath').value=target.path||'';$('codebook').value=x.codebook_path||'';if(target.path&&target.kind==='文件夹'){await restoreSessionTree(target.path,target.selected_paths)}else{clearTargetTree()}await loadCodebookStatus();loadDocs();loadCoverage()}catch(e){console.warn('Could not restore session context',e)}}
+async function openSessionByName(name){try{closeSessionMenu();let s=await api('/api/session/open',{method:'POST',body:JSON.stringify({name})});renderStatus(s);await restoreSessionContext();await loadHistory();await loadSessions(true)}catch(e){$('sessionmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function newSession(){try{let s=await api('/api/session/new',{method:'POST'});renderStatus(s);$('targetpath').value='';$('codebook').value='';clearTargetTree();await loadHistory();await loadSessions(true);loadDocs();loadCodebookStatus()}catch(e){$('sessionmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+function openSessionMenu(event,item){closeSessionMenu();let menu=document.createElement('div');menu.id='sessionmenu';menu.className='session-menu';let rect=event.currentTarget.getBoundingClientRect();menu.style.left=Math.min(window.innerWidth-145,rect.right+6)+'px';menu.style.top=rect.top+'px';menu.innerHTML='<button data-action="rename">重命名</button><button data-action="pin">'+(item.pinned?'取消置顶':'置顶')+'</button><button class="delete" data-action="delete">删除</button>';menu.onclick=async e=>{let action=e.target.dataset.action;if(!action)return;if(action==='rename')await renameSession(item.name);if(action==='pin')await pinSession(item);if(action==='delete')await deleteSession(item.name);closeSessionMenu()};document.body.append(menu)}
+async function renameSession(name){let value=prompt('输入新的会话名称：',name);if(!value?.trim())return;try{let s=await api('/api/session/rename',{method:'POST',body:JSON.stringify({name:value.trim(),source:name})});renderStatus(s);await loadSessions(true)}catch(e){alert(e.message)}}
+async function pinSession(item){try{await api('/api/session/pin',{method:'POST',body:JSON.stringify({name:item.name,pinned:!item.pinned})});await loadSessions(true)}catch(e){alert(e.message)}}
+async function deleteSession(name){if(!confirm('确定删除此会话吗？只会删除本地聊天记录和会话状态，不会删除原始材料、Codebook 或共享缓存。'))return;try{let wasCurrent=name===currentSessionName;let s=await api('/api/session/delete',{method:'POST',body:JSON.stringify({confirmed:true,name})});renderStatus(s);if(wasCurrent){await restoreSessionContext();await loadHistory()}await loadSessions(true)}catch(e){alert(e.message)}}
 async function loadHistory(){try{let x=await api('/api/history');$('chat').innerHTML='';if(!x.history.length){message('这是一个新会话，可以直接开始提问。');return}for(let item of x.history)message(item.content,item.role==='user'?'user':'assistant')}catch{}}
 async function setup(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default',language:uiLanguage})});renderStatus(s);$('setupmsg').textContent='已打开。';loadDocs();loadSessions();loadHistory();loadCodebookStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
-async function openSession(){if(!$('session').value)return;await setup()}
-async function newSession(){let name=prompt('新会话名称，例如：BG_012 或 token_test');if(!name||!name.trim())return;$('session').innerHTML='<option>'+esc(name.trim())+'</option>';await setup()}
-async function renameSession(){try{let name=prompt('输入新的会话名称：',$('session').value);if(!name||!name.trim())return;let s=await api('/api/session/rename',{method:'POST',body:JSON.stringify({name:name.trim()})});renderStatus(s);$('sessionmsg').textContent='会话已重命名。';loadSessions()}catch(e){$('sessionmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
-async function deleteSession(){if(!confirm('确定删除当前会话吗？只会删除本地聊天记录、索引和导出文件，不会删除代码工作区或原始材料。'))return;try{let s=await api('/api/session/delete',{method:'POST',body:JSON.stringify({confirmed:true})});renderStatus(s);$('sessionmsg').textContent='当前会话已删除，已切换到其他会话。';loadSessions();loadHistory()}catch(e){$('sessionmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
+async function openLegacySession(){if(!$('session').value)return;await setup()}
 async function switchModel(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/model',{method:'POST',body:JSON.stringify({model})});renderStatus(s);$('modelmsg').innerHTML='<span class="ok">已切换至 '+esc(model)+'；当前会话与材料保持不变。</span>'}catch(e){$('modelmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function loadModelStatus(){try{let x=await api('/api/model-tests');let r=x.tests[selectedModel()];if(!r){$('modelstatus').textContent='尚未测试此模型。';return}if(!r.ok){$('modelstatus').innerHTML='<span class="error">上次测试失败：'+esc(r.tested_at)+'</span>';return}$('modelstatus').innerHTML='<span class="ok">上次可用：'+esc(r.tested_at)+'；'+esc(r.streaming||'未记录流式状态')+'；usage '+(r.usage_available===false?'未返回':'已返回')+'</span>'}catch{}}
 async function testModel(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');$('setupmsg').textContent='正在发送一次极短的测试请求…';let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});$('setupmsg').innerHTML=x.ok?'<span class="ok">模型可用：'+x.model+'；'+(x.streaming||'')+'；输入 '+x.input_tokens+' / 输出 '+x.output_tokens+' token。 '+(x.usage_available===false?'网关未返回 usage。':'')+'</span>':'<span class="error">模型测试失败：'+x.message+'</span>';loadModelStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
