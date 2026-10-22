@@ -442,7 +442,8 @@ def ensure_relative(path: str) -> str:
 
 
 def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], full_files: dict[str, str] | None = None,
-               document_snippets: list[dict] | None = None, bg_context: dict | None = None):
+               document_snippets: list[dict] | None = None, bg_context: dict | None = None,
+               coverage_summaries: list[dict] | None = None):
     recent = "\n".join(f"{turn['role']}: {turn['content']}" for turn in state.data["history"][-HISTORY_MESSAGES_PER_REQUEST:]) or "(new conversation)"
     memories = state.search_memory(question)
     memory_text = "\n".join(f"- [{item['id']}] {item['content']}" for item in memories) or "(No relevant confirmed long-term memory.)"
@@ -453,6 +454,10 @@ def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], ful
         f"--- DOCUMENT [{item['id']}] {item['label']} ---\n{item['text']}"
         for item in (document_snippets or [])
     ) or "(No relevant locally extracted document excerpt.)"
+    coverage_text = "\n\n".join(
+        f"--- FILE COVERAGE SUMMARY {item.get('name', 'unknown')} ---\n{item.get('summary', '')}"
+        for item in (coverage_summaries or []) if item.get("summary")
+    ) or "(No complete per-file coverage summary has been prepared.)"
     bg_instruction = ""
     if bg_context:
         bg_instruction = f"""
@@ -474,6 +479,8 @@ Indexed files and symbols (local metadata only):\n{indexed}
 Relevant code excerpts:\n{shown}
 
 Relevant locally extracted document excerpts:\n{document_text}
+
+Complete per-file coverage summaries (prepared from every extracted text chunk in the selected material):\n{coverage_text}
 
 Complete current files supplied in this turn:\n{complete}
 
