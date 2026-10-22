@@ -375,6 +375,12 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
     evidence = documents.search(question, preferred_ids=preferred, classification=bool(bg_context), allowed_ids=allowed)
     visuals = documents.visual_paths(evidence, state.root / "visual_cache")
     reasoning, notices = [], []
+    visual_report = documents.last_visual_report
+    if visual_report.get("short_drawings"):
+        names = "、".join(str(name) for name in visual_report["short_drawings"])
+        notices.append(f"图纸视觉证据：已将短图纸 {names} 的全部页转为压缩 JPEG；本轮附件 {visual_report.get('attachments', 0)} 个，约 {int(visual_report.get('bytes', 0)) // 1024} KB。")
+    if visual_report.get("skipped"):
+        notices.append("部分视觉附件因本轮总大小预算未发送；文字证据仍已保留。")
 
     def events(kind: str, text: str):
         if kind == "reasoning": reasoning.append(text)
@@ -460,12 +466,17 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
     preferred = [bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))
     evidence = documents.search(question, preferred_ids=preferred, classification=True, allowed_ids=preferred)
     visuals = documents.visual_paths(evidence, state.root / "visual_cache")
+    visual_report = documents.last_visual_report
     coverage = load_coverage(state)
     prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
                         coverage_summaries=coverage.get("files", []) if coverage.get("complete") else [])
     results = []
     for index, model in enumerate(models, start=1):
         notices: list[str] = []
+        if visual_report.get("short_drawings"):
+            notices.append(f"短图纸已按全页压缩附件发送（{visual_report.get('attachments', 0)} 个附件，约 {int(visual_report.get('bytes', 0)) // 1024} KB）。")
+        if visual_report.get("skipped"):
+            notices.append("部分视觉附件超出总大小预算，未发送；文字证据仍已保留。")
 
         def events(kind: str, text: str):
             if kind == "notice":
