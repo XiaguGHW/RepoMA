@@ -473,8 +473,9 @@ BG CLASSIFICATION MODE (active):
 - Treat the Codebook as the rule source. Cite evidence labels exactly as supplied.
 - A source marked visual/scanned may require visual inspection; do not infer text that was not supplied.
 - When the user asks for a classification, include a `classification` object in the JSON action:
-  {"label": "exact Codebook class name", "confidence": "high|medium|low", "alternative_label": "exact Codebook class name or empty", "evidence_labels": ["exact supplied document label", "..."], "uncertainties": ["concise limitation or empty list"]}.
+  {"label": "exact Codebook class name", "confidence": "high|medium|low", "alternative_label": "exact Codebook class name or empty", "codebook_rule_ids": ["exact rule id from the locked profile"], "codebook_rule_pages": [1], "evidence_labels": ["exact supplied document label", "..."], "bg_evidence_pages": ["file name — page 2"], "uncertainties": ["concise limitation or empty list"]}.
 - Copy the class and evidence-label spelling exactly. Use only evidence labels supplied in this prompt. A non-empty evidence_labels list is mandatory for a classification.
+- A non-empty codebook_rule_ids list is mandatory; it must name the actual locked rule(s) used for the decision. Keep Codebook-rule pages and BG-evidence pages separate.
 """
     return f"""Workspace: {state.workspace}
 Project summary: {state.data['summary'] or '(none)'}
