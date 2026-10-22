@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
 import re
 from datetime import datetime, timezone
@@ -17,6 +18,12 @@ MAX_CHUNK_CHARS = 3500
 MAX_CHUNKS_PER_DOCUMENT = 900
 MAX_EXCEL_ROWS_PER_SHEET = 2000
 MAX_VISUALS_PER_REQUEST = 5
+# Bosch Farm sends file attachments base64-encoded.  Keep the binary total
+# below this conservative value so the JSON request stays well inside typical
+# 4 MB gateway limits, even when the source drawing itself is tens of MB.
+MAX_VISUAL_BYTES_PER_REQUEST = 2_400_000
+MAX_VISUAL_BYTES_PER_FILE = 700_000
+MAX_SHORT_PDF_PAGES = 5
 
 
 def _now():
@@ -53,6 +60,7 @@ class LocalDocumentLibrary:
     def __init__(self, path: Path):
         self.path = path
         self.data = self._load()
+        self.last_visual_report: dict[str, object] = {}
 
     def _load(self):
         if self.path.exists():
@@ -191,30 +199,78 @@ class LocalDocumentLibrary:
         ]
 
     def visual_paths(self, snippets, cache_dir: Path, limit: int = MAX_VISUALS_PER_REQUEST):
-        """Materialise a few cited visual sources only for the current request."""
+        """Make upload-safe visual evidence for only the current request.
+
+        A small-page-count technical drawing is treated differently from a long
+        datasheet: every sheet is represented, while no original PDF is ever
+        attached.  JPEGs are compressed independently and as a group so a
+        visually dense 20 MB drawing cannot cause an HTTP payload failure.
+        """
         cache_dir.mkdir(parents=True, exist_ok=True)
-        paths, seen = [], set()
+        paths, seen, used_bytes, skipped = [], set(), 0, []
+        short_pdfs: list[Path] = []
+        for snippet in snippets:
+            visual = snippet.get("visual") or {}
+            source = Path(visual.get("path", ""))
+            if visual.get("kind") == "pdf_page" and source.is_file() and source not in short_pdfs:
+                try:
+                    if self._pdf_page_count(source) <= MAX_SHORT_PDF_PAGES:
+                        short_pdfs.append(source)
+                except Exception:
+                    pass
+
+        def attach(output: Path | None, description: str) -> bool:
+            nonlocal used_bytes
+            if not output or not output.is_file():
+                skipped.append(f"{description} 无法转换")
+                return False
+            size = output.stat().st_size
+            if len(paths) >= limit or used_bytes + size > MAX_VISUAL_BYTES_PER_REQUEST:
+                skipped.append(f"{description} 超出本轮视觉附件预算")
+                return False
+            paths.append(str(output)); used_bytes += size
+            return True
+
+        # For a 1–5 page PDF, an individual retrieved page is not sufficient:
+        # the title block, view, BOM and revision can be on different sheets.
+        for source in short_pdfs:
+            page_count = self._pdf_page_count(source)
+            all_overviews_attached = True
+            for page_number in range(1, page_count + 1):
+                output = self._render_pdf_page(source, page_number, cache_dir)
+                if not attach(output, f"{source.name} 第 {page_number} 页总览"):
+                    all_overviews_attached = False
+            # A readable title block is often decisive for a scanned drawing.
+            # Add it only after all sheets and only if payload budget permits.
+            if all_overviews_attached and page_count and len(paths) < limit:
+                attach(self._render_pdf_title_block(source, 1, cache_dir), f"{source.name} 第 1 页标题栏")
+
         for snippet in snippets:
             visual = snippet.get("visual") or {}
             kind = visual.get("kind")
             source = Path(visual.get("path", ""))
             key = (kind, str(source), visual.get("page"), visual.get("sheet"), visual.get("start_row"))
-            if key in seen or not source.is_file():
+            if key in seen or not source.is_file() or (kind == "pdf_page" and source in short_pdfs):
                 continue
             try:
                 if kind == "image":
-                    output = source
+                    output = self._prepare_image(source, cache_dir)
                 elif kind == "pdf_page":
                     output = self._render_pdf_page(source, int(visual["page"]), cache_dir)
                 elif kind == "excel_range":
-                    output = self._render_excel_range(source, visual, cache_dir)
+                    output = self._prepare_image(self._render_excel_range(source, visual, cache_dir), cache_dir)
                 else:
                     continue
             except Exception:
+                skipped.append(f"{source.name} 转换失败")
                 continue
-            seen.add(key); paths.append(str(output))
-            if len(paths) >= limit:
-                break
+            seen.add(key)
+            attach(output, source.name)
+
+        self.last_visual_report = {
+            "attachments": len(paths), "bytes": used_bytes, "budget": MAX_VISUAL_BYTES_PER_REQUEST,
+            "short_drawings": [item.name for item in short_pdfs], "skipped": skipped,
+        }
         return paths
 
     def _extract(self, path: Path):
@@ -301,15 +357,68 @@ class LocalDocumentLibrary:
         return _chunks(path.name, "\n".join(rows))
 
     @staticmethod
-    def _render_pdf_page(path: Path, page_number: int, cache_dir: Path):
+    def _pdf_page_count(path: Path) -> int:
         import fitz
-        target = cache_dir / f"{hashlib.sha256(str(path).encode()).hexdigest()[:10]}_p{page_number}.jpg"
-        if target.exists():
-            return target
         with fitz.open(path) as document:
-            pix = document[page_number - 1].get_pixmap(matrix=fitz.Matrix(160 / 72, 160 / 72), alpha=False)
-            pix.save(target)
-        return target
+            return len(document)
+
+    @classmethod
+    def _render_pdf_page(cls, path: Path, page_number: int, cache_dir: Path):
+        import fitz
+        key = hashlib.sha256(str(path).encode()).hexdigest()[:10]
+        with fitz.open(path) as document:
+            page = document[page_number - 1]
+            scale = min(180 / 72, 2200 / max(page.rect.width, page.rect.height))
+            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+        return cls._save_safe_jpeg(pix, cache_dir / f"{key}_p{page_number}_overview.jpg")
+
+    @classmethod
+    def _render_pdf_title_block(cls, path: Path, page_number: int, cache_dir: Path):
+        """Render the usual lower-right title-block area separately at legible size."""
+        import fitz
+        key = hashlib.sha256(str(path).encode()).hexdigest()[:10]
+        with fitz.open(path) as document:
+            page = document[page_number - 1]
+            rect = page.rect
+            clip = fitz.Rect(rect.x0 + rect.width * .55, rect.y0 + rect.height * .66, rect.x1, rect.y1)
+            scale = min(250 / 72, 1900 / max(clip.width, clip.height))
+            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=clip, alpha=False)
+        return cls._save_safe_jpeg(pix, cache_dir / f"{key}_p{page_number}_title_block.jpg", max_bytes=420_000, max_edge=1700)
+
+    @classmethod
+    def _prepare_image(cls, source: Path, cache_dir: Path):
+        key = hashlib.sha256(f"{source}|{source.stat().st_mtime_ns}".encode()).hexdigest()[:12]
+        target = cache_dir / f"image_{key}.jpg"
+        if target.exists() and target.stat().st_size <= MAX_VISUAL_BYTES_PER_FILE:
+            return target
+        from PIL import Image
+        with Image.open(source) as image:
+            image.load()
+            return cls._save_image_jpeg(image, target)
+
+    @classmethod
+    def _save_safe_jpeg(cls, pix, target: Path, max_bytes=MAX_VISUAL_BYTES_PER_FILE, max_edge=2000):
+        if target.exists() and target.stat().st_size <= max_bytes:
+            return target
+        from PIL import Image
+        with Image.open(io.BytesIO(pix.tobytes("png"))) as image:
+            image.load()
+            return cls._save_image_jpeg(image, target, max_bytes=max_bytes, max_edge=max_edge)
+
+    @staticmethod
+    def _save_image_jpeg(image, target: Path, max_bytes=MAX_VISUAL_BYTES_PER_FILE, max_edge=2000):
+        """Bound both resolution and bytes; return None if an upload-safe copy fails."""
+        target.parent.mkdir(parents=True, exist_ok=True)
+        rgb = image.convert("RGB")
+        for edge in (max_edge, 1700, 1450, 1200, 1000, 850):
+            for quality in (84, 74, 64, 54):
+                candidate = rgb.copy()
+                candidate.thumbnail((edge, edge))
+                candidate.save(target, "JPEG", quality=quality, optimize=True, progressive=True)
+                if target.stat().st_size <= max_bytes:
+                    return target
+        target.unlink(missing_ok=True)
+        return None
 
     @staticmethod
     def _render_excel_range(path: Path, visual: dict, cache_dir: Path):
