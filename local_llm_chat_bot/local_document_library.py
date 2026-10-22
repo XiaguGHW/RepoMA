@@ -321,6 +321,59 @@ class LocalDocumentLibrary:
         }
         return paths
 
+    def codebook_page_records(self, value: str | Path, cache_dir: Path) -> list[dict]:
+        """Build a durable, page-by-page evidence record for a PDF Codebook.
+
+        Native PDF text is retained even when OCR is available.  OCR is a
+        second reading channel for scanned/mixed pages, never a replacement
+        for genuine embedded text.  A missing local Tesseract installation is
+        recorded per page instead of making a long-running preparation fail.
+        """
+        path = Path(value).expanduser().resolve()
+        if path.suffix.lower() != ".pdf":
+            return []
+        try:
+            import fitz
+        except ImportError as exc:
+            raise ValueError("PDF support requires PyMuPDF.") from exc
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        records = []
+        with fitz.open(path) as document:
+            for number, page in enumerate(document, start=1):
+                native_text = page.get_text("text").strip()
+                image_count = len(page.get_images(full=True))
+                if len(native_text) < 40:
+                    page_type = "visual"
+                elif image_count or len(native_text) < 260:
+                    page_type = "mixed"
+                else:
+                    page_type = "text"
+                image = self._render_pdf_page(path, number, cache_dir)
+                ocr_text, ocr_status = self._ocr_page_image(image)
+                records.append({
+                    "page": number, "page_type": page_type,
+                    "native_text": native_text, "ocr_text": ocr_text,
+                    "ocr_status": ocr_status, "image_path": str(image),
+                    "embedded_image_count": image_count,
+                })
+        return records
+
+    @staticmethod
+    def _ocr_page_image(image_path: Path) -> tuple[str, str]:
+        """Use optional Tesseract, with an explicit non-fatal status."""
+        try:
+            import pytesseract
+            from PIL import Image
+            with Image.open(image_path) as image:
+                text = pytesseract.image_to_string(image, lang="deu+eng").strip()
+            return text, "ok"
+        except ImportError:
+            return "", "unavailable: pytesseract is not installed"
+        except Exception as exc:
+            # This also covers a Python package installed without the native
+            # tesseract executable or without the German language pack.
+            return "", f"unavailable: {str(exc)[:180]}"
+
     @staticmethod
     def _evenly_spaced(items: list[Path], count: int) -> list[Path]:
         if len(items) <= count:
