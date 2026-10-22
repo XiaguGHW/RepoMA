@@ -61,6 +61,15 @@ your Bosch proxy, from inside the downloaded tool folder:
 python -m pip install -r requirements.txt
 ```
 
+### Codebook OCR（建议安装）
+
+Codebook 的准备会保留 PDF 原生文字、生成整页高清图，并尝试以
+Tesseract OCR 读取扫描页。Python 依赖会随 `requirements.txt` 安装；在
+Windows 上还需安装本机的 Tesseract 程序及 German (`deu`) language data。
+如果它不可用，界面仍会完成原生文字 + 页面图片 + 多模态解析，并在
+锁定的 `codebook_profile.json` 中明确记录该页 OCR 不可用，而不会悄悄把
+OCR 当作已经成功。
+
 Start a named persistent conversation and point it to the existing `.env`:
 
 ```powershell
