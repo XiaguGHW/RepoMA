@@ -27,6 +27,14 @@ MAX_VISUAL_BYTES_PER_REQUEST = 2_400_000
 MAX_VISUAL_BYTES_PER_FILE = 700_000
 MAX_SHORT_PDF_PAGES = 5
 MAX_IMAGE_GROUP_DETAIL_VIEWS = 3
+# DFC exports are often one very tall Teamcenter hierarchy screenshot.  Keep
+# the source untouched and cache readable, overlapping crops for a later
+# structure-aware reading pass.
+DFC_LONG_IMAGE_MIN_HEIGHT = 2400
+DFC_LONG_IMAGE_MIN_ASPECT = 1.6
+DFC_SEGMENT_MAX_HEIGHT = 2800
+DFC_SEGMENT_MIN_HEIGHT = 1600
+DFC_SEGMENT_OVERLAP = 240
 
 QUERY_EXPANSIONS = {
     "rotation": ("rotation", "rotieren", "drehen", "dreh", "schwenk", "achse"),
@@ -128,6 +136,10 @@ class LocalDocumentLibrary:
         }
         if path.suffix.lower() == ".pdf":
             document["page_inventory"] = self.pdf_page_inventory(path)
+        elif path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            document["image_type"] = self.image_type(path)
+            if document["image_type"] == "dfc_structure_screenshot":
+                document["dfc_structure"] = self.dfc_segment_manifest(path)
         self.data["documents"] = [item for item in self.data["documents"] if item["path"] != str(path)]
         self.data["documents"].append(document)
         self._save()
@@ -224,6 +236,79 @@ class LocalDocumentLibrary:
             if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} and path.parent.name.casefold() == "bilder" and path.is_file():
                 paths.append(path)
         return sorted(set(paths), key=lambda item: item.name.casefold())
+
+    @staticmethod
+    def image_type(path: Path) -> str:
+        """Classify the important DFC hierarchy screenshots before CAD views.
+
+        The rule deliberately requires a DFC/structure signal instead of
+        treating every file named "structure" as DFC material.  It also keeps
+        common historic spellings from manually exported Teamcenter files.
+        """
+        text = " ".join(part.casefold() for part in path.parts)
+        compact = re.sub(r"[^a-z0-9]+", "", text)
+        structure_terms = ("struktur", "strucktur", "structure", "strukturbaum", "baugruppenstruktur")
+        has_dfc = "dfc" in compact
+        has_structure = any(term in text or term in compact for term in structure_terms)
+        if (has_dfc and has_structure) or "strukturbaum" in compact or "baugruppenstruktur" in compact:
+            return "dfc_structure_screenshot"
+        return "image"
+
+    def dfc_segment_manifest(self, source: Path) -> dict:
+        """Create deterministic overlapping crops for a tall DFC screenshot.
+
+        These are local reusable derivatives only.  They are *not* uploaded or
+        OCRed by this change; that comes in the subsequent DFC reading step.
+        """
+        try:
+            from PIL import Image
+            with Image.open(source) as image:
+                image.load()
+                width, height = image.size
+        except Exception as exc:
+            return {"status": f"unavailable: {str(exc)[:120]}", "segments": []}
+
+        is_long = height >= DFC_LONG_IMAGE_MIN_HEIGHT and height / max(width, 1) >= DFC_LONG_IMAGE_MIN_ASPECT
+        manifest = {
+            "status": "not_needed" if not is_long else "ready",
+            "width": width,
+            "height": height,
+            "overlap_px": DFC_SEGMENT_OVERLAP if is_long else 0,
+            "segments": [],
+        }
+        if not is_long:
+            return manifest
+
+        cache_dir = self.path.parent / "dfc_structure_segments"
+        key = hashlib.sha256(f"{source}|{source.stat().st_mtime_ns}|{width}x{height}".encode()).hexdigest()[:16]
+        segment_height = max(DFC_SEGMENT_MIN_HEIGHT, min(DFC_SEGMENT_MAX_HEIGHT, width * 2))
+        step = max(1, segment_height - DFC_SEGMENT_OVERLAP)
+        starts = list(range(0, max(1, height - segment_height + 1), step))
+        last_start = max(0, height - segment_height)
+        if not starts or starts[-1] != last_start:
+            starts.append(last_start)
+
+        try:
+            with Image.open(source) as image:
+                image.load()
+                for number, top in enumerate(starts, start=1):
+                    bottom = min(height, top + segment_height)
+                    target = cache_dir / f"dfc_{key}_part_{number:02d}.jpg"
+                    if not target.exists():
+                        crop = image.crop((0, top, width, bottom))
+                        # This is a local reading cache, so preserve more
+                        # detail than the conservative upload-safe copies.
+                        self._save_image_jpeg(crop, target, max_bytes=1_400_000, max_edge=3000)
+                    manifest["segments"].append({
+                        "part": number,
+                        "top_px": top,
+                        "bottom_px": bottom,
+                        "path": str(target),
+                    })
+        except Exception as exc:
+            manifest["status"] = f"unavailable: {str(exc)[:120]}"
+            manifest["segments"] = []
+        return manifest
 
     def remove(self, document_id: str):
         before = len(self.data["documents"])
@@ -396,10 +481,10 @@ class LocalDocumentLibrary:
             kind = visual.get("kind")
             source = Path(visual.get("path", ""))
             key = (kind, str(source), visual.get("page"), visual.get("sheet"), visual.get("start_row"))
-            if key in seen or not source.is_file() or (kind == "pdf_page" and source in short_pdfs) or (kind == "image" and source in grouped_image_sources):
+            if key in seen or not source.is_file() or (kind == "pdf_page" and source in short_pdfs) or (kind in {"image", "dfc_structure_screenshot"} and source in grouped_image_sources):
                 continue
             try:
-                if kind == "image":
+                if kind in {"image", "dfc_structure_screenshot"}:
                     output = self._prepare_image(source, cache_dir)
                 elif kind == "pdf_page":
                     output = self._render_pdf_page(source, int(visual["page"]), cache_dir)
@@ -545,7 +630,9 @@ class LocalDocumentLibrary:
         if suffix == ".csv":
             return self._csv(path)
         if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
-            return [{"label": f"{path.name} — image", "text": f"Visual evidence: {path.name}", "visual": {"kind": "image", "path": str(path)}}]
+            kind = self.image_type(path)
+            label_type = "DFC structure screenshot" if kind == "dfc_structure_screenshot" else "image"
+            return [{"label": f"{path.name} — {label_type}", "text": f"Visual evidence: {path.name}", "visual": {"kind": kind, "path": str(path)}}]
         return _chunks(f"{path.name}", path.read_text(encoding="utf-8", errors="replace"))
 
     def _pdf(self, path: Path):
