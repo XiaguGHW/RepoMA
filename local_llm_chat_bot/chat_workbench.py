@@ -404,6 +404,26 @@ def parse_codebook_draft(raw: str) -> dict:
 
 CODEBOOK_PAGE_SYSTEM = """You transcribe exactly one technical classification Codebook page using supplied native text, OCR text and the full-page image. Return ONLY JSON: {\"page\":number,\"official_names\":[\"exact wording\"],\"definitions\":[\"...\"],\"decision_rules\":[\"...\"],\"boundaries\":[\"...\"],\"tables\":[{\"title\":\"...\",\"columns\":[\"...\"],\"rows\":[[\"cell\"]]}],\"uncertainties\":[\"...\"]}. Preserve table row/column meaning, do not invent text, and use the page number supplied in the prompt."""
 CODEBOOK_MERGE_SYSTEM = """You consolidate page-by-page Codebook transcriptions. Return ONLY JSON: {\"classes\":[{\"name\":\"exact official class name\",\"definition\":\"...\",\"decision_rules\":[{\"id\":\"class-rule-1\",\"text\":\"...\",\"pages\":[1]}],\"boundaries\":[{\"id\":\"class-boundary-1\",\"text\":\"...\",\"pages\":[1]}],\"evidence_pages\":[1]}],\"global_rules\":[{\"id\":\"global-1\",\"text\":\"...\",\"pages\":[1]}],\"table_rules\":[{\"id\":\"table-1\",\"text\":\"meaning of the table rule\",\"pages\":[1],\"table\":{\"columns\":[\"...\"],\"rows\":[[\"...\"]]}}],\"uncertainties\":[\"...\"]}. Preserve exact names, rule IDs and page numbers. Do not invent missing rules."""
+CODEBOOK_JSON_REPAIR_SYSTEM = """Return ONLY one complete, valid JSON object. Do not use Markdown fences or commentary. Preserve every fact, class name, rule, table value and page number from the supplied candidate; only repair JSON syntax such as missing commas, quotes, brackets or escaping."""
+
+
+def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str) -> tuple[dict, dict | None]:
+    """Parse the final Codebook JSON, making one syntax-only repair attempt if needed."""
+    try:
+        return parse_codebook_draft(raw), None
+    except (ValueError, json.JSONDecodeError) as initial_error:
+        repair_prompt = (
+            "The candidate Codebook JSON below could not be parsed. Repair its JSON syntax only; "
+            "do not summarize, add, omit, translate, or change any factual content.\n"
+            f"Parser error: {initial_error}\n\n--- CANDIDATE JSON ---\n{raw}"
+        )
+        repaired = connector.ask_about_files([], repair_prompt, CODEBOOK_JSON_REPAIR_SYSTEM,
+                                             {"maxOutputTokens": 4096, "temperature": 0}, stream=True)
+        repair_usage = connector.get_last_token_usage() or {}
+        try:
+            return parse_codebook_draft(repaired), repair_usage
+        except (ValueError, json.JSONDecodeError) as repair_error:
+            raise ValueError(f"Codebook JSON 自动修复后仍无效：{repair_error}") from initial_error
 
 
 def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str) -> dict:
@@ -428,7 +448,9 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str) -> di
         f"--- PAGE GROUP {index} ---\n{note}" for index, note in enumerate(notes, start=1))
     merged = connector.ask_about_files([], merge_prompt, CODEBOOK_MERGE_SYSTEM, {"maxOutputTokens": 3500, "temperature": 0}, stream=True)
     usages.append(connector.get_last_token_usage() or {})
-    draft = parse_codebook_draft(merged)
+    draft, repair_usage = parse_codebook_draft_with_repair(connector, merged)
+    if repair_usage is not None:
+        usages.append(repair_usage)
     usage = summarize_usage(usages)
     estimate = data["pricing"].estimate(connector.last_response_model or model, usage["input"], usage["output"])
     usage["cost_usd"] = float(estimate["cost_usd"]) if estimate else None
