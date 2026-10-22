@@ -6,6 +6,7 @@ files, credentials and session data stay on the computer that starts it.
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json
 import os
 import re
@@ -46,6 +47,31 @@ def model_tests_path() -> Path:
 
 def material_selections_path() -> Path:
     return app_state_home() / "material_selections.json"
+
+
+def codebook_profile_path() -> Path:
+    return app_state_home() / "codebook_profile.json"
+
+
+def load_codebook_profile() -> dict:
+    try:
+        data = json.loads(codebook_profile_path().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_codebook_profile(profile: dict) -> None:
+    app_state_home().mkdir(parents=True, exist_ok=True)
+    codebook_profile_path().write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def load_material_selection(folder: Path) -> tuple[set[str], int, int]:
@@ -174,6 +200,11 @@ class TargetRequest(BaseModel):
     selected_paths: list[str] = []
 
 
+class CodebookPrepareRequest(BaseModel):
+    path: str
+    model: str = ""
+
+
 class ChatRequest(BaseModel):
     question: str
 
@@ -274,6 +305,85 @@ def selected_target_files(folder: Path, values: list[str]) -> list[Path]:
         if key not in seen:
             selected.append(path); seen.add(key)
     return selected
+
+
+def codebook_page_groups(document: dict, pages_per_group: int = 3) -> list[list[dict]]:
+    pages: dict[int, list[dict]] = {}
+    for chunk in document.get("chunks", []):
+        visual = chunk.get("visual") or {}
+        page = visual.get("page")
+        if isinstance(page, int):
+            pages.setdefault(page, []).append(chunk)
+    # PDF chunks carry a page number and are grouped page-wise so that every
+    # original page (including visual-only/table pages) reaches the model.
+    # DOCX does not have PDF page metadata; its extracted paragraphs/tables are
+    # still useful and must not make Codebook preparation silently fail.
+    ordered = [pages[number] for number in sorted(pages)]
+    if not ordered:
+        chunks = document.get("chunks", [])
+        ordered = [chunks[index:index + pages_per_group]
+                   for index in range(0, len(chunks), pages_per_group)]
+        return ordered
+    return [sum(ordered[index:index + pages_per_group], []) for index in range(0, len(ordered), pages_per_group)]
+
+
+def parse_codebook_draft(raw: str) -> dict:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I)
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end < start:
+        raise ValueError("模型没有返回 Codebook JSON")
+    draft = json.loads(text[start:end + 1])
+    if not isinstance(draft, dict) or not isinstance(draft.get("classes"), list):
+        raise ValueError("Codebook JSON 缺少 classes 列表")
+    classes = []
+    for item in draft["classes"]:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not item["name"].strip():
+            continue
+        classes.append({
+            "name": item["name"].strip(), "definition": str(item.get("definition", "")).strip(),
+            "decision_rules": item.get("decision_rules", []), "boundaries": item.get("boundaries", []),
+            "evidence_pages": item.get("evidence_pages", []),
+        })
+    if not classes:
+        raise ValueError("Codebook JSON 未包含有效类别")
+    return {"classes": classes, "global_rules": draft.get("global_rules", []),
+            "table_rules": draft.get("table_rules", []), "uncertainties": draft.get("uncertainties", [])}
+
+
+CODEBOOK_PAGE_SYSTEM = """You extract a technical classification Codebook. Use only supplied page text and images. Return ONLY JSON: {\"page_notes\":[{\"page\":number,\"facts\":[\"...\"],\"tables\":[\"preserve row/column meaning\"],\"uncertainties\":[\"...\"]}]}. Do not classify a Baugruppe."""
+CODEBOOK_MERGE_SYSTEM = """You consolidate Codebook page notes. Return ONLY JSON: {\"classes\":[{\"name\":\"exact official class name\",\"definition\":\"...\",\"decision_rules\":[\"...\"],\"boundaries\":[\"...\"],\"evidence_pages\":[1]}],\"global_rules\":[\"...\"],\"table_rules\":[\"...\"],\"uncertainties\":[\"...\"]}. Preserve exact class names and page numbers. Do not invent missing rules."""
+
+
+def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str) -> dict:
+    document = data["documents"].add(str(path))
+    connector = LLMConnector(model, data["llm"].api_key, session_id=f"codebook_{os.urandom(6).hex()}")
+    groups, notes, usages = codebook_page_groups(document), [], []
+    if not groups:
+        raise HTTPException(400, "Codebook 没有可读取的页面。")
+    for index, group in enumerate(groups, start=1):
+        snippets = [{"label": item["label"], "text": item["text"], "visual": item.get("visual")} for item in group]
+        visuals = data["documents"].visual_paths(snippets, app_state_home() / "codebook_visual_cache", limit=5)
+        pages = ", ".join(str((item.get("visual") or {}).get("page", "?")) for item in group)
+        prompt = "Codebook page group " + str(index) + "/" + str(len(groups)) + "; pages " + pages + ".\n\n" + "\n\n".join(
+            f"--- {item['label']} ---\n{item['text']}" for item in snippets)
+        raw = connector.ask_about_files(visuals, prompt, CODEBOOK_PAGE_SYSTEM, {"maxOutputTokens": 1800, "temperature": 0}, stream=True)
+        notes.append(raw); usages.append(connector.get_last_token_usage() or {})
+    merge_prompt = "Consolidate every Codebook page note below. All classes, tables and boundary rules must be retained.\n\n" + "\n\n".join(
+        f"--- PAGE GROUP {index} ---\n{note}" for index, note in enumerate(notes, start=1))
+    merged = connector.ask_about_files([], merge_prompt, CODEBOOK_MERGE_SYSTEM, {"maxOutputTokens": 3500, "temperature": 0}, stream=True)
+    usages.append(connector.get_last_token_usage() or {})
+    draft = parse_codebook_draft(merged)
+    usage = summarize_usage(usages)
+    estimate = data["pricing"].estimate(connector.last_response_model or model, usage["input"], usage["output"])
+    usage["cost_usd"] = float(estimate["cost_usd"]) if estimate else None
+    page_numbers = {((item.get("visual") or {}).get("page")) for group in groups for item in group}
+    page_count = len([number for number in page_numbers if isinstance(number, int)]) or len(document.get("chunks", []))
+    return {"status": "draft", "source_path": str(path), "source_name": path.name, "sha256": file_digest(path),
+            "prepared_at": datetime.now().astimezone().isoformat(timespec="seconds"), "parser_model": connector.last_response_model or model,
+            "page_count": page_count,
+            "page_groups": len(groups), "usage": usage, "draft": draft, "document_id": document["id"]}
 
 
 def summarize_usage(records: list[dict]) -> dict[str, int | float]:
@@ -481,9 +591,11 @@ def needs_bg_preparation(question: str, bg_context: dict | None) -> bool:
 
 
 def codebook_text(documents: LocalDocumentLibrary, bg_context: dict | None) -> str:
+    profile = (bg_context or {}).get("locked_profile") or {}
+    profile_text = json.dumps(profile, ensure_ascii=False)
     codebook_id = (bg_context or {}).get("codebook_id")
     document = next((item for item in documents.list() if item.get("id") == codebook_id), None)
-    return "\n".join(str(chunk.get("text", "")) for chunk in (document or {}).get("chunks", []))
+    return profile_text + "\n" + "\n".join(str(chunk.get("text", "")) for chunk in (document or {}).get("chunks", []))
 
 
 def validate_classification(action: dict, evidence: list[dict], codebook: str) -> str | None:
@@ -938,12 +1050,16 @@ def analyze_target(request: TargetRequest):
         target_kind = "文件夹"
     else:
         raise HTTPException(400, f"文件或文件夹不存在：{target}")
-    codebook_path = request.codebook.strip()
-    if codebook_path:
-        codebook = data["documents"].add(str(safe_file(codebook_path)))
+    profile = load_codebook_profile()
+    if profile.get("status") == "locked":
+        codebook_path = Path(str(profile.get("source_path", "")))
+        if not codebook_path.is_file() or file_digest(codebook_path) != profile.get("sha256"):
+            raise HTTPException(409, "已锁定的 Codebook 文件缺失或内容已变化；请重新准备并确认 Codebook。")
+        codebook = data["documents"].add(str(codebook_path))
         data["state"].data["bg_context"] = {
             "codebook_id": codebook["id"], "codebook_name": codebook["name"],
             "source_ids": [item["id"] for item in sources], "folder": str(target),
+            "locked_profile": profile.get("draft", {}),
         }
     else:
         data["state"].data.pop("bg_context", None)
@@ -969,6 +1085,56 @@ def get_target_tree(target: str):
             "saved_selection": sorted(saved_paths), "missing_saved_files": missing,
             "changed_saved_files": changed,
             "supported_extensions": sorted(SUPPORTED_DOCUMENT_EXTENSIONS)}
+
+
+@app.get("/api/codebook")
+def codebook_status():
+    return load_codebook_profile()
+
+
+@app.post("/api/codebook/prepare")
+def codebook_prepare(request: CodebookPrepareRequest):
+    data = session()
+    path = safe_file(request.path)
+    if path.suffix.lower() not in {".pdf", ".docx"}:
+        raise HTTPException(400, "Codebook 目前仅支持 PDF 或 DOCX。")
+    model = request.model.strip() or data["model"]
+    with LOCK:
+        try:
+            profile = prepare_codebook_profile(data, path, model)
+        except Exception as exc:
+            raise HTTPException(400, f"Codebook 准备失败：{exc}") from exc
+        save_codebook_profile(profile)
+    return profile
+
+
+@app.post("/api/codebook/lock")
+def codebook_lock():
+    profile = load_codebook_profile()
+    if profile.get("status") != "draft" or not (profile.get("draft") or {}).get("classes"):
+        raise HTTPException(400, "请先成功准备 Codebook 草稿。")
+    path = Path(str(profile.get("source_path", "")))
+    if not path.is_file() or file_digest(path) != profile.get("sha256"):
+        raise HTTPException(409, "Codebook 文件已变化；请重新准备。")
+    profile["status"] = "locked"
+    profile["locked_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    save_codebook_profile(profile)
+    return profile
+
+
+@app.delete("/api/codebook")
+def codebook_clear():
+    try:
+        codebook_profile_path().unlink()
+    except FileNotFoundError:
+        pass
+    # A changed Codebook must not keep classifying with an old profile in the
+    # currently open session.  Other sessions are likewise harmless until they
+    # explicitly analyse a target again, at which time the global lock is read.
+    if ACTIVE:
+        ACTIVE["state"].data.pop("bg_context", None)
+        ACTIVE["state"].save()
+    return {"status": "none"}
 
 
 @app.get("/api/coverage")
@@ -1035,7 +1201,7 @@ def apply():
 
 HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bosch Local Workbench</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#111827;color:#e5e7eb;font:14px Inter,Segoe UI,Arial,sans-serif}button,input,select{font:inherit}button{background:#2563eb;color:white;border:0;border-radius:7px;padding:8px 10px;cursor:pointer}button.ghost{background:#263244;color:#cbd5e1}.shell{height:100vh;display:grid;grid-template-columns:270px minmax(420px,1fr) 300px}.side{background:#172033;border-right:1px solid #334155;padding:16px;overflow:auto}.right{border-left:1px solid #334155;border-right:0}.main{display:flex;flex-direction:column;min-width:0}.brand{font-weight:700;font-size:16px;margin-bottom:16px}.muted{color:#94a3b8;font-size:12px}.field{margin:10px 0}.field label{display:block;font-size:12px;color:#a9b6c8;margin-bottom:5px}input{width:100%;background:#0f172a;border:1px solid #3b4960;border-radius:6px;padding:8px;color:#f8fafc}.row{display:flex;gap:7px}.row>*{min-width:0}.row input{flex:1}.chat{flex:1;overflow:auto;padding:24px max(32px,8%)}.message{max-width:920px;margin:0 auto 18px;padding:13px 15px;border-radius:10px;white-space:pre-wrap;line-height:1.55}.user{background:#1e3a5f;margin-left:auto;max-width:78%}.assistant{background:#1e293b}.reason{margin:8px auto 18px;max-width:920px;background:#171e2d;border:1px solid #334155;border-radius:8px;padding:9px}.reason summary{cursor:pointer;color:#b9c9e2}.reason pre{white-space:pre-wrap;font-size:12px;color:#aab7c8}.composer{border-top:1px solid #334155;padding:13px 8%;display:flex;gap:8px;background:#111827}.composer input{padding:12px}.composer button{padding:10px 17px}.card{border:1px solid #334155;border-radius:8px;padding:10px;margin:10px 0;background:#141d2d}.list{font-size:12px;line-height:1.5;word-break:break-word}.diff{white-space:pre-wrap;background:#0b1220;border-radius:6px;padding:8px;max-height:230px;overflow:auto;color:#d7e1ed}.ok{color:#86efac}.error{color:#fca5a5}.chip{display:inline-block;padding:3px 6px;border-radius:5px;background:#22314a;color:#bcd5ff;margin:2px;font-size:11px}.check{display:block;margin:5px 0;color:#dbeafe;font-size:12px}.check input{width:auto;margin-right:5px}.comparison{max-width:1180px;margin:0 auto 20px}.comparison-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:10px}.comparison .card{margin:0}.comparison .answer{white-space:pre-wrap;line-height:1.5;max-height:440px;overflow:auto}.target-tree{max-height:360px;overflow:auto;border:1px solid #334155;border-radius:7px;padding:7px;background:#0f172a}.target-tree details{margin:3px 0}.target-tree summary{cursor:pointer;list-style:none}.target-tree summary::-webkit-details-marker{display:none}.target-tree summary:before{content:'▸';display:inline-block;width:13px;color:#94a3b8}.target-tree details[open]>summary:before{content:'▾'}.target-tree label{cursor:pointer;margin-left:4px}.target-tree input{width:auto;vertical-align:middle}.tree-children{margin-left:17px;border-left:1px solid #29374d;padding-left:7px}.tree-file{margin:3px 0}.unsupported{color:#64748b}.classification-card{max-width:920px;margin:-8px auto 18px;border:1px solid #38bdf8;border-radius:10px;padding:13px 15px;background:#10263a;line-height:1.55}.classification-card h3{margin:0 0 8px;color:#bae6fd;font-size:14px}.classification-card ul{margin:5px 0 0;padding-left:20px}.classification-card .result{font-size:16px;color:#f8fafc}
+*{box-sizing:border-box}body{margin:0;background:#111827;color:#e5e7eb;font:14px Inter,Segoe UI,Arial,sans-serif}button,input,select{font:inherit}button{background:#2563eb;color:white;border:0;border-radius:7px;padding:8px 10px;cursor:pointer}button.ghost{background:#263244;color:#cbd5e1}.shell{height:100vh;display:grid;grid-template-columns:270px minmax(420px,1fr) 300px}.side{background:#172033;border-right:1px solid #334155;padding:16px;overflow:auto}.right{border-left:1px solid #334155;border-right:0}.main{display:flex;flex-direction:column;min-width:0}.brand{font-weight:700;font-size:16px;margin-bottom:16px}.muted{color:#94a3b8;font-size:12px}.field{margin:10px 0}.field label{display:block;font-size:12px;color:#a9b6c8;margin-bottom:5px}input{width:100%;background:#0f172a;border:1px solid #3b4960;border-radius:6px;padding:8px;color:#f8fafc}.row{display:flex;gap:7px}.row>*{min-width:0}.row input{flex:1}.chat{flex:1;overflow:auto;padding:24px max(32px,8%)}.message{max-width:920px;margin:0 auto 18px;padding:13px 15px;border-radius:10px;white-space:pre-wrap;line-height:1.55}.user{background:#1e3a5f;margin-left:auto;max-width:78%}.assistant{background:#1e293b}.reason{margin:8px auto 18px;max-width:920px;background:#171e2d;border:1px solid #334155;border-radius:8px;padding:9px}.reason summary{cursor:pointer;color:#b9c9e2}.reason pre{white-space:pre-wrap;font-size:12px;color:#aab7c8}.composer{border-top:1px solid #334155;padding:13px 8%;display:flex;gap:8px;background:#111827}.composer input{padding:12px}.composer button{padding:10px 17px}.card{border:1px solid #334155;border-radius:8px;padding:10px;margin:10px 0;background:#141d2d}.list{font-size:12px;line-height:1.5;word-break:break-word}.diff{white-space:pre-wrap;background:#0b1220;border-radius:6px;padding:8px;max-height:230px;overflow:auto;color:#d7e1ed}.ok{color:#86efac}.error{color:#fca5a5}.chip{display:inline-block;padding:3px 6px;border-radius:5px;background:#22314a;color:#bcd5ff;margin:2px;font-size:11px}.check{display:block;margin:5px 0;color:#dbeafe;font-size:12px}.check input{width:auto;margin-right:5px}.comparison{max-width:1180px;margin:0 auto 20px}.comparison-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:10px}.comparison .card{margin:0}.comparison .answer{white-space:pre-wrap;line-height:1.5;max-height:440px;overflow:auto}.target-tree{max-height:360px;overflow:auto;border:1px solid #334155;border-radius:7px;padding:7px;background:#0f172a}.target-tree details{margin:3px 0}.target-tree summary{cursor:pointer;list-style:none}.target-tree summary::-webkit-details-marker{display:none}.target-tree summary:before{content:'▸';display:inline-block;width:13px;color:#94a3b8}.target-tree details[open]>summary:before{content:'▾'}.target-tree label{cursor:pointer;margin-left:4px}.target-tree input{width:auto;vertical-align:middle}.tree-children{margin-left:17px;border-left:1px solid #29374d;padding-left:7px}.tree-file{margin:3px 0}.unsupported{color:#64748b}.classification-card{max-width:920px;margin:-8px auto 18px;border:1px solid #38bdf8;border-radius:10px;padding:13px 15px;background:#10263a;line-height:1.55}.classification-card h3{margin:0 0 8px;color:#bae6fd;font-size:14px}.classification-card ul{margin:5px 0 0;padding-left:20px}.classification-card .result{font-size:16px;color:#f8fafc}.codebook-workspace{padding-top:28px}.codebook-workspace .workspace-inner{max-width:980px;margin:auto}.codebook-workspace h1{font-size:22px;margin:0 0 7px}.codebook-workspace h2{font-size:16px;margin:22px 0 8px}.codebook-class{border-left:3px solid #38bdf8}.codebook-class h3{margin:0 0 7px}.codebook-class ul{margin:7px 0;padding-left:20px;line-height:1.55}.workspace-actions{display:flex;gap:8px;position:sticky;bottom:0;padding:12px 0;background:#111827}
 </style></head><body><div class="shell"><aside class="side"><div class="brand">Bosch Local Workbench</div><div class="muted">仅本机 127.0.0.1 · 缓存固定保存在程序目录 AI_Bot_State</div>
 <div class="field"><label>代码工作区文件夹</label><div class="row"><input id="workspace" placeholder="C:\\...\\项目文件夹"><button class="ghost" onclick="pick('folder','workspace')">选择</button></div></div><div class="field"><label>模型</label>
 <select id="model" onchange="toggleCustomModel();loadModelStatus()">
@@ -1046,9 +1212,9 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 </select>
 <input id="custommodel" placeholder="粘贴准确的 Bosch Farm Model ID" style="display:none;margin-top:7px"></div><div id="modelstatus" class="muted"></div><div class="row"><button onclick="setup()">打开工作区</button><button class="ghost" onclick="switchModel()">切换模型</button><button class="ghost" onclick="testModel()">测试模型</button></div><div id="setupmsg" class="muted"></div>
 <div class="field"><label>聊天会话</label><div class="row"><select id="session"></select><button class="ghost" onclick="openSession()">切换</button><button class="ghost" onclick="newSession()">新建</button><button class="ghost" onclick="renameSession()">改名</button><button class="ghost" onclick="deleteSession()">删除</button></div><div id="sessionmsg" class="muted"></div></div>
-<hr><b>材料分析</b><div class="muted">文件直接分析；文件夹先显示结构，再明确勾选要用的材料。不会自动加入按页转换的 image 实验图片。</div><div class="field"><label>分析目标：文件或文件夹</label><div class="row"><input id="targetpath" placeholder="PDF / Excel / PNG，或 Baugruppe 文件夹" oninput="clearTargetTree()"><button class="ghost" onclick="pick('file','targetpath')">文件</button><button class="ghost" onclick="pickFolderForTree()">文件夹</button></div></div><div class="field"><label>Codebook（可选：用于 Baugruppe 分类）</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><div class="row"><button class="ghost" onclick="loadTargetTree()">显示文件夹结构</button><button class="ghost" onclick="analyzeTarget()">用选中材料开始分析</button></div><div id="treestatus" class="muted"></div><div id="targettree" class="target-tree muted">选择文件夹后显示可展开的文件树。</div><button class="ghost" onclick="clearBg()">退出分类模式</button><div id="bgstatus" class="muted"></div><div id="scanreport" class="list"></div><button class="ghost" onclick="prepareCoverage()">预先准备分类证据</button><div id="coveragestatus" class="muted">分类/Codebook 问题会自动准备证据；也可在提问前手动准备。</div><div id="docs" class="list"></div>
+<hr><b>Codebook</b><div id="codebookstatus" class="muted">尚未锁定 Codebook。</div><div class="field"><label>Codebook 文件（首次准备或更换时选择）</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf / .docx"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><div class="row"><button class="ghost" onclick="prepareCodebook()">准备 Codebook</button><button class="ghost" onclick="viewCodebook()">查看</button><button class="ghost" onclick="changeCodebook()">更换</button></div><hr><b>材料分析</b><div class="muted">文件直接分析；文件夹先显示结构，再明确勾选要用的材料。已锁定 Codebook 会自动用于分类。</div><div class="field"><label>分析目标：文件或文件夹</label><div class="row"><input id="targetpath" placeholder="PDF / Excel / PNG，或 Baugruppe 文件夹" oninput="clearTargetTree()"><button class="ghost" onclick="pick('file','targetpath')">文件</button><button class="ghost" onclick="pickFolderForTree()">文件夹</button></div></div><div class="row"><button class="ghost" onclick="loadTargetTree()">显示文件夹结构</button><button class="ghost" onclick="analyzeTarget()">用选中材料开始分析</button></div><div id="treestatus" class="muted"></div><div id="targettree" class="target-tree muted">选择文件夹后显示可展开的文件树。</div><button class="ghost" onclick="clearBg()">退出分类模式</button><div id="bgstatus" class="muted"></div><div id="scanreport" class="list"></div><button class="ghost" onclick="prepareCoverage()">预先准备分类证据</button><div id="coveragestatus" class="muted">分类/Codebook 问题会自动准备证据；也可在提问前手动准备。</div><div id="docs" class="list"></div>
 <hr><b>多模型对比</b><div class="muted">同一条问题、同一份 BG 证据；逐个选择 2–4 个模型后顺序请求。结果不会写进普通聊天会话。</div><div id="comparemodels"></div><div class="row"><button class="ghost" id="addcompare" onclick="addCompareModel()">＋ 添加对比模型</button><button class="ghost" onclick="compareModels()">开始对比</button></div><div id="comparestatus" class="muted"></div></aside>
-<main class="main"><div class="chat" id="chat"><div class="message assistant">选择工作区后即可聊天。代码修改会先显示 diff，只有点击“应用修改”才会写入本地文件。</div></div><div class="composer"><input id="question" placeholder="问代码，或根据 Codebook 判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button></div></main>
+<main class="main"><div class="chat" id="chat"><div class="message assistant">选择工作区后即可聊天。代码修改会先显示 diff，只有点击“应用修改”才会写入本地文件。</div></div><div class="composer" id="composer"><input id="question" placeholder="问代码，或根据 Codebook 判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button></div></main>
 <aside class="side right"><b>本轮状态</b><div id="status" class="card muted">尚未打开工作区</div><b>会话导出</b><div id="sessionexport" class="card"><button class="ghost" onclick="exportSession()">导出完整会话</button></div><b>本轮 token 明细</b><div id="usagedetail" class="card muted">完成一次请求后显示。</div><b>BG 分析导出</b><div id="analysisexport" class="card muted">仅在 Baugruppe 分析完成后可导出。</div><b>证据来源</b><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><b>待应用修改</b><div id="changes" class="list">无</div></aside></div>
 <script>
 const $=id=>document.getElementById(id);let busy=false,lastQuestion='',compareSlots=[{value:'claude-haiku-5.5',custom:''}],savedTargetSelection=new Set(),treeRestoreNote='';
@@ -1075,9 +1241,18 @@ function renderUsageDetail(u,model){if(!u)return;$('usagedetail').innerHTML=`实
 function toggleCustomModel(){let custom=$('model').value==='__custom__';$('custommodel').style.display=custom?'block':'none';if(custom)$('custommodel').focus()}
 function setSelectedModel(model){let known=[...$('model').options].some(option=>option.value===model);$('model').value=known?model:'__custom__';$('custommodel').value=known?'':model;toggleCustomModel();loadModelStatus()}
 function selectedModel(){let selected=$('model').value;return selected==='__custom__' ? $('custommodel').value.trim() : selected}
+function codebookList(items){let values=Array.isArray(items)?items.filter(Boolean):[];return values.length?'<ul>'+values.map(item=>'<li>'+esc(String(item))+'</li>').join('')+'</ul>':'<div class="muted">未提取到。</div>'}
+function renderCodebookStatus(profile){let host=$('codebookstatus');if(!profile||profile.status==='none'||!profile.status){host.textContent='尚未准备 Codebook；普通材料问答仍可直接使用。';return}let lock=profile.status==='locked';host.innerHTML=(lock?'<span class="ok">已锁定</span>':'<span class="error">草稿待确认</span>')+'：<b>'+esc(profile.source_name||'Codebook')+'</b><br>'+esc(profile.page_count||0)+' 页/片段 · '+esc(profile.parser_model||'—')+(lock?'<br>切换模型、会话或材料后仍会自动沿用。':'<br>请在中间区域核对后一次确认锁定。')}
+async function loadCodebookStatus(){try{renderCodebookStatus(await api('/api/codebook'))}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+function leaveCodebookWorkspace(){let composer=$('composer');composer.style.display='flex';$('chat').classList.remove('codebook-workspace');loadHistory()}
+function showCodebookWorkspace(profile){let draft=profile.draft||{};$('composer').style.display='none';let classes=(draft.classes||[]).map(item=>'<article class="card codebook-class"><h3>'+esc(item.name||'未命名类别')+'</h3><div>'+esc(item.definition||'未提供定义')+'</div><b>判定规则</b>'+codebookList(item.decision_rules)+'<b>边界 / 排除规则</b>'+codebookList(item.boundaries)+'<div class="muted">依据页：'+esc((item.evidence_pages||[]).join('、')||'未标注')+'</div></article>').join('')||'<div class="card error">未找到可确认的类别，请更换模型或重新准备。</div>';let usage=profile.usage||{};let locked=profile.status==='locked';$('chat').className='chat codebook-workspace';$('chat').innerHTML='<section class="workspace-inner"><h1>Codebook 工作区</h1><div class="muted">'+(locked?'此版本已锁定，将作为后续全部 BG 分类的首要规则来源。':'请阅读下方模型整理的完整结果；确认无误后一次点击锁定。')+'</div><div class="card"><b>来源：</b>'+esc(profile.source_name||'—')+'<br><span class="muted">解析模型：'+esc(profile.parser_model||'—')+' · 页/片段：'+esc(profile.page_count||0)+' · 分组：'+esc(profile.page_groups||0)+' · Token：'+esc(usage.input||0)+' / '+esc(usage.output||0)+(usage.cost_usd===null||usage.cost_usd===undefined?'':' · $'+Number(usage.cost_usd).toFixed(6))+'</span></div><h2>类别与判定边界</h2>'+classes+'<h2>通用规则</h2><div class="card">'+codebookList(draft.global_rules)+'</div><h2>表格规则</h2><div class="card">'+codebookList(draft.table_rules)+'</div><h2>需要注意的不确定项</h2><div class="card">'+codebookList(draft.uncertainties)+'</div><div class="workspace-actions">'+(locked?'<button class="ghost" onclick="leaveCodebookWorkspace()">返回聊天</button>':'<button onclick="lockCodebook()">确认并锁定此 Codebook</button><button class="ghost" onclick="leaveCodebookWorkspace()">暂不锁定</button>')+'</div></section>';$('chat').scrollTop=0}
+async function prepareCodebook(){let path=$('codebook').value.trim();if(!path){$('codebookstatus').innerHTML='<span class="error">请先选择 PDF 或 DOCX Codebook 文件。</span>';return}let model=prompt('用于完整解析 Codebook 的模型 ID（可修改）。\n建议选擅长视觉/表格理解的模型。',selectedModel());if(model===null)return;model=model.trim();if(!model){$('codebookstatus').innerHTML='<span class="error">请输入一个模型 ID。</span>';return}try{$('codebookstatus').textContent='正在按页读取、提取表格与合并 Codebook；大型文件可能需要几分钟…';let profile=await api('/api/codebook/prepare',{method:'POST',body:JSON.stringify({path,model})});renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function viewCodebook(){try{let profile=await api('/api/codebook');if(!profile||!profile.status)throw Error('尚未准备 Codebook。');renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function lockCodebook(){if(!confirm('确认锁定此 Codebook？之后切换文件夹、会话或模型都会继续使用它；只有你手动更换或原文件变化时才会失效。'))return;try{let profile=await api('/api/codebook/lock',{method:'POST'});renderCodebookStatus(profile);showCodebookWorkspace(profile);$('setupmsg').innerHTML='<span class="ok">Codebook 已锁定。</span>'}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function changeCodebook(){if(!confirm('更换 Codebook 会解除当前锁定；不会删除原始文件或已完成的聊天记录。继续吗？'))return;try{await api('/api/codebook',{method:'DELETE'});$('codebook').value='';renderCodebookStatus({status:'none'});leaveCodebookWorkspace();$('setupmsg').textContent='已解除 Codebook 锁定，请选择新文件并准备。'}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function loadSessions(){try{let x=await api('/api/sessions');$('session').innerHTML=x.sessions.map(n=>`<option value="${esc(n)}" ${n===x.current?'selected':''}>${esc(n)}</option>`).join('');$('sessionmsg').textContent='聊天记录、BG 状态、代码索引和 token 统计按会话分开；已加入的材料索引按工作区共享。'}catch(e){$('sessionmsg').textContent=e.message}}
 async function loadHistory(){try{let x=await api('/api/history');$('chat').innerHTML='';if(!x.history.length){message('这是一个新会话，可以直接开始提问。');return}for(let item of x.history)message(item.content,item.role==='user'?'user':'assistant')}catch{}}
-async function setup(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default'})});renderStatus(s);$('setupmsg').textContent='已打开。';loadDocs();loadSessions();loadHistory()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
+async function setup(){try{let model=selectedModel();if(!model)throw Error('请先输入 Bosch Farm 的准确 Model ID。');let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default'})});renderStatus(s);$('setupmsg').textContent='已打开。';loadDocs();loadSessions();loadHistory();loadCodebookStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function openSession(){if(!$('session').value)return;await setup()}
 async function newSession(){let name=prompt('新会话名称，例如：BG_012 或 token_test');if(!name||!name.trim())return;$('session').innerHTML='<option>'+esc(name.trim())+'</option>';await setup()}
 async function renameSession(){try{let name=prompt('输入新的会话名称：',$('session').value);if(!name||!name.trim())return;let s=await api('/api/session/rename',{method:'POST',body:JSON.stringify({name:name.trim()})});renderStatus(s);$('sessionmsg').textContent='会话已重命名。';loadSessions()}catch(e){$('sessionmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
