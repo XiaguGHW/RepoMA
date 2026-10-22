@@ -24,6 +24,7 @@ MAX_VISUALS_PER_REQUEST = 5
 MAX_VISUAL_BYTES_PER_REQUEST = 2_400_000
 MAX_VISUAL_BYTES_PER_FILE = 700_000
 MAX_SHORT_PDF_PAGES = 5
+MAX_IMAGE_GROUP_DETAIL_VIEWS = 3
 
 
 def _now():
@@ -125,6 +126,18 @@ class LocalDocumentLibrary:
     def list(self):
         return self.data["documents"]
 
+    def bilder_image_paths(self, allowed_ids=None) -> list[Path]:
+        """Return explicitly selected CAD screenshots from direct Bilder folders."""
+        allowed = set(allowed_ids or [])
+        paths = []
+        for document in self.data["documents"]:
+            if allowed and document.get("id") not in allowed:
+                continue
+            path = Path(document.get("path", ""))
+            if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} and path.parent.name.casefold() == "bilder" and path.is_file():
+                paths.append(path)
+        return sorted(set(paths), key=lambda item: item.name.casefold())
+
     def remove(self, document_id: str):
         before = len(self.data["documents"])
         self.data["documents"] = [item for item in self.data["documents"] if item["id"] != document_id]
@@ -198,7 +211,7 @@ class LocalDocumentLibrary:
             for item in selected[:result_limit]
         ]
 
-    def visual_paths(self, snippets, cache_dir: Path, limit: int = MAX_VISUALS_PER_REQUEST):
+    def visual_paths(self, snippets, cache_dir: Path, limit: int = MAX_VISUALS_PER_REQUEST, bilder_images=None):
         """Make upload-safe visual evidence for only the current request.
 
         A small-page-count technical drawing is treated differently from a long
@@ -208,6 +221,8 @@ class LocalDocumentLibrary:
         """
         cache_dir.mkdir(parents=True, exist_ok=True)
         paths, seen, used_bytes, skipped = [], set(), 0, []
+        grouped_image_sources = {Path(item) for item in (bilder_images or []) if Path(item).is_file()}
+        image_group_reports, title_blocks = [], []
         short_pdfs: list[Path] = []
         for snippet in snippets:
             visual = snippet.get("visual") or {}
@@ -246,15 +261,43 @@ class LocalDocumentLibrary:
                     all_overviews_attached = False
             # A readable title block is often decisive for a scanned drawing.
             # Add it only after all sheets and only if payload budget permits.
-            if all_overviews_attached and page_count and len(paths) < limit:
-                attach(self._render_pdf_title_block(source, 1, cache_dir), f"{source.name} 第 1 页标题栏")
+            if all_overviews_attached and page_count:
+                title_blocks.append((source, self._render_pdf_title_block(source, 1, cache_dir)))
+
+        # CAD screenshots belong together. For a larger Bilder folder, a
+        # contact sheet preserves the assembly overview in one attachment and
+        # a few evenly distributed originals retain readable details.
+        groups = {}
+        for source in grouped_image_sources:
+            groups.setdefault(source.parent, []).append(source)
+        for folder, sources in sorted(groups.items(), key=lambda item: str(item[0]).casefold()):
+            sources = sorted(sources, key=lambda item: item.name.casefold())
+            if len(sources) <= 4:
+                for source in sources:
+                    attach(self._prepare_image(source, cache_dir), source.name)
+                image_group_reports.append(f"{folder.name}: {len(sources)} 张原图")
+                continue
+            sheet = self._render_contact_sheet(sources, cache_dir)
+            attached_sheet = attach(sheet, f"{folder.name} 图片总览")
+            details = self._evenly_spaced(sources, MAX_IMAGE_GROUP_DETAIL_VIEWS)
+            details_attached = 0
+            for source in details:
+                if attach(self._prepare_image(source, cache_dir), source.name):
+                    details_attached += 1
+            if attached_sheet:
+                image_group_reports.append(f"{folder.name}: {len(sources)} 张，缩略总览 + {details_attached} 张细节")
+
+        # A title block is useful but less important than an explicitly chosen
+        # screenshot group; attach it only after that group has a chance.
+        for source, title_block in title_blocks:
+            attach(title_block, f"{source.name} 第 1 页标题栏")
 
         for snippet in snippets:
             visual = snippet.get("visual") or {}
             kind = visual.get("kind")
             source = Path(visual.get("path", ""))
             key = (kind, str(source), visual.get("page"), visual.get("sheet"), visual.get("start_row"))
-            if key in seen or not source.is_file() or (kind == "pdf_page" and source in short_pdfs):
+            if key in seen or not source.is_file() or (kind == "pdf_page" and source in short_pdfs) or (kind == "image" and source in grouped_image_sources):
                 continue
             try:
                 if kind == "image":
@@ -273,9 +316,43 @@ class LocalDocumentLibrary:
 
         self.last_visual_report = {
             "attachments": len(paths), "bytes": used_bytes, "budget": MAX_VISUAL_BYTES_PER_REQUEST,
-            "short_drawings": [item.name for item in short_pdfs], "skipped": skipped,
+            "short_drawings": [item.name for item in short_pdfs], "image_groups": image_group_reports,
+            "skipped": skipped,
         }
         return paths
+
+    @staticmethod
+    def _evenly_spaced(items: list[Path], count: int) -> list[Path]:
+        if len(items) <= count:
+            return items
+        indexes = {round(index * (len(items) - 1) / (count - 1)) for index in range(count)}
+        return [item for index, item in enumerate(items) if index in indexes]
+
+    @classmethod
+    def _render_contact_sheet(cls, sources: list[Path], cache_dir: Path):
+        from PIL import Image, ImageDraw, ImageFont, ImageOps
+        identity = "|".join(f"{source}|{source.stat().st_mtime_ns}" for source in sources)
+        key = hashlib.sha256(identity.encode()).hexdigest()[:14]
+        target = cache_dir / f"bilder_contact_{key}.jpg"
+        if target.exists() and target.stat().st_size <= MAX_VISUAL_BYTES_PER_FILE:
+            return target
+        columns, cell_w, cell_h, label_h, padding = 3, 430, 310, 25, 10
+        rows = (len(sources) + columns - 1) // columns
+        sheet = Image.new("RGB", (columns * cell_w + (columns + 1) * padding,
+                                   rows * (cell_h + label_h) + (rows + 1) * padding), "white")
+        draw, font = ImageDraw.Draw(sheet), ImageFont.load_default()
+        for index, source in enumerate(sources):
+            try:
+                with Image.open(source) as image:
+                    preview = ImageOps.contain(image.convert("RGB"), (cell_w, cell_h))
+                    column, row = index % columns, index // columns
+                    x = padding + column * (cell_w + padding) + (cell_w - preview.width) // 2
+                    y = padding + row * (cell_h + label_h + padding) + (cell_h - preview.height) // 2
+                    sheet.paste(preview, (x, y))
+                    draw.text((padding + column * (cell_w + padding), y + cell_h + 3), source.name[:52], fill="black", font=font)
+            except Exception:
+                continue
+        return cls._save_image_jpeg(sheet, target, max_bytes=620_000, max_edge=2000)
 
     def _extract(self, path: Path):
         suffix = path.suffix.lower()
