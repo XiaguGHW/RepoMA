@@ -1231,7 +1231,7 @@ async function restoreLastWorkspace(){
     $('setupmsg').textContent='无法自动打开上次工作区；请重新选择路径。';
   }
 }
-window.addEventListener('DOMContentLoaded',()=>{renderCompareSlots();restoreLastWorkspace()});
+window.addEventListener('DOMContentLoaded',()=>{renderCompareSlots();loadCodebookStatus();restoreLastWorkspace()});
 async function api(url,opt={}){let r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt});let d=await r.json();if(!r.ok)throw Error(d.detail||'请求失败');return d}
 async function pick(kind,target){try{$(target).value=(await api('/api/pick/'+kind)).path||''}catch(e){alert(e.message)}}
 function message(text,kind='assistant'){let e=document.createElement('div');e.className='message '+kind;e.textContent=text;$('chat').append(e);$('chat').scrollTop=1e9;return e}
