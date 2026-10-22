@@ -219,6 +219,15 @@ class CoverageRequest(BaseModel):
     full: bool = False
 
 
+class CacheFileRequest(BaseModel):
+    document_id: str
+    confirmed: bool = False
+
+
+class CacheConfirmRequest(BaseModel):
+    confirmed: bool = False
+
+
 def session() -> dict[str, Any]:
     if not ACTIVE:
         raise HTTPException(400, "请先设置工作区。")
@@ -624,6 +633,72 @@ def prepare_bg_dossier(data: dict[str, Any], coverage: dict) -> tuple[dict | Non
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(dossier, ensure_ascii=False, indent=2), encoding="utf-8")
     return dossier, usage, True
+
+
+def material_cache_entries(document: dict) -> list[dict]:
+    """Return metadata only; source text and model summaries stay local/private."""
+    digest = str(document.get("sha256") or "")
+    root = app_state_home() / "material_cache" / digest
+    entries = []
+    try:
+        candidates = sorted(root.glob("*.json"))
+    except OSError:
+        candidates = []
+    for path in candidates:
+        try:
+            item = json.loads(path.read_text(encoding="utf-8"))
+            record = item.get("record", {}) if isinstance(item, dict) else {}
+            if not isinstance(item, dict) or item.get("sha256") != digest:
+                continue
+            entries.append({"model": item.get("model", ""), "created_at": item.get("created_at", ""),
+                            "full": bool(item.get("full")), "pages": item.get("pages", []),
+                            "complete": bool(record.get("complete")), "groups": record.get("text_groups_processed", 0)})
+        except (OSError, ValueError):
+            continue
+    return entries
+
+
+def document_ocr_audit(document: dict) -> str:
+    if document.get("image_type") == "dfc_structure_screenshot":
+        audit = LocalDocumentLibrary.dfc_audit(document) or {}
+        return "DFC " + str(audit.get("ocr_status", "not requested"))
+    pages = document.get("page_inventory", [])
+    if not pages:
+        return "不需要 / 无 PDF 页"
+    statuses = [str(item.get("ocr_status", "not_requested")) for item in pages if item.get("page_type") != "text"]
+    if not statuses:
+        return "不需要（原生文字页）"
+    if all(status == "ok" for status in statuses):
+        return "已完成"
+    if any(status == "ok" for status in statuses):
+        return "部分完成"
+    return statuses[0]
+
+
+def cache_audit(data: dict[str, Any]) -> dict:
+    state, documents = data["state"], data["documents"]
+    active = set(state.data.get("active_source_ids") or [])
+    selected = [item for item in documents.list() if item.get("id") in active]
+    coverage = load_coverage(state)
+    current = coverage_matches_current_selection(data, coverage)
+    dossier = load_bg_dossier_cache(coverage, data["model"]) if current else None
+    return {"selection_current": current, "coverage_created_at": coverage.get("created_at", ""),
+            "dossier": {"ready": bool(dossier), "created_at": dossier.get("created_at", "") if dossier else "",
+                        "model": dossier.get("model", "") if dossier else ""},
+            "files": [{"id": item.get("id"), "name": item.get("name"), "sha256": str(item.get("sha256", ""))[:12],
+                       "role": material_role_label(item.get("material_role", "other")),
+                       "index_status": item.get("index_cache_status", "unknown"), "ocr_status": document_ocr_audit(item),
+                       "summary_entries": material_cache_entries(item)} for item in selected]}
+
+
+def invalidate_current_coverage(state: ProjectState, document_id: str | None = None) -> None:
+    coverage = load_coverage(state)
+    if not coverage:
+        return
+    if document_id:
+        coverage["files"] = [item for item in coverage.get("files", []) if item.get("id") != document_id]
+    coverage["complete"] = False
+    coverage_path(state).write_text(json.dumps(coverage, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_coverage(state: ProjectState) -> dict:
@@ -1439,6 +1514,60 @@ def create_coverage(request: CoverageRequest = CoverageRequest()):
         return prepare_coverage(session(), full=request.full)
 
 
+@app.get("/api/cache/audit")
+def cache_audit_status():
+    return cache_audit(session())
+
+
+@app.post("/api/cache/file/rebuild")
+def rebuild_cached_file(request: CacheFileRequest):
+    if not request.confirmed:
+        raise HTTPException(400, "必须确认后才会清除该文件的摘要缓存。")
+    data = session()
+    document = next((item for item in data["documents"].list() if item.get("id") == request.document_id), None)
+    if not document:
+        raise HTTPException(404, "当前材料范围中找不到该文件。")
+    target = app_state_home() / "material_cache" / str(document.get("sha256") or "")
+    if target.is_dir():
+        shutil.rmtree(target)
+    invalidate_current_coverage(data["state"], str(document["id"]))
+    return {"message": f"已清除 {document['name']} 的本地摘要；下次分类会只重读该文件。", "audit": cache_audit(data)}
+
+
+@app.post("/api/cache/dossier/rebuild")
+def rebuild_bg_dossier(request: CacheConfirmRequest):
+    if not request.confirmed:
+        raise HTTPException(400, "必须确认后才会重新生成 BG 综合证据档案。")
+    data = session(); coverage = load_coverage(data["state"])
+    if not coverage_matches_current_selection(data, coverage):
+        raise HTTPException(409, "当前材料尚未完成预读；请先准备分类证据。")
+    path = bg_dossier_cache_path(coverage, data["model"])
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    with LOCK:
+        dossier, usage, _created = prepare_bg_dossier(data, coverage)
+    if usage:
+        data["state"].note_usage(usage, data["pricing"], data["model"])
+    return {"message": "BG 综合证据档案已重新生成。", "dossier": dossier,
+            "usage": summarize_usage([usage or {}]), "audit": cache_audit(data)}
+
+
+@app.post("/api/cache/clear")
+def clear_summary_caches(request: CacheConfirmRequest):
+    if not request.confirmed:
+        raise HTTPException(400, "必须确认后才会清除本地摘要缓存。")
+    for name in ("material_cache", "bg_dossier_cache"):
+        target = app_state_home() / name
+        if target.is_dir():
+            shutil.rmtree(target)
+    # Keep local source indexes/OCR derivatives intact; only model-generated
+    # summaries and dossiers are cleared.  The current report is marked stale.
+    invalidate_current_coverage(session()["state"])
+    return {"message": "已清除本地材料摘要和 BG 综合档案；索引与 OCR 缓存保留。", "audit": cache_audit(session())}
+
+
 @app.delete("/api/bg")
 def clear_bg():
     data = session(); data["state"].data.pop("bg_context", None); data["state"].save(); return status_data(data)
@@ -1522,7 +1651,7 @@ async function restoreLastWorkspace(){
     $('setupmsg').textContent='无法自动打开上次工作区；请重新选择路径。';
   }
 }
-window.addEventListener('DOMContentLoaded',()=>{renderCompareSlots();loadCodebookStatus();restoreLastWorkspace()});
+window.addEventListener('DOMContentLoaded',()=>{renderCompareSlots();loadCodebookStatus();ensureCacheAuditPanel();restoreLastWorkspace()});
 async function api(url,opt={}){let r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt});let d=await r.json();if(!r.ok)throw Error(d.detail||'请求失败');return d}
 async function pick(kind,target){try{$(target).value=(await api('/api/pick/'+kind)).path||''}catch(e){alert(e.message)}}
 function message(text,kind='assistant'){let e=document.createElement('div');e.className='message '+kind;e.textContent=text;$('chat').append(e);$('chat').scrollTop=1e9;return e}
@@ -1557,6 +1686,12 @@ async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:
 function renderScanReport(x){let files=x.files.map(f=>{let index=f.index_cache_status==='reused'?' · 本地索引已复用':f.index_cache_status==='changed'?' · 内容变化，已重新索引':f.index_cache_status==='new'?' · 已建立本地索引':'';return `<div class="card"><b>${esc(f.name)}</b><br><span class="muted">${esc(f.material_role_label||'其他资料')} · 成功提取 ${f.chunks} 个文本片段 · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB${index}</span></div>`}).join('');let skipped=x.skipped_count?`<div class="card error">跳过 / 失败 ${x.skipped_count} 个<br><span class="muted">${x.skipped.map(esc).join('<br>')}${x.skipped_count>x.skipped.length?'<br>其余失败项未展开。':''}</span></div>`:'';$('scanreport').innerHTML='<b>扫描报告</b><div class="muted">成功 '+x.sources+' 个；本次选定材料范围已锁定。</div>'+files+skipped}
 function renderCoverageReport(x){if(!x||!x.files){$('coveragestatus').textContent='分类/Codebook 问题会自动准备证据；也可在提问前手动准备。';return}if(x.current_selection===false){$('coveragestatus').innerHTML='<span class="muted">材料选择或模型已更新；下次分类准备时会复用未变文件的本地摘要，仅预读新增/变更文件。</span>';return}let done=x.files.filter(f=>f.complete).length;let details=x.files.map(f=>{let pages=f.pages_total?`页：已读 ${(f.pages_read||[]).join('、')||'—'}${(f.pages_unread||[]).length?'；未读 '+f.pages_unread.join('、'):''}`:'无页码';let dfc=f.dfc_structure?` · <span class="chip">DFC Struktur：${esc(f.dfc_structure.ocr_status||'—')}，${esc(f.dfc_structure.segments_total||0)} 段</span>`:'';let cache=f.cache_status==='reused'?' · <span class="chip">本地摘要已复用</span>':f.cache_status==='created'?' · <span class="chip">本轮新预读</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${f.text_groups_processed}/${f.text_groups_total} 个文本组 · ${esc(f.reading_scope||'')} · ${esc(pages)}${cache}${dfc}${f.failures?.length?'（'+esc(f.failures.join('；'))+'）':''}`}).join('');let dossier=x.bg_dossier?.ready?' · <span class="chip">BG 综合证据档案已缓存</span>':' · <span class="chip">首次分类后生成 BG 综合证据档案</span>';$('coveragestatus').innerHTML=(x.complete?'<span class="ok">分类证据已准备：</span>':'<span class="error">分类证据不完整：</span>')+` ${done}/${x.files.length} 个文件；复用 ${x.reused_files||0} 个，新预读 ${x.created_files||0} 个；本次 ${x.model_calls||0} 次模型调用。`+dossier+details}
 async function loadCoverage(){try{renderCoverageReport(await api('/api/coverage'))}catch{}}
+function ensureCacheAuditPanel(){if($('cacheauditpanel'))return;let panel=document.createElement('details');panel.id='cacheauditpanel';panel.className='card';panel.innerHTML='<summary>材料缓存与审计</summary><div class="muted">查看当前材料的索引、OCR、摘要与 BG 档案状态。</div><div class="row"><button class="ghost" onclick="loadCacheAudit()">刷新</button><button class="ghost" onclick="rebuildDossier()">重建 BG 档案</button><button class="ghost" onclick="clearSummaryCaches()">清除摘要缓存</button></div><div id="cacheaudit" class="list muted">选择材料后可查看。</div>';let anchor=$('coveragestatus');anchor.insertAdjacentElement('afterend',panel)}
+function renderCacheAudit(x){let host=$('cacheaudit');if(!x.files?.length){host.textContent='当前没有已选材料。';return}let dossier=x.dossier?.ready?`BG 综合档案：已缓存（${esc(x.dossier.model||'—')}）`:'BG 综合档案：尚未生成或材料范围已变化';let files=x.files.map(f=>{let summaries=(f.summary_entries||[]).map(s=>`${esc(s.model||'—')} · ${s.full?'全部页':'默认范围'} · ${s.complete?'完成':'未完成'}`).join('<br>')||'无摘要缓存';return `<div class="card"><b>${esc(f.name)}</b><br><span class="muted">SHA ${esc(f.sha256)} · ${esc(f.role)}<br>索引：${esc(f.index_status)} · OCR：${esc(f.ocr_status)}<br>摘要：${summaries}</span><br><button class="ghost" onclick="rebuildCachedFile('${esc(f.id)}')">仅重读此文件</button></div>`}).join('');host.innerHTML='<div class="muted">'+dossier+(x.selection_current?'':'；当前材料范围待更新')+'</div>'+files}
+async function loadCacheAudit(){try{renderCacheAudit(await api('/api/cache/audit'))}catch(e){$('cacheaudit').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function rebuildCachedFile(id){if(!confirm('仅清除这份文件的本地摘要？下次分类会重新读取该文件；其他文件摘要保持不变。'))return;try{let x=await api('/api/cache/file/rebuild',{method:'POST',body:JSON.stringify({document_id:id,confirmed:true})});$('coveragestatus').textContent=x.message;renderCacheAudit(x.audit)}catch(e){$('cacheaudit').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function rebuildDossier(){if(!confirm('重新生成 BG 综合证据档案会调用当前模型并产生 token 消耗。继续吗？'))return;try{let x=await api('/api/cache/dossier/rebuild',{method:'POST',body:JSON.stringify({confirmed:true})});$('coveragestatus').textContent=x.message;renderCacheAudit(x.audit);renderStatus(await api('/api/status'))}catch(e){$('cacheaudit').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function clearSummaryCaches(){if(!confirm('清除所有本地材料摘要和 BG 综合档案？不会删除原始文件、本地索引或 OCR，但之后需要重新预读。'))return;try{let x=await api('/api/cache/clear',{method:'POST',body:JSON.stringify({confirmed:true})});$('coveragestatus').textContent=x.message;renderCacheAudit(x.audit)}catch(e){$('cacheaudit').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function clearTargetTree(){savedTargetSelection=new Set();treeRestoreNote='';$('targettree').textContent='选择文件夹后显示可展开的文件树。';$('targettree').classList.add('muted');$('treestatus').textContent=''}
 async function pickFolderForTree(){await pick('folder','targetpath');if($('targetpath').value)loadTargetTree()}
 function treeFileCount(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].length}
