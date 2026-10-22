@@ -37,7 +37,8 @@ Return ONLY a JSON object with these fields:
   "answer": "concise Chinese explanation for the user (normally <= 1200 Chinese characters; complete the JSON even if you must shorten)",
   "read_files": ["relative/path"],
   "changes": [{"path": "relative/path", "content": "complete new UTF-8 file content", "reason": "brief reason"}],
-  "memory_action": {"operation": "none|add|edit|delete", "id": "memory id or empty", "content": "new memory text or empty"}
+  "memory_action": {"operation": "none|add|edit|delete", "id": "memory id or empty", "content": "new memory text or empty"},
+  "classification": null
 }
 Rules:
 - Paths must be relative to the supplied workspace. Never use .. or an absolute path.
@@ -378,6 +379,7 @@ def parse_json(answer: str) -> dict:
     data.setdefault("read_files", [])
     data.setdefault("changes", [])
     data.setdefault("memory_action", {"operation": "none", "id": "", "content": ""})
+    data.setdefault("classification", None)
     return data
 
 
@@ -467,6 +469,9 @@ BG CLASSIFICATION MODE (active):
 - Give the full detailed classification format required by the system prompt.
 - Treat the Codebook as the rule source. Cite evidence labels exactly as supplied.
 - A source marked visual/scanned may require visual inspection; do not infer text that was not supplied.
+- When the user asks for a classification, include a `classification` object in the JSON action:
+  {"label": "exact Codebook class name", "confidence": "high|medium|low", "alternative_label": "exact Codebook class name or empty", "evidence_labels": ["exact supplied document label", "..."], "uncertainties": ["concise limitation or empty list"]}.
+- Copy the class and evidence-label spelling exactly. Use only evidence labels supplied in this prompt. A non-empty evidence_labels list is mandatory for a classification.
 """
     return f"""Workspace: {state.workspace}
 Project summary: {state.data['summary'] or '(none)'}
