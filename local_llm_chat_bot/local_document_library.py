@@ -50,6 +50,64 @@ QUERY_EXPANSIONS = {
     "接口": ("schnittstelle", "interface", "anschluss", "stecker", "io"),
 }
 
+MATERIAL_ROLE_LABELS = {
+    "technical_drawing": "技术图纸",
+    "bom": "BOM / 装配表",
+    "datasheet": "数据表 / 目录",
+    "dfc_structure": "DFC 结构图",
+    "cad_screenshot": "CAD 截图",
+    "derived_duplicate": "派生重复资料",
+    "unsupported_drawing": "Inventor 源图（暂不支持）",
+    "other": "其他资料",
+}
+MATERIAL_ROLE_PRIORITY = {
+    "technical_drawing": 0, "dfc_structure": 0, "bom": 1,
+    "datasheet": 2, "cad_screenshot": 3, "other": 4,
+    "derived_duplicate": 99, "unsupported_drawing": 100,
+}
+
+
+def _path_text(path: Path) -> tuple[str, str]:
+    text = " ".join(part.casefold() for part in path.parts)
+    return text, re.sub(r"[^a-z0-9]+", "", text)
+
+
+def has_dfc_structure_signal(path: Path) -> bool:
+    """Require both DFC and a structural term; ATB names must not match."""
+    text, compact = _path_text(path)
+    structure_terms = ("struktur", "strucktur", "structure", "strukturbaum", "baugruppenstruktur")
+    return ("dfc" in compact and any(term in text or term in compact for term in structure_terms)) or "strukturbaum" in compact or "baugruppenstruktur" in compact
+
+
+def material_role(path: Path) -> str:
+    """Classify material locally from stable file/folder naming conventions."""
+    text, compact = _path_text(path)
+    name = path.name.casefold()
+    suffix = path.suffix.casefold()
+    if "convertedpdfimages" in compact or "converted_pdf_images" in text or "visualcontext" in compact:
+        return "derived_duplicate"
+    if suffix in {".idw", ".dwg"}:
+        return "unsupported_drawing"
+    if suffix in {".png", ".jpg", ".jpeg", ".webp"} and has_dfc_structure_signal(path):
+        return "dfc_structure"
+    if any(term in name for term in ("atb", "stueckliste", "stückliste", "part list", "partslist", "parts_list")):
+        return "bom"
+    if any(term in name for term in ("datenblatt", "data sheet", "datasheet")) or re.search(r"(?:^|[_-])cat(?:[_-]|$)", name):
+        return "datasheet"
+    if suffix == ".pdf" and (path.with_suffix(".idw").is_file() or any(term in name for term in ("zeichnung", "drawing", "technische zeichnung"))):
+        return "technical_drawing"
+    if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+        return "cad_screenshot"
+    return "other"
+
+
+def material_is_recommended(path: Path) -> bool:
+    return material_role(path) not in {"derived_duplicate", "unsupported_drawing"}
+
+
+def material_role_label(role: str) -> str:
+    return MATERIAL_ROLE_LABELS.get(role, MATERIAL_ROLE_LABELS["other"])
+
 
 def _now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -134,6 +192,7 @@ class LocalDocumentLibrary:
             "bytes": len(raw),
             "indexed_at": _now(),
             "chunks": chunks[:MAX_CHUNKS_PER_DOCUMENT],
+            "material_role": material_role(path),
         }
         if path.suffix.lower() == ".pdf":
             document["page_inventory"] = self.pdf_page_inventory(path)
@@ -281,12 +340,7 @@ class LocalDocumentLibrary:
         treating every file named "structure" as DFC material.  It also keeps
         common historic spellings from manually exported Teamcenter files.
         """
-        text = " ".join(part.casefold() for part in path.parts)
-        compact = re.sub(r"[^a-z0-9]+", "", text)
-        structure_terms = ("struktur", "strucktur", "structure", "strukturbaum", "baugruppenstruktur")
-        has_dfc = "dfc" in compact
-        has_structure = any(term in text or term in compact for term in structure_terms)
-        if (has_dfc and has_structure) or "strukturbaum" in compact or "baugruppenstruktur" in compact:
+        if has_dfc_structure_signal(path):
             return "dfc_structure_screenshot"
         return "image"
 
@@ -419,6 +473,8 @@ class LocalDocumentLibrary:
         chars = set(re.findall(r"[\u4e00-\u9fff]", question.lower()))
         allowed = set(allowed_ids or [])
         documents = [item for item in self.data["documents"] if not allowed or item["id"] in allowed]
+        if classification:
+            documents.sort(key=lambda item: (MATERIAL_ROLE_PRIORITY.get(item.get("material_role", "other"), 50), item.get("name", "").casefold()))
         scored = []
         for document in documents:
             for index, chunk in enumerate(document.get("chunks", [])):
