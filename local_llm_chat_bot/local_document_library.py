@@ -5,7 +5,9 @@ import csv
 import hashlib
 import io
 import json
+import os
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -62,6 +64,7 @@ class LocalDocumentLibrary:
         self.path = path
         self.data = self._load()
         self.last_visual_report: dict[str, object] = {}
+        self._ocr_runtime_cache: dict[str, object] | None = None
 
     def _load(self):
         if self.path.exists():
@@ -358,20 +361,48 @@ class LocalDocumentLibrary:
                 })
         return records
 
-    @staticmethod
-    def _ocr_page_image(image_path: Path) -> tuple[str, str]:
-        """Use optional Tesseract, with an explicit non-fatal status."""
+    def ocr_runtime_status(self) -> dict[str, object]:
+        """Locate a Windows Tesseract installation without requiring PATH."""
+        if self._ocr_runtime_cache is not None:
+            return self._ocr_runtime_cache
+        try:
+            import pytesseract
+            candidates = [shutil.which("tesseract")]
+            for root in (os.environ.get("LOCALAPPDATA"), os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+                if root:
+                    candidates.append(str(Path(root) / "Programs" / "Tesseract-OCR" / "tesseract.exe"))
+                    candidates.append(str(Path(root) / "Tesseract-OCR" / "tesseract.exe"))
+            command = next((candidate for candidate in candidates if candidate and Path(candidate).is_file()), None)
+            if not command:
+                self._ocr_runtime_cache = {"available": False, "status": "Tesseract executable not found", "command": "", "languages": []}
+                return self._ocr_runtime_cache
+            pytesseract.pytesseract.tesseract_cmd = command
+            version = str(pytesseract.get_tesseract_version())
+            languages = pytesseract.get_languages(config="")
+            self._ocr_runtime_cache = {"available": True, "status": "ok", "command": command,
+                                       "version": version, "languages": languages,
+                                       "german_available": "deu" in languages}
+            return self._ocr_runtime_cache
+        except ImportError:
+            self._ocr_runtime_cache = {"available": False, "status": "pytesseract is not installed", "command": "", "languages": []}
+            return self._ocr_runtime_cache
+        except Exception as exc:
+            self._ocr_runtime_cache = {"available": False, "status": str(exc)[:180], "command": "", "languages": []}
+            return self._ocr_runtime_cache
+
+    def _ocr_page_image(self, image_path: Path) -> tuple[str, str]:
+        """Use the detected engine, with an explicit non-fatal page status."""
+        runtime = self.ocr_runtime_status()
+        if not runtime.get("available"):
+            return "", "unavailable: " + str(runtime.get("status", "unknown"))
         try:
             import pytesseract
             from PIL import Image
+            language = "deu+eng" if runtime.get("german_available") else "eng"
             with Image.open(image_path) as image:
-                text = pytesseract.image_to_string(image, lang="deu+eng").strip()
+                text = pytesseract.image_to_string(image, lang=language).strip()
             return text, "ok"
-        except ImportError:
-            return "", "unavailable: pytesseract is not installed"
         except Exception as exc:
-            # This also covers a Python package installed without the native
-            # tesseract executable or without the German language pack.
             return "", f"unavailable: {str(exc)[:180]}"
 
     @staticmethod
