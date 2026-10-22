@@ -44,6 +44,62 @@ def model_tests_path() -> Path:
     return app_state_home() / "model_tests.json"
 
 
+def material_selections_path() -> Path:
+    return app_state_home() / "material_selections.json"
+
+
+def load_material_selection(folder: Path) -> tuple[set[str], int, int]:
+    """Restore only still-existing files; never touch the original BG folder."""
+    try:
+        all_records = json.loads(material_selections_path().read_text(encoding="utf-8"))
+        record = all_records.get(str(folder), {}) if isinstance(all_records, dict) else {}
+        items = record.get("files", []) if isinstance(record, dict) else []
+    except (OSError, ValueError):
+        items = []
+    restored, missing, changed = set(), 0, 0
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            continue
+        try:
+            path = (folder / item["path"]).resolve()
+            path.relative_to(folder)
+        except (OSError, ValueError):
+            missing += 1; continue
+        if not path.is_file():
+            missing += 1; continue
+        restored.add(item["path"])
+        try:
+            if item.get("bytes") != path.stat().st_size or item.get("mtime_ns") != path.stat().st_mtime_ns:
+                changed += 1
+        except OSError:
+            missing += 1; restored.discard(item["path"])
+    return restored, missing, changed
+
+
+def save_material_selection(folder: Path, files: list[Path]) -> None:
+    """Persist a compact, path-relative manual selection under AI_Bot_State."""
+    app_state_home().mkdir(parents=True, exist_ok=True)
+    try:
+        records = json.loads(material_selections_path().read_text(encoding="utf-8"))
+        records = records if isinstance(records, dict) else {}
+    except (OSError, ValueError):
+        records = {}
+    entries = []
+    for path in files:
+        try:
+            stat = path.stat()
+            entries.append({"path": path.relative_to(folder).as_posix(), "bytes": stat.st_size,
+                            "mtime_ns": stat.st_mtime_ns})
+        except (OSError, ValueError):
+            continue
+    records[str(folder)] = {"updated_at": datetime.now().astimezone().isoformat(timespec="seconds"), "files": entries}
+    # A bounded history keeps this settings file permanently lightweight.
+    if len(records) > 100:
+        keep = sorted(records, key=lambda key: str(records[key].get("updated_at", "")), reverse=True)[:100]
+        records = {key: records[key] for key in keep}
+    material_selections_path().write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def load_model_tests() -> dict[str, dict]:
     try:
         data = json.loads(model_tests_path().read_text(encoding="utf-8"))
@@ -182,6 +238,7 @@ def target_tree(folder: Path, maximum_nodes: int = 5000) -> tuple[dict, bool]:
             except OSError:
                 size = 0
             return {"type": "file", "name": path.name, "path": str(path),
+                    "relative": path.relative_to(folder).as_posix(),
                     "supported": suffix in SUPPORTED_DOCUMENT_EXTENSIONS, "bytes": size}
         children = []
         try:
@@ -195,7 +252,8 @@ def target_tree(folder: Path, maximum_nodes: int = 5000) -> tuple[dict, bool]:
             item = visit(child)
             if item is not None:
                 children.append(item)
-        return {"type": "folder", "name": path.name, "path": str(path), "children": children}
+        return {"type": "folder", "name": path.name, "path": str(path),
+                "relative": "." if path == folder else path.relative_to(folder).as_posix(), "children": children}
 
     tree = visit(folder)
     return tree or {"type": "folder", "name": folder.name, "path": str(folder), "children": []}, truncated
@@ -431,12 +489,15 @@ def call_model(data: dict[str, Any], question: str) -> dict[str, Any]:
     preferred = ([bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))) if bg_context else active_source_ids
     allowed = list(bg_context.get("source_ids", [])) + [bg_context.get("codebook_id")] if bg_context else active_source_ids
     evidence = documents.search(question, preferred_ids=preferred, classification=bool(bg_context), allowed_ids=allowed)
-    visuals = documents.visual_paths(evidence, state.root / "visual_cache")
+    visuals = documents.visual_paths(evidence, state.root / "visual_cache",
+                                     bilder_images=documents.bilder_image_paths(allowed))
     reasoning, notices = [], []
     visual_report = documents.last_visual_report
     if visual_report.get("short_drawings"):
         names = "、".join(str(name) for name in visual_report["short_drawings"])
         notices.append(f"图纸视觉证据：已将短图纸 {names} 的全部页转为压缩 JPEG；本轮附件 {visual_report.get('attachments', 0)} 个，约 {int(visual_report.get('bytes', 0)) // 1024} KB。")
+    if visual_report.get("image_groups"):
+        notices.append("Bilder 图片组：" + "；".join(str(item) for item in visual_report["image_groups"]) + "。")
     if visual_report.get("skipped"):
         notices.append("部分视觉附件因本轮总大小预算未发送；文字证据仍已保留。")
 
@@ -523,7 +584,8 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
     snippets = {item: excerpt(state, item, question) for item in matches}
     preferred = [bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))
     evidence = documents.search(question, preferred_ids=preferred, classification=True, allowed_ids=preferred)
-    visuals = documents.visual_paths(evidence, state.root / "visual_cache")
+    visuals = documents.visual_paths(evidence, state.root / "visual_cache",
+                                     bilder_images=documents.bilder_image_paths(preferred))
     visual_report = documents.last_visual_report
     coverage = load_coverage(state)
     prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
@@ -533,6 +595,8 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
         notices: list[str] = []
         if visual_report.get("short_drawings"):
             notices.append(f"短图纸已按全页压缩附件发送（{visual_report.get('attachments', 0)} 个附件，约 {int(visual_report.get('bytes', 0)) // 1024} KB）。")
+        if visual_report.get("image_groups"):
+            notices.append("Bilder 图片组：" + "；".join(str(item) for item in visual_report["image_groups"]) + "。")
         if visual_report.get("skipped"):
             notices.append("部分视觉附件超出总大小预算，未发送；文字证据仍已保留。")
 
@@ -783,6 +847,7 @@ def analyze_target(request: TargetRequest):
                 skipped.append(f"{path.name}: {exc}")
         if not sources:
             raise HTTPException(400, "所选文件均无法读取；请查看扫描报告。")
+        save_material_selection(target, selected)
         target_kind = "文件夹"
     else:
         raise HTTPException(400, f"文件或文件夹不存在：{target}")
@@ -812,7 +877,10 @@ def get_target_tree(target: str):
     if not folder.is_dir():
         raise HTTPException(400, "请选择一个存在的文件夹后再显示文件树。")
     tree, truncated = target_tree(folder)
+    saved_paths, missing, changed = load_material_selection(folder)
     return {"tree": tree, "truncated": truncated,
+            "saved_selection": sorted(saved_paths), "missing_saved_files": missing,
+            "changed_saved_files": changed,
             "supported_extensions": sorted(SUPPORTED_DOCUMENT_EXTENSIONS)}
 
 
@@ -896,7 +964,7 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 <main class="main"><div class="chat" id="chat"><div class="message assistant">选择工作区后即可聊天。代码修改会先显示 diff，只有点击“应用修改”才会写入本地文件。</div></div><div class="composer"><input id="question" placeholder="问代码，或根据 Codebook 判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button></div></main>
 <aside class="side right"><b>本轮状态</b><div id="status" class="card muted">尚未打开工作区</div><b>会话导出</b><div id="sessionexport" class="card"><button class="ghost" onclick="exportSession()">导出完整会话</button></div><b>本轮 token 明细</b><div id="usagedetail" class="card muted">完成一次请求后显示。</div><b>BG 分析导出</b><div id="analysisexport" class="card muted">仅在 Baugruppe 分析完成后可导出。</div><b>证据来源</b><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><b>待应用修改</b><div id="changes" class="list">无</div></aside></div>
 <script>
-const $=id=>document.getElementById(id);let busy=false,lastQuestion='',compareSlots=[{value:'claude-haiku-5.5',custom:''}];
+const $=id=>document.getElementById(id);let busy=false,lastQuestion='',compareSlots=[{value:'claude-haiku-5.5',custom:''}],savedTargetSelection=new Set(),treeRestoreNote='';
 async function restoreLastWorkspace(){
   try{
     let s=await api('/api/settings');
@@ -934,14 +1002,14 @@ async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:
 function renderScanReport(x){let files=x.files.map(f=>`<div class="card"><b>${esc(f.name)}</b><br><span class="muted">成功提取 ${f.chunks} 个文本片段 · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB</span></div>`).join('');let skipped=x.skipped_count?`<div class="card error">跳过 / 失败 ${x.skipped_count} 个<br><span class="muted">${x.skipped.map(esc).join('<br>')}${x.skipped_count>x.skipped.length?'<br>其余失败项未展开。':''}</span></div>`:'';$('scanreport').innerHTML='<b>扫描报告</b><div class="muted">成功 '+x.sources+' 个；本次选定材料范围已锁定。</div>'+files+skipped}
 function renderCoverageReport(x){if(!x||!x.files){$('coveragestatus').textContent='分类/Codebook 问题会自动准备证据；也可在提问前手动准备。';return}let done=x.files.filter(f=>f.complete).length;let details=x.files.map(f=>`<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${f.text_groups_processed}/${f.text_groups_total} 个文本组 · ${esc(f.reading_scope||'')} ${f.failures?.length?'（'+esc(f.failures.join('；'))+'）':''}`).join('');$('coveragestatus').innerHTML=(x.complete?'<span class="ok">分类证据已准备：</span>':'<span class="error">分类证据不完整：</span>')+` ${done}/${x.files.length} 个文件；${x.model_calls||0} 次模型调用。`+details}
 async function loadCoverage(){try{renderCoverageReport(await api('/api/coverage'))}catch{}}
-function clearTargetTree(){$('targettree').textContent='选择文件夹后显示可展开的文件树。';$('targettree').classList.add('muted');$('treestatus').textContent=''}
+function clearTargetTree(){savedTargetSelection=new Set();treeRestoreNote='';$('targettree').textContent='选择文件夹后显示可展开的文件树。';$('targettree').classList.add('muted');$('treestatus').textContent=''}
 async function pickFolderForTree(){await pick('folder','targetpath');if($('targetpath').value)loadTargetTree()}
 function treeFileCount(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].length}
-function updateTreeStatus(){let count=treeFileCount();$('treestatus').textContent=count?`已选择 ${count} 个受支持文件。`:'尚未选择材料；勾选文件或整个子文件夹。'}
+function updateTreeStatus(){let count=treeFileCount();$('treestatus').textContent=(count?`已选择 ${count} 个受支持文件。`:'尚未选择材料；勾选文件或整个子文件夹。')+(treeRestoreNote?' '+treeRestoreNote:'')}
 function refreshFolderState(folder){let files=[...folder.querySelectorAll('input.tree-file:not(:disabled)')];let box=folder.querySelector(':scope > summary input.tree-folder');if(!box||!files.length)return;let checked=files.filter(x=>x.checked).length;box.checked=checked===files.length;box.indeterminate=checked>0&&checked<files.length}
 function refreshAllFolderStates(){[...$('targettree').querySelectorAll('details')].reverse().forEach(refreshFolderState);updateTreeStatus()}
-function makeTreeNode(node,depth=0){if(node.type==='folder'){let details=document.createElement('details');details.open=depth<1;let summary=document.createElement('summary');let box=document.createElement('input');box.type='checkbox';box.className='tree-folder';box.addEventListener('click',e=>e.stopPropagation());box.addEventListener('change',()=>{details.querySelectorAll('input.tree-file:not(:disabled)').forEach(x=>x.checked=box.checked);refreshAllFolderStates()});let label=document.createElement('label');label.textContent='📁 '+node.name;summary.append(box,label);details.append(summary);let children=document.createElement('div');children.className='tree-children';node.children.forEach(child=>children.append(makeTreeNode(child,depth+1)));details.append(children);return details}let row=document.createElement('div');row.className='tree-file'+(node.supported?'':' unsupported');let box=document.createElement('input');box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.disabled=!node.supported;box.addEventListener('change',refreshAllFolderStates);let label=document.createElement('label');label.textContent='📄 '+node.name+(node.supported?` · ${(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1)} MB`:' · 不支持');row.append(box,label);return row}
-async function loadTargetTree(){let target=$('targetpath').value.trim();if(!target){$('treestatus').innerHTML='<span class="error">请先选择或粘贴一个 BG 文件夹路径。</span>';return}try{$('treestatus').textContent='正在仅读取文件夹结构…';let x=await api('/api/target-tree?target='+encodeURIComponent(target));let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates();if(x.truncated)$('treestatus').innerHTML='<span class="error">文件树超过 5000 项，已截断；请进入更具体的 BG 文件夹。</span>'}catch(e){$('treestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+function makeTreeNode(node,depth=0){if(node.type==='folder'){let details=document.createElement('details');details.open=depth<1;let summary=document.createElement('summary');let box=document.createElement('input');box.type='checkbox';box.className='tree-folder';box.addEventListener('click',e=>e.stopPropagation());box.addEventListener('change',()=>{details.querySelectorAll('input.tree-file:not(:disabled)').forEach(x=>x.checked=box.checked);refreshAllFolderStates()});let label=document.createElement('label');label.textContent='📁 '+node.name;summary.append(box,label);details.append(summary);let children=document.createElement('div');children.className='tree-children';node.children.forEach(child=>children.append(makeTreeNode(child,depth+1)));details.append(children);return details}let row=document.createElement('div');row.className='tree-file'+(node.supported?'':' unsupported');let box=document.createElement('input');box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.checked=!!node.supported&&savedTargetSelection.has(node.relative);box.disabled=!node.supported;box.addEventListener('change',refreshAllFolderStates);let label=document.createElement('label');label.textContent='📄 '+node.name+(node.supported?` · ${(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1)} MB`:' · 不支持');row.append(box,label);return row}
+async function loadTargetTree(){let target=$('targetpath').value.trim();if(!target){$('treestatus').innerHTML='<span class="error">请先选择或粘贴一个 BG 文件夹路径。</span>';return}try{$('treestatus').textContent='正在仅读取文件夹结构…';let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(x.saved_selection||[]);let notes=[];if(savedTargetSelection.size)notes.push(`已恢复上次的 ${savedTargetSelection.size} 项选择。`);if(x.changed_saved_files)notes.push(`${x.changed_saved_files} 个已选文件内容已变化。`);if(x.missing_saved_files)notes.push(`${x.missing_saved_files} 个原选文件不存在，未恢复。`);treeRestoreNote=notes.join(' ');let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates();if(x.truncated)$('treestatus').innerHTML='<span class="error">文件树超过 5000 项，已截断；请进入更具体的 BG 文件夹。</span>'}catch(e){$('treestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function selectedTargetPaths(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].map(x=>x.dataset.path)}
 async function analyzeTarget(){try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error('请先在文件树中勾选至少一个材料。');let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});renderStatus(x.status);$('bgstatus').textContent=x.classification?`已加入 ${x.target_kind}中的 ${x.sources} 个选定材料，并启用 Codebook 分类。`:`已加入 ${x.target_kind}中的 ${x.sources} 个选定材料；当前为普通材料问答。`;renderScanReport(x);$('coveragestatus').textContent='材料范围已锁定；首次分类/Codebook 问题会自动准备分类证据。';loadDocs()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}}
 async function prepareCoverage(){if(busy)return;busy=true;$('coveragestatus').textContent='正在按文件角色准备分类证据；大型 Datasheet 默认只预读前 15 页，并计入 token 与费用…';try{let x=await api('/api/coverage',{method:'POST'});renderCoverageReport(x)}catch(e){$('coveragestatus').innerHTML='<span class="error">分类证据准备失败：'+esc(e.message)+'</span>'}finally{busy=false}}
