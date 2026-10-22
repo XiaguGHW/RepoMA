@@ -445,7 +445,7 @@ def ensure_relative(path: str) -> str:
 
 def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], full_files: dict[str, str] | None = None,
                document_snippets: list[dict] | None = None, bg_context: dict | None = None,
-               coverage_summaries: list[dict] | None = None):
+               coverage_summaries: list[dict] | None = None, bg_dossier: dict | None = None):
     recent = "\n".join(f"{turn['role']}: {turn['content']}" for turn in state.data["history"][-HISTORY_MESSAGES_PER_REQUEST:]) or "(new conversation)"
     memories = state.search_memory(question)
     memory_text = "\n".join(f"- [{item['id']}] {item['content']}" for item in memories) or "(No relevant confirmed long-term memory.)"
@@ -460,6 +460,7 @@ def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], ful
         f"--- FILE COVERAGE SUMMARY {item.get('name', 'unknown')} ---\n{item.get('summary', '')}"
         for item in (coverage_summaries or []) if item.get("summary")
     ) or "(No complete per-file coverage summary has been prepared.)"
+    dossier_text = str((bg_dossier or {}).get("summary", "")).strip() or "(No BG comprehensive evidence dossier has been prepared.)"
     bg_instruction = ""
     if bg_context:
         locked_profile = bg_context.get("locked_profile") or {}
@@ -489,7 +490,9 @@ Relevant code excerpts:\n{shown}
 
 Relevant locally extracted document excerpts:\n{document_text}
 
-Prepared per-file evidence summaries (the reading scope is recorded for each file; do not claim unread pages were inspected):\n{coverage_text}
+BG comprehensive evidence dossier (compiled from the selected files' local summaries; citations and limitations must be retained):\n{dossier_text}
+
+Prepared per-file evidence summaries (fallback only when no dossier is available; do not claim unread pages were inspected):\n{coverage_text}
 
 Complete current files supplied in this turn:\n{complete}
 
