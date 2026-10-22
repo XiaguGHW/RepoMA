@@ -212,7 +212,11 @@ class LocalDocumentLibrary:
         for snippet in snippets:
             visual = snippet.get("visual") or {}
             source = Path(visual.get("path", ""))
-            if visual.get("kind") == "pdf_page" and source.is_file() and source not in short_pdfs:
+            # A short Codebook is reference material, not a technical drawing.
+            # Keep its retrieved page available below, but reserve the full-page
+            # treatment for the BG material that carries the visual geometry.
+            if (visual.get("kind") == "pdf_page" and source.is_file() and source not in short_pdfs
+                    and "codebook" not in source.name.casefold()):
                 try:
                     if self._pdf_page_count(source) <= MAX_SHORT_PDF_PAGES:
                         short_pdfs.append(source)
@@ -365,7 +369,7 @@ class LocalDocumentLibrary:
     @classmethod
     def _render_pdf_page(cls, path: Path, page_number: int, cache_dir: Path):
         import fitz
-        key = hashlib.sha256(str(path).encode()).hexdigest()[:10]
+        key = hashlib.sha256(f"{path}|{path.stat().st_mtime_ns}".encode()).hexdigest()[:10]
         with fitz.open(path) as document:
             page = document[page_number - 1]
             scale = min(180 / 72, 2200 / max(page.rect.width, page.rect.height))
@@ -376,7 +380,7 @@ class LocalDocumentLibrary:
     def _render_pdf_title_block(cls, path: Path, page_number: int, cache_dir: Path):
         """Render the usual lower-right title-block area separately at legible size."""
         import fitz
-        key = hashlib.sha256(str(path).encode()).hexdigest()[:10]
+        key = hashlib.sha256(f"{path}|{path.stat().st_mtime_ns}".encode()).hexdigest()[:10]
         with fitz.open(path) as document:
             page = document[page_number - 1]
             rect = page.rect
