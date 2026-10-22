@@ -462,10 +462,13 @@ def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], ful
     ) or "(No complete per-file coverage summary has been prepared.)"
     bg_instruction = ""
     if bg_context:
+        locked_profile = bg_context.get("locked_profile") or {}
+        profile_text = json.dumps(locked_profile, ensure_ascii=False) if locked_profile else "(No locked structured profile available.)"
         bg_instruction = f"""
 BG CLASSIFICATION MODE (active):
 - Codebook: {bg_context.get('codebook_name', 'unknown')}
 - Baugruppe folder: {bg_context.get('folder', 'unknown')}
+- Locked Codebook profile (user-confirmed; use this as the primary rule source): {profile_text}
 - Give the full detailed classification format required by the system prompt.
 - Treat the Codebook as the rule source. Cite evidence labels exactly as supplied.
 - A source marked visual/scanned may require visual inspection; do not infer text that was not supplied.
