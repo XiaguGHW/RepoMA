@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "purpose": "Authoritative terminology and language rules for the Local LLM Chat Bot interface.",
+  "language_rules": {
+    "zh": {
+      "interface_language": "简体中文",
+      "assembly_term": "装配体",
+      "rule": "界面说明、按钮和状态使用中文。保留文件名、零件号、材料原文、模型名、类别官方名称和证据引用的原始语言。"
+    },
+    "en": {
+      "interface_language": "English",
+      "assembly_term": "assembly",
+      "rule": "Use English for all interface copy. Preserve file names, part numbers, model IDs, original source excerpts and official class names."
+    },
+    "de": {
+      "interface_language": "Deutsch",
+      "assembly_term": "Baugruppe",
+      "rule": "Die gesamte Oberfläche verwendet Deutsch. Dateinamen, Teilenummern, Modell-IDs, Originalzitate und offizielle Klassennamen bleiben unverändert."
+    }
+  },
+  "terms": {
+    "app_name": {
+      "zh": "Bosch 装配体分析助手",
+      "en": "Bosch Assembly Analysis Assistant",
+      "de": "Bosch Baugruppen-Analyseassistent"
+    },
+    "workspace": {
+      "zh": "工作区",
+      "en": "Workspace",
+      "de": "Arbeitsbereich"
+    },
+    "workspace_folder": {
+      "zh": "工作区文件夹",
+      "en": "Workspace folder",
+      "de": "Arbeitsordner"
+    },
+    "assembly": {
+      "zh": "装配体",
+      "en": "assembly",
+      "de": "Baugruppe"
+    },
+    "assembly_folder": {
+      "zh": "装配体文件夹",
+      "en": "assembly folder",
+      "de": "Baugruppenordner"
+    },
+    "assembly_analysis": {
+      "zh": "装配体分析",
+      "en": "Assembly analysis",
+      "de": "Baugruppenanalyse"
+    },
+    "classification_rules": {
+      "zh": "分类规则",
+      "en": "Classification rules",
+      "de": "Klassifikationsregeln"
+    },
+    "classification_rules_file": {
+      "zh": "分类规则文件",
+      "en": "Classification rules file",
+      "de": "Datei mit Klassifikationsregeln"
+    },
+    "classification_evidence": {
+      "zh": "分类证据",
+      "en": "Classification evidence",
+      "de": "Klassifikationsevidenz"
+    },
+    "selected_materials": {
+      "zh": "本次材料",
+      "en": "Selected materials",
+      "de": "Ausgewählte Materialien"
+    },
+    "material_scope": {
+      "zh": "材料范围",
+      "en": "Material scope",
+      "de": "Materialumfang"
+    },
+    "processing_status": {
+      "zh": "处理状态",
+      "en": "Processing status",
+      "de": "Verarbeitungsstatus"
+    },
+    "scan_report": {
+      "zh": "扫描报告",
+      "en": "Scan report",
+      "de": "Scanbericht"
+    },
+    "full_page_coverage": {
+      "zh": "完整页覆盖",
+      "en": "Full-page coverage",
+      "de": "Vollständige Seitenabdeckung"
+    },
+    "material_cache_audit": {
+      "zh": "材料缓存与审计",
+      "en": "Material cache and audit",
+      "de": "Material-Cache und Prüfung"
+    },
+    "local_index": {
+      "zh": "本地索引",
+      "en": "Local index",
+      "de": "Lokaler Index"
+    },
+    "model_summary_cache": {
+      "zh": "模型摘要缓存",
+      "en": "Model-summary cache",
+      "de": "Modellzusammenfassungs-Cache"
+    },
+    "current_model": {
+      "zh": "当前模型",
+      "en": "Current model",
+      "de": "Aktuelles Modell"
+    },
+    "model_test": {
+      "zh": "测试模型",
+      "en": "Test model",
+      "de": "Modell testen"
+    },
+    "chat_session": {
+      "zh": "聊天会话",
+      "en": "Chat session",
+      "de": "Chat-Sitzung"
+    },
+    "new_chat": {
+      "zh": "新聊天",
+      "en": "New chat",
+      "de": "Neuer Chat"
+    },
+    "multi_model_comparison": {
+      "zh": "多模型对比",
+      "en": "Multi-model comparison",
+      "de": "Modellvergleich"
+    },
+    "source_material": {
+      "zh": "原始材料",
+      "en": "Source material",
+      "de": "Ausgangsmaterial"
+    },
+    "original_excerpt": {
+      "zh": "材料原文",
+      "en": "Original source excerpt",
+      "de": "Originalauszug"
+    },
+    "ocr_status": {
+      "zh": "OCR 状态",
+      "en": "OCR status",
+      "de": "OCR-Status"
+    },
+    "token_usage": {
+      "zh": "Token 用量",
+      "en": "Token usage",
+      "de": "Tokenverbrauch"
+    }
+  },
+  "copy_rules": [
+    "Use sentence case in English and German UI text; do not use title case for ordinary buttons or labels.",
+    "Use concise action verbs for buttons: 选择 / Choose / Auswählen; 确认 / Confirm / Bestätigen; 查看 / View / Ansehen.",
+    "Do not translate model names, model IDs, file names, part numbers, OCR, PDF, token, or manufacturer identifiers.",
+    "Use the official Codebook class name verbatim wherever it is evidence or a classification result; do not translate the class name automatically.",
+    "For Chinese UI copy, use 装配体 instead of Baugruppe. For German UI copy, use Baugruppe. For English UI copy, use assembly.",
+    "Dynamic status and error messages must be assembled from translation keys and variables, never from hard-coded sentences in one language."
+  ],
+  "layout_rules": [
+    "All labels must wrap naturally; no fixed-height control may clip a second line in Chinese, English, or German.",
+    "Buttons use content-aware minimum widths and may grow to two lines for German where necessary.",
+    "Cards may show a two-line summary before truncation; long paths use middle truncation rather than forcing a horizontal overflow.",
+    "Use a font fallback stack that supports Simplified Chinese, Latin scripts and German diacritics on Windows: Inter, Segoe UI, Microsoft YaHei, Noto Sans SC, sans-serif.",
+    "Every language must be checked at 100%, 125% and 150% Windows display scaling before release."
+  ]
+}
