@@ -104,6 +104,39 @@ def write_json_atomically(path: Path, payload) -> None:
             pass
 
 
+def write_jsonl_atomically(path: Path, records: list[dict]) -> None:
+    """Create a transcript archive as one complete replacement."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8", newline="") as handle:
+            for record in records:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            handle.flush()
+            try:
+                os.fsync(handle.fileno())
+            except OSError:
+                pass
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def append_jsonl_durably(path: Path, record: dict) -> None:
+    """Append one complete transcript line and request it be flushed to disk."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", newline="") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        handle.flush()
+        try:
+            os.fsync(handle.fileno())
+        except OSError:
+            pass
+
+
 def tokens(text: str) -> list[str]:
     return re.findall(r"[A-Za-z_][A-Za-z0-9_]{1,}|[\u4e00-\u9fff]{2,}|\d{2,}", text.lower())
 
@@ -314,13 +347,10 @@ class ProjectState:
         turn = {"role": role, "content": content, "time": now()}
         # Migrate the compact legacy window into the archive on first use.
         if not self.transcript_path.exists() and self.data.get("history"):
-            with self.transcript_path.open("w", encoding="utf-8") as handle:
-                for prior in self.data["history"]:
-                    handle.write(json.dumps(prior, ensure_ascii=False) + "\n")
+            write_jsonl_atomically(self.transcript_path, self.data["history"])
         # Keep a complete local archive for review, while sending only the
         # compact in-state window to the model on later requests.
-        with self.transcript_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(turn, ensure_ascii=False) + "\n")
+        append_jsonl_durably(self.transcript_path, turn)
         self.data["history"].append(turn)
         self.data["history"] = self.data["history"][-8:]
         self.save()
