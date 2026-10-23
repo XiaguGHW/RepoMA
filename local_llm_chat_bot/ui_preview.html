@@ -43,6 +43,26 @@ function openModal(type){$('modalbackdrop').classList.add('show');if(type==='mod
 function closeModal(e){if(!e||e.target===$('modalbackdrop'))$('modalbackdrop').classList.remove('show')}
 function toggleMenu(e){e.stopPropagation();$('moremenu').classList.toggle('show')};document.addEventListener('click',()=>$('moremenu').classList.remove('show'));
 let timer;function toast(text){let el=$('toast');el.textContent=text;el.classList.add('show');clearTimeout(timer);timer=setTimeout(()=>el.classList.remove('show'),2800)}
+
+// Preview-only refinement: the model control is a compact pill, and the last
+// option exposes an inline custom-ID input instead of pretending it is a model.
+const previewStyle=document.createElement('style');
+previewStyle.textContent=`.model-btn{border-radius:999px!important;padding:6px 12px!important}.model-choice{border:1px solid var(--line);background:#142036;border-radius:11px;padding:13px;color:inherit;text-align:left;cursor:pointer}.model-choice:hover{border-color:#5b8fc9;background:#182943}.custom-model{display:none;margin-top:14px;padding:13px;border-radius:11px;border:1px solid #3d5a7d;background:#111d31}.custom-model.show{display:block}.custom-model label{display:block;color:#cbd8e8;font-size:12px;font-weight:650;margin-bottom:7px}.custom-model-row{display:flex;gap:8px}.custom-model input{flex:1;min-width:0;border:1px solid #3b506f;border-radius:8px;background:#0c1525;color:#edf3fb;padding:9px 10px;font:inherit}.custom-model input:focus{outline:2px solid #4f9bf566;border-color:#609ce0}`;
+document.head.append(previewStyle);
+function openModal(type){
+  $('modalbackdrop').classList.add('show');
+  if(type!=='model'){
+    $('modal-title').textContent='多模型对比';$('modal-desc').textContent='同一问题、同一份 BG 证据；最多同时比较四个模型。';
+    $('modal-content').innerHTML=`<div class="compare-grid">${[['Claude Haiku 5.5','Kombinierte Einheit','依据 3-Achsensystem 与 Greifer 模块的组合功能，主要功能不能归入单一运动类别。'],['Gemini 2.5 Pro','Kombinierte Einheit','视觉上下文与 BOM 均显示 Gantry、Greifer 和轴系统。需要确认主导功能。'],['DeepSeek R1 (0528)','Rotationseinheit','轴系统证据可能被过度权重；应进一步检查 BOM 中的末端执行器。']].map(x=>`<article class="compare-card"><b>${x[0]}</b><div class="tag">预测：${x[1]}</div><p>${x[2]}</p><span class="badge"><i></i>模拟结果</span></article>`).join('')}</div>`;
+    return;
+  }
+  $('modal-title').textContent='选择当前模型';$('modal-desc').textContent='选择后会立即用于后续消息；不会清除当前会话与材料。';
+  const choices=[['Claude Haiku 5.5','推荐：日常、便宜'],['Claude Sonnet 5.5','更强分析'],['Claude Opus 5','最高质量'],['Gemini 3.5 Flash-Lite','最快、最省'],['Gemini 2.5 Pro','复杂文档']];
+  $('modal-content').innerHTML=`<div class="compare-grid">${choices.map(x=>`<button class="model-choice" onclick="selectPreviewModel('${x[0]}')"><b>${x[0]}</b><div class="tag">${x[1]}</div></button>`).join('')}<button class="model-choice" onclick="showCustomModel()"><b>其他 Model ID…</b><div class="tag">输入 Bosch Farm 的准确模型 ID</div></button></div><div class="custom-model" id="custom-model"><label for="custom-model-id">Bosch Farm Model ID</label><div class="custom-model-row"><input id="custom-model-id" placeholder="例如：claude-haiku-5-5"><button class="button" onclick="confirmCustomPreviewModel()">确认切换</button></div></div>`;
+}
+function selectPreviewModel(name){document.querySelector('.model-btn').textContent=name+'  ▾';closeModal();toast('已切换到 '+name+'（预览）')}
+function showCustomModel(){const box=$('custom-model');box.classList.add('show');setTimeout(()=>$('custom-model-id').focus(),0)}
+function confirmCustomPreviewModel(){const id=$('custom-model-id').value.trim();if(!id){$('custom-model-id').focus();return}document.querySelector('.model-btn').textContent=id+'  ▾';closeModal();toast('已切换到 '+id+'（预览）')}
 </script>
 </body>
 </html>
