@@ -828,9 +828,9 @@ def load_bg_dossier_cache(coverage: dict, model: str) -> dict | None:
     return payload if str(payload.get("summary", "")).strip() else None
 
 
-def prepare_bg_dossier(data: dict[str, Any], coverage: dict) -> tuple[dict | None, dict | None, bool]:
+def prepare_bg_dossier(data: dict[str, Any], coverage: dict, *, force: bool = False) -> tuple[dict | None, dict | None, bool]:
     """Consolidate reusable per-file facts once; raw evidence remains query-specific."""
-    cached = load_bg_dossier_cache(coverage, data["model"])
+    cached = None if force else load_bg_dossier_cache(coverage, data["model"])
     if cached:
         cached = dict(cached); cached["cache_status"] = "reused"
         return cached, None, False
@@ -1130,6 +1130,35 @@ def codebook_text(documents: LocalDocumentLibrary, bg_context: dict | None) -> s
     return profile_text + "\n" + "\n".join(str(chunk.get("text", "")) for chunk in (document or {}).get("chunks", []))
 
 
+CODEBOOK_CLASS_ALIASES = {
+    "linear einheit": ("linear einheit", "lineareinheit", "linear unit", "linear axis", "线性单元", "直线单元", "平移单元"),
+    "gantry": ("gantry", "gantry system", "portal", "portalachse", "龙门", "桁架"),
+    "roboter": ("roboter", "robot", "robotic", "机器人"),
+    "greifer/endeffektor": ("greifer/endeffektor", "greifer", "endeffektor", "end-effektor", "end effector", "gripper", "夹爪", "末端执行器"),
+    "handhabungsbaugruppe": ("handhabungsbaugruppe", "handhabung", "handling assembly", "handling module", "搬运装配体", "搬运模块", "搬运单元"),
+    "rotationseinheit": ("rotationseinheit", "rotation unit", "rotary unit", "旋转单元", "转动单元"),
+    "kombinierte einheit": ("kombinierte einheit", "combined unit", "combined assembly", "组合单元", "组合装配体", "复合单元"),
+}
+
+
+def _codebook_name_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold().replace("ä", "a").replace("ö", "o").replace("ü", "u").replace("ß", "ss")).strip()
+
+
+def _codebook_aliases(class_name: str) -> tuple[str, ...]:
+    key = _codebook_name_key(class_name)
+    aliases = [class_name]
+    for known_name, known_aliases in CODEBOOK_CLASS_ALIASES.items():
+        if key == _codebook_name_key(known_name):
+            aliases.extend(known_aliases)
+            break
+    return tuple(dict.fromkeys(alias.casefold() for alias in aliases if str(alias).strip()))
+
+
+def _rule_pages(rule: dict) -> list[int]:
+    return [int(page) for page in rule.get("pages", []) if str(page).isdigit() and int(page) > 0]
+
+
 def relevant_codebook_page_evidence(question: str, bg_context: dict | None, maximum_pages: int = 3) -> list[dict]:
     """Attach original pages for the rules most relevant to this question.
 
@@ -1141,32 +1170,70 @@ def relevant_codebook_page_evidence(question: str, bg_context: dict | None, maxi
     path = Path(str((bg_context or {}).get("codebook_path", "")))
     if not path.is_file() or path.suffix.lower() != ".pdf":
         return []
-    words = {word for word in re.findall(r"[\wäöüß-]{3,}", question.casefold())}
-    candidates = []
-    groups = list(profile.get("global_rules", [])) + list(profile.get("table_rules", []))
-    for cls in profile.get("classes", []):
-        if isinstance(cls, dict):
-            groups.extend(cls.get("decision_rules", [])); groups.extend(cls.get("boundaries", []))
-    for rule in groups:
-        if not isinstance(rule, dict):
+    limit = max(0, int(maximum_pages))
+    if not limit:
+        return []
+    query = question.casefold()
+    words = {word for word in re.findall(r"[\wäöüß-]{3,}", query)}
+    # Candidate tuples retain their source relation.  This allows a Chinese
+    # question to select a German source page through a class alias, while the
+    # visual page label remains strictly grounded in the locked profile.
+    candidates: list[tuple[int, int, list[int], str, str]] = []
+    for class_index, cls in enumerate(profile.get("classes", [])):
+        if not isinstance(cls, dict):
             continue
-        pages = [int(page) for page in rule.get("pages", []) if str(page).isdigit()]
-        if not pages:
-            continue
-        text = str(rule.get("text", ""))
-        score = sum(word in text.casefold() for word in words)
-        candidates.append((score, pages, str(rule.get("id", "rule")), text))
-    candidates.sort(key=lambda item: (-item[0], item[2]))
+        name = str(cls.get("name", "")).strip()
+        aliases = _codebook_aliases(name)
+        alias_hits = sum(1 for alias in aliases if alias and alias in query)
+        class_text = " ".join([name, str(cls.get("definition", ""))] + [str(rule.get("text", "")) for group in ("decision_rules", "boundaries") for rule in cls.get(group, []) if isinstance(rule, dict)])
+        lexical_hits = sum(word in class_text.casefold() for word in words)
+        class_score = alias_hits * 100 + lexical_hits
+        definition_pages = [int(page) for page in cls.get("evidence_pages", []) if str(page).isdigit() and int(page) > 0]
+        # A named class is the strongest signal. Its evidence/definition page
+        # is deliberately considered before narrower rules to yield an
+        # explainable, stable fallback for short multilingual questions.
+        if definition_pages:
+            candidates.append((class_score, class_index * 10, definition_pages, f"class {name}", str(cls.get("definition", ""))))
+        for group_index, group_name in enumerate(("decision_rules", "boundaries"), start=1):
+            for rule_index, rule in enumerate(cls.get(group_name, [])):
+                if not isinstance(rule, dict):
+                    continue
+                pages = _rule_pages(rule)
+                if not pages:
+                    continue
+                rule_id, text = str(rule.get("id", "")).strip(), str(rule.get("text", ""))
+                rule_id_hit = bool(rule_id and rule_id.casefold() in query)
+                rule_hits = sum(word in text.casefold() for word in words)
+                score = class_score + (80 if rule_id_hit else 0) + rule_hits
+                candidates.append((score, class_index * 10 + group_index + rule_index / 1000,
+                                   pages, f"class {name}, {group_name[:-1]} {rule_id or rule_index + 1}", text))
+    for group_offset, group_name in enumerate(("global_rules", "table_rules"), start=1000):
+        for rule_index, rule in enumerate(profile.get(group_name, [])):
+            if not isinstance(rule, dict):
+                continue
+            pages = _rule_pages(rule)
+            if not pages:
+                continue
+            rule_id, text = str(rule.get("id", "")).strip(), str(rule.get("text", ""))
+            score = (80 if rule_id and rule_id.casefold() in query else 0) + sum(word in text.casefold() for word in words)
+            candidates.append((score, group_offset + rule_index / 1000, pages,
+                               f"{group_name[:-1]} {rule_id or rule_index + 1}", text))
+
+    # When there is no reliable hit, retain only definition/core-rule pages in
+    # profile order.  This is deterministic and meaningful, unlike selecting
+    # arbitrary rule IDs merely because their lexical scores all equal zero.
+    reliable = [item for item in candidates if item[0] > 0]
+    ranked = sorted(reliable or candidates, key=lambda item: (-item[0], item[1]))
     selected, seen = [], set()
-    for _score, pages, rule_id, text in candidates:
+    for _score, _order, pages, relation, text in ranked:
         for page in pages:
             if page in seen:
                 continue
             selected.append({"id": "locked-codebook-page", "name": path.name,
-                             "label": f"{path.name} — Codebook rule {rule_id}, page {page}",
+                             "label": f"{path.name} — Codebook {relation}, page {page}",
                              "text": text, "visual": {"kind": "pdf_page", "path": str(path), "page": page}})
             seen.add(page)
-            if len(selected) >= maximum_pages:
+            if len(selected) >= limit:
                 return selected
     return selected
 
@@ -1220,25 +1287,30 @@ Return the complete JSON action again, with a valid `classification` object. Do 
 """
 
 
+def progress_copy(data: dict[str, Any], zh: str, en: str, de: str) -> str:
+    """Return transient processing text in the UI language without changing API fields."""
+    return {"en": en, "de": de}.get(normalize_language(data.get("language", "zh")), zh)
+
+
 def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, Any]:
     state, documents, llm = data["state"], data["documents"], data["llm"]
     def report(phase: str, text: str, percent: int | None = None) -> None:
         if progress:
             progress(phase, text, percent)
 
-    report("search", "正在检查当前材料与已有理解结果…", 5)
+    report("search", progress_copy(data, "正在检查当前材料与已有理解结果…", "Checking current materials and existing understanding…", "Aktuelle Materialien und vorhandenes Verständnis werden geprüft…"), 5)
     bg_context = state.data.get("bg_context")
     active_source_ids = state.data.get("active_source_ids")
     matches = state.search(question)
     snippets = {item: excerpt(state, item, question) for item in matches}
     preferred = ([bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))) if bg_context else active_source_ids
     allowed = list(bg_context.get("source_ids", [])) + [bg_context.get("codebook_id")] if bg_context else active_source_ids
-    report("search", "正在检索与当前问题相关的本地证据…", 10)
+    report("search", progress_copy(data, "正在检索与当前问题相关的本地证据…", "Retrieving local evidence relevant to this question…", "Lokale Evidenz zur aktuellen Frage wird abgerufen…"), 10)
     evidence = documents.search(question, preferred_ids=preferred, classification=bool(bg_context), allowed_ids=allowed)
     if bg_context:
         existing = {(item.get("visual") or {}).get("page") for item in evidence if item.get("name") == bg_context.get("codebook_name")}
         evidence.extend(item for item in relevant_codebook_page_evidence(question, bg_context) if (item.get("visual") or {}).get("page") not in existing)
-    report("search", "正在核对文字、OCR 与视觉证据…", 12)
+    report("search", progress_copy(data, "正在核对文字、OCR 与视觉证据…", "Checking text, OCR and visual evidence…", "Text-, OCR- und visuelle Evidenz werden abgeglichen…"), 12)
     evidence = documents.ensure_ocr_for_snippets(evidence, question, classification=bool(bg_context))
     visuals = documents.visual_paths(evidence, state.root / "visual_cache",
                                      bilder_images=documents.bilder_image_paths(allowed))
@@ -1268,17 +1340,17 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
     # phrases it as a natural question rather than using a classification word.
     preparation_request = bool(bg_context)
     if not coverage_matches_current_selection(data, coverage) and preparation_request:
-        report("reading", "正在进行文件的读取与理解…", 12)
+        report("reading", progress_copy(data, "正在进行文件的读取与理解…", "Reading and understanding the files…", "Dateien werden gelesen und inhaltlich erschlossen…"), 12)
         coverage = prepare_coverage(data, progress=report)
         auto_prepared = True
-        report("reading", "文件读取与理解完成。", 62)
+        report("reading", progress_copy(data, "文件读取与理解完成。", "File reading and understanding complete.", "Dateien wurden gelesen und erschlossen."), 62)
     elif preparation_request:
-        report("reading", "已复用当前材料的读取与理解结果。", 62)
+        report("reading", progress_copy(data, "已复用当前材料的读取与理解结果。", "Reusing the current material-reading results.", "Die vorhandenen Lese- und Verständnisresultate werden wiederverwendet."), 62)
     coverage_summaries = coverage.get("files", []) if coverage.get("complete") else []
     dossier, usage_records, estimates = None, [], []
     if coverage_summaries:
         try:
-            report("dossier", "正在整理 Baugruppe 综合证据档案…", 70)
+            report("dossier", progress_copy(data, "正在整理 Baugruppe 综合证据档案…", "Consolidating the Baugruppe comprehensive evidence dossier…", "Das umfassende Evidenzdossier der Baugruppe wird konsolidiert…"), 70)
             dossier, dossier_usage, dossier_created = prepare_bg_dossier(data, coverage)
             if dossier_usage:
                 usage_records.append(dossier_usage)
@@ -1288,23 +1360,23 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
                 notices.append("已生成并保存 BG 综合证据档案；后续追问将复用该档案，仅补充本问题命中的原始证据。")
             elif dossier:
                 notices.append("已复用 BG 综合证据档案；本轮未重复发送全部逐文件摘要。")
-            report("dossier", "BG 综合证据档案已准备完成。", 80)
+            report("dossier", progress_copy(data, "BG 综合证据档案已准备完成。", "BG comprehensive evidence dossier ready.", "Das BG-Gesamtevidenzdossier ist bereit."), 80)
         except Exception as exc:
             notices.append(f"BG 综合证据档案未能生成，已回退为逐文件摘要：{exc}")
             dossier = None
     model_prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
                               coverage_summaries=[] if dossier else coverage_summaries, bg_dossier=dossier,
                               response_language=data.get("language", "zh"))
-    report("model", f"正在连接 {data['model']} 并提交问题…", 86)
+    report("model", progress_copy(data, f"正在连接 {data['model']} 并提交问题…", f"Connecting to {data['model']} and submitting the question…", f"Verbindung zu {data['model']} wird hergestellt und die Frage übermittelt…"), 86)
     model_started = False
     def model_events(kind: str, text: str):
         nonlocal model_started
         events(kind, text)
         if not model_started:
             model_started = True
-            report("model", "模型正在生成回答…", 92)
+            report("model", progress_copy(data, "模型正在生成回答…", "The model is generating its answer…", "Das Modell erstellt die Antwort…"), 92)
 
-    report("model", "正在等待模型输出…", 90)
+    report("model", progress_copy(data, "正在等待模型输出…", "Waiting for model output…", "Warte auf die Modellausgabe…"), 90)
     raw = llm.ask_about_files(visuals, model_prompt,
                                SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=model_events)
     raw = require_model_success(raw, "模型回答请求")
@@ -1322,7 +1394,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
         if not problem:
             return action
         notices.append(f"分类 JSON 校验未通过（{problem}），已自动重试一次。")
-        report("validation", "正在校验分类证据与 Codebook 规则；模型输出需补全，正在自动重试…", 96)
+        report("validation", progress_copy(data, "正在校验分类证据与 Codebook 规则；模型输出需补全，正在自动重试…", "Validating classification evidence and Codebook rules; the output needs completion and is being retried…", "Klassifikationsevidenz und Codebook-Regeln werden geprüft; die Ausgabe wird zur Vervollständigung erneut angefordert…"), 96)
         repaired = llm.ask_about_files(visuals, classification_repair_prompt(request_prompt, problem),
                                        SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=model_events)
         repaired = require_model_success(repaired, "分类输出修复请求")
@@ -1337,7 +1409,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
         return action
 
     try:
-        report("validation", "正在核验模型分类输出…", 96)
+        report("validation", progress_copy(data, "正在核验模型分类输出…", "Validating the model classification output…", "Die Klassifikationsausgabe des Modells wird geprüft…"), 96)
         action = validated_action(raw, model_prompt)
     except Exception:
         # Some Bosch Farm models return a normal natural-language answer despite
@@ -1349,7 +1421,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
         state.add_turn("assistant", answer)
         if auto_prepared:
             notices.insert(0, f"已在回答前自动准备 {len(coverage.get('files', []))} 个文件的分类证据（{coverage.get('model_calls', 0)} 次预读调用）。")
-        report("complete", "处理完成。", 100)
+        report("complete", progress_copy(data, "处理完成。", "Processing complete.", "Verarbeitung abgeschlossen."), 100)
         return {"answer": answer, "reasoning": "".join(reasoning), "notices": notices,
                 "sources": evidence, "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [], "can_export_bg": False,
                 "classification": None, "coverage_summary": coverage_summary_for_answer(coverage) if classification_request else None,
@@ -1365,7 +1437,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
     if complete:
         model_prompt = prompt_for(state, question, snippets, complete, evidence, bg_context,
                                   [] if dossier else coverage_summaries, dossier, data.get("language", "zh"))
-        report("model", "正在补充读取模型请求的本地文件并生成回答…", 93)
+        report("model", progress_copy(data, "正在补充读取模型请求的本地文件并生成回答…", "Reading requested local files and generating the answer…", "Vom Modell angeforderte lokale Dateien werden ergänzt gelesen und die Antwort wird erstellt…"), 93)
         raw = llm.ask_about_files(visuals, model_prompt,
                                    SYSTEM, {"maxOutputTokens": 3000, "temperature": 0}, stream=True, event_handler=model_events)
         raw = require_model_success(raw, "补充材料后的模型回答请求")
@@ -1398,7 +1470,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
         state.save()
     if auto_prepared:
         notices.insert(0, f"已在回答前自动准备 {len(coverage.get('files', []))} 个文件的分类证据（{coverage.get('model_calls', 0)} 次预读调用）。")
-    report("complete", "处理完成。", 100)
+    report("complete", progress_copy(data, "处理完成。", "Processing complete.", "Verarbeitung abgeschlossen."), 100)
     return {"answer": action.get("answer", ""), "reasoning": "".join(reasoning), "notices": notices,
             "sources": evidence, "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [{k: v for k, v in item.items() if k != "content"} for item in changes],
             "can_export_bg": bool(bg_context),
@@ -1935,23 +2007,28 @@ def rebuild_cached_file(request: CacheFileRequest):
 
 @app.post("/api/cache/dossier/rebuild")
 def rebuild_bg_dossier(request: CacheConfirmRequest):
-    reject_context_change_while_processing()
     if not request.confirmed:
         raise HTTPException(400, "必须确认后才会重新生成 BG 综合证据档案。")
-    data = session(); coverage = load_coverage(data["state"])
-    if not coverage_matches_current_selection(data, coverage):
-        raise HTTPException(409, "当前材料尚未完成预读；请先准备分类证据。")
-    path = bg_dossier_cache_path(coverage, data["model"])
+    # Reserve the shared model slot before inspecting the session.  Until the
+    # finally block runs, every context-changing route and every other model
+    # task sees this rebuild as active.
+    data = begin_model_work()
     try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
-    with LOCK:
-        dossier, usage, _created = prepare_bg_dossier(data, coverage)
-    if usage:
-        data["state"].note_usage(usage, data["pricing"], data["model"])
-    return {"message": "BG 综合证据档案已重新生成。", "dossier": dossier,
-            "usage": summarize_usage([usage or {}]), "audit": cache_audit(data)}
+        coverage = load_coverage(data["state"])
+        if not coverage_matches_current_selection(data, coverage):
+            raise HTTPException(409, "当前材料尚未完成预读；请先准备分类证据。")
+        with LOCK:
+            # Do not unlink an existing dossier first.  The replacement is
+            # written atomically only after the new model response succeeded,
+            # so a failed rebuild cannot masquerade as a completed cache or
+            # discard a previously valid audit record.
+            dossier, usage, _created = prepare_bg_dossier(data, coverage, force=True)
+        if usage:
+            data["state"].note_usage(usage, data["pricing"], data["model"])
+        return {"message": "BG 综合证据档案已重新生成。", "dossier": dossier,
+                "usage": summarize_usage([usage or {}]), "audit": cache_audit(data)}
+    finally:
+        MODEL_WORK_IN_PROGRESS.clear()
 
 
 @app.post("/api/cache/clear")
@@ -2155,6 +2232,17 @@ Object.assign(UI.de,{'Claude Haiku 5.5（推荐：日常、便宜）':'Claude Ha
 Object.assign(UI.en,{'正在恢复该会话的材料范围…':'Restoring this chat’s material scope…','已恢复此会话最后确认的材料范围。':'The last confirmed material scope of this chat was restored.','重命名':'Rename','置顶':'Pin','取消置顶':'Unpin','删除':'Delete','输入新的会话名称：':'Enter a new chat name:','这是一个新会话，可以直接开始提问。':'This is a new chat. You can ask a question now.','请先输入 Bosch Farm 的准确 Model ID。':'Enter the exact Bosch Farm model ID first.','已打开。':'Opened.','已切换至 ':'Switched to ','；当前会话与材料保持不变。':'; the current chat and materials remain unchanged.','尚未测试此模型。':'This model has not been tested yet.','上次测试失败：':'Last test failed: ','上次可用：':'Last available: ','正在发送一次极短的测试请求…':'Sending a very short test request…','模型可用：':'Model available: ','；输入 ':'; input ',' / 输出 ':' / output ',' token。':' tokens.','网关未返回 usage。':'The gateway did not return usage.','模型测试失败：':'Model test failed: ','其他资料':'Other material','尚无材料。':'No materials yet.','选择文件夹后显示可展开的文件树。':'Choose a folder to display an expandable file tree.','查看扫描报告':'View scan report','确认选中材料':'Confirm selected materials','正在本地读取…':'Reading locally…','材料范围已更新；首次分类提问会自动读取并理解新增或变化的材料。':'Material scope updated. The first classification question automatically reads and understands new or changed materials.','正在处理你的问题':'Processing your question','正在建立本地处理连接…':'Establishing local processing…','正在处理…':'Processing…','处理完成。':'Processing complete.'});
 Object.assign(UI.de,{'正在恢复该会话的材料范围…':'Materialumfang dieser Sitzung wird wiederhergestellt…','已恢复此会话最后确认的材料范围。':'Der zuletzt bestätigte Materialumfang dieser Sitzung wurde wiederhergestellt.','重命名':'Umbenennen','置顶':'Anheften','取消置顶':'Anheftung aufheben','删除':'Löschen','输入新的会话名称：':'Neuen Sitzungsnamen eingeben:','这是一个新会话，可以直接开始提问。':'Dies ist eine neue Sitzung. Du kannst jetzt direkt eine Frage stellen.','请先输入 Bosch Farm 的准确 Model ID。':'Bitte zuerst die genaue Bosch-Farm-Modell-ID eingeben.','已打开。':'Geöffnet.','已切换至 ':'Gewechselt zu ','；当前会话与材料保持不变。':'; aktuelle Sitzung und Materialien bleiben unverändert.','尚未测试此模型。':'Dieses Modell wurde noch nicht getestet.','上次测试失败：':'Letzter Test fehlgeschlagen: ','上次可用：':'Zuletzt verfügbar: ','正在发送一次极短的测试请求…':'Sehr kurze Testanfrage wird gesendet…','模型可用：':'Modell verfügbar: ','；输入 ':'; Eingabe ',' / 输出 ':' / Ausgabe ',' token。':' Token.','网关未返回 usage。':'Das Gateway hat keine Nutzungsdaten zurückgegeben.','模型测试失败：':'Modelltest fehlgeschlagen: ','其他资料':'Weitere Unterlagen','尚无材料。':'Noch keine Materialien.','选择文件夹后显示可展开的文件树。':'Einen Ordner auswählen, um eine aufklappbare Dateistruktur anzuzeigen.','查看扫描报告':'Scanbericht ansehen','确认选中材料':'Ausgewählte Materialien bestätigen','正在本地读取…':'Wird lokal gelesen…','材料范围已更新；首次分类提问会自动读取并理解新增或变化的材料。':'Materialumfang aktualisiert. Bei der ersten Klassifikationsfrage werden neue oder geänderte Materialien automatisch gelesen und verstanden.','正在处理你的问题':'Deine Frage wird verarbeitet','正在建立本地处理连接…':'Lokale Verarbeitung wird verbunden…','正在处理…':'Wird verarbeitet…','处理完成。':'Verarbeitung abgeschlossen.'});
 function tr(key){return (UI[uiLanguage]||{})[key]||key}
+const RUNTIME_COPY={
+zh:{
+ 'scan.reading':'正在本地读取…','scan.report.title':'本次材料扫描报告','scan.report.local':'仅本地读取与索引；不消耗模型 token。','scan.report.none':'没有成功加入的材料。','scan.report.added':'成功加入 {count} 个文件。以下结果只表示本地可读性；首次提问时会自动读取理解并生成分类证据。','scan.report.cache':'高级：缓存与重新读取','scan.report.cache_detail':'用于核对是否已复用模型摘要，或在分类异常时只重读特定文件。','scan.report.cache_loading':'正在读取缓存状态…','scan.index.reused':'本地索引已复用','scan.index.changed':'内容变化，已重新索引','scan.index.created':'已建立本地索引','dossier.confirm':'重新生成 BG 综合证据档案会调用当前模型并产生 token 消耗。继续吗？','dossier.working':'正在重建 BG 综合证据档案；模型任务已占用，请等待完成…','dossier.failed':'重建 BG 综合证据档案失败：','coverage.preparing':'正在按文件角色准备分类证据；大型数据表默认只预读前 15 页，并计入 token 与费用…','coverage.preparing_full':'正在完整覆盖所有页并生成可审计摘要；会消耗相应 token 与费用…','coverage.failed':'分类证据准备失败：','session.restoring':'正在恢复该会话的材料范围…','session.restored':'已恢复此会话最后确认的材料范围。','session.restore_failed':'恢复会话或材料范围失败：','material.updated':'材料范围已更新；首次分类提问会自动读取并理解新增或变化的材料。','model.processing':'正在处理你的问题','model.connecting':'正在建立本地处理连接…','model.waiting':'正在处理…','model.complete':'处理完成。','model.failed':'错误：','model.connection_failed':'无法连接本地工作台；请确认程序仍在运行。','material.none':'当前没有已选材料。','material.cache_empty':'尚无模型生成的缓存。首次提问后，程序会自动读取并理解当前材料；随后这里会显示复用状态、所用模型和 BG 综合档案。'
+},
+en:{
+ 'scan.reading':'Reading locally…','scan.report.title':'Material scan report','scan.report.local':'Read and indexed locally only; no model tokens are used.','scan.report.none':'No material was added successfully.','scan.report.added':'{count} file(s) added successfully. These results show local readability only; the first question automatically reads, understands and prepares classification evidence.','scan.report.cache':'Advanced: cache and re-read','scan.report.cache_detail':'Check reused model summaries, or re-read only a specific file when classification needs review.','scan.report.cache_loading':'Loading cache status…','scan.index.reused':'Local index reused','scan.index.changed':'Content changed; re-indexed','scan.index.created':'Local index created','dossier.confirm':'Rebuilding the BG comprehensive evidence dossier calls the current model and consumes tokens. Continue?','dossier.working':'Rebuilding the BG comprehensive evidence dossier; the model task is reserved until it finishes…','dossier.failed':'BG comprehensive evidence dossier rebuild failed: ','coverage.preparing':'Preparing classification evidence by material role; large datasheets initially read the first 15 pages and count toward token use and cost…','coverage.preparing_full':'Reading all pages and creating auditable summaries; corresponding token use and cost apply…','coverage.failed':'Classification-evidence preparation failed: ','session.restoring':'Restoring this chat’s material scope…','session.restored':'The last confirmed material scope of this chat was restored.','session.restore_failed':'Could not restore the chat or material scope: ','material.updated':'Material scope updated. The first classification question automatically reads and understands new or changed materials.','model.processing':'Processing your question','model.connecting':'Establishing local processing…','model.waiting':'Processing…','model.complete':'Processing complete.','model.failed':'Error: ','model.connection_failed':'Cannot connect to the local workbench. Confirm that it is still running.','material.none':'No selected materials.','material.cache_empty':'No model-generated cache yet. After the first question, the app reads and understands the current materials; reuse status, model and BG dossier will appear here.'
+},
+de:{
+ 'scan.reading':'Wird lokal gelesen…','scan.report.title':'Scanbericht der Materialien','scan.report.local':'Nur lokal gelesen und indiziert; es werden keine Modell-Token verbraucht.','scan.report.none':'Es wurden keine Materialien erfolgreich hinzugefügt.','scan.report.added':'{count} Datei(en) erfolgreich hinzugefügt. Diese Ergebnisse zeigen nur die lokale Lesbarkeit; die erste Frage liest, versteht und bereitet Klassifikationsevidenz automatisch vor.','scan.report.cache':'Erweitert: Cache und erneutes Lesen','scan.report.cache_detail':'Wiederverwendete Modellzusammenfassungen prüfen oder bei einer Klassifikationsprüfung nur eine bestimmte Datei erneut lesen.','scan.report.cache_loading':'Cachestatus wird geladen…','scan.index.reused':'Lokaler Index wiederverwendet','scan.index.changed':'Inhalt geändert; erneut indiziert','scan.index.created':'Lokaler Index erstellt','dossier.confirm':'Das Neuerstellen des umfassenden BG-Evidenzdossiers ruft das aktuelle Modell auf und verbraucht Token. Fortfahren?','dossier.working':'BG-Gesamtevidenzdossier wird neu erstellt; der Modellauftrag bleibt bis zum Abschluss reserviert…','dossier.failed':'Neuerstellung des BG-Gesamtevidenzdossiers fehlgeschlagen: ','coverage.preparing':'Klassifikationsevidenz wird nach Materialrolle vorbereitet; große Datenblätter werden zunächst auf den ersten 15 Seiten gelesen, Token und Kosten werden erfasst…','coverage.preparing_full':'Alle Seiten werden gelesen und auditierbare Zusammenfassungen erstellt; entsprechende Token und Kosten fallen an…','coverage.failed':'Vorbereitung der Klassifikationsevidenz fehlgeschlagen: ','session.restoring':'Materialumfang dieser Sitzung wird wiederhergestellt…','session.restored':'Der zuletzt bestätigte Materialumfang dieser Sitzung wurde wiederhergestellt.','session.restore_failed':'Sitzung oder Materialumfang konnte nicht wiederhergestellt werden: ','material.updated':'Materialumfang aktualisiert. Bei der ersten Klassifikationsfrage werden neue oder geänderte Materialien automatisch gelesen und verstanden.','model.processing':'Deine Frage wird verarbeitet','model.connecting':'Lokale Verarbeitung wird verbunden…','model.waiting':'Wird verarbeitet…','model.complete':'Verarbeitung abgeschlossen.','model.failed':'Fehler: ','model.connection_failed':'Lokale Workbench kann nicht erreicht werden. Bitte prüfen, ob sie noch läuft.','material.none':'Keine Materialien ausgewählt.','material.cache_empty':'Noch kein modellgenerierter Cache. Nach der ersten Frage liest und versteht das Programm die aktuellen Materialien; Wiederverwendung, Modell und BG-Evidenzdossier werden anschließend hier angezeigt.'
+}};
+function rt(key,values={}){let text=(RUNTIME_COPY[uiLanguage]||RUNTIME_COPY.zh)[key]||RUNTIME_COPY.zh[key]||key;return text.replace(/\{(\w+)\}/g,(_whole,name)=>values[name]??'')}
 function applyLanguage(){let dict=UI[uiLanguage]||{};document.documentElement.lang=uiLanguage;document.documentElement.dataset.uiLanguage=uiLanguage;document.title='Bosch Local Workbench';let walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);for(let node;node=walker.nextNode();){let source=originalText.get(node);if(source===undefined){source=node.nodeValue;originalText.set(node,source)}let key=source.trim(),translated=dict[key];if(translated){let lead=source.match(/^\s*/)[0],tail=source.match(/\s*$/)[0],next=lead+translated+tail;if(node.nodeValue!==next)node.nodeValue=next}}for(let el of document.querySelectorAll('[placeholder],[title]'))for(let attr of ['placeholder','title'])if(el.hasAttribute(attr)){let saved=originalAttr.get(el)||{};if(!(attr in saved)){saved[attr]=el.getAttribute(attr);originalAttr.set(el,saved)}let next=dict[saved[attr]]||saved[attr];if(el.getAttribute(attr)!==next)el.setAttribute(attr,next)}}
 function initLegacyDynamicTranslations(){if(window.__legacyTranslationObserver)return;let queued=false;let refresh=()=>{if(queued)return;queued=true;queueMicrotask(()=>{queued=false;applyLanguage()})};window.__legacyTranslationObserver=new MutationObserver(refresh);window.__legacyTranslationObserver.observe(document.body,{childList:true,subtree:true,characterData:true})}
 async function changeLanguage(){uiLanguage=$('language').value;applyLanguage();try{if($('workspace').value.trim())await api('/api/language',{method:'POST',body:JSON.stringify({language:uiLanguage})})}catch(e){console.warn('Could not persist UI language',e)}}
@@ -2282,8 +2370,8 @@ function initSessionSidebar(){if($('sessionpanel'))return;let left=document.quer
 function closeSessionMenu(){$('sessionmenu')?.remove()}
 function renderSessionRows(items,append){let list=$('sessionlist');if(!append)list.innerHTML='';for(let item of items){let row=document.createElement('div');row.className='session-row'+(item.name===currentSessionName?' active':'');row.onclick=()=>openSessionByName(item.name);let title=document.createElement('span');title.className='session-title';title.textContent=item.title;row.append(title);if(item.pinned){let pin=document.createElement('span');pin.className='session-pin';pin.textContent='●';pin.title='已置顶';row.append(pin)}let more=document.createElement('button');more.className='session-more';more.textContent='•••';more.title='更多';more.onclick=e=>{e.stopPropagation();openSessionMenu(e,item)};row.append(more);list.append(row)}if(sessionLoading){let loading=document.createElement('div');loading.id='sessionloading';loading.className='session-loading';loading.textContent='正在加载…';list.append(loading)}}
 async function loadSessions(reset=true){if(sessionLoading)return;if(reset){sessionOffset=0;sessionHasMore=false;renderSessionRows([],true)}sessionLoading=true;try{let x=await api('/api/sessions?offset='+sessionOffset+'&limit=10');currentSessionName=x.current;let existingCount=$('sessionlist').querySelectorAll('.session-row').length,items=x.sessions;renderSessionRows(items,!reset);let rows=[...$('sessionlist').querySelectorAll('.session-row')];items.forEach((item,index)=>rows[existingCount+index].dataset.name=item.name);sessionOffset+=items.length;sessionHasMore=!!x.has_more}catch(e){$('sessionmsg').textContent=e.message}finally{sessionLoading=false;$('sessionloading')?.remove()}}
-async function restoreSessionTree(target,paths){$('treestatus').textContent='正在恢复该会话的材料范围…';let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(paths||[]);treeRestoreNote='已恢复此会话最后确认的材料范围。';let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates()}
-async function restoreSessionContext(){try{let x=await api('/api/session/context');setSelectedModel(x.model);let target=x.target||{};$('targetpath').value=target.path||'';$('codebook').value=x.codebook_path||'';if(target.path&&target.kind==='文件夹'){await restoreSessionTree(target.path,target.selected_paths)}else{clearTargetTree()}await loadCodebookStatus();loadDocs();loadCoverage()}catch(e){console.warn('Could not restore session context',e)}}
+async function restoreSessionTree(target,paths){$('treestatus').textContent=rt('session.restoring');let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(paths||[]);treeRestoreNote=rt('session.restored');let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates()}
+async function restoreSessionContext(){try{let x=await api('/api/session/context');setSelectedModel(x.model);let target=x.target||{};$('targetpath').value=target.path||'';$('codebook').value=x.codebook_path||'';if(target.path&&target.kind==='文件夹'){await restoreSessionTree(target.path,target.selected_paths)}else{clearTargetTree()}await loadCodebookStatus();loadDocs();loadCoverage()}catch(e){console.warn('Could not restore session context',e);$('treestatus').innerHTML='<span class="error">'+esc(rt('session.restore_failed')+e.message)+'</span>'}}
 async function openSessionByName(name){try{closeSessionMenu();let s=await api('/api/session/open',{method:'POST',body:JSON.stringify({name})});renderStatus(s);await restoreSessionContext();await loadHistory();await loadSessions(true)}catch(e){$('sessionmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function newSession(){try{let s=await api('/api/session/new',{method:'POST'});renderStatus(s);$('targetpath').value='';$('codebook').value='';clearTargetTree();await loadHistory();await loadSessions(true);loadDocs();loadCodebookStatus()}catch(e){$('sessionmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function openSessionMenu(event,item){closeSessionMenu();let menu=document.createElement('div');menu.id='sessionmenu';menu.className='session-menu';let rect=event.currentTarget.getBoundingClientRect();menu.style.left=Math.min(window.innerWidth-145,rect.right+6)+'px';menu.style.top=rect.top+'px';menu.innerHTML='<button data-action="rename">重命名</button><button data-action="pin">'+(item.pinned?'取消置顶':'置顶')+'</button><button class="delete" data-action="delete">删除</button>';menu.onclick=async e=>{let action=e.target.dataset.action;if(!action)return;if(action==='rename')await renameSession(item.name);if(action==='pin')await pinSession(item);if(action==='delete')await deleteSession(item.name);closeSessionMenu()};document.body.append(menu)}
@@ -2306,11 +2394,11 @@ function updateMaterialFlowButtons(){let confirm=$('confirmmaterials'),report=$(
 function setScanReportAvailable(report){lastScanReport=report||null;let button=$('viewscanreport');if(button){button.disabled=!lastScanReport;button.textContent=lastScanReport?'查看扫描报告':'查看扫描报告'}}
 function openScanReport(){if(!lastScanReport)return;renderScanDrawer(lastScanReport);$('scanbackdrop').classList.add('open');loadCacheAudit()}
 function closeScanReport(){$('scanbackdrop')?.classList.remove('open')}
-function renderScanDrawer(x){let files=(x.files||[]).map(f=>{let index=f.index_cache_status==='reused'?'本地索引已复用':f.index_cache_status==='changed'?'内容变化，已重新索引':f.index_cache_status==='new'?'已建立本地索引':'—';return `<article class="file-card"><b>${esc(f.name)}</b><br><span class="muted">${esc(f.material_role_label||'其他资料')} · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB<br>本地文本片段：${f.chunks} · ${index}</span></article>`}).join('')||'<div class="muted">没有成功加入的材料。</div>';let skipped=x.skipped_count?`<article class="file-card error"><b>跳过 / 失败 ${x.skipped_count} 个</b><br><span class="muted">${x.skipped.map(esc).join('<br>')}${x.skipped_count>x.skipped.length?'<br>其余失败项未展开。':''}</span></article>`:'';let audit='<details id="cacheauditpanel" class="file-card" ontoggle="if(this.open)loadCacheAudit()"><summary><b>高级：缓存与重新读取</b></summary><div class="muted" style="margin:7px 0">用于核对是否已复用模型摘要，或在分类异常时只重读特定文件。</div><div id="cacheaudit" class="list muted">正在读取缓存状态…</div></details>';$('scanreportbody').innerHTML='<div class="muted">成功加入 '+(x.sources||0)+' 个文件。以下结果只表示本地可读性；首次提问时会自动读取理解并生成分类证据。</div>'+files+skipped+audit}
-function renderCacheAudit(x){let host=$('cacheaudit');if(!host)return;if(!x.files?.length){host.textContent='当前没有已选材料。';return}let hasSummary=x.files.some(f=>(f.summary_entries||[]).length);if(!hasSummary){host.innerHTML='<div class="muted">尚无模型生成的缓存。首次提问后，程序会自动读取并理解当前材料；随后这里会显示复用状态、所用模型和 BG 综合档案。</div>';return}let dossier=x.dossier?.ready?`BG 综合档案：已缓存（${esc(x.dossier.model||'—')}）`:'BG 综合档案：尚未生成或材料范围已变化';let files=x.files.map(f=>{let summaries=(f.summary_entries||[]).map(s=>`${esc(s.model||'—')} · ${s.full?'全部页':'默认范围'} · ${s.complete?'完成':'未完成'}`).join('<br>')||'无摘要缓存';let read=(f.summary_entries||[]).length?'<br><button class="ghost" onclick="rebuildCachedFile(\''+esc(f.id)+'\')">仅重读此文件</button>':'';return `<div class="card"><b>${esc(f.name)}</b><br><span class="muted">索引：${esc(f.index_status)} · OCR：${esc(f.ocr_status)}<br>摘要：${summaries}</span>${read}</div>`}).join('');host.innerHTML='<div class="muted">'+dossier+(x.selection_current?'':'；当前材料范围待更新')+'</div><div class="row"><button class="ghost" onclick="rebuildDossier()">重建 BG 档案</button><button class="ghost" onclick="clearSummaryCaches()">清除摘要缓存</button></div>'+files}
+function renderScanDrawer(x){let files=(x.files||[]).map(f=>{let index=f.index_cache_status==='reused'?rt('scan.index.reused'):f.index_cache_status==='changed'?rt('scan.index.changed'):f.index_cache_status==='new'?rt('scan.index.created'):'—';return `<article class="file-card"><b>${esc(f.name)}</b><br><span class="muted">${esc(f.material_role_label||'其他资料')} · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB<br>本地文本片段：${f.chunks} · ${index}</span></article>`}).join('')||'<div class="muted">'+rt('scan.report.none')+'</div>';let skipped=x.skipped_count?`<article class="file-card error"><b>跳过 / 失败 ${x.skipped_count} 个</b><br><span class="muted">${x.skipped.map(esc).join('<br>')}${x.skipped_count>x.skipped.length?'<br>其余失败项未展开。':''}</span></article>`:'';let audit='<details id="cacheauditpanel" class="file-card" ontoggle="if(this.open)loadCacheAudit()"><summary><b>'+rt('scan.report.cache')+'</b></summary><div class="muted" style="margin:7px 0">'+rt('scan.report.cache_detail')+'</div><div id="cacheaudit" class="list muted">'+rt('scan.report.cache_loading')+'</div></details>';$('scanreportbody').innerHTML='<div class="muted">'+rt('scan.report.added',{count:x.sources||0})+'</div>'+files+skipped+audit}
+function renderCacheAudit(x){let host=$('cacheaudit');if(!host)return;if(!x.files?.length){host.textContent=rt('material.none');return}let hasSummary=x.files.some(f=>(f.summary_entries||[]).length);if(!hasSummary){host.innerHTML='<div class="muted">'+rt('material.cache_empty')+'</div>';return}let dossier=x.dossier?.ready?`BG 综合档案：已缓存（${esc(x.dossier.model||'—')}）`:'BG 综合档案：尚未生成或材料范围已变化';let files=x.files.map(f=>{let summaries=(f.summary_entries||[]).map(s=>`${esc(s.model||'—')} · ${s.full?'全部页':'默认范围'} · ${s.complete?'完成':'未完成'}`).join('<br>')||'无摘要缓存';let read=(f.summary_entries||[]).length?'<br><button class="ghost" onclick="rebuildCachedFile(\''+esc(f.id)+'\')">仅重读此文件</button>':'';return `<div class="card"><b>${esc(f.name)}</b><br><span class="muted">索引：${esc(f.index_status)} · OCR：${esc(f.ocr_status)}<br>摘要：${summaries}</span>${read}</div>`}).join('');host.innerHTML='<div class="muted">'+dossier+(x.selection_current?'':'；当前材料范围待更新')+'</div><div class="row"><button class="ghost" onclick="rebuildDossier()">重建 BG 档案</button><button class="ghost" onclick="clearSummaryCaches()">清除摘要缓存</button></div>'+files}
 async function loadCacheAudit(){let host=$('cacheaudit');if(!host)return;try{renderCacheAudit(await api('/api/cache/audit'))}catch(e){host.innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function rebuildCachedFile(id){if(!confirm('仅清除这份文件的本地摘要？下次分类会重新读取该文件；其他文件摘要保持不变。'))return;try{let x=await api('/api/cache/file/rebuild',{method:'POST',body:JSON.stringify({document_id:id,confirmed:true})});$('coveragestatus').textContent=x.message;renderCacheAudit(x.audit)}catch(e){$('cacheaudit').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-async function rebuildDossier(){if(!confirm('重新生成 BG 综合证据档案会调用当前模型并产生 token 消耗。继续吗？'))return;try{let x=await api('/api/cache/dossier/rebuild',{method:'POST',body:JSON.stringify({confirmed:true})});$('coveragestatus').textContent=x.message;renderCacheAudit(x.audit);renderStatus(await api('/api/status'))}catch(e){$('cacheaudit').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function rebuildDossier(){if(!confirm(rt('dossier.confirm')))return;let host=$('cacheaudit');let button=host?.querySelector('button[onclick="rebuildDossier()"]');if(button)button.disabled=true;$('coveragestatus').textContent=rt('dossier.working');try{let x=await api('/api/cache/dossier/rebuild',{method:'POST',body:JSON.stringify({confirmed:true})});$('coveragestatus').textContent=x.message;renderCacheAudit(x.audit);renderStatus(await api('/api/status'))}catch(e){$('coveragestatus').innerHTML='<span class="error">'+esc(rt('dossier.failed')+e.message)+'</span>';if(host)host.innerHTML='<span class="error">'+esc(rt('dossier.failed')+e.message)+'</span>'}finally{if(button)button.disabled=false}}
 async function clearSummaryCaches(){if(!confirm('清除所有本地材料摘要和 BG 综合档案？不会删除原始文件、本地索引或 OCR，但之后需要重新预读。'))return;try{let x=await api('/api/cache/clear',{method:'POST',body:JSON.stringify({confirmed:true})});$('coveragestatus').textContent=x.message;renderCacheAudit(x.audit)}catch(e){$('cacheaudit').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function clearTargetTree(){savedTargetSelection=new Set();treeRestoreNote='';scannedSelection='';setScanReportAvailable(null);$('targettree').textContent='选择文件夹后显示可展开的文件树。';$('targettree').classList.add('muted');$('treestatus').textContent='';updateMaterialFlowButtons()}
 async function pickFolderForTree(){await pick('folder','targetpath');if($('targetpath').value)loadTargetTree()}
@@ -2322,8 +2410,8 @@ function recommendedTreePaths(node,paths=[]){if(node.type==='file'){if(node.reco
 function makeTreeNode(node,depth=0){if(node.type==='folder'){let details=document.createElement('details');details.open=depth<1;let summary=document.createElement('summary');let box=document.createElement('input');box.type='checkbox';box.className='tree-folder';box.addEventListener('click',e=>e.stopPropagation());box.addEventListener('change',()=>{details.querySelectorAll('input.tree-file:not(:disabled)').forEach(x=>x.checked=box.checked);refreshAllFolderStates()});let label=document.createElement('label');label.textContent='📁 '+node.name;summary.append(box,label);details.append(summary);let children=document.createElement('div');children.className='tree-children';node.children.forEach(child=>children.append(makeTreeNode(child,depth+1)));details.append(children);return details}let row=document.createElement('div');row.className='tree-file'+(node.supported?'':' unsupported');let box=document.createElement('input');box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.checked=!!node.supported&&savedTargetSelection.has(node.relative);box.disabled=!node.supported;box.addEventListener('change',refreshAllFolderStates);let label=document.createElement('label');let role=node.material_role_label?` · ${node.material_role_label}`:'';let hint=node.supported&&!node.recommended?' · 默认不选':'';label.textContent='📄 '+node.name+(node.supported?` · ${(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1)} MB${role}${hint}`:` · 不支持${role}`);row.append(box,label);return row}
 async function loadTargetTree(){let target=$('targetpath').value.trim();if(!target){$('treestatus').innerHTML='<span class="error">请先选择或粘贴一个 BG 文件夹路径。</span>';return}try{$('treestatus').textContent='正在仅读取文件夹结构…';let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(x.saved_selection||[]);let notes=[];if(savedTargetSelection.size)notes.push(`已恢复上次的 ${savedTargetSelection.size} 项选择。`);else{savedTargetSelection=new Set(recommendedTreePaths(x.tree));notes.push(`已按资料类型默认选择 ${savedTargetSelection.size} 项原始资料；派生重复资料默认未选。`)}if(x.changed_saved_files)notes.push(`${x.changed_saved_files} 个已选文件内容已变化。`);if(x.missing_saved_files)notes.push(`${x.missing_saved_files} 个原选文件不存在，未恢复。`);treeRestoreNote=notes.join(' ');let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates();if(x.truncated)$('treestatus').innerHTML='<span class="error">文件树超过 5000 项，已截断；请进入更具体的 BG 文件夹。</span>'}catch(e){$('treestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function selectedTargetPaths(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].map(x=>x.dataset.path)}
-async function analyzeTarget(){let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent='正在本地读取…'}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error('请先在文件树中勾选至少一个材料。');let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');renderStatus(x.status);$('bgstatus').textContent=x.classification?`已确认 ${x.target_kind}中的 ${x.sources} 个选定材料；Codebook 分类已就绪。`:`已确认 ${x.target_kind}中的 ${x.sources} 个选定材料；可直接开始普通材料问答。`;renderScanReport(x);$('coveragestatus').textContent='材料范围已更新；首次分类提问会自动读取并理解新增或变化的材料。';loadDocs();loadCacheAudit()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}finally{if(confirm)confirm.textContent='确认选中材料';updateMaterialFlowButtons()}}
-async function prepareCoverage(full=false){if(busy)return;busy=true;$('coveragestatus').textContent=full?'正在完整覆盖所有页并生成可审计摘要；会消耗相应 token 与费用…':'正在按文件角色准备分类证据；大型 Datasheet 默认只预读前 15 页，并计入 token 与费用…';try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full})});renderCoverageReport(x)}catch(e){$('coveragestatus').innerHTML='<span class="error">分类证据准备失败：'+esc(e.message)+'</span>'}finally{busy=false}}
+async function analyzeTarget(){let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent=rt('scan.reading')}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error('请先在文件树中勾选至少一个材料。');let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');renderStatus(x.status);$('bgstatus').textContent=x.classification?`已确认 ${x.target_kind}中的 ${x.sources} 个选定材料；Codebook 分类已就绪。`:`已确认 ${x.target_kind}中的 ${x.sources} 个选定材料；可直接开始普通材料问答。`;renderScanReport(x);$('coveragestatus').textContent=rt('material.updated');loadDocs();loadCacheAudit()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}finally{if(confirm)confirm.textContent=tr('确认选中材料');updateMaterialFlowButtons()}}
+async function prepareCoverage(full=false){if(busy)return;busy=true;$('coveragestatus').textContent=rt(full?'coverage.preparing_full':'coverage.preparing');try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full})});renderCoverageReport(x)}catch(e){$('coveragestatus').innerHTML='<span class="error">'+esc(rt('coverage.failed')+e.message)+'</span>'}finally{busy=false}}
 async function clearBg(){try{renderStatus(await api('/api/bg',{method:'DELETE'}));$('bgstatus').textContent='已退出 BG 模式。'}catch(e){$('bgstatus').textContent=e.message}}
 const compareOptions=[['claude-haiku-5-5','Claude Haiku 5.5'],['claude-sonnet-5-5','Claude Sonnet 5.5'],['claude-opus-5','Claude Opus 5'],['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite'],['gemini-2.5-pro','Gemini 2.5 Pro'],['gemini-2.5-flash','Gemini 2.5 Flash'],['deepseek-r1-0528-maas','DeepSeek R1 (0528)'],['llama-3.3-70b-instruct-maas','Llama 3.3 70B'],['glm-5-maas','GLM-5']];
 function renderCompareSlots(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">选择模型…</option>'+compareOptions.map(([value,label])=>'<option value="'+value+'" '+(slot.value===value?'selected':'')+'>'+label+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>其他：手动输入 Model ID…</option>';return '<div class="field"><label>对比模型 '+(index+1)+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+esc(slot.custom||'')+'" placeholder="输入准确的 Bosch Farm Model ID" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?'最多 4 个模型':'＋ 添加对比模型';if(compareSlots.length>=4)$('comparestatus').textContent='已达到最多 4 个对比模型。'}
@@ -2332,10 +2420,10 @@ function addCompareModel(){if(compareSlots.length>=4){$('comparestatus').textCon
 function removeCompareModel(index){compareSlots.splice(index,1);renderCompareSlots();$('comparestatus').textContent=''}
 function selectedCompareModels(){return compareSlots.map((slot,index)=>slot.value==='__custom__'?$('cmpcustom'+index).value.trim():slot.value).filter(Boolean)}
 async function compareModels(){if(busy)return;let q=$('question').value.trim()||lastQuestion;if(!q){$('comparestatus').innerHTML='<span class="error">先在下方输入问题，或先发送一次问题。</span>';return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){$('comparestatus').innerHTML='<span class="error">请选择 2–4 个不同模型；“其他”中输入准确的 Bosch Farm Model ID。</span>';return}busy=true;lastQuestion=q;$('comparestatus').textContent='正在按顺序请求 '+models.length+' 个模型…';let wait=message('正在进行多模型对比：'+models.join(' · '));try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models})});wait.remove();let box=document.createElement('section');box.className='comparison';box.innerHTML='<div class="message assistant"><b>多模型对比</b><br>同一问题：'+esc(q)+'<br><span class="muted">相同证据：'+x.sources.map(esc).join(' · ')+'</span></div><div class="comparison-grid"></div>';let grid=box.querySelector('.comparison-grid');for(let r of x.results){let card=document.createElement('article');card.className='card';if(!r.ok){card.innerHTML='<b>'+esc(r.requested_model)+'</b><p class="error">请求失败</p><div class="muted">'+esc(r.error||'未知错误')+'</div>';grid.append(card);continue}let u=r.usage||{};let cost=u.cost_usd===null||u.cost_usd===undefined?'未配置价格':'$'+Number(u.cost_usd).toFixed(6);let classification=r.classification?'<div class="chip">已校验类别：'+esc(r.classification.label)+' · '+esc(r.classification.confidence)+'</div>':'';card.innerHTML='<b>'+esc(r.model_response)+'</b>'+(r.model_response!==r.requested_model?'<div class="muted">请求：'+esc(r.requested_model)+'</div>':'')+'<div class="muted ok">成功 · Token '+(u.input||0)+' / '+(u.output||0)+' · '+cost+'</div>'+classification+'<hr><div class="answer"></div>'+(r.notices?.length?'<div class="muted">'+r.notices.map(esc).join('<br>')+'</div>':'');card.querySelector('.answer').textContent=r.answer;grid.append(card)}$('chat').append(box);$('comparestatus').innerHTML='<span class="ok">对比完成；结果仅显示在当前页面，不写入普通会话。</span>'}catch(e){wait.textContent='多模型对比错误：'+e.message;wait.classList.add('error');$('comparestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{busy=false;$('chat').scrollTop=1e9}}
-function processingCard(){let card=document.createElement('section');card.className='message assistant';card.style.border='1px solid #334155';card.innerHTML='<b>正在处理你的问题</b><div class="muted" data-process-text>正在建立本地处理连接…</div><div style="height:7px;background:#0b1220;border-radius:8px;overflow:hidden;margin-top:9px"><div data-process-bar style="height:100%;width:4%;background:#38bdf8;transition:width .25s ease"></div></div>';$('chat').append(card);return card}
-function updateProcessing(card,event){let text=card.querySelector('[data-process-text]'),bar=card.querySelector('[data-process-bar]');text.textContent=event.text||'正在处理…';if(typeof event.percent==='number')bar.style.width=Math.max(4,Math.min(100,event.percent))+'%';if(event.phase==='complete'){card.style.borderColor='#22c55e';bar.style.background='#22c55e'}}
+function processingCard(){let card=document.createElement('section');card.className='message assistant';card.style.border='1px solid #334155';card.innerHTML='<b>'+rt('model.processing')+'</b><div class="muted" data-process-text>'+rt('model.connecting')+'</div><div style="height:7px;background:#0b1220;border-radius:8px;overflow:hidden;margin-top:9px"><div data-process-bar style="height:100%;width:4%;background:#38bdf8;transition:width .25s ease"></div></div>';$('chat').append(card);return card}
+function updateProcessing(card,event){let text=card.querySelector('[data-process-text]'),bar=card.querySelector('[data-process-bar]');text.textContent=event.text||rt('model.waiting');if(typeof event.percent==='number')bar.style.width=Math.max(4,Math.min(100,event.percent))+'%';if(event.phase==='complete'){card.style.borderColor='#22c55e';bar.style.background='#22c55e'}}
 function showChatResult(x){message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>模型推理（接口返回）</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${c.path}</b><br>${c.reason}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button onclick="apply()">应用修改</button>':'无';$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">导出本次 BG 分析</button>':'仅在 Baugruppe 分析完成后可导出。';renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}
-async function chat(){if(busy||!$('question').value.trim())return;busy=true;let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');let wait=processingCard(),buffer='',result=null;try{let response;try{response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})})}catch(error){throw Error('无法连接本地工作台；请确认程序仍在运行。'+(error?.message?` ${error.message}`:''))}if(!response.ok){await readApiResponse(response)}let reader=response.body.getReader(),decoder=new TextDecoder();while(true){let part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});let blocks=buffer.split('\n\n');buffer=blocks.pop();for(let block of blocks){let line=block.split('\n').find(item=>item.startsWith('data: '));if(!line)continue;let event=JSON.parse(line.slice(6));if(event.type==='progress')updateProcessing(wait,event);else if(event.type==='result')result=event.data;else if(event.type==='error')throw Error(event.message||'处理失败')}}if(!result)throw Error('请求未返回结果');updateProcessing(wait,{phase:'complete',text:'处理完成。',percent:100});showChatResult(result)}catch(e){wait.querySelector('[data-process-text]').textContent='错误：'+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
+async function chat(){if(busy||!$('question').value.trim())return;busy=true;let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');let wait=processingCard(),buffer='',result=null;try{let response;try{response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})})}catch(error){throw Error(rt('model.connection_failed')+(error?.message?` ${error.message}`:''))}if(!response.ok){await readApiResponse(response)}let reader=response.body.getReader(),decoder=new TextDecoder();while(true){let part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});let blocks=buffer.split('\n\n');buffer=blocks.pop();for(let block of blocks){let line=block.split('\n').find(item=>item.startsWith('data: '));if(!line)continue;let event=JSON.parse(line.slice(6));if(event.type==='progress')updateProcessing(wait,event);else if(event.type==='result')result=event.data;else if(event.type==='error')throw Error(event.message||rt('model.failed'))}}if(!result)throw Error('请求未返回结果');updateProcessing(wait,{phase:'complete',text:rt('model.complete'),percent:100});showChatResult(result)}catch(e){wait.querySelector('[data-process-text]').textContent=rt('model.failed')+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
 async function exportSession(){try{let x=await api('/api/export/session',{method:'POST'});$('sessionexport').innerHTML='<span class="ok">已导出：'+esc(x.path)+'</span>'}catch(e){$('sessionexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function exportBgAnalysis(){try{let x=await api('/api/export/bg-analysis',{method:'POST'});$('analysisexport').innerHTML='<span class="ok">已导出：'+esc(x.path)+'</span>'}catch(e){$('analysisexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function esc(s){let e=document.createElement('div');e.textContent=s;return e.innerHTML}async function apply(){try{let x=await api('/api/apply',{method:'POST'});$('changes').innerHTML='<span class="ok">已应用 '+x.applied+' 个修改。</span>';message('已写入 '+x.applied+' 个经确认的文件修改。')}catch(e){$('changes').innerHTML='<span class="error">'+e.message+'</span>'}}

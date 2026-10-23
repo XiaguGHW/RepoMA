@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -166,8 +167,35 @@ class LocalDocumentLibrary:
         return {"version": 1, "documents": []}
 
     def _save(self):
+        """Persist the index without ever exposing a partially written JSON file.
+
+        The index is an expendable local cache, but a power loss during a direct
+        ``write_text`` could otherwise leave it syntactically truncated.  Keep
+        the temporary file in the same directory so ``os.replace`` is atomic on
+        the local filesystem.  A corrupt historical index is still handled by
+        ``_load`` as an empty index; no source material is touched.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{self.path.name}.", suffix=".tmp", dir=self.path.parent, text=True
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+                json.dump(self.data, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                try:
+                    os.fsync(handle.fileno())
+                except OSError:
+                    # Some network/synchronised folders do not support fsync.
+                    # Closing and replacing still prevents half-written JSON.
+                    pass
+            os.replace(temporary, self.path)
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
     def add(self, value: str):
         path = Path(value.strip().strip('"')).expanduser().resolve()
