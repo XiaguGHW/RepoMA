@@ -354,6 +354,8 @@ def connector_failure(raw: Any) -> str | None:
     normalized = text.casefold()
     if normalized.startswith(("error:", "http error", "error after ")):
         return text
+    if normalized.startswith("(no text content"):
+        return f"接口未返回最终正文：{text}"
     return None
 
 
