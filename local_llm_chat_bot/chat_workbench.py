@@ -321,6 +321,31 @@ def safe_file(value: str) -> Path:
     return path
 
 
+def connector_failure(raw: Any) -> str | None:
+    """Return a connector-level failure message, if a connector returned one.
+
+    The Bosch Farm connector intentionally returns transport failures as text so
+    callers can still display them in simple scripts.  A workbench answer must
+    not mistake that text for an LLM answer, however.
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return "模型没有返回可显示的文字。"
+    normalized = text.casefold()
+    if normalized.startswith(("error:", "http error", "error after ")):
+        return text
+    return None
+
+
+def require_model_success(raw: Any, context: str = "模型请求") -> str:
+    """Return a non-empty model answer or raise a user-visible failure."""
+    text = str(raw or "").strip()
+    failure = connector_failure(text)
+    if failure:
+        raise RuntimeError(f"{context}失败：{failure}")
+    return text
+
+
 def target_tree(folder: Path, maximum_nodes: int = 5000) -> tuple[dict, bool]:
     """Return a read-only, local folder tree without indexing any material."""
     count, truncated = 0, False
@@ -467,6 +492,7 @@ def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str) -> tuple
         )
         repaired = connector.ask_about_files([], repair_prompt, CODEBOOK_JSON_REPAIR_SYSTEM,
                                              {"maxOutputTokens": 4096, "temperature": 0}, stream=True)
+        repaired = require_model_success(repaired, "Codebook JSON 自动修复请求")
         repair_usage = connector.get_last_token_usage() or {}
         try:
             return parse_codebook_draft(repaired), repair_usage
@@ -486,15 +512,18 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str) -> di
         for record in records:
             prompt = f"Codebook page {record['page']} of {len(records)}. Page type: {record['page_type']}.\n--- NATIVE TEXT ---\n{record['native_text'] or '[none]'}\n--- OCR TEXT ({record['ocr_status']}) ---\n{record['ocr_text'] or '[none]'}"
             raw = connector.ask_about_files([record["image_path"]], prompt, CODEBOOK_PAGE_SYSTEM, {"maxOutputTokens": 2200, "temperature": 0}, stream=True)
+            raw = require_model_success(raw, f"Codebook 第 {record['page']} 页读取")
             notes.append(raw); usages.append(connector.get_last_token_usage() or {})
     else:
         for index, group in enumerate(groups, start=1):
             prompt = f"Codebook DOCX section {index}/{len(groups)}.\n" + "\n\n".join(f"--- {item['label']} ---\n{item['text']}" for item in group)
             raw = connector.ask_about_files([], prompt, CODEBOOK_PAGE_SYSTEM, {"maxOutputTokens": 2200, "temperature": 0}, stream=True)
+            raw = require_model_success(raw, f"Codebook DOCX 第 {index} 段读取")
             notes.append(raw); usages.append(connector.get_last_token_usage() or {})
     merge_prompt = "Consolidate every Codebook page note below. All classes, tables and boundary rules must be retained.\n\n" + "\n\n".join(
         f"--- PAGE GROUP {index} ---\n{note}" for index, note in enumerate(notes, start=1))
     merged = connector.ask_about_files([], merge_prompt, CODEBOOK_MERGE_SYSTEM, {"maxOutputTokens": 3500, "temperature": 0}, stream=True)
+    merged = require_model_success(merged, "Codebook 规则汇总")
     usages.append(connector.get_last_token_usage() or {})
     draft, repair_usage = parse_codebook_draft_with_repair(connector, merged)
     if repair_usage is not None:
@@ -703,7 +732,7 @@ def prepare_bg_dossier(data: dict[str, Any], coverage: dict) -> tuple[dict | Non
         for item in records)
     system_prompt = "You are a careful technical evidence consolidator. Use only supplied file summaries. Write concise Chinese factual evidence for later Baugruppe questions; do not classify it and do not invent facts. Preserve every source file name and page/section label, distinguish confirmed facts from uncertainty, and omit irrelevant detail."
     request = "Create one reusable BG comprehensive evidence dossier with sections: composition/BOM; motion and main functional chain; actuators/transmission; relevant geometry/interfaces; DFC hierarchy; conflicts or limitations; source evidence. Every factual bullet must retain its source file and page/section label.\n\n" + sources
-    raw = data["llm"].ask_about_files([], request, system_prompt, {"maxOutputTokens": 2400, "temperature": 0}, stream=True).strip()
+    raw = require_model_success(data["llm"].ask_about_files([], request, system_prompt, {"maxOutputTokens": 2400, "temperature": 0}, stream=True), "装配体综合证据汇总")
     usage = data["llm"].get_last_token_usage() or {}
     dossier = {"version": BG_DOSSIER_CACHE_VERSION, "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                "identity": bg_dossier_identity(coverage, data["model"]), "model": data["model"],
@@ -910,6 +939,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None) ->
                              12 + int((file_index - 1 + number / max(len(groups), 1)) / max(total_documents, 1) * 48))
                 raw = llm.ask_about_files([], f"文件：{document['name']}。这是第 {number}/{len(groups)} 个完整文本片段组。提取结构、部件、驱动、运动、接口、尺寸和不确定处，并保留页面/表格标签。\n\n{group}",
                                          summary_system, {"maxOutputTokens": 900, "temperature": 0}, stream=True)
+                raw = require_model_success(raw, f"文件 {document['name']} 的文本片段读取")
                 notes.append(raw.strip())
                 usage = llm.get_last_token_usage() or {}
                 state.note_usage(usage, data["pricing"], data["model"])
@@ -921,6 +951,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None) ->
                 merged = "\n\n".join(f"[片段组 {i}]\n{note}" for i, note in enumerate(notes, start=1))
                 raw = llm.ask_about_files([], f"请将下列同一文件的全部片段笔记合成为一份不遗漏冲突或不确定处的技术摘要。必须保留证据标签。\n\n文件：{document['name']}\n\n{merged}",
                                          summary_system, {"maxOutputTokens": 1400, "temperature": 0}, stream=True)
+                raw = require_model_success(raw, f"文件 {document['name']} 的摘要汇总")
                 summary = raw.strip()
                 usage = llm.get_last_token_usage() or {}
                 state.note_usage(usage, data["pricing"], data["model"])
@@ -1167,6 +1198,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
     report("model", "正在等待模型输出…", 90)
     raw = llm.ask_about_files(visuals, model_prompt,
                                SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=model_events)
+    raw = require_model_success(raw, "模型回答请求")
     usage_records.append(llm.get_last_token_usage() or {})
     estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
     if estimate: estimates.append(estimate)
@@ -1184,6 +1216,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
         report("validation", "正在校验分类证据与 Codebook 规则；模型输出需补全，正在自动重试…", 96)
         repaired = llm.ask_about_files(visuals, classification_repair_prompt(request_prompt, problem),
                                        SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=model_events)
+        repaired = require_model_success(repaired, "分类输出修复请求")
         usage_records.append(llm.get_last_token_usage() or {})
         estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
         if estimate: estimates.append(estimate)
@@ -1226,6 +1259,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
         report("model", "正在补充读取模型请求的本地文件并生成回答…", 93)
         raw = llm.ask_about_files(visuals, model_prompt,
                                    SYSTEM, {"maxOutputTokens": 3000, "temperature": 0}, stream=True, event_handler=model_events)
+        raw = require_model_success(raw, "补充材料后的模型回答请求")
         usage_records.append(llm.get_last_token_usage() or {})
         estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
         if estimate: estimates.append(estimate)
@@ -1312,6 +1346,7 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
                 visuals, prompt, SYSTEM, {"maxOutputTokens": 4096, "temperature": 0},
                 stream=True, event_handler=events,
             )
+            raw = require_model_success(raw, f"对比模型 {model} 的回答请求")
             usage_records = [connector.get_last_token_usage() or {}]
             actual_model = connector.last_response_model or model
             classification = None
@@ -1322,6 +1357,7 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
                     notices.append(f"分类 JSON 校验未通过（{problem}），已自动重试一次。")
                     raw = connector.ask_about_files(visuals, classification_repair_prompt(prompt, problem), SYSTEM,
                                                      {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=events)
+                    raw = require_model_success(raw, f"对比模型 {model} 的分类输出修复请求")
                     usage_records.append(connector.get_last_token_usage() or {})
                     action = parse_json(raw)
                     problem = validate_classification(action, evidence, codebook_text(documents, bg_context), (bg_context or {}).get("locked_profile"))
@@ -1538,9 +1574,8 @@ def model_test(request: ModelTestRequest):
             [], "Reply with exactly OK.", "You are a connection test. Follow the user instruction exactly.",
             {"maxOutputTokens": 32, "temperature": 0}, stream=True,
             event_handler=lambda kind, text: notices.append(text) if kind == "notice" else None,
-        ).strip()
-        if answer.startswith(("Error:", "HTTP error")):
-            return record(False, answer, model=model, usage=probe.get_last_token_usage() or {})
+        )
+        answer = require_model_success(answer, "模型测试")
         usage = probe.get_last_token_usage() or {}
         if any("拒绝流式" in item for item in notices):
             streaming = "自动回退为完整响应"
