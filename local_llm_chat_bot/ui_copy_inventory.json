@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "status": "inventory complete; no migration has been performed by this file",
+  "scope": "All user-facing copy emitted by chat_workbench.py, including static markup, JavaScript-created markup, browser dialogs, client-side status text and backend error messages surfaced by the browser.",
+  "source_of_truth": "ui_terminology.json",
+  "do_not_translate": [
+    "file names and folder paths",
+    "part numbers, order numbers, manufacturer identifiers and drawing numbers",
+    "model names and exact model IDs",
+    "official Codebook class names when shown as evidence or a classification result",
+    "original source excerpts, OCR text and quoted material",
+    "OCR, PDF, token and other established technical acronyms"
+  ],
+  "units": [
+    {
+      "id": "chrome.topbar",
+      "source": "HTML static markup; refreshAppChrome",
+      "visible_when": "always",
+      "items": ["application name", "workspace shortcut", "local-running status", "workspace-open status", "GUI language picker"],
+      "variables": ["workspace path"],
+      "current_coverage": "partial"
+    },
+    {
+      "id": "sessions.sidebar",
+      "source": "initSessionSidebar, renderSessionRows, openSessionMenu",
+      "visible_when": "always in left sidebar",
+      "items": ["new chat", "loading older sessions", "rename", "pin/unpin", "delete", "session menu", "empty session state"],
+      "variables": ["session title", "pin state", "pagination state"],
+      "current_coverage": "partial"
+    },
+    {
+      "id": "chat.header",
+      "source": "HTML static markup",
+      "visible_when": "always in centre pane",
+      "items": ["assembly analysis", "classification-rule and selected-material subtitle", "multi-model comparison tooltip", "export-chat tooltip"],
+      "variables": [],
+      "current_coverage": "partial"
+    },
+    {
+      "id": "chat.welcome",
+      "source": "HTML static markup; loadHistory",
+      "visible_when": "new or empty chat",
+      "items": ["welcome heading", "local-reading explanation", "choose assembly folder action", "manage classification rules action", "new-chat message"],
+      "variables": [],
+      "current_coverage": "partial"
+    },
+    {
+      "id": "composer",
+      "source": "HTML static markup; initComposerControls; modelChanged",
+      "visible_when": "chat mode",
+      "items": ["question placeholder", "send", "current model", "test model", "custom-model input", "confirm custom model", "model-change notice"],
+      "variables": ["model ID", "test timestamp", "token counts"],
+      "current_coverage": "partial"
+    },
+    {
+      "id": "context.cards",
+      "source": "HTML static markup; refreshContextPanel",
+      "visible_when": "always in right sidebar",
+      "items": ["current context", "classification rules", "selected materials", "processing status", "material cache and audit", "manage/view affordances", "empty summaries"],
+      "variables": ["selected file count", "path", "current rule state", "usage state"],
+      "current_coverage": "partial"
+    },
+    {
+      "id": "drawer.workspace",
+      "source": "openContextDrawer('workspace'); contextPickWorkspace; contextOpenWorkspace",
+      "visible_when": "topbar workspace shortcut is selected",
+      "items": ["workspace explanation", "workspace-folder label", "choose", "open workspace", "missing-workspace error", "restoring-last-workspace status"],
+      "variables": ["workspace path"],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "drawer.rules",
+      "source": "openContextDrawer('rules'); renderCodebookStatus; prepareCodebook; viewCodebook; lockCodebook; changeCodebook",
+      "visible_when": "classification-rules card is selected",
+      "items": ["rule explanation", "rule-file label", "choose file", "prepare rules", "view rules", "replace rules", "locked/draft/no-rule states", "prepare/lock/replace confirmations and failures"],
+      "variables": ["file name", "page count", "model", "token counts", "OCR availability"],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "drawer.materials",
+      "source": "openContextDrawer('materials'); loadTargetTree; makeTreeNode; updateTreeStatus; analyzeTarget; clearBg",
+      "visible_when": "selected-materials card is selected",
+      "items": ["file-or-assembly-folder label", "choose file", "choose folder", "show folder tree", "confirm material scope", "tree selection status", "recommended/not-recommended role hints", "analysis-ready and exit-classification states"],
+      "variables": ["file name", "file size", "material role", "selected count", "path", "changed/missing saved files"],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "drawer.processing",
+      "source": "openContextDrawer('scan'); renderCoverageReport; prepareCoverage",
+      "visible_when": "processing-status card is selected",
+      "items": ["automatic-first-question explanation", "view scan report", "extend to all pages", "coverage complete/incomplete", "reused/new pre-read counts", "evidence-dossier state", "per-file pages read/unread and failures"],
+      "variables": ["file count", "page count", "model calls", "failure messages", "OCR/DFC state"],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "drawer.cache_audit",
+      "source": "openContextDrawer('audit'); renderCacheAudit; rebuildCachedFile; rebuildDossier; clearSummaryCaches",
+      "visible_when": "material-cache-and-audit card is selected",
+      "items": ["audit explanation", "local index", "OCR state", "summary-cache state", "assembly evidence dossier", "read one file again", "rebuild dossier", "clear summary caches", "destructive confirmations"],
+      "variables": ["model", "full/default scope", "cache status", "current-selection state"],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "scan_report",
+      "source": "ensureMaterialFlow; renderScanDrawer; openScanReport",
+      "visible_when": "a material scope has been confirmed",
+      "items": ["confirm selected materials", "view scan report", "local-index status", "files successfully added", "skipped/failed files", "advanced cache and re-read section"],
+      "variables": ["source count", "file size", "chunk count", "skipped count"],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "codebook_workspace",
+      "source": "showCodebookWorkspace; leaveCodebookWorkspace; codebookList",
+      "visible_when": "prepared classification rules are viewed",
+      "items": ["classification-rules workspace heading", "locked/draft explanation", "source metadata", "classes and decision boundaries", "general rules", "table rules", "uncertainties", "confirm and lock", "return to chat"],
+      "variables": ["source name", "parser model", "page/group count", "token/cost data", "OCR configuration", "class/rule content"],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "comparison",
+      "source": "openCompareDrawer; renderCompareSlots; addCompareModel; removeCompareModel; compareModels",
+      "visible_when": "comparison icon is selected",
+      "items": ["comparison explanation", "comparison-model slot", "choose model", "other model ID", "add model", "maximum-four state", "validation errors", "in-progress state", "completion state", "per-model success/failure result"],
+      "variables": ["model count", "requested model", "responding model", "token and cost data", "classification output"],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "chat_processing",
+      "source": "processingCard; updateProcessing; chat",
+      "visible_when": "a chat request is running",
+      "items": ["processing heading", "connection status", "local-reading status", "model-request status", "completion status", "error status", "progress percentage"],
+      "variables": ["progress event text", "progress percentage", "error detail"],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "classification_result",
+      "source": "classificationCard; coverageSummaryCard; showChatResult",
+      "visible_when": "a classification response is returned",
+      "items": ["validated classification conclusion", "class", "confidence", "alternative class", "classification rules and pages", "assembly evidence pages", "evidence", "uncertainties", "material-processing summary"],
+      "variables": ["official class name", "rule IDs", "page numbers", "evidence labels", "confidence", "per-file coverage"],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "status_usage_sources",
+      "source": "renderStatus; renderUsageDetail; renderEvidenceSources",
+      "visible_when": "workspace is open or a request has completed",
+      "items": ["current model", "session", "code-file count", "material count", "request count", "token usage", "estimated cost", "classification mode", "reasoning tokens", "cache read/write", "evidence source", "visual evidence", "DFC structure evidence"],
+      "variables": ["counts", "model", "cost", "source labels", "DFC segment data"],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "session_management",
+      "source": "restoreSessionTree; restoreSessionContext; renameSession; deleteSession; newSession; openSessionByName",
+      "visible_when": "session is opened, renamed, deleted or restored",
+      "items": ["restoring material scope", "restored last confirmed material scope", "rename prompt", "delete confirmation", "new-session state", "open-session errors"],
+      "variables": ["session name", "material count", "target path"],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "model_testing",
+      "source": "confirmCustomModel; switchModel; loadModelStatus; testModel",
+      "visible_when": "model is selected, changed or tested",
+      "items": ["missing model-ID error", "saved custom model notice", "model switched notice", "untested-model state", "last test failed/available", "short test request", "usage returned/not returned", "test failure"],
+      "variables": ["model ID", "timestamp", "streaming mode", "input/output tokens", "error detail"],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "documents_and_exports",
+      "source": "loadDocs; addDoc; exportSession; exportBgAnalysis; apply",
+      "visible_when": "documents are loaded, an export is requested, or code changes are pending",
+      "items": ["no materials", "other material", "chunks", "document indexed", "session exported", "assembly analysis exported", "pending changes", "apply changes", "changes applied"],
+      "variables": ["document name", "chunk count", "export path", "number of changes"],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "browser_accessibility",
+      "source": "HTML aria-label/title/placeholder attributes; dynamically created dialog labels",
+      "visible_when": "screen-reader and pointer interaction",
+      "items": ["splitter label", "context-dialog label", "scan-report dialog label", "model-comparison title", "export title", "input placeholders"],
+      "variables": [],
+      "current_coverage": "missing"
+    },
+    {
+      "id": "backend_errors",
+      "source": "FastAPI HTTPException detail messages surfaced by api()",
+      "visible_when": "a request fails before a client-side message is rendered",
+      "items": ["workspace missing", "path/file validation", "unsupported selection", "Codebook validation", "model/connector failures", "cache operations", "export operations", "request validation", "conflict errors"],
+      "variables": ["path", "file name", "model ID", "underlying safe error detail"],
+      "current_coverage": "missing",
+      "migration_note": "Replace user-facing backend detail strings with stable error codes or a language-neutral reason field; the client selects the localized sentence."
+    }
+  ],
+  "completion_criteria_for_next_step": [
+    "Every item in every unit receives a stable i18n key or an explicit do-not-translate classification.",
+    "No user-visible hard-coded Chinese, English or German sentence remains in HTML or JavaScript rendering functions.",
+    "Backend error details shown in the UI are mapped from a stable code to a localized message.",
+    "Each key has zh, en and de values and a layout classification: one-line, wrap-allowed, or path-truncate."
+  ]
+}
