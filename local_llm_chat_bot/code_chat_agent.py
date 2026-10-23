@@ -84,6 +84,26 @@ def safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)[:80] or "session"
 
 
+def write_json_atomically(path: Path, payload) -> None:
+    """Persist local state without leaving a partial JSON file after a crash."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8", newline="") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            try:
+                os.fsync(handle.fileno())
+            except OSError:
+                pass
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def tokens(text: str) -> list[str]:
     return re.findall(r"[A-Za-z_][A-Za-z0-9_]{1,}|[\u4e00-\u9fff]{2,}|\d{2,}", text.lower())
 
@@ -167,7 +187,7 @@ class ProjectState:
                 "files": {}, "history": [], "summary": "", "usage": {"requests": 0, "input": 0, "output": 0, "estimated_cost_usd": 0.0, "unpriced_requests": 0}}
 
     def save(self):
-        self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_atomically(self.path, self.data)
 
     def _load_memory(self):
         if self.memory_path.exists():
@@ -180,7 +200,7 @@ class ProjectState:
         return {"version": 1, "items": []}
 
     def save_memory(self):
-        self.memory_path.write_text(json.dumps(self.memory, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_atomically(self.memory_path, self.memory)
 
     def remember(self, content: str):
         content = content.strip()
