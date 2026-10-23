@@ -31,8 +31,12 @@ from llm_connector_with_prompt_caching import LLMConnector
 
 
 app = FastAPI(title="Bosch Local Workbench", docs_url=None, redoc_url=None)
-LOCK = threading.Lock()
+LOCK = threading.RLock()
 ACTIVE: dict[str, Any] = {}
+# A streamed request runs in a background thread.  Keep an explicit marker in
+# addition to LOCK so a second browser action cannot replace ACTIVE while that
+# request is queued for the lock or is using a captured session context.
+MODEL_WORK_IN_PROGRESS = threading.Event()
 
 # Retain existing local settings/sessions made by early workbench releases,
 # while never sending their obsolete dotted Farm IDs to the endpoint again.
@@ -263,6 +267,22 @@ def session() -> dict[str, Any]:
     if not ACTIVE:
         raise HTTPException(400, "请先设置工作区。")
     return ACTIVE
+
+
+def reject_context_change_while_processing() -> None:
+    """Keep the selected session, model and material scope stable per request."""
+    if MODEL_WORK_IN_PROGRESS.is_set():
+        raise HTTPException(409, "当前模型请求仍在处理中；请等待回答完成后再切换会话、模型或材料。")
+
+
+def begin_model_work() -> dict[str, Any]:
+    """Reserve the single model slot and capture its complete request context."""
+    with LOCK:
+        if MODEL_WORK_IN_PROGRESS.is_set():
+            raise HTTPException(409, "已有模型请求正在处理中，请等待其完成。")
+        data = dict(session())
+        MODEL_WORK_IN_PROGRESS.set()
+        return data
 
 
 def status_data(data: dict[str, Any]) -> dict[str, Any]:
@@ -1388,6 +1408,7 @@ def index():
 
 @app.post("/api/setup")
 def setup(request: Setup):
+    reject_context_change_while_processing()
     workspace = Path(request.workspace).expanduser().resolve()
     if not workspace.is_dir(): raise HTTPException(400, f"工作区不存在：{workspace}")
     env_file = Path(__file__).resolve().parent / ".env"
@@ -1400,14 +1421,16 @@ def setup(request: Setup):
     price_file = Path(__file__).resolve().parent / "model_pricing.json"
     language = normalize_language(request.language)
     model = canonical_model_id(request.model)
-    ACTIVE.clear(); ACTIVE.update({"state": state, "documents": documents, "model": model, "language": language,
-                                    "llm": LLMConnector(model, key, session_id=state.data["session_id"]),
-                                    "pricing": PricingCatalog(price_file), "pending": []})
-    state.scan()
-    state.data["selected_model"] = model
-    state.save()
-    save_workbench_settings(workspace, state.root.name, model, language)
-    return status_data(ACTIVE)
+    with LOCK:
+        reject_context_change_while_processing()
+        ACTIVE.clear(); ACTIVE.update({"state": state, "documents": documents, "model": model, "language": language,
+                                        "llm": LLMConnector(model, key, session_id=state.data["session_id"]),
+                                        "pricing": PricingCatalog(price_file), "pending": []})
+        state.scan()
+        state.data["selected_model"] = model
+        state.save()
+        save_workbench_settings(workspace, state.root.name, model, language)
+        return status_data(ACTIVE)
 
 
 @app.get("/api/status")
@@ -1416,67 +1439,76 @@ def status(): return status_data(session())
 
 @app.post("/api/model")
 def switch_model(request: ModelSwitchRequest):
+    reject_context_change_while_processing()
     model = canonical_model_id(request.model)
     if not model:
         raise HTTPException(400, "请输入 Bosch Farm 的准确 Model ID。")
-    data = session()
-    try:
-        data["llm"] = LLMConnector(model, data["llm"].api_key, session_id=data["state"].data["session_id"])
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    data["model"] = model
-    data["state"].data["selected_model"] = model
-    data["state"].save()
-    save_workbench_settings(data["state"].workspace, data["state"].root.name, model, data.get("language", "zh"))
-    return status_data(data)
+    with LOCK:
+        reject_context_change_while_processing()
+        data = session()
+        try:
+            data["llm"] = LLMConnector(model, data["llm"].api_key, session_id=data["state"].data["session_id"])
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        data["model"] = model
+        data["state"].data["selected_model"] = model
+        data["state"].save()
+        save_workbench_settings(data["state"].workspace, data["state"].root.name, model, data.get("language", "zh"))
+        return status_data(data)
 
 
 def activate_local_session(data: dict[str, Any], session_name: str) -> dict:
-    state = ProjectState(app_state_home(), data["state"].workspace, session_name)
-    data["state"] = state
-    data["documents"] = LocalDocumentLibrary(state.root.parent / "documents.json")
-    data["model"] = canonical_model_id(state.data.get("selected_model") or data["model"])
-    data["llm"] = LLMConnector(data["model"], data["llm"].api_key, session_id=state.data["session_id"])
-    data["pending"] = []
-    save_workbench_settings(state.workspace, state.root.name, data["model"], data.get("language", "zh"))
-    return status_data(data)
+    with LOCK:
+        reject_context_change_while_processing()
+        state = ProjectState(app_state_home(), data["state"].workspace, session_name)
+        data["state"] = state
+        data["documents"] = LocalDocumentLibrary(state.root.parent / "documents.json")
+        data["model"] = canonical_model_id(state.data.get("selected_model") or data["model"])
+        data["llm"] = LLMConnector(data["model"], data["llm"].api_key, session_id=state.data["session_id"])
+        data["pending"] = []
+        save_workbench_settings(state.workspace, state.root.name, data["model"], data.get("language", "zh"))
+        return status_data(data)
 
 
 @app.post("/api/session/rename")
 def rename_session(request: SessionRenameRequest):
-    data = session()
-    name = safe_name(request.name.strip())
-    state = data["state"] if not request.source.strip() else ProjectState(app_state_home(), data["state"].workspace, safe_name(request.source.strip()))
-    if not state.root.is_dir():
-        raise HTTPException(404, "会话不存在。")
-    target = state.root.parent / name
-    if target == state.root:
-        return status_data(data)
-    if target.exists():
-        raise HTTPException(409, "已存在同名会话。")
-    try:
-        state.root.rename(target)
-    except OSError as exc:
-        raise HTTPException(500, f"无法重命名会话：{exc}") from exc
-    return activate_local_session(data, name) if state.root == data["state"].root else status_data(data)
+    with LOCK:
+        reject_context_change_while_processing()
+        data = session()
+        name = safe_name(request.name.strip())
+        state = data["state"] if not request.source.strip() else ProjectState(app_state_home(), data["state"].workspace, safe_name(request.source.strip()))
+        if not state.root.is_dir():
+            raise HTTPException(404, "会话不存在。")
+        target = state.root.parent / name
+        if target == state.root:
+            return status_data(data)
+        if target.exists():
+            raise HTTPException(409, "已存在同名会话。")
+        try:
+            state.root.rename(target)
+        except OSError as exc:
+            raise HTTPException(500, f"无法重命名会话：{exc}") from exc
+        return activate_local_session(data, name) if state.root == data["state"].root else status_data(data)
 
 
 @app.post("/api/session/delete")
 def delete_session(request: SessionDeleteRequest):
-    if not request.confirmed:
-        raise HTTPException(400, "必须确认后才可删除会话。")
-    data = session()
-    state = data["state"] if not request.name.strip() else ProjectState(app_state_home(), data["state"].workspace, safe_name(request.name.strip()))
-    if not state.root.is_dir():
-        raise HTTPException(404, "会话不存在。")
-    current = state.root
-    parent = current.parent
-    try:
-        shutil.rmtree(current)
-    except OSError as exc:
-        raise HTTPException(500, f"无法删除会话：{exc}") from exc
-    remaining = available_sessions(ProjectState(app_state_home(), data["state"].workspace, "default")) if parent.is_dir() else []
-    return activate_local_session(data, str(remaining[0]["name"]) if remaining else "default") if current == data["state"].root else status_data(data)
+    with LOCK:
+        reject_context_change_while_processing()
+        if not request.confirmed:
+            raise HTTPException(400, "必须确认后才可删除会话。")
+        data = session()
+        state = data["state"] if not request.name.strip() else ProjectState(app_state_home(), data["state"].workspace, safe_name(request.name.strip()))
+        if not state.root.is_dir():
+            raise HTTPException(404, "会话不存在。")
+        current = state.root
+        parent = current.parent
+        try:
+            shutil.rmtree(current)
+        except OSError as exc:
+            raise HTTPException(500, f"无法删除会话：{exc}") from exc
+        remaining = available_sessions(ProjectState(app_state_home(), data["state"].workspace, "default")) if parent.is_dir() else []
+        return activate_local_session(data, str(remaining[0]["name"]) if remaining else "default") if current == data["state"].root else status_data(data)
 
 
 @app.get("/api/settings")
@@ -1504,22 +1536,27 @@ def sessions(offset: int = 0, limit: int = 10):
 
 @app.post("/api/session/open")
 def open_saved_session(request: SessionOpenRequest):
-    data = session(); name = safe_name(request.name.strip())
-    target = data["state"].root.parent / name
-    if not target.is_dir():
-        raise HTTPException(404, "会话不存在。")
-    return activate_local_session(data, name)
+    with LOCK:
+        reject_context_change_while_processing()
+        data = session(); name = safe_name(request.name.strip())
+        target = data["state"].root.parent / name
+        if not target.is_dir():
+            raise HTTPException(404, "会话不存在。")
+        return activate_local_session(data, name)
 
 
 @app.post("/api/session/new")
 def create_session():
-    data = session()
-    stamp = datetime.now().astimezone().strftime("新聊天_%Y%m%d_%H%M%S")
-    return activate_local_session(data, stamp)
+    with LOCK:
+        reject_context_change_while_processing()
+        data = session()
+        stamp = datetime.now().astimezone().strftime("新聊天_%Y%m%d_%H%M%S")
+        return activate_local_session(data, stamp)
 
 
 @app.post("/api/session/pin")
 def pin_session(request: SessionPinRequest):
+    reject_context_change_while_processing()
     data = session(); name = safe_name(request.name.strip())
     target = data["state"].root.parent / name
     if not target.is_dir():
@@ -1622,6 +1659,7 @@ def documents():
 
 @app.post("/api/document")
 def add_document(request: PathRequest):
+    reject_context_change_while_processing()
     item = session()["documents"].add(str(safe_file(request.path)))
     return {"id": item["id"], "name": item["name"], "chunks": len(item["chunks"]),
             "material_role": item.get("material_role", "other"),
@@ -1630,6 +1668,7 @@ def add_document(request: PathRequest):
 
 @app.post("/api/bg")
 def activate_bg(request: BGRequest):
+    reject_context_change_while_processing()
     data = session(); codebook = data["documents"].add(str(safe_file(request.codebook)))
     folder = Path(request.folder.strip().strip('"')).expanduser().resolve()
     sources, skipped = data["documents"].add_folder(str(folder))
@@ -1642,6 +1681,7 @@ def activate_bg(request: BGRequest):
 @app.post("/api/target")
 def analyze_target(request: TargetRequest):
     """Index one file or explicitly selected files in one folder."""
+    reject_context_change_while_processing()
     data = session()
     target = Path(request.target.strip().strip('"')).expanduser().resolve()
     if target.is_file():
@@ -1710,24 +1750,27 @@ def codebook_status():
 
 @app.post("/api/codebook/prepare")
 def codebook_prepare(request: CodebookPrepareRequest):
-    data = session()
     path = safe_file(request.path)
     if path.suffix.lower() not in {".pdf", ".docx"}:
         raise HTTPException(400, "Codebook 目前仅支持 PDF 或 DOCX。")
+    data = begin_model_work()
     model = request.model.strip() or data["model"]
-    with LOCK:
-        try:
+    try:
+        with LOCK:
             profile = prepare_codebook_profile(data, path, model)
-        except Exception as exc:
-            raise HTTPException(400, f"Codebook 准备失败：{exc}") from exc
-        save_codebook_profile(profile)
-        data["state"].data["selected_codebook_path"] = str(path)
-        data["state"].save()
-    return profile
+            save_codebook_profile(profile)
+            data["state"].data["selected_codebook_path"] = str(path)
+            data["state"].save()
+        return profile
+    except Exception as exc:
+        raise HTTPException(400, f"Codebook 准备失败：{exc}") from exc
+    finally:
+        MODEL_WORK_IN_PROGRESS.clear()
 
 
 @app.post("/api/codebook/lock")
 def codebook_lock():
+    reject_context_change_while_processing()
     profile = load_codebook_profile()
     if profile.get("status") != "draft" or not (profile.get("draft") or {}).get("classes"):
         raise HTTPException(400, "请先成功准备 Codebook 草稿。")
@@ -1745,6 +1788,7 @@ def codebook_lock():
 
 @app.delete("/api/codebook")
 def codebook_clear():
+    reject_context_change_while_processing()
     try:
         codebook_profile_path().unlink()
     except FileNotFoundError:
@@ -1765,8 +1809,12 @@ def coverage_status():
 
 @app.post("/api/coverage")
 def create_coverage(request: CoverageRequest = CoverageRequest()):
-    with LOCK:
-        return prepare_coverage(session(), full=request.full)
+    data = begin_model_work()
+    try:
+        with LOCK:
+            return prepare_coverage(data, full=request.full)
+    finally:
+        MODEL_WORK_IN_PROGRESS.clear()
 
 
 @app.get("/api/cache/audit")
@@ -1776,6 +1824,7 @@ def cache_audit_status():
 
 @app.post("/api/cache/file/rebuild")
 def rebuild_cached_file(request: CacheFileRequest):
+    reject_context_change_while_processing()
     if not request.confirmed:
         raise HTTPException(400, "必须确认后才会清除该文件的摘要缓存。")
     data = session()
@@ -1791,6 +1840,7 @@ def rebuild_cached_file(request: CacheFileRequest):
 
 @app.post("/api/cache/dossier/rebuild")
 def rebuild_bg_dossier(request: CacheConfirmRequest):
+    reject_context_change_while_processing()
     if not request.confirmed:
         raise HTTPException(400, "必须确认后才会重新生成 BG 综合证据档案。")
     data = session(); coverage = load_coverage(data["state"])
@@ -1811,6 +1861,7 @@ def rebuild_bg_dossier(request: CacheConfirmRequest):
 
 @app.post("/api/cache/clear")
 def clear_summary_caches(request: CacheConfirmRequest):
+    reject_context_change_while_processing()
     if not request.confirmed:
         raise HTTPException(400, "必须确认后才会清除本地摘要缓存。")
     for name in ("material_cache", "bg_dossier_cache"):
@@ -1825,6 +1876,7 @@ def clear_summary_caches(request: CacheConfirmRequest):
 
 @app.delete("/api/bg")
 def clear_bg():
+    reject_context_change_while_processing()
     data = session(); data["state"].data.pop("bg_context", None); data["state"].save(); return status_data(data)
 
 
@@ -1843,7 +1895,12 @@ def export_bg_analysis():
 @app.post("/api/chat")
 def chat(request: ChatRequest):
     if not request.question.strip(): raise HTTPException(400, "请输入问题。")
-    with LOCK: return call_model(session(), request.question.strip())
+    data = begin_model_work()
+    try:
+        with LOCK:
+            return call_model(data, request.question.strip())
+    finally:
+        MODEL_WORK_IN_PROGRESS.clear()
 
 
 @app.post("/api/chat/stream")
@@ -1852,6 +1909,7 @@ def chat_stream(request: ChatRequest):
     question = request.question.strip()
     if not question:
         raise HTTPException(400, "请输入问题。")
+    data = begin_model_work()
     events: Queue[dict[str, Any]] = Queue()
 
     def publish(phase: str, text: str, percent: int | None = None) -> None:
@@ -1860,11 +1918,12 @@ def chat_stream(request: ChatRequest):
     def worker() -> None:
         try:
             with LOCK:
-                result = call_model(session(), question, progress=publish)
+                result = call_model(data, question, progress=publish)
             events.put({"type": "result", "data": result})
         except Exception as exc:
             events.put({"type": "error", "message": str(exc)})
         finally:
+            MODEL_WORK_IN_PROGRESS.clear()
             events.put({"type": "end"})
 
     threading.Thread(target=worker, daemon=True).start()
@@ -1892,12 +1951,17 @@ def compare(request: CompareRequest):
         raise HTTPException(400, "请输入同一条要对比的问题。")
     if not 2 <= len(models) <= 4:
         raise HTTPException(400, "请勾选 2 到 4 个模型。")
-    with LOCK:
-        return call_comparison(session(), question, models)
+    data = begin_model_work()
+    try:
+        with LOCK:
+            return call_comparison(data, question, models)
+    finally:
+        MODEL_WORK_IN_PROGRESS.clear()
 
 
 @app.post("/api/apply")
 def apply():
+    reject_context_change_while_processing()
     data = session(); pending = data.get("pending", [])
     if not pending: raise HTTPException(400, "没有待应用的修改。")
     state = data["state"]
