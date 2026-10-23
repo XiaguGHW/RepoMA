@@ -68,6 +68,31 @@ def codebook_profile_path() -> Path:
     return app_state_home() / "codebook_profile.json"
 
 
+def write_json_atomically(path: Path, payload: Any) -> None:
+    """Replace one local JSON file without ever exposing a half-written file.
+
+    All workbench state stays beside the program.  Writing a sibling temporary
+    file and replacing it only after close prevents an interrupted shutdown
+    from corrupting settings, Codebook profiles or reusable evidence caches.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8", newline="") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            try:
+                os.fsync(handle.fileno())
+            except OSError:
+                pass
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def load_codebook_profile() -> dict:
     try:
         data = json.loads(codebook_profile_path().read_text(encoding="utf-8"))
@@ -77,8 +102,7 @@ def load_codebook_profile() -> dict:
 
 
 def save_codebook_profile(profile: dict) -> None:
-    app_state_home().mkdir(parents=True, exist_ok=True)
-    codebook_profile_path().write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomically(codebook_profile_path(), profile)
 
 
 def file_digest(path: Path) -> str:
@@ -138,7 +162,7 @@ def save_material_selection(folder: Path, files: list[Path]) -> None:
     if len(records) > 100:
         keep = sorted(records, key=lambda key: str(records[key].get("updated_at", "")), reverse=True)[:100]
         records = {key: records[key] for key in keep}
-    material_selections_path().write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomically(material_selections_path(), records)
 
 
 def load_model_tests() -> dict[str, dict]:
@@ -150,10 +174,9 @@ def load_model_tests() -> dict[str, dict]:
 
 
 def save_model_test(result: dict) -> None:
-    app_state_home().mkdir(parents=True, exist_ok=True)
     records = load_model_tests()
     records[str(result["requested_model"])] = result
-    model_tests_path().write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomically(model_tests_path(), records)
 
 
 def load_workbench_settings() -> dict[str, str]:
@@ -174,11 +197,10 @@ def normalize_language(value: Any) -> str:
 
 
 def save_workbench_settings(workspace: Path, session_name: str, model: str, language: str = "zh") -> None:
-    app_state_home().mkdir(parents=True, exist_ok=True)
-    workbench_settings_path().write_text(
-        json.dumps({"workspace": str(workspace), "session": session_name, "model": canonical_model_id(model), "language": normalize_language(language)}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    write_json_atomically(workbench_settings_path(), {
+        "workspace": str(workspace), "session": session_name,
+        "model": canonical_model_id(model), "language": normalize_language(language),
+    })
 
 
 class Setup(BaseModel):
@@ -707,11 +729,10 @@ def load_material_summary_cache(document: dict, model: str, full: bool, read_pag
 
 def save_material_summary_cache(document: dict, model: str, full: bool, read_pages: list[int], record: dict) -> None:
     path = material_summary_cache_path(document, model, full, read_pages)
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"version": MATERIAL_SUMMARY_CACHE_VERSION, "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                "sha256": document.get("sha256"), "model": model, "full": full, "pages": read_pages,
                "record": record}
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomically(path, payload)
 
 
 def bg_dossier_identity(coverage: dict, model: str) -> dict:
@@ -762,8 +783,7 @@ def prepare_bg_dossier(data: dict[str, Any], coverage: dict) -> tuple[dict | Non
                                                      "pages_read": item.get("pages_read", [])} for item in records],
                "cache_status": "created"}
     path = bg_dossier_cache_path(coverage, data["model"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(dossier, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomically(path, dossier)
     return dossier, usage, True
 
 
@@ -830,7 +850,7 @@ def invalidate_current_coverage(state: ProjectState, document_id: str | None = N
     if document_id:
         coverage["files"] = [item for item in coverage.get("files", []) if item.get("id") != document_id]
     coverage["complete"] = False
-    coverage_path(state).write_text(json.dumps(coverage, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomically(coverage_path(state), coverage)
 
 
 def load_coverage(state: ProjectState) -> dict:
@@ -1001,7 +1021,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None) ->
     report = {"created_at": datetime.now().astimezone().isoformat(timespec="seconds"), "model": data["model"], "requested_full_coverage": full,
               "files": records, "complete": all(item["complete"] for item in records), "model_calls": total_calls,
               "reused_files": reused_files, "created_files": created_files}
-    coverage_path(state).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomically(coverage_path(state), report)
     return report
 
 
