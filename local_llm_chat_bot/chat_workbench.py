@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -27,7 +28,7 @@ from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relati
                              excerpt, parse_json, prompt_for, safe_name, sha256)
 from local_document_library import (LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS,
                                     material_is_recommended, material_role, material_role_label)
-from llm_connector_with_prompt_caching import LLMConnector
+from llm_connector_with_prompt_caching import LLMConnector, farm_base_url
 
 
 app = FastAPI(title="Bosch Local Workbench", docs_url=None, redoc_url=None)
@@ -177,6 +178,72 @@ def save_model_test(result: dict) -> None:
     records = load_model_tests()
     records[str(result["requested_model"])] = result
     write_json_atomically(model_tests_path(), records)
+
+
+def local_diagnostics() -> dict[str, Any]:
+    """Return a non-sensitive readiness report for the local workbench.
+
+    This deliberately never calls a model endpoint and never includes a
+    credential (or even its length).  It is safe to show directly in the UI.
+    """
+    env_file = Path(__file__).resolve().parent / ".env"
+    load_dotenv(env_file)
+    key_present = bool(os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY") or os.getenv("BOSCH_FARM_API_KEY"))
+    checks: list[dict[str, Any]] = [
+        {"id": "env_file", "label": "配置文件 (.env)", "ok": env_file.is_file(), "required": True,
+         "detail": "已找到。" if env_file.is_file() else "未找到；请在程序目录添加 .env。"},
+        {"id": "farm_key", "label": "Bosch Farm 密钥", "ok": key_present, "required": True,
+         "detail": "已读取（不会显示密钥）。" if key_present else "未读取；请设置 BOSCH_FARM_SUBSCRIPTION_KEY。"},
+        {"id": "farm_endpoint", "label": "Bosch Farm 地址", "ok": bool(farm_base_url()), "required": True,
+         "detail": farm_base_url() or "未配置。"},
+    ]
+    package_groups = {
+        "Web 服务": ("fastapi", "uvicorn"),
+        "PDF 读取 (PyMuPDF)": ("fitz",),
+        "DOCX / Excel 读取": ("docx", "openpyxl"),
+    }
+    for label, modules in package_groups.items():
+        missing = [module for module in modules if importlib.util.find_spec(module) is None]
+        checks.append({"id": "packages_" + "_".join(modules), "label": label,
+                       "ok": not missing, "required": True,
+                       "detail": "可用。" if not missing else "缺少：" + ", ".join(missing)})
+    try:
+        probe = LocalDocumentLibrary(app_state_home() / ".diagnostic_document_index.json")
+        ocr = probe.ocr_runtime_status()
+        ocr_ok = bool(ocr.get("available"))
+        if ocr_ok:
+            detail = "可用" + ("；已安装德语 deu。" if ocr.get("german_available") else "；未检测到德语 deu 语言包。")
+        else:
+            detail = "不可用：" + str(ocr.get("status", "未知原因"))
+        checks.append({"id": "ocr", "label": "OCR (Tesseract)", "ok": ocr_ok,
+                       "required": False, "detail": detail})
+    except Exception as exc:
+        checks.append({"id": "ocr", "label": "OCR (Tesseract)", "ok": False,
+                       "required": False, "detail": "检查失败：" + str(exc)[:160]})
+    try:
+        state_dir = app_state_home()
+        state_dir.mkdir(parents=True, exist_ok=True)
+        check_file = state_dir / f".diagnostic-{os.getpid()}-{threading.get_ident()}.tmp"
+        check_file.write_text("ok", encoding="utf-8")
+        check_file.unlink()
+        checks.append({"id": "state_storage", "label": "本地状态目录", "ok": True,
+                       "required": True, "detail": "可读写。"})
+    except OSError as exc:
+        checks.append({"id": "state_storage", "label": "本地状态目录", "ok": False,
+                       "required": True, "detail": "不可写：" + str(exc)[:160]})
+    settings = load_workbench_settings()
+    active_model = str(ACTIVE.get("model") or settings.get("model") or "")
+    previous_test = load_model_tests().get(active_model, {})
+    if previous_test:
+        detail = ("上次测试可用：" if previous_test.get("ok") else "上次测试失败：") + str(previous_test.get("tested_at", "—"))
+        checks.append({"id": "model_test", "label": "当前模型的上次测试", "ok": bool(previous_test.get("ok")),
+                       "required": False, "detail": detail})
+    else:
+        checks.append({"id": "model_test", "label": "当前模型的上次测试", "ok": None,
+                       "required": False, "detail": "尚未测试；可在模型选择器旁测试。"})
+    return {"generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "overall": "ready" if all(check["ok"] or not check["required"] for check in checks) else "attention",
+            "checks": checks}
 
 
 def load_workbench_settings() -> dict[str, str]:
@@ -1610,6 +1677,12 @@ def model_tests():
     return {"tests": load_model_tests()}
 
 
+@app.get("/api/diagnostics")
+def diagnostics():
+    """Local-only readiness checks; this endpoint never contacts Bosch Farm."""
+    return local_diagnostics()
+
+
 @app.post("/api/model-test")
 def model_test(request: ModelTestRequest):
     model = request.model.strip()
@@ -2037,7 +2110,7 @@ const I18N={
     'rules.title':'分类规则','rules.description':'分类规则是后续装配体分类的固定依据。选择或替换文件后，再一次性准备并确认锁定。','rules.file_label':'分类规则文件（PDF / DOCX）','rules.choose':'选择分类规则文件','rules.prepare':'准备分类规则','rules.view':'查看规则','rules.replace':'更换',
     'materials.title':'本次材料','materials.description':'选择单个文件，或选择装配体文件夹后在下方树中勾选本次需要的文件。','materials.target_label':'文件或装配体文件夹','materials.target_placeholder':'PDF / Excel / PNG，或装配体文件夹','materials.file':'文件','materials.folder':'文件夹','materials.show_tree':'显示文件夹结构','materials.confirm_scope':'确认材料范围',
     'scan.title':'扫描状态','scan.description':'首次分类问题会自动读取并理解当前已确认材料；无需提前消耗模型 token。','scan.report':'查看扫描报告','scan.extend':'继续覆盖全部页',
-    'audit.title':'材料缓存与审计','audit.description':'这里用于核对本地索引、已复用的模型摘要与本轮 token。首次提问前为空是正常状态。','audit.open':'打开详细缓存审计',
+    'audit.title':'材料缓存与审计','audit.description':'这里用于核对本地索引、已复用的模型摘要与本轮 token。首次提问前为空是正常状态。','audit.open':'打开详细缓存审计','audit.diagnostics':'运行本机自检','audit.diagnostics_loading':'正在检查本机配置…','audit.diagnostics_idle':'尚未运行自检。不会发送材料或密钥。','audit.diagnostics_ready':'本机已准备就绪','audit.diagnostics_attention':'有本机配置需要处理','audit.diagnostics_failed':'自检失败：',
     'model.unknown_source':'未知来源','classification.title':'本次分类结论（已校验）','classification.label':'类别','classification.confidence':'置信度','classification.alternative':'备选类别','classification.rules':'分类规则','classification.rule_pages':'规则页码','classification.evidence_pages':'装配体证据页码','classification.evidence':'证据','classification.uncertainty':'不确定性','classification.none':'未提供','classification.not_returned':'未返回','classification.not_reported':'未报告明显不确定性',
     'coverage.title':'本次资料处理情况（本地记录）','coverage.summary':'已处理 {files} 个文件；复用 {reused} 个，本次读取 {created} 个；预读模型调用 {calls} 次。','coverage.read':'已读','coverage.unread':'未读','coverage.reused':'已复用','coverage.created':'本次读取','coverage.default_scope':'已读取',
     'status.model':'模型','status.session':'会话','status.code':'代码','status.documents':'材料','status.requests':'累计请求','status.tokens':'累计 Token','status.cost':'累计估算','status.assembly_mode':'装配体模式','status.normal_mode':'普通模式'
@@ -2047,7 +2120,7 @@ const I18N={
     'rules.title':'Classification rules','rules.description':'Classification rules are the fixed basis for later assembly classification. Select or replace a file, then prepare and confirm it once.','rules.file_label':'Classification-rules file (PDF / DOCX)','rules.choose':'Choose classification-rules file','rules.prepare':'Prepare classification rules','rules.view':'View rules','rules.replace':'Replace',
     'materials.title':'Selected materials','materials.description':'Select one file, or choose an assembly folder and tick the files required for this analysis below.','materials.target_label':'File or assembly folder','materials.target_placeholder':'PDF / Excel / PNG, or assembly folder','materials.file':'File','materials.folder':'Folder','materials.show_tree':'Show folder tree','materials.confirm_scope':'Confirm material scope',
     'scan.title':'Processing status','scan.description':'The first classification question automatically reads and understands confirmed materials; no model tokens are spent in advance.','scan.report':'View scan report','scan.extend':'Read all pages',
-    'audit.title':'Material cache and audit','audit.description':'Review local indexes, reused model summaries and token use for this request here. It is normally empty before the first question.','audit.open':'Open detailed cache audit',
+    'audit.title':'Material cache and audit','audit.description':'Review local indexes, reused model summaries and token use for this request here. It is normally empty before the first question.','audit.open':'Open detailed cache audit','audit.diagnostics':'Run local self-check','audit.diagnostics_loading':'Checking local configuration…','audit.diagnostics_idle':'No self-check has run yet. No materials or credentials are sent.','audit.diagnostics_ready':'Local setup is ready','audit.diagnostics_attention':'Local configuration needs attention','audit.diagnostics_failed':'Self-check failed: ',
     'model.unknown_source':'Unknown source','classification.title':'Classification result (validated)','classification.label':'Class','classification.confidence':'Confidence','classification.alternative':'Alternative class','classification.rules':'Classification rules','classification.rule_pages':'Rule pages','classification.evidence_pages':'Assembly evidence pages','classification.evidence':'Evidence','classification.uncertainty':'Uncertainties','classification.none':'Not provided','classification.not_returned':'Not returned','classification.not_reported':'No material uncertainty reported',
     'coverage.title':'Material processing summary (local record)','coverage.summary':'{files} files processed; {reused} reused, {created} read now; {calls} pre-reading model calls.','coverage.read':'read','coverage.unread':'unread','coverage.reused':'reused','coverage.created':'read now','coverage.default_scope':'read',
     'status.model':'Model','status.session':'Session','status.code':'Code','status.documents':'Materials','status.requests':'Total requests','status.tokens':'Total tokens','status.cost':'Total estimate','status.assembly_mode':'Assembly mode','status.normal_mode':'Normal mode'
@@ -2057,7 +2130,7 @@ const I18N={
     'rules.title':'Klassifikationsregeln','rules.description':'Klassifikationsregeln sind die feste Grundlage für die spätere Baugruppenklassifikation. Datei auswählen oder ersetzen, danach einmal vorbereiten und bestätigen.','rules.file_label':'Datei mit Klassifikationsregeln (PDF / DOCX)','rules.choose':'Regeldatei auswählen','rules.prepare':'Klassifikationsregeln vorbereiten','rules.view':'Regeln ansehen','rules.replace':'Ersetzen',
     'materials.title':'Ausgewählte Materialien','materials.description':'Eine Datei auswählen oder einen Baugruppenordner wählen und unten die für diese Analyse benötigten Dateien markieren.','materials.target_label':'Datei oder Baugruppenordner','materials.target_placeholder':'PDF / Excel / PNG oder Baugruppenordner','materials.file':'Datei','materials.folder':'Ordner','materials.show_tree':'Ordnerstruktur anzeigen','materials.confirm_scope':'Materialumfang bestätigen',
     'scan.title':'Verarbeitungsstatus','scan.description':'Bei der ersten Klassifikationsfrage werden bestätigte Materialien automatisch gelesen und verstanden; vorher entstehen keine Modell-Token.','scan.report':'Scanbericht ansehen','scan.extend':'Alle Seiten lesen',
-    'audit.title':'Material-Cache und Prüfung','audit.description':'Hier lassen sich lokale Indizes, wiederverwendete Modellzusammenfassungen und Token dieser Runde prüfen. Vor der ersten Frage ist der Bereich normalerweise leer.','audit.open':'Detaillierte Cache-Prüfung öffnen',
+    'audit.title':'Material-Cache und Prüfung','audit.description':'Hier lassen sich lokale Indizes, wiederverwendete Modellzusammenfassungen und Token dieser Runde prüfen. Vor der ersten Frage ist der Bereich normalerweise leer.','audit.open':'Detaillierte Cache-Prüfung öffnen','audit.diagnostics':'Lokale Selbstprüfung starten','audit.diagnostics_loading':'Lokale Konfiguration wird geprüft…','audit.diagnostics_idle':'Noch keine Selbstprüfung ausgeführt. Materialien und Zugangsdaten werden nicht gesendet.','audit.diagnostics_ready':'Lokale Einrichtung ist bereit','audit.diagnostics_attention':'Lokale Konfiguration benötigt Aufmerksamkeit','audit.diagnostics_failed':'Selbstprüfung fehlgeschlagen: ',
     'model.unknown_source':'Unbekannte Quelle','classification.title':'Klassifikationsergebnis (geprüft)','classification.label':'Klasse','classification.confidence':'Konfidenz','classification.alternative':'Alternative Klasse','classification.rules':'Klassifikationsregeln','classification.rule_pages':'Regelseiten','classification.evidence_pages':'Evidenzseiten der Baugruppe','classification.evidence':'Evidenz','classification.uncertainty':'Unsicherheiten','classification.none':'Nicht angegeben','classification.not_returned':'Nicht zurückgegeben','classification.not_reported':'Keine wesentliche Unsicherheit angegeben',
     'coverage.title':'Materialverarbeitung (lokaler Nachweis)','coverage.summary':'{files} Dateien verarbeitet; {reused} wiederverwendet, {created} jetzt gelesen; {calls} Modellaufrufe zur Voranalyse.','coverage.read':'gelesen','coverage.unread':'ungelesen','coverage.reused':'wiederverwendet','coverage.created':'jetzt gelesen','coverage.default_scope':'gelesen',
     'status.model':'Modell','status.session':'Sitzung','status.code':'Code','status.documents':'Materialien','status.requests':'Anfragen gesamt','status.tokens':'Token gesamt','status.cost':'Schätzung gesamt','status.assembly_mode':'Baugruppenmodus','status.normal_mode':'Normaler Modus'
@@ -2149,6 +2222,21 @@ async function contextPickTarget(kind){try{let path=(await api('/api/pick/'+kind
 function contextSyncTarget(){let value=$('contexttargetpath').value.trim();$('targetpath').value=value;clearTargetTree();refreshContextPanel()}
 function contextSyncRule(){let value=$('contextcodebookpath').value.trim();$('codebook').value=value;refreshContextPanel()}
 async function contextPickRule(){try{let path=(await api('/api/pick/file')).path||'';if(!path)return;$('codebook').value=path;$('contextcodebookpath').value=path;refreshContextPanel()}catch(e){$('contextrulemsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+function renderDiagnostics(report){
+  let host=$('diagnosticsresult');if(!host)return;
+  let ready=report.overall==='ready';
+  let rows=(report.checks||[]).map(check=>{
+    let marker=check.ok===true?'<span class="ok">✓</span>':check.required===false?'<span class="muted">△</span>':'<span class="error">×</span>';
+    return '<div class="card"><b>'+marker+' '+esc(check.label||'—')+'</b><br><span class="muted">'+esc(check.detail||'—')+'</span></div>';
+  }).join('');
+  host.innerHTML='<div class="'+(ready?'ok':'error')+'"><b>'+t(ready?'audit.diagnostics_ready':'audit.diagnostics_attention')+'</b></div>'+rows;
+}
+async function runDiagnostics(){
+  let host=$('diagnosticsresult');if(!host)return;
+  host.textContent=t('audit.diagnostics_loading');
+  try{renderDiagnostics(await api('/api/diagnostics'))}
+  catch(e){host.innerHTML='<span class="error">'+t('audit.diagnostics_failed')+esc(e.message)+'</span>'}
+}
 function openContextDrawer(kind){
   closeContextDrawer();let title=$('contextdrawertitle'),body=$('contextdrawerbody');
   if(kind==='workspace'){
@@ -2164,9 +2252,9 @@ function openContextDrawer(kind){
     title.textContent='多模型对比';body.innerHTML='<div class="muted">同一问题、同一份已确认的 BG 证据；选择 2–4 个模型进行顺序对比。结果只显示在当前页面，不写入会话。</div><div id="contextcomparemount"></div>';
     let host=$('contextcomparemount');moveContextElements(['comparemodels'],host);let row=$('addcompare')?.parentNode;if(row){let marker=document.createComment('context:compare-actions');row.parentNode.insertBefore(marker,row);contextMoved.push({el:row,marker});host.append(row)}moveContextElements(['comparestatus'],host);
   }else{
-    title.textContent=t('audit.title');body.innerHTML='<div class="muted">'+t('audit.description')+'</div><div class="card">'+$('usagedetail').innerHTML+'</div><div class="card">'+$('status').innerHTML+'</div><div class="row"><button class="ghost" onclick="openScanReport();setTimeout(loadCacheAudit,80)">'+t('audit.open')+'</button></div>';
+    title.textContent=t('audit.title');body.innerHTML='<div class="muted">'+t('audit.description')+'</div><div class="card">'+$('usagedetail').innerHTML+'</div><div class="card">'+$('status').innerHTML+'</div><div class="row"><button class="ghost" onclick="openScanReport();setTimeout(loadCacheAudit,80)">'+t('audit.open')+'</button><button class="ghost" onclick="runDiagnostics()">'+t('audit.diagnostics')+'</button></div><div id="diagnosticsresult" class="list muted" style="margin-top:12px">'+t('audit.diagnostics_idle')+'</div>';
   }
-  $('contextbackdrop').classList.add('open');applyLanguage();refreshContextPanel();
+  $('contextbackdrop').classList.add('open');applyLanguage();refreshContextPanel();if(kind==='audit')runDiagnostics();
 }
 function openCompareDrawer(){openContextDrawer('compare')}
 function message(text,kind='assistant'){let e=document.createElement('div');e.className='message '+kind;e.textContent=text;$('chat').append(e);$('chat').scrollTop=1e9;return e}
