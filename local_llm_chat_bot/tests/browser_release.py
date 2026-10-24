@@ -1,115 +1,371 @@
-"""Run with Python Playwright 1.51+, Chromium installed. No Bosch access."""
+"""Strict synthetic browser regressions. Run directly; failures exit nonzero."""
+
 import json
 import os
 from pathlib import Path
 import socket
 import sys
+import tempfile
 import threading
 import time
+import unittest
 
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import uvicorn
 import chat_workbench as w
 from fixture_support import FixtureEnvironment
 from playwright.sync_api import sync_playwright
 
 
-def main():
-    output=Path(os.getenv('WORKBENCH_TEST_OUTPUT','/tmp/workbench-browser-results'));output.mkdir(parents=True,exist_ok=True)
-    with FixtureEnvironment() as f:
-        sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
-        server=uvicorn.Server(uvicorn.Config(w.app,log_level='error'))
-        thread=threading.Thread(target=server.run,kwargs={'sockets':[sock]},daemon=True);thread.start()
-        for _ in range(100):
-            if server.started:break
-            time.sleep(.05)
-        errors=[]; warnings=[];checks=[]
-        try:
-            with sync_playwright() as p:
-                browser=p.chromium.launch(headless=True)
-                page=browser.new_page(viewport={'width':1440,'height':1000})
-                page.on('pageerror',lambda error:errors.append(str(error)))
-                page.on('console',lambda message:warnings.append(message.text) if message.type=='warning' else None)
-                page.goto(f'http://127.0.0.1:{port}')
-                page.wait_for_function('typeof materialDraftDirty !== "undefined"')
-                page.locator('#workspaceshortcut').click()
-                # The existing drawer provides text input for machines without a file picker.
-                page.locator('#contextworkspace').fill(str(f.workspace))
-                page.locator('#contextdrawerbody button').filter(has_text='打开工作区').click()
-                page.wait_for_function('lastStatusSnapshot && lastStatusSnapshot.workspace')
-                page.evaluate('closeContextDrawer()')
-                page.select_option('#model','__custom__')
-                page.locator('#custommodel').fill(' GEMINI-2.5-PRO ')
-                page.evaluate('switchModel()')
-                page.wait_for_function('lastStatusSnapshot.model === "gemini-2.5-pro"')
-                checks.append('workspace and custom model')
-                for language in ['zh','en','de','zh','en','de']:
-                    page.select_option('#language',language)
-                    page.wait_for_function('(l)=>document.documentElement.lang===l',arg=language)
-                    page.evaluate('languageSave')
-                    assert page.input_value('#custommodel').strip().lower()=='gemini-2.5-pro'
-                checks.append('six language switches preserve selection')
-                page.select_option('#language','en');page.evaluate('languageSave')
-                page.evaluate('openContextDrawer("rules")')
-                page.locator('#contextcodebookpath').fill(str(f.rules))
-                page.evaluate('contextSyncRule()')
-                page.on('dialog',lambda d:d.accept('gemini-2.5-pro') if d.type=='prompt' else d.accept())
-                page.evaluate('prepareCodebook()')
-                page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
-                page.evaluate('closeContextDrawer()')
-                page.get_by_role('button',name='Lock Codebook',exact=False).click()
-                page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
-                page.evaluate('leaveCodebookWorkspace()')
-                page.evaluate('openContextDrawer("materials")')
-                page.locator('#contexttargetpath').fill(str(f.bg_a))
-                page.evaluate('contextSyncTarget();loadTargetTree()')
-                page.wait_for_selector('input.tree-file')
-                page.evaluate('analyzeTarget()')
-                page.wait_for_function('lastStatusSnapshot.bg_context?.folder.endsWith("BG_A")')
-                page.evaluate('closeContextDrawer()')
-                page.locator('#question').fill('Classify this Baugruppe')
-                page.evaluate('chat()')
-                page.wait_for_selector('.classification-card')
-                assert 'Rotationseinheit' in page.locator('.classification-card').inner_text()
-                page.locator('#question').fill('Explain the motor evidence')
-                page.evaluate('chat()')
-                page.wait_for_function('!busy')
-                checks.append('prepare lock select classify follow-up')
-                page.evaluate('viewCodebook()')
-                page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
-                page.get_by_role('button',name='Edit rule draft',exact=True).click()
-                draft=json.loads(page.input_value('#ruleeditor'));draft['classes'][0]['name']='Fixture Class B'
-                page.locator('#ruleeditor').fill(json.dumps(draft))
-                page.get_by_role('button',name='Save draft',exact=True).click()
-                page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
-                page.evaluate('lockCodebook()');page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
-                page.evaluate('leaveCodebookWorkspace();openContextDrawer("materials")')
-                page.locator('#contexttargetpath').fill(str(f.bg_b));page.evaluate('contextSyncTarget();loadTargetTree()')
-                page.wait_for_function('lastTargetTreePayload?.tree?.path.endsWith("BG_B")')
-                page.evaluate('analyzeTarget()');page.wait_for_function('lastStatusSnapshot.bg_context?.folder.endsWith("BG_B")')
-                page.evaluate('closeContextDrawer()')
-                page.locator('#question').fill('Classify this Baugruppe again');page.evaluate('chat()')
-                page.wait_for_selector('.classification-card')
-                assert 'Fixture Class B' in page.locator('.classification-card').inner_text()
-                assert 'FIXTURE_BG_A' not in json.dumps(f.calls[-1])
-                checks.append('edit rules, switch BG, classify without old context')
-                page.screenshot(path=str(output/'desktop.png'),full_page=True)
-                for width in [800,390]:
-                    page.set_viewport_size({'width':width,'height':900})
-                    page.evaluate('openContextDrawer("materials")')
-                    assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth+1')
-                    page.screenshot(path=str(output/f'width-{width}.png'),full_page=True)
-                    page.evaluate('closeContextDrawer()')
-                checks.append('800px and 390px no horizontal overflow')
-                page.reload();page.wait_for_function('lastStatusSnapshot?.bg_context?.folder.endsWith("BG_B")')
-                checks.append('refresh restores workspace, model, language, BG')
-                assert not errors,errors
-                assert not [x for x in warnings if 'Unknown UI translation key' in x],warnings
-                browser.close()
-        finally:
-            server.should_exit=True;thread.join(timeout=10);sock.close()
-            (output/'browser-results.json').write_text(json.dumps({'checks':checks,'errors':errors,'warnings':warnings},ensure_ascii=False,indent=2))
-        print(json.dumps({'checks':checks,'errors':errors},ensure_ascii=False))
+OUTPUT = Path(
+    os.getenv("WORKBENCH_TEST_OUTPUT") or tempfile.mkdtemp(prefix="workbench-browser-")
+)
+CHECKS = []
 
 
-if __name__=='__main__':main()
+class BrowserRelease(unittest.TestCase):
+    def setUp(self):
+        self.stage = self._testMethodName
+        self.f = FixtureEnvironment().__enter__()
+        self.addCleanup(self.f.__exit__, None, None, None)
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        self.addCleanup(sock.close)
+        self.server = uvicorn.Server(uvicorn.Config(w.app, log_level="error"))
+        self.thread = threading.Thread(
+            target=self.server.run, kwargs={"sockets": [sock]}, daemon=True
+        )
+        self.thread.start()
+        self.addCleanup(self.stop_server)
+        deadline = time.monotonic() + 10
+        while not self.server.started and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(self.server.started, "fixture server did not start")
+        runtime = sync_playwright().start()
+        self.addCleanup(runtime.stop)
+        options = {"headless": True}
+        if os.getenv("WORKBENCH_CHROMIUM_EXECUTABLE"):
+            options["executable_path"] = os.environ["WORKBENCH_CHROMIUM_EXECUTABLE"]
+        self.browser = runtime.chromium.launch(**options)
+        self.addCleanup(self.browser.close)
+        self.page = self.browser.new_page(viewport={"width": 1440, "height": 1000})
+        self.page.set_default_timeout(8000)
+        self.page.set_default_navigation_timeout(10000)
+        self.errors, self.warnings = [], []
+        self.page.on("pageerror", lambda error: self.errors.append(str(error)))
+        self.page.on(
+            "console",
+            lambda msg: (
+                self.warnings.append(msg.text) if msg.type == "warning" else None
+            ),
+        )
+        self.page.on(
+            "dialog",
+            lambda dialog: (
+                dialog.accept("gemini-2.5-pro")
+                if dialog.type == "prompt"
+                else dialog.accept()
+            ),
+        )
+        self.page.goto(f"http://127.0.0.1:{port}")
+        self.page.wait_for_function('typeof materialDraftDirty !== "undefined"')
+        self.open_workspace()
+
+    def stop_server(self):
+        self.server.should_exit = True
+        self.thread.join(timeout=10)
+
+    def tearDown(self):
+        self.assertEqual(self.errors, [], "browser page errors")
+        self.assertEqual(
+            [v for v in self.warnings if "Unknown UI translation key" in v], []
+        )
+
+    def completed(self, stage):
+        CHECKS.append(
+            {"test": self._testMethodName, "stage": stage, "status": "passed"}
+        )
+
+    def button(self, handler, root=""):
+        return self.page.locator(f'{root} button[onclick="{handler}"]')
+
+    def close_drawer(self):
+        self.button("closeContextDrawer()", ".context-drawer-head").click()
+
+    def open_drawer(self, kind):
+        if kind == "workspace":
+            self.page.locator("#workspaceshortcut").click()
+        else:
+            self.page.locator(
+                f".context-card[onclick=\"openContextDrawer('{kind}')\"]"
+            ).click()
+
+    def open_workspace(self):
+        self.open_drawer("workspace")
+        self.page.locator("#contextworkspacepath").fill(str(self.f.workspace))
+        self.button("contextOpenWorkspace()").click()
+        # renderStatus is earlier than restoreSessionContext; await setup's final signal.
+        self.page.wait_for_function(
+            "document.getElementById('setupmsg').textContent === t('workspace.opened')"
+        )
+
+    def language(self, language):
+        self.page.select_option("#language", language)
+        self.page.evaluate("languageSave")
+        self.page.wait_for_function(
+            "(l)=>document.documentElement.lang===l", arg=language
+        )
+
+    def prepare_rules(self):
+        self.open_drawer("rules")
+        self.page.locator("#contextcodebookpath").fill(str(self.f.rules))
+        self.button("contextSyncRule();prepareCodebook()").click()
+        self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
+        self.close_drawer()
+
+    def lock_rules(self):
+        label = self.page.evaluate("t('rulews.lock_action')")
+        self.page.get_by_role("button", name=label, exact=True).click()
+        self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
+
+    def select_bg(self, folder):
+        self.open_drawer("materials")
+        self.page.locator("#contexttargetpath").fill(str(folder))
+        self.button("contextSyncTarget();loadTargetTree()").click()
+        self.page.wait_for_function(
+            "(path)=>lastTargetTreePayload?.tree?.path===path", arg=str(folder)
+        )
+        self.page.locator("input.tree-file").first.wait_for(state="attached")
+        self.button("contextSyncTarget();analyzeTarget()").click()
+        self.page.wait_for_function(
+            "(path)=>lastStatusSnapshot.bg_context?.folder===path", arg=str(folder)
+        )
+        self.close_drawer()
+
+    def ask(self, question):
+        self.page.locator("#question").fill(question)
+        self.button("chat()", "#composer").click()
+        self.page.wait_for_function(
+            "!busy && document.getElementById('question').value === ''"
+        )
+
+    def test_user_flow(self):
+        self.stage = "workspace and custom model"
+        self.page.select_option("#model", "__custom__")
+        self.page.locator("#custommodel").fill(" GEMINI-2.5-PRO ")
+        self.button("confirmCustomModel()").click()
+        self.page.wait_for_function('lastStatusSnapshot.model === "gemini-2.5-pro"')
+        self.completed(self.stage)
+        self.stage = "six language switches preserve model"
+        for language in ["zh", "en", "de", "zh", "en", "de"]:
+            self.language(language)
+            self.assertEqual(
+                self.page.input_value("#custommodel").strip().lower(), "gemini-2.5-pro"
+            )
+        self.completed(self.stage)
+        self.language("en")
+        self.stage = "prepare lock select classify follow-up"
+        self.prepare_rules()
+        self.lock_rules()
+        self.button("leaveCodebookWorkspace()").click()
+        self.select_bg(self.f.bg_a)
+        self.ask("Classify this Baugruppe")
+        # Coverage and classification share a CSS class; identify them by their own heading.
+        card = self.page.locator(".classification-card").filter(
+            has=self.page.get_by_role(
+                "heading",
+                name=self.page.evaluate("t('classification.title')"),
+                exact=True,
+            )
+        )
+        self.assertEqual(card.count(), 1)
+        self.assertIn("Rotationseinheit", card.inner_text())
+        coverage = self.page.locator(".classification-card").filter(
+            has=self.page.get_by_role(
+                "heading", name=self.page.evaluate("t('coverage.title')"), exact=True
+            )
+        )
+        self.assertEqual(coverage.count(), 1)
+        self.ask("Explain the motor evidence")
+        self.completed(self.stage)
+        self.stage = "edit rules and switch BG without old context"
+        self.open_drawer("rules")
+        self.button("viewCodebook()", "#contextdrawerbody").click()
+        self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
+        self.close_drawer()
+        self.button("editCodebookDraft()").click()
+        draft = json.loads(self.page.input_value("#ruleeditor"))
+        draft["classes"][0]["name"] = "Fixture Class B"
+        self.page.locator("#ruleeditor").fill(json.dumps(draft))
+        self.button("saveCodebookDraft()").click()
+        self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
+        self.lock_rules()
+        self.button("leaveCodebookWorkspace()").click()
+        self.select_bg(self.f.bg_b)
+        self.ask("Classify this Baugruppe again")
+        self.assertIn("Fixture Class B", card.inner_text())
+        self.assertNotIn("FIXTURE_BG_A", json.dumps(self.f.calls[-1]))
+        self.completed(self.stage)
+        self.stage = "refresh restores workspace model language and BG"
+        self.page.reload()
+        self.page.wait_for_function(
+            'lastStatusSnapshot?.bg_context?.folder.endsWith("BG_B")'
+        )
+        self.page.wait_for_function(
+            "document.getElementById('targetpath').value.endsWith('BG_B')"
+        )
+        self.assertEqual(self.page.input_value("#workspace"), str(self.f.workspace))
+        self.assertEqual(self.page.evaluate("selectedModel()"), "gemini-2.5-pro")
+        self.assertEqual(self.page.input_value("#language"), "en")
+        self.completed(self.stage)
+
+    def test_material_drawer_geometry_and_real_actions(self):
+        self.language("en")
+        self.prepare_rules()
+        self.lock_rules()
+        self.button("leaveCodebookWorkspace()").click()
+        for width in [1440, 800, 390]:
+            with self.subTest(width=width):
+                self.stage = f"materials drawer geometry and clicks at {width}px"
+                self.page.set_viewport_size({"width": width, "height": 900})
+                # Narrow layouts hide the context sidebar: exercise the visible welcome action.
+                if width < 1180:
+                    self.button("openContextDrawer('materials')", "#chat").click()
+                else:
+                    self.open_drawer("materials")
+                drawer = self.page.locator(".context-drawer")
+                box = drawer.bounding_box()
+                self.page.screenshot(path=str(OUTPUT / f"width-{width}.png"))
+                self.assertIsNotNone(box)
+                self.assertGreaterEqual(box["x"], -1, box)
+                self.assertLessEqual(box["x"] + box["width"], width + 1, box)
+                self.page.locator("#contexttargetpath").fill(str(self.f.bg_a))
+                self.button("contextSyncTarget();loadTargetTree()").click()
+                self.page.locator("input.tree-file").first.wait_for(state="attached")
+                # Expand/collapse the actual tree and change a checkbox, then restore it.
+                toggle = self.page.locator("#targettree summary").first
+                if toggle.count():
+                    toggle.click()
+                    toggle.click()
+                checkbox = self.page.locator("input.tree-file").first
+                checkbox.uncheck()
+                checkbox.check()
+                confirm = self.button("contextSyncTarget();analyzeTarget()")
+                confirm.scroll_into_view_if_needed()
+                rect = confirm.bounding_box()
+                self.assertGreaterEqual(rect["x"], 0, rect)
+                self.assertLessEqual(rect["x"] + rect["width"], width + 1, rect)
+                with self.page.expect_response(
+                    lambda r: (
+                        r.url.endswith("/api/target") and r.request.method == "POST"
+                    )
+                ) as response:
+                    confirm.click()
+                self.assertEqual(response.value.status, 200)
+                self.close_drawer()
+                self.page.wait_for_function(
+                    "!document.getElementById('contextbackdrop').classList.contains('open')"
+                )
+                self.completed(self.stage)
+            # Return to a known welcome screen before testing the next viewport.
+            self.page.reload()
+            self.page.wait_for_function("typeof openContextDrawer === 'function'")
+
+    def test_rule_draft_survives_language_cycle(self):
+        self.prepare_rules()
+        self.button("editCodebookDraft()").click()
+        marker = "UNSAVED_FIXTURE_DRAFT {"
+        self.page.locator("#ruleeditor").fill(marker)
+        for language in ["zh", "en", "de", "zh", "en", "de"]:
+            with self.subTest(language=language):
+                self.language(language)
+                self.assertEqual(self.page.locator("#ruleeditor").count(), 1)
+                self.assertEqual(self.page.input_value("#ruleeditor"), marker)
+
+    def test_existing_classification_card_uses_current_language(self):
+        # Isolate card retranslation from backend classification semantics.
+        self.language("zh")
+        self.page.evaluate("""() => document.getElementById('chat').append(classificationCard({
+            label:'Rotationseinheit',confidence:'high',evidence_labels:['facts.txt block 1'],
+            codebook_rule_ids:['rotation-1'],codebook_rule_pages:[1],
+            bg_evidence_pages:['facts.txt block 1'],uncertainties:[]}))""")
+        self.assertIn(
+            self.page.evaluate("t('classification.title')"),
+            self.page.locator(".classification-card h3").all_text_contents(),
+        )
+        self.language("en")
+        headings = self.page.locator(".classification-card h3").all_text_contents()
+        self.assertIn(self.page.evaluate("t('classification.title')"), headings)
+
+    def test_workspace_attribute_input_cannot_create_event_handler(self):
+        payload = 'fixture" onpointerover="window.__auditXss=1'
+        self.open_drawer("workspace")
+        self.page.locator("#contextworkspacepath").fill(payload)
+        self.button("contextOpenWorkspace()").click()
+        self.page.wait_for_function(
+            "!document.getElementById('contextbackdrop')?.classList.contains('open')"
+        )
+        self.open_drawer("workspace")
+        field = self.page.locator("#contextworkspacepath")
+        field.dispatch_event("pointerover")
+        self.assertIsNone(field.get_attribute("onpointerover"))
+        self.assertFalse(self.page.evaluate("window.__auditXss === 1"))
+        self.assertEqual(field.input_value(), payload)
+
+
+class RecordedResult(unittest.TextTestResult):
+    def addFailure(self, test, err):
+        super().addFailure(test, err)
+        CHECKS.append(
+            {
+                "test": str(test),
+                "stage": getattr(test, "stage", str(test)),
+                "status": "failed",
+                "detail": self._exc_info_to_string(err, test),
+            }
+        )
+
+    def addError(self, test, err):
+        super().addError(test, err)
+        CHECKS.append(
+            {
+                "test": str(test),
+                "stage": getattr(test, "stage", str(test)),
+                "status": "error",
+                "detail": self._exc_info_to_string(err, test),
+            }
+        )
+
+    def addSubTest(self, test, subtest, err):
+        super().addSubTest(test, subtest, err)
+        if err:
+            CHECKS.append(
+                {
+                    "test": str(subtest),
+                    "stage": test.stage,
+                    "status": "failed",
+                    "detail": self._exc_info_to_string(err, test),
+                }
+            )
+
+
+if __name__ == "__main__":
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    result = unittest.TextTestRunner(verbosity=2, resultclass=RecordedResult).run(
+        unittest.defaultTestLoader.loadTestsFromTestCase(BrowserRelease)
+    )
+    (OUTPUT / "browser-results.json").write_text(
+        json.dumps(
+            {
+                "success": result.wasSuccessful(),
+                "tests_run": result.testsRun,
+                "checks": CHECKS,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print(f"Browser results: {OUTPUT}")
+    sys.exit(0 if result.wasSuccessful() else 1)
