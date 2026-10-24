@@ -17,6 +17,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from release_safety import context_state_error
 
 try:
     from dotenv import load_dotenv
@@ -216,10 +217,12 @@ class ProjectState:
 
     def _load(self):
         defaults = {"workspace": str(self.workspace), "session_id": uuid.uuid4().hex,
+                    "context_schema_version": 1, "context_revision": uuid.uuid4().hex,
                     "files": {}, "history": [], "summary": "", "usage": {"requests": 0, "input": 0, "output": 0, "estimated_cost_usd": 0.0, "unpriced_requests": 0}}
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             if not isinstance(data, dict) or data.get("workspace") != str(self.workspace): return defaults
+            context_problem = context_state_error(data)
             for key, value in defaults.items():
                 if not isinstance(data.get(key), type(value)): data[key] = value
             for key, value in defaults["usage"].items():
@@ -228,6 +231,19 @@ class ProjectState:
                     data["usage"][key] = value
             data["history"] = [v for v in data["history"] if isinstance(v, dict) and isinstance(v.get("content"), str) and v.get("role") in {"user", "assistant"}]
             data["files"] = {k:v for k,v in data["files"].items() if isinstance(v, dict)}
+            if context_problem or context_state_error(data):
+                # Keep the original scope for recovery before setup saves a
+                # sanitized state; valid conversation and usage remain intact.
+                quarantine = self.root / "quarantine" / ("state-" + uuid.uuid4().hex + ".json")
+                quarantine.parent.mkdir(exist_ok=True)
+                quarantine.write_bytes(self.path.read_bytes())
+                for key in ("bg_context", "selected_target", "source_binding", "selected_codebook_path"):
+                    data.pop(key, None)
+                data["active_source_ids"] = []
+                data["context_issue"] = "restored_invalid"
+                data["context_revision"] = uuid.uuid4().hex
+            data["context_schema_version"] = 1
+            data.setdefault("context_revision", uuid.uuid4().hex)
             return data
         except (OSError, ValueError):
             return defaults

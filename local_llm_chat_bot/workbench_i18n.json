@@ -2,6 +2,8 @@
   "messages": {
     "zh": {
       "workspace.title": "工作区",
+      "context.reconfirm": "请重新确认所选材料和已锁定的分类规则后再继续。",
+      "rules.pending_path": "此路径尚未准备；已准备的规则路径：{path}",
       "workspace.description": "工作区用于保存本地会话、索引、材料缓存和分类规则状态；不会写入所选装配体的原始文件夹。",
       "workspace.path_label": "代码工作区文件夹",
       "workspace.choose": "选择",
@@ -346,6 +348,8 @@
     },
     "en": {
       "workspace.title": "Workspace",
+      "context.reconfirm": "Confirm the selected materials and locked classification rules again to continue.",
+      "rules.pending_path": "This path has not been prepared. Prepared rules: {path}",
       "workspace.description": "The workspace stores local chats, indexes, material cache and rule status; it does not modify the selected assembly source folder.",
       "workspace.path_label": "Code workspace folder",
       "workspace.choose": "Browse",
@@ -690,6 +694,8 @@
     },
     "de": {
       "workspace.title": "Arbeitsbereich",
+      "context.reconfirm": "Bestätigen Sie die ausgewählten Unterlagen und die gesperrten Klassifikationsregeln erneut.",
+      "rules.pending_path": "Dieser Pfad wurde noch nicht vorbereitet. Vorbereitete Regeln: {path}",
       "workspace.description": "Der Arbeitsbereich speichert lokale Chats, Indizes, Material-Cache und Regelstatus; der gewählte Quellordner der Baugruppe wird nicht verändert.",
       "workspace.path_label": "Code-Arbeitsordner",
       "workspace.choose": "Auswählen",

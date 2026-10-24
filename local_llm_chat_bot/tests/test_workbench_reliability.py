@@ -58,8 +58,9 @@ class DossierModelSlotTests(unittest.TestCase):
         self.assertEqual(blocked.exception.status_code, 409)
 
     def test_rebuild_releases_slot_after_success_and_exception(self):
-        state = SimpleNamespace(note_usage=lambda *_args, **_kwargs: None)
-        workbench.ACTIVE.update({"state": state, "model": "test-model", "pricing": object()})
+        state = SimpleNamespace(data={}, note_usage=lambda *_args, **_kwargs: None)
+        workbench.ACTIVE.update({"state": state, "model": "test-model", "pricing": object(),
+                                 "documents": SimpleNamespace(list=lambda: [])})
         originals = (workbench.load_coverage, workbench.coverage_matches_current_selection,
                      workbench.prepare_bg_dossier, workbench.cache_audit)
         workbench.load_coverage = lambda _state: {"files": [{"summary": "ready"}]}

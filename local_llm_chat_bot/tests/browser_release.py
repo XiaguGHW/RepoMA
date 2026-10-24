@@ -150,6 +150,11 @@ class BrowserRelease(unittest.TestCase):
         self.page.wait_for_function(
             "!busy && document.getElementById('question').value === ''"
         )
+        self.assertEqual(
+            self.page.locator("#chat .message.error").count(),
+            0,
+            self.page.locator("#chat").inner_text(),
+        )
 
     def test_user_flow(self):
         self.stage = "workspace and custom model"
@@ -220,6 +225,77 @@ class BrowserRelease(unittest.TestCase):
         self.assertEqual(self.page.evaluate("selectedModel()"), "gemini-2.5-pro")
         self.assertEqual(self.page.input_value("#language"), "en")
         self.completed(self.stage)
+
+    def test_rule_change_reconfirms_same_bg_and_pending_path_is_explicit(self):
+        self.language("en")
+        self.page.select_option("#model", "gemini-2.5-pro")
+        self.page.wait_for_function('lastStatusSnapshot.model === "gemini-2.5-pro"')
+        self.prepare_rules()
+        self.lock_rules()
+        self.button("leaveCodebookWorkspace()").click()
+        self.select_bg(self.f.bg_a)
+        self.ask("Classify this Baugruppe")
+        self.open_drawer("rules")
+        alternate = str(self.f.root / "not prepared ü.docx")
+        self.page.locator("#contextcodebookpath").fill(alternate)
+        self.assertIn(
+            str(self.f.rules), self.page.locator("#contextrulemsg").inner_text()
+        )
+        self.assertIn(
+            str(self.f.rules), self.page.locator("#codebookstatus").inner_text()
+        )
+        self.page.locator("#contextcodebookpath").fill(str(self.f.rules))
+        self.assertEqual(self.page.locator("#contextrulemsg").inner_text(), "")
+        self.button("viewCodebook()", "#contextdrawerbody").click()
+        self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
+        self.close_drawer()
+        self.button("editCodebookDraft()").click()
+        draft = json.loads(self.page.input_value("#ruleeditor"))
+        draft["classes"][0]["name"] = "New same-BG fixture class"
+        self.page.locator("#ruleeditor").fill(json.dumps(draft))
+        self.button("saveCodebookDraft()").click()
+        self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
+        self.lock_rules()
+        self.button("leaveCodebookWorkspace()").click()
+        self.page.wait_for_function("document.getElementById('question').disabled")
+        self.assertIn("Confirm", self.page.locator("#contextguard").inner_text())
+        count = len(self.f.calls)
+        for endpoint, body in [
+            ("/api/chat", {"question": "classify"}),
+            (
+                "/api/compare",
+                {
+                    "question": "classify",
+                    "models": ["gemini-2.5-pro", "gemini-2.5-flash"],
+                },
+            ),
+        ]:
+            self.assertEqual(
+                self.page.request.post(
+                    self.page.url.rstrip("/") + endpoint, data=body
+                ).status,
+                409,
+            )
+        self.assertEqual(len(self.f.calls), count)
+        self.open_drawer("materials")
+        self.assertEqual(self.page.input_value("#contexttargetpath"), str(self.f.bg_a))
+        self.assertTrue(self.page.locator("input.tree-file").first.is_checked())
+        with self.page.expect_response(
+            lambda response: response.url.endswith("/api/target")
+        ) as response:
+            self.button("contextSyncTarget();analyzeTarget()").click()
+        self.assertEqual(response.value.status, 200)
+        self.page.wait_for_function("!document.getElementById('question').disabled")
+        self.close_drawer()
+        self.ask("Classify this Baugruppe")
+        card = self.page.locator(".classification-card").filter(
+            has=self.page.get_by_role(
+                "heading",
+                name=self.page.evaluate("t('classification.title')"),
+                exact=True,
+            )
+        )
+        self.assertIn("New same-BG fixture class", card.inner_text())
 
     def test_material_drawer_geometry_and_real_actions(self):
         self.language("en")

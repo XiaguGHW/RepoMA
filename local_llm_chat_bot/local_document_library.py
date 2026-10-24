@@ -161,7 +161,14 @@ class LocalDocumentLibrary:
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
                 if isinstance(data, dict) and isinstance(data.get("documents"), list):
-                    data["documents"] = [d for d in data["documents"] if isinstance(d, dict) and all(k in d for k in ("id", "path", "name", "chunks"))]
+                    from release_safety import valid_document_record
+                    valid = [d for d in data["documents"] if valid_document_record(d)]
+                    if len(valid) != len(data["documents"]):
+                        import uuid
+                        quarantine = self.path.parent / "quarantine" / ("documents-" + uuid.uuid4().hex + ".json")
+                        quarantine.parent.mkdir(exist_ok=True)
+                        quarantine.write_bytes(self.path.read_bytes())
+                    data["documents"] = valid
                     return data
             except (OSError, json.JSONDecodeError):
                 pass
@@ -176,6 +183,8 @@ class LocalDocumentLibrary:
         the local filesystem.  A corrupt historical index is still handled by
         ``_load`` as an empty index; no source material is touched.
         """
+        if getattr(self, "_defer_save", False):
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{self.path.name}.", suffix=".tmp", dir=self.path.parent, text=True

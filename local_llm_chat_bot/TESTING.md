@@ -61,6 +61,15 @@ because 2.4.0 crashed in this container's process discovery before checking code
 
 ## Current gates
 
+After step 3, discovery runs 106 tests: 96 pass, 9 fail and the native Windows
+test remains skipped on Linux. R05/R06/R07/R08 audit regressions now pass.
+Run the new scope/recovery/rollback matrix with:
+`python -m unittest discover -s tests -p test_release_step_three.py -v`.
+Browser coverage now also verifies editing/relocking rules and re-confirming
+the same BG without losing the material selection. The pending rule path is
+tested separately from the effective prepared path.
+See docs/release-reports/Workbench_Repair_Step_03_2026-10-24.md at repository root.
+
 After step 2, discovery runs 97 tests: 83 pass, 13 fail and one native Windows
 junction/case test is skipped on Linux. R02/R03/R04 regressions now pass.
 Run the targeted backend suite with:

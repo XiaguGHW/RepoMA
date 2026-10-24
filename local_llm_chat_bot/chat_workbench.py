@@ -6,6 +6,7 @@ files, credentials and session data stay on the computer that starts it.
 from __future__ import annotations
 
 import difflib
+import copy
 import hashlib
 import importlib.util
 import json
@@ -25,7 +26,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
-from release_safety import safe_error, normalize_usage
+from release_safety import safe_error, normalize_usage, context_state_error, valid_rule_profile
 from dotenv import load_dotenv
 from workbench_i18n import catalog_script_json
 from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative,
@@ -107,6 +108,7 @@ def load_codebook_profile() -> dict:
 
 
 def save_codebook_profile(profile: dict) -> None:
+    profile["version"] = uuid.uuid4().hex
     write_json_atomically(codebook_profile_path(), profile)
 
 
@@ -393,6 +395,8 @@ def status_data(data: dict[str, Any]) -> dict[str, Any]:
         "cost": round(float(usage.get("estimated_cost_usd", 0)), 6),
         "unpriced_requests": usage.get("unpriced_requests", 0),
         "bg_context": state.data.get("bg_context"),
+        "context_issue": context_issue(data),
+        "context_revision": state.data.get("context_revision", ""),
     }
 
 
@@ -846,6 +850,9 @@ def load_bg_dossier_cache(coverage: dict, model: str) -> dict | None:
 
 def prepare_bg_dossier(data: dict[str, Any], coverage: dict, *, force: bool = False) -> tuple[dict | None, dict | None, bool]:
     """Consolidate reusable per-file facts once; raw evidence remains query-specific."""
+    ensure_current_sources(data)
+    if not coverage_matches_current_selection(data, coverage):
+        raise HTTPException(409, "Material evidence is stale. Confirm materials and prepare evidence again.")
     cached = None if force else load_bg_dossier_cache(coverage, data["model"])
     if cached:
         cached = dict(cached); cached["cache_status"] = "reused"
@@ -949,6 +956,8 @@ def coverage_matches_current_selection(data: dict[str, Any], coverage: dict | No
     coverage = coverage if coverage is not None else load_coverage(data["state"])
     if not coverage.get("complete") or coverage.get("model") != data["model"]:
         return False
+    if context_issue(data) or coverage.get("context_revision") != data["state"].data.get("context_revision"):
+        return False
     active = set(data["state"].data.get("active_source_ids") or [])
     selected = [item for item in data["documents"].list() if item.get("id") in active]
     expected = {(item.get("id"), item.get("sha256")) for item in selected}
@@ -1010,6 +1019,7 @@ def summary_groups(document: dict, chunks: list[dict], limit: int = 24_000) -> l
 
 def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None) -> dict:
     """Prepare auditable, document-aware evidence before a BG classification question."""
+    ensure_current_sources(data)
     state, documents, llm = data["state"], data["documents"], data["llm"]
     active_ids = state.data.get("active_source_ids") or []
     selected = [item for item in documents.list() if item.get("id") in active_ids]
@@ -1101,7 +1111,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None) ->
         if progress:
             progress("reading", f"已完成 {file_index}/{total_documents}：{document['name']}",
                      12 + int(file_index / max(total_documents, 1) * 48))
-    report = {"created_at": datetime.now().astimezone().isoformat(timespec="seconds"), "model": data["model"], "requested_full_coverage": full,
+    report = {"context_revision": state.data.get("context_revision"), "created_at": datetime.now().astimezone().isoformat(timespec="seconds"), "model": data["model"], "requested_full_coverage": full,
               "files": records, "complete": all(item["complete"] for item in records), "model_calls": total_calls,
               "reused_files": reused_files, "created_files": created_files}
     write_json_atomically(coverage_path(state), report)
@@ -1511,6 +1521,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
 
 def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> dict[str, Any]:
     """Run an isolated, read-only answer for each model against identical BG evidence."""
+    ensure_current_sources(data)
     state, documents = data["state"], data["documents"]
     bg_context = state.data.get("bg_context")
     if not bg_context:
@@ -1611,18 +1622,65 @@ def reset_context(data):
     state.data.pop('last_bg_analysis', None)
     coverage_path(state).unlink(missing_ok=True)
     invalidate_pending(data)
-    data["context_revision"] = uuid.uuid4().hex
+    state.data["context_revision"] = uuid.uuid4().hex
     state.save()
 
 
+def context_issue(data):
+    state = data["state"]
+    if context_state_error(state.data):
+        return "restored_invalid"
+    if state.data.get("context_issue"):
+        return state.data["context_issue"]
+    context = state.data.get("bg_context")
+    if context:
+        profile = load_codebook_profile()
+        if (profile.get("status") != "locked"
+                or profile.get("version") != context.get("rule_profile_version")
+                or profile.get("draft") != context.get("locked_profile")):
+            return "rules_changed"
+    ids = set(state.data.get("active_source_ids") or [])
+    if state.data.get("bg_context"):
+        ids.add(state.data["bg_context"]["codebook_id"])
+    if ids - {item["id"] for item in data["documents"].list()}:
+        return "index_invalid"
+    return ""
+
+
+def source_binding(documents, ids):
+    return [{key: item[key] for key in ("id", "path", "sha256")}
+            for item in documents.list() if item["id"] in set(ids)]
+
+
+def restore_context_binding(data):
+    state = data["state"]
+    if "source_binding" not in state.data:
+        try:
+            ensure_current_sources(data)
+        except (HTTPException, OSError):
+            state.data["context_issue"] = context_issue(data) or "source_changed"
+        else:
+            state.data["source_binding"] = source_binding(data["documents"], state.data.get("active_source_ids", []))
+
+
 def ensure_current_sources(data):
-    state = data['state']; context = state.data.get('bg_context')
+    state = data["state"]
+    if context_issue(data):
+        raise HTTPException(409, "Materials/rules need confirmation. Reconfirm the selected materials and locked rules.")
+    context = state.data.get('bg_context')
     if context:
         profile = load_codebook_profile()
         path = Path(context.get('codebook_path', ''))
-        if profile.get('status') != 'locked' or profile.get('draft') != context.get('locked_profile') or not path.is_file() or file_digest(path) != profile.get('sha256'):
+        if (profile.get('status') != 'locked' or not valid_rule_profile(profile.get("draft"))
+            or profile.get('draft') != context.get('locked_profile')
+            or profile.get("version") != context.get("rule_profile_version")
+            or profile.get("sha256") != context.get("codebook_sha256")
+            or not path.is_file() or file_digest(path) != profile.get('sha256')):
             raise HTTPException(409, 'Codebook changed or is not locked. Confirm the current rules and materials again.')
     ids = set(state.data.get('active_source_ids') or [])
+    bound = state.data.get("source_binding")
+    if bound is not None and bound != source_binding(data["documents"], ids):
+        raise HTTPException(409, "Material scope/version changed. Confirm materials again.")
     for item in data['documents'].list():
         if item.get('id') in ids:
             path = Path(item['path'])
@@ -1677,6 +1735,7 @@ def setup(request: Setup):
         ACTIVE.clear(); ACTIVE.update({"state": state, "documents": documents, "model": model, "language": language,
                                         "llm": connector,
                                         "pricing": PricingCatalog(price_file), "pending": []})
+        restore_context_binding(ACTIVE)
         state.scan()
         state.data["selected_model"] = model
         state.save()
@@ -1716,6 +1775,7 @@ def activate_local_session(data: dict[str, Any], session_name: str) -> dict:
         state = ProjectState(app_state_home(), data["state"].workspace, session_name)
         data["state"] = state
         data["documents"] = LocalDocumentLibrary(state.root.parent / "documents.json")
+        restore_context_binding(data)
         data["model"] = canonical_model_id(state.data.get("selected_model") or data["model"])
         data["llm"] = LLMConnector(data["model"], data["llm"].api_key, session_id=state.data["session_id"])
         invalidate_pending(data)
@@ -1842,7 +1902,7 @@ def session_context():
     data = session(); state = data["state"]
     return {"model": data["model"], "target": state.data.get("selected_target", {}),
             "codebook_path": state.data.get("selected_codebook_path", ""),
-            "bg_context": state.data.get("bg_context")}
+            "bg_context": state.data.get("bg_context"), "context_issue": context_issue(data)}
 
 
 @app.get("/api/model-tests")
@@ -1929,9 +1989,15 @@ def documents():
 @context_mutation
 def add_document(request: PathRequest):
     reject_context_change_while_processing()
+    if session()["state"].data.get("bg_context") or context_issue(session()):
+        raise HTTPException(409, "Confirm the complete material selection before adding documents.")
     item = session()["documents"].add(str(safe_file(request.path)))
     state = session()["state"]
     state.data.setdefault("active_source_ids", []).append(item["id"])
+    state.data["active_source_ids"] = list(dict.fromkeys(state.data["active_source_ids"]))
+    state.data["source_binding"] = source_binding(session()["documents"], state.data["active_source_ids"])
+    state.data["context_revision"] = uuid.uuid4().hex
+    invalidate_pending(session())
     state.save()
     return {"id": item["id"], "name": item["name"], "chunks": len(item["chunks"]),
             "material_role": item.get("material_role", "other"),
@@ -1952,55 +2018,120 @@ def activate_bg(request: BGRequest):
     return {"sources": len(sources), "skipped": skipped[:10], "status": status_data(data)}
 
 
+def restore_state_file(path: Path, original: bytes | None):
+    if original is None:
+        path.unlink(missing_ok=True)
+    elif not path.exists() or path.read_bytes() != original:
+        temporary = path.with_name("." + path.name + "." + uuid.uuid4().hex + ".restore")
+        try:
+            temporary.write_bytes(original)
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
 @app.post("/api/target")
 @context_mutation
 def analyze_target(request: TargetRequest):
-    """Index one file or explicitly selected files in one folder."""
+    """Prepare against a private index copy, then commit or restore all bindings."""
     reject_context_change_while_processing()
     data = session()
-    if not request.target.strip(): raise HTTPException(400, "Select a file or folder")
+    if not request.target.strip():
+        raise HTTPException(400, "Select a file or folder")
     target = Path(request.target.strip().strip('"')).expanduser().resolve()
+    profile = load_codebook_profile()
     codebook_path = None
+    if profile.get("status") == "locked":
+        codebook_path = Path(str(profile.get("source_path", "")))
+        if (not valid_rule_profile(profile.get("draft")) or not codebook_path.is_file()
+                or file_digest(codebook_path) != profile.get("sha256")):
+            raise HTTPException(409, "Codebook changed or is invalid. Prepare and lock the rules again.")
+    elif data["state"].data.get("context_issue") == "rules_changed":
+        raise HTTPException(409, "Lock the current rules before confirming classification materials.")
+
+    # Defer index writes while preserving content-addressed parser/OCR caches.
+    documents = data["documents"]
+    staged = copy.copy(documents)
+    staged.data = copy.deepcopy(documents.data)
+    staged._defer_save = True
+    selected, sources, skipped = [], [], []
     if target.is_file():
-        sources, skipped, target_kind = [data["documents"].add(str(target))], [], "文件"
+        sources = [staged.add(str(target))]
+        target_kind = "文件"
     elif target.is_dir():
         selected = selected_target_files(target, request.selected_paths)
         if not selected:
-            raise HTTPException(400, "请先在文件树中勾选至少一个受支持的文件或文件夹。")
-        sources, skipped = [], []
+            raise HTTPException(400, "Select at least one supported material.")
         for path in selected:
             try:
-                sources.append(data["documents"].add(str(path)))
+                sources.append(staged.add(str(path)))
+            except OSError:
+                raise
             except Exception as exc:
                 skipped.append(f"{path.name}: {exc}")
         if not sources:
             raise HTTPException(400, "No selected file could be read: " + "; ".join(skipped[:10]))
-        save_material_selection(target, selected)
         target_kind = "文件夹"
     else:
-        raise HTTPException(400, f"文件或文件夹不存在：{target}")
-    profile = load_codebook_profile()
-    reset_context(data)
-    if profile.get("status") == "locked":
-        codebook_path = Path(str(profile.get("source_path", "")))
-        if not codebook_path.is_file() or file_digest(codebook_path) != profile.get("sha256"):
-            raise HTTPException(409, "已锁定的 Codebook 文件缺失或内容已变化；请重新准备并确认 Codebook。")
-        codebook = data["documents"].add(str(codebook_path))
-        data["state"].data["bg_context"] = {
+        raise HTTPException(400, f"File or folder does not exist: {target}")
+    codebook = staged.add(str(codebook_path)) if codebook_path else None
+    if profile != load_codebook_profile():
+        raise HTTPException(409, "Rules changed during material preparation. Confirm again.")
+    for item in sources + ([codebook] if codebook else []):
+        if file_digest(Path(item["path"])) != item["sha256"]:
+            raise HTTPException(409, "A source changed during preparation. Confirm materials again.")
+
+    state = data["state"]
+    old_state, old_index = state.data, documents.data
+    candidate = copy.deepcopy(old_state)
+    candidate.update({
+        "history": [], "summary": "", "context_issue": "", "context_schema_version": 1,
+        "context_revision": uuid.uuid4().hex,
+        "active_source_ids": [item["id"] for item in sources],
+        "selected_target": {
+            "path": str(target), "kind": target_kind,
+            "selected_paths": [path.relative_to(target).as_posix() for path in selected] if target.is_dir() else [str(target)],
+            "codebook_path": str(codebook_path) if codebook_path else "",
+        },
+    })
+    candidate.pop("bg_context", None)
+    candidate.pop("last_bg_analysis", None)
+    if codebook:
+        candidate["bg_context"] = {
             "codebook_id": codebook["id"], "codebook_name": codebook["name"],
             "source_ids": [item["id"] for item in sources], "folder": str(target),
-            "locked_profile": profile.get("draft", {}), "codebook_path": str(codebook_path),
-            "codebook_sha256": profile.get("sha256"),
+            "locked_profile": copy.deepcopy(profile["draft"]), "codebook_path": str(codebook_path),
+            "codebook_sha256": profile["sha256"], "rule_profile_version": profile.get("version"),
         }
-    else:
-        data["state"].data.pop("bg_context", None)
-    data["state"].data["active_source_ids"] = [item["id"] for item in sources]
-    data["state"].data["selected_target"] = {
-        "path": str(target), "kind": target_kind,
-        "selected_paths": [item.relative_to(target).as_posix() for item in selected] if target.is_dir() else [str(target)],
-        "codebook_path": str(codebook_path) if profile.get("status") == "locked" else str(data["state"].data.get("selected_codebook_path", "")),
-    }
-    data["state"].save()
+        candidate["selected_codebook_path"] = str(codebook_path)
+    candidate["source_binding"] = source_binding(staged, candidate["active_source_ids"])
+    problem = context_state_error(candidate)
+    if problem:
+        raise HTTPException(409, "Invalid material binding: " + problem)
+
+    paths = [state.path, documents.path, material_selections_path(), state.transcript_path, coverage_path(state)]
+    originals = {path: path.read_bytes() if path.exists() else None for path in paths}
+    archive = state.root / "archives" / (uuid.uuid4().hex + ".jsonl")
+    staged_state = copy.copy(state)
+    staged_state.data = candidate
+    try:
+        staged._defer_save = False
+        staged._save()
+        staged_state.save()
+        if target.is_dir():
+            save_material_selection(target, selected)
+        if state.transcript_path.exists():
+            archive.parent.mkdir(exist_ok=True)
+            state.transcript_path.replace(archive)
+        coverage_path(state).unlink(missing_ok=True)
+    except Exception:
+        state.data, documents.data = old_state, old_index
+        for path, original in originals.items():
+            restore_state_file(path, original)
+        archive.unlink(missing_ok=True)
+        raise
+    state.data, documents.data = candidate, staged.data
+    invalidate_pending(data)
     return {"sources": len(sources), "skipped": skipped[:10], "skipped_count": len(skipped), "target_kind": target_kind,
             "files": [{"name": item["name"], "chunks": len(item.get("chunks", [])), "bytes": item.get("bytes", 0),
                        "material_role": item.get("material_role", "other"),
@@ -2038,8 +2169,7 @@ def codebook_prepare(request: CodebookPrepareRequest):
         with LOCK:
             profile = prepare_codebook_profile(data, path, model)
             save_codebook_profile(profile)
-            reset_context(data)
-            data["state"].data.pop("bg_context", None)
+            rules_changed(data)
             data["state"].data["selected_codebook_path"] = str(path)
             data["state"].save()
         return profile
@@ -2054,6 +2184,14 @@ class CodebookEditRequest(BaseModel):
     confirmed: bool = False
 
 
+def rules_changed(data):
+    reset_context(data)
+    state = data["state"]
+    state.data.pop("bg_context", None)
+    state.data["context_issue"] = "rules_changed" if state.data.get("selected_target") or state.data.get("active_source_ids") else ""
+    state.save()
+
+
 @app.post("/api/codebook/edit")
 @context_mutation
 def codebook_edit(request: CodebookEditRequest):
@@ -2066,7 +2204,7 @@ def codebook_edit(request: CodebookEditRequest):
     profile['previous_draft'] = previous.get('draft', {})
     save_codebook_profile(profile)
     if ACTIVE:
-        reset_context(ACTIVE); ACTIVE['state'].data.pop('bg_context', None); ACTIVE['state'].save()
+        rules_changed(ACTIVE)
     return profile
 
 
@@ -2085,8 +2223,7 @@ def codebook_lock():
     profile["locked_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
     save_codebook_profile(profile)
     if ACTIVE:
-        reset_context(ACTIVE)
-        ACTIVE["state"].data.pop("bg_context", None)
+        rules_changed(ACTIVE)
         ACTIVE["state"].data["selected_codebook_path"] = str(path)
         ACTIVE["state"].save()
     return profile
@@ -2104,9 +2241,7 @@ def codebook_clear():
     # currently open session.  Other sessions are likewise harmless until they
     # explicitly analyse a target again, at which time the global lock is read.
     if ACTIVE:
-        reset_context(ACTIVE)
-        ACTIVE["state"].data.pop("bg_context", None)
-        ACTIVE["state"].save()
+        rules_changed(ACTIVE)
     return {"status": "none"}
 
 
@@ -2137,7 +2272,9 @@ def rebuild_cached_file(request: CacheFileRequest):
     if not request.confirmed:
         raise HTTPException(400, "必须确认后才会清除该文件的摘要缓存。")
     data = session()
-    document = next((item for item in data["documents"].list() if item.get("id") == request.document_id), None)
+    ensure_current_sources(data)
+    document = next((item for item in data["documents"].list() if item.get("id") == request.document_id
+                     and item["id"] in data["state"].data.get("active_source_ids", [])), None)
     if not document:
         raise HTTPException(404, "当前材料范围中找不到该文件。")
     target = app_state_home() / "material_cache" / str(document.get("sha256") or "")
@@ -2156,6 +2293,7 @@ def rebuild_bg_dossier(request: CacheConfirmRequest):
     # task sees this rebuild as active.
     data = begin_model_work()
     try:
+        ensure_current_sources(data)
         coverage = load_coverage(data["state"])
         if not coverage_matches_current_selection(data, coverage):
             raise HTTPException(409, "当前材料尚未完成预读；请先准备分类证据。")
@@ -2193,7 +2331,9 @@ def clear_summary_caches(request: CacheConfirmRequest):
 @context_mutation
 def clear_bg():
     reject_context_change_while_processing()
-    data = session(); reset_context(data); data["state"].data.pop("bg_context", None); data["state"].save(); return status_data(data)
+    data = session(); reset_context(data); data["state"].data.pop("bg_context", None)
+    data["state"].data["context_issue"] = ""
+    data["state"].save(); return status_data(data)
 
 
 @app.post("/api/export/session")
@@ -2226,6 +2366,12 @@ def chat_stream(request: ChatRequest):
     if not question:
         raise HTTPException(400, "请输入问题。")
     data = begin_model_work()
+    try:
+        with LOCK:
+            ensure_current_sources(data)
+    except Exception:
+        MODEL_WORK_IN_PROGRESS.clear()
+        raise
     events: Queue[dict[str, Any]] = Queue()
 
     def publish(phase: str, text: str, percent: int | None = None) -> None:
@@ -2300,7 +2446,8 @@ def plan_context(data):
     return plan_digest({
         "workspace": str(state.workspace), "session": str(state.root),
         "session_id": state.data["session_id"], "model": data["model"],
-        "revision": data.get("context_revision"),
+        "revision": state.data.get("context_revision"),
+        "context_schema_version": state.data.get("context_schema_version", 1),
         "target": state.data.get("selected_target"),
         "bg": state.data.get("bg_context"),
         "sources": state.data.get("active_source_ids"),
@@ -2519,6 +2666,16 @@ function refreshContextPanel(){
   if($('context-material-summary'))$('context-material-summary').textContent=material;
   if($('context-scan-summary'))$('context-scan-summary').textContent=scan;
   if($('context-audit-summary'))$('context-audit-summary').textContent=audit;
+  renderContextGuard();
+}
+function renderContextGuard(){
+  let issue=!!lastStatusSnapshot?.context_issue,host=$('contextguard');
+  if(!host&&$('composer')){host=document.createElement('div');host.id='contextguard';host.className='muted';$('composer').before(host)}
+  if(host)host.textContent=issue?t('context.reconfirm'):'';
+  if($('question'))$('question').disabled=issue;
+  document.querySelectorAll('button[onclick="chat()"],button[onclick="compareModels()"]').forEach(button=>button.disabled=issue);
+  let draft=$('contextcodebookpath')?.value.trim(),prepared=lastCodebookProfile?.source_path||'';
+  if($('contextrulemsg'))$('contextrulemsg').textContent=draft&&draft!==prepared?t('rules.pending_path',{path:prepared||'—'}):'';
 }
 function initContextPanel(){
   if($('contextbackdrop'))return;
@@ -2593,13 +2750,13 @@ function selectedModel(){let selected=$('model').value;return selected==='__cust
 async function modelChanged(){toggleCustomModel();loadModelStatus();if($('model').value!=='__custom__'&&$('workspace').value.trim())await switchModel()}
 async function confirmCustomModel(){if(!selectedModel()){ $('modelmsg').innerHTML='<span class="error">'+t('model.id_required')+'</span>';return}if($('workspace').value.trim())await switchModel();else $('modelmsg').textContent=t('model.custom_saved')}
 function codebookList(items){let values=Array.isArray(items)?items.filter(Boolean):[];return values.length?'<ul>'+values.map(item=>{if(item&&typeof item==='object'){let text=esc(item.text||item.title||JSON.stringify(item));let id=item.id?' <span class="muted">['+esc(item.id)+']</span>':'';let pages=Array.isArray(item.pages)&&item.pages.length?' <span class="muted">('+t('rulews.evidence_pages')+' '+esc(item.pages.join('、'))+')</span>':'';return '<li>'+text+id+pages+'</li>'}return '<li>'+esc(String(item))+'</li>'}).join('')+'</ul>':'<div class="muted">'+t('classification.none')+'</div>'}
-function renderCodebookStatus(profile){lastCodebookProfile=profile;let host=$('codebookstatus');if(!profile||profile.status==='none'||!profile.status){host.textContent=t('rulews.not_prepared');return}let lock=profile.status==='locked';host.innerHTML=(lock?'<span class="ok">'+t('rulews.locked')+'</span>':'<span class="error">'+t('rulews.draft')+'</span>')+'：<b>'+esc(profile.source_name||'—')+'</b><br>'+esc(profile.page_count||0)+' '+t('rulews.pages')+' · '+esc(profile.parser_model||'—')+(lock?'<br>'+t('rulews.reused'):'<br>'+t('rulews.confirm'))}
+function renderCodebookStatus(profile){lastCodebookProfile=profile;let host=$('codebookstatus');if(!profile||profile.status==='none'||!profile.status){host.textContent=t('rulews.not_prepared');return}let lock=profile.status==='locked';host.innerHTML=(lock?'<span class="ok">'+t('rulews.locked')+'</span>':'<span class="error">'+t('rulews.draft')+'</span>')+'：<b>'+esc(profile.source_path||profile.source_name||'—')+'</b><br>'+esc(profile.page_count||0)+' '+t('rulews.pages')+' · '+esc(profile.parser_model||'—')+(lock?'<br>'+t('rulews.reused'):'<br>'+t('rulews.confirm'))}
 async function loadCodebookStatus(){try{renderCodebookStatus(await api('/api/codebook'))}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function leaveCodebookWorkspace(){lastCodebookWorkspaceProfile=null;let composer=$('composer');composer.style.display='flex';$('chat').classList.remove('codebook-workspace');loadHistory()}
 function showCodebookWorkspace(profile){lastCodebookWorkspaceProfile=profile;let draft=profile.draft||{};$('composer').style.display='none';let classes=(draft.classes||[]).map(item=>'<article class="card codebook-class"><h3>'+esc(item.name||t('rulews.untitled'))+'</h3><div>'+esc(item.definition||t('rulews.no_definition'))+'</div><b>'+t('rulews.decision_rules')+'</b>'+codebookList(item.decision_rules)+'<b>'+t('rulews.boundaries')+'</b>'+codebookList(item.boundaries)+'<div class="muted">'+t('rulews.evidence_pages')+'：'+esc((item.evidence_pages||[]).join('、')||'—')+'</div></article>').join('')||'<div class="card error">'+t('rulews.no_class')+'</div>';let usage=profile.usage||{},ocr=profile.ocr_runtime||{},locked=profile.status==='locked';let ocrText=ocr.status==='not applicable to DOCX'?t('rulews.ocr_docx'):(ocr.available?(t('rulews.ocr_enabled')+' · '+esc(ocr.command||'Tesseract')+(ocr.german_available?' · deu':' · eng')):(t('rulews.ocr_disabled')+' · '+esc(ocr.status||'Tesseract')));$('chat').className='chat codebook-workspace';$('chat').innerHTML='<section class="workspace-inner"><h1>'+t('rulews.title')+'</h1><div class="muted">'+(locked?t('rulews.locked_intro'):t('rulews.draft_intro'))+'</div><div class="card"><b>'+t('rulews.source')+'：</b>'+esc(profile.source_name||'—')+'<br><span class="muted">'+t('rulews.parser_model')+'：'+esc(profile.parser_model||'—')+' · '+t('rulews.pages')+'：'+esc(profile.page_count||0)+' · '+t('rulews.groups')+'：'+esc(profile.page_groups||0)+' · Token：'+esc(usage.input||0)+' / '+esc(usage.output||0)+(usage.cost_usd===null||usage.cost_usd===undefined?'':' · $'+Number(usage.cost_usd).toFixed(6))+'<br>'+ocrText+'</span></div><h2>'+t('rulews.classes')+'</h2>'+classes+'<h2>'+t('rulews.global_rules')+'</h2><div class="card">'+codebookList(draft.global_rules)+'</div><h2>'+t('rulews.table_rules')+'</h2><div class="card">'+codebookList(draft.table_rules)+'</div><h2>'+t('rulews.uncertainties')+'</h2><div class="card">'+codebookList(draft.uncertainties)+'</div><div class="workspace-actions"><button class="ghost" onclick="editCodebookDraft()">'+t('rules.edit')+'</button>'+ (locked?'<button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.back')+'</button>':'<button onclick="lockCodebook()">'+t('rulews.lock_action')+'</button><button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.defer')+'</button>')+'</div></section>';$('chat').scrollTop=0}
-async function prepareCodebook(){let path=$('codebook').value.trim();if(!path){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.choose_file')+'</span>';return}let model=prompt(t('rulews.model_prompt'),selectedModel());if(model===null)return;model=model.trim();if(!model){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.model_required')+'</span>';return}try{$('codebookstatus').textContent=t('rulews.preparing');let profile=await api('/api/codebook/prepare',{method:'POST',body:JSON.stringify({path,model})});renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function prepareCodebook(){let path=$('codebook').value.trim();if(!path){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.choose_file')+'</span>';return}let model=prompt(t('rulews.model_prompt'),selectedModel());if(model===null)return;model=model.trim();if(!model){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.model_required')+'</span>';return}try{$('codebookstatus').textContent=t('rulews.preparing');let profile=await api('/api/codebook/prepare',{method:'POST',body:JSON.stringify({path,model})});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile)}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function viewCodebook(){try{let profile=await api('/api/codebook');if(!profile||!profile.status)throw Error(t('rulews.not_prepared'));renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-async function lockCodebook(){if(!confirm(t('rulews.lock_confirm')))return;try{let profile=await api('/api/codebook/lock',{method:'POST'});renderCodebookStatus(profile);showCodebookWorkspace(profile);$('setupmsg').innerHTML='<span class="ok">'+t('rulews.lock_success')+'</span>'}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function lockCodebook(){if(!confirm(t('rulews.lock_confirm')))return;try{let profile=await api('/api/codebook/lock',{method:'POST'});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile);$('setupmsg').innerHTML='<span class="ok">'+t('rulews.lock_success')+'</span>'}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function changeCodebook(){if(!confirm(t('rulews.replace_confirm')))return;try{await api('/api/codebook',{method:'DELETE'});$('codebook').value='';renderCodebookStatus({status:'none'});leaveCodebookWorkspace();$('setupmsg').textContent=t('rulews.replace_success')}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 let sessionOffset=0,sessionHasMore=false,sessionLoading=false,currentSessionName='';
 function initSessionSidebar(){if($('sessionpanel'))return;let left=document.querySelector('.shell > .side');if(!left)return;let style=document.createElement('style');style.textContent='.side.left{display:flex;flex-direction:column;overflow:hidden;padding-bottom:10px}.left-content{overflow:auto;min-height:0;padding-right:2px}.session-panel{border-top:1px solid #334155;margin-top:10px;padding-top:10px;display:flex;flex-direction:column;min-height:155px;max-height:42vh}.session-new{width:100%;margin-bottom:8px;text-align:left}.session-list{overflow:auto;min-height:0}.session-row{display:flex;align-items:center;gap:4px;border-radius:7px;margin:2px 0;padding:6px 5px;cursor:pointer;color:#dbeafe}.session-row:hover,.session-row.active{background:#263244}.session-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.session-more{visibility:hidden;width:25px;padding:2px 3px;background:transparent;color:#cbd5e1}.session-row:hover .session-more,.session-row.active .session-more{visibility:visible}.session-pin{font-size:10px;color:#7dd3fc}.session-loading{text-align:center;padding:8px;color:#94a3b8}.session-menu{position:fixed;z-index:100;min-width:130px;padding:5px;background:#1e293b;border:1px solid #475569;border-radius:8px;box-shadow:0 12px 30px rgba(0,0,0,.4)}.session-menu button{display:block;width:100%;text-align:left;background:transparent;color:#e5e7eb;padding:7px 9px}.session-menu button:hover{background:#334155}.session-menu button.delete{color:#fca5a5}';document.head.append(style);left.classList.add('left');let content=document.createElement('div');content.className='left-content';while(left.firstChild)content.append(left.firstChild);left.append(content);let old=$('session')?.closest('.field');if(old)old.style.display='none';let panel=document.createElement('section');panel.id='sessionpanel';panel.className='session-panel';panel.innerHTML='<button id="newsessionbutton" class="ghost session-new" onclick="newSession()"></button><div id="sessionlist" class="session-list"></div>';left.append(panel);localizeSessionChrome();$('sessionlist').addEventListener('scroll',()=>{let el=$('sessionlist');if(sessionHasMore&&!sessionLoading&&el.scrollTop+el.clientHeight>=el.scrollHeight-18)loadSessions(false)});document.addEventListener('click',event=>{if(!event.target.closest('.session-more')&&!event.target.closest('#sessionmenu'))closeSessionMenu()})}
@@ -2764,7 +2921,7 @@ updateTreeStatus=updateTreeStatusForLanguage;
 makeTreeNode=makeTreeNodeForLanguage;
 loadTargetTree=loadTargetTreeForLanguage;
 function selectedTargetPaths(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].map(x=>x.dataset.path)}
-async function analyzeTarget(){let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent=rt('scan.reading')}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error(t('materials.selection_required'));let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');materialDraftDirty=false;renderStatus(x.status);clearResultPanels();await loadHistory();$('bgstatus').textContent=t(x.classification?'materials.confirmed_bg':'materials.confirmed_normal',{kind:tr(x.target_kind),count:x.sources});renderScanReport(x);$('coveragestatus').textContent=rt('material.updated');loadDocs();loadCacheAudit()}catch(e){$('bgstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{if(confirm)confirm.textContent=t('materials.confirm_selected');updateMaterialFlowButtons()}}
+async function analyzeTarget(){let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent=rt('scan.reading')}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error(t('materials.selection_required'));let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');materialDraftDirty=false;clearResultPanels();await loadHistory();renderStatus(x.status);$('bgstatus').textContent=t(x.classification?'materials.confirmed_bg':'materials.confirmed_normal',{kind:tr(x.target_kind),count:x.sources});renderScanReport(x);$('coveragestatus').textContent=rt('material.updated');loadDocs();loadCacheAudit()}catch(e){$('bgstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{if(confirm)confirm.textContent=t('materials.confirm_selected');updateMaterialFlowButtons()}}
 async function prepareCoverage(full=false){if(busy)return;busy=true;$('coveragestatus').textContent=rt(full?'coverage.preparing_full':'coverage.preparing');try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full})});renderCoverageReport(x)}catch(e){$('coveragestatus').innerHTML='<span class="error">'+esc(rt('coverage.failed')+e.message)+'</span>'}finally{busy=false}}
 async function clearBg(){try{renderStatus(await api('/api/bg',{method:'DELETE'}));$('bgstatus').textContent=t('bg.exited')}catch(e){$('bgstatus').textContent=e.message}}
 const compareOptions=[['claude-haiku-5-5','Claude Haiku 5.5'],['claude-sonnet-5-5','Claude Sonnet 5.5'],['claude-opus-5','Claude Opus 5'],['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite'],['gemini-2.5-pro','Gemini 2.5 Pro'],['gemini-2.5-flash','Gemini 2.5 Flash'],['deepseek-r1-0528-maas','DeepSeek R1 (0528)'],['llama-3.3-70b-instruct-maas','Llama 3.3 70B'],['glm-5-maas','GLM-5']];
@@ -2778,11 +2935,11 @@ function renderComparisonForLanguage(record){
   box.innerHTML='<div class="message assistant"><b>'+t('compare.title')+'</b><br>'+t('compare.question')+'：'+esc(record.question)+'<br><span class="muted">'+t('compare.same_evidence')+'：'+(x.sources||[]).map(esc).join(' · ')+'</span></div><div class="comparison-grid"></div>';
   let grid=box.querySelector('.comparison-grid');for(let r of x.results||[]){let card=document.createElement('article');card.className='card';if(!r.ok){card.innerHTML='<b>'+esc(r.requested_model)+'</b><p class="error">'+t('compare.request_failed')+'</p><div class="muted">'+esc(r.error||t('compare.unknown_error'))+'</div>';grid.append(card);continue}let u=r.usage||{},cost=u.cost_usd===null||u.cost_usd===undefined?t('compare.price_unavailable'):'$'+Number(u.cost_usd).toFixed(6),classification=r.classification?'<div class="chip">'+t('classification.verified')+'：'+esc(r.classification.label)+' · '+esc(r.classification.confidence)+'</div>':'';card.innerHTML='<b>'+esc(r.model_response)+'</b>'+(r.model_response!==r.requested_model?'<div class="muted">'+t('compare.requested_model')+'：'+esc(r.requested_model)+'</div>':'')+'<div class="muted ok">'+t('compare.success')+' · Token '+(u.input||0)+' / '+(u.output||0)+' · '+cost+'</div>'+classification+'<hr><div class="answer"></div>'+(r.notices?.length?'<div class="muted">'+r.notices.map(esc).join('<br>')+'</div>':'');card.querySelector('.answer').textContent=r.answer;grid.append(card)}$('chat').append(box);
 }
-async function compareModels(){if(busy)return;if(materialDraftDirty){message(t('materials.reconfirm'));return;}let q=$('question').value.trim()||lastQuestion;if(!q){$('comparestatus').innerHTML='<span class="error">'+t('compare.question_required')+'</span>';return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){$('comparestatus').innerHTML='<span class="error">'+t('compare.models_required')+'</span>';return}busy=true;lastQuestion=q;$('comparestatus').textContent=t('compare.running',{count:models.length});let wait=message(t('compare.in_progress',{models:models.join(' · ')}));try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models})});wait.remove();lastComparison={question:q,data:x};renderComparisonForLanguage(lastComparison);$('comparestatus').innerHTML='<span class="ok">'+t('compare.complete')+'</span>'}catch(e){wait.textContent=t('model.failed')+e.message;wait.classList.add('error');$('comparestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{busy=false;$('chat').scrollTop=1e9}}
+async function compareModels(){if(busy)return;if(lastStatusSnapshot?.context_issue){message(t('context.reconfirm'));return;}if(materialDraftDirty){message(t('materials.reconfirm'));return;}let q=$('question').value.trim()||lastQuestion;if(!q){$('comparestatus').innerHTML='<span class="error">'+t('compare.question_required')+'</span>';return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){$('comparestatus').innerHTML='<span class="error">'+t('compare.models_required')+'</span>';return}busy=true;lastQuestion=q;$('comparestatus').textContent=t('compare.running',{count:models.length});let wait=message(t('compare.in_progress',{models:models.join(' · ')}));try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models})});wait.remove();lastComparison={question:q,data:x};renderComparisonForLanguage(lastComparison);$('comparestatus').innerHTML='<span class="ok">'+t('compare.complete')+'</span>'}catch(e){wait.textContent=t('model.failed')+e.message;wait.classList.add('error');$('comparestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{busy=false;$('chat').scrollTop=1e9}}
 function processingCard(){let card=document.createElement('section');card.className='message assistant';card.style.border='1px solid #334155';card.innerHTML='<b>'+rt('model.processing')+'</b><div class="muted" data-process-text>'+rt('model.connecting')+'</div><div style="height:7px;background:#0b1220;border-radius:8px;overflow:hidden;margin-top:9px"><div data-process-bar style="height:100%;width:4%;background:#38bdf8;transition:width .25s ease"></div></div>';$('chat').append(card);return card}
 function updateProcessing(card,event){let text=card.querySelector('[data-process-text]'),bar=card.querySelector('[data-process-bar]');text.textContent=event.text||rt('model.waiting');if(typeof event.percent==='number')bar.style.width=Math.max(4,Math.min(100,event.percent))+'%';if(event.phase==='complete'){card.style.borderColor='#22c55e';bar.style.background='#22c55e'}}
 function showChatResult(x){message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>'+t('model.reasoning')+'</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${esc(c.path)}</b><br>${esc(c.reason)}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button data-plan-id="'+escAttr(x.plan_id||'')+'" onclick="apply(this.dataset.planId,this)">'+t('changes.apply')+'</button>':t('changes.none');if(x.changes?.length){let review=$('changes').cloneNode(true);review.removeAttribute('id');review.className='message assistant change-plan';$('chat').append(review)}$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">'+t('export.assembly')+'</button>':t('export.assembly_unavailable');renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}
-async function chat(){if(busy||!$('question').value.trim())return;if(materialDraftDirty){message(t('materials.reconfirm'));return;}busy=true;let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');let wait=processingCard(),buffer='',result=null;try{let response;try{response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})})}catch(error){throw Error(rt('model.connection_failed')+(error?.message?` ${error.message}`:''))}if(!response.ok){await readApiResponse(response)}let reader=response.body.getReader(),decoder=new TextDecoder();while(true){let part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});let blocks=buffer.split('\n\n');buffer=blocks.pop();for(let block of blocks){let line=block.split('\n').find(item=>item.startsWith('data: '));if(!line)continue;let event=JSON.parse(line.slice(6));if(event.type==='progress')updateProcessing(wait,event);else if(event.type==='result')result=event.data;else if(event.type==='error')throw Error(event.message||rt('model.failed'))}}if(!result)throw Error(t('api.no_result'));updateProcessing(wait,{phase:'complete',text:rt('model.complete'),percent:100});showChatResult(result)}catch(e){wait.querySelector('[data-process-text]').textContent=rt('model.failed')+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
+async function chat(){if(busy||!$('question').value.trim())return;if(lastStatusSnapshot?.context_issue){message(t('context.reconfirm'));return;}if(materialDraftDirty){message(t('materials.reconfirm'));return;}busy=true;let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');let wait=processingCard(),buffer='',result=null;try{let response;try{response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})})}catch(error){throw Error(rt('model.connection_failed')+(error?.message?` ${error.message}`:''))}if(!response.ok){await readApiResponse(response)}let reader=response.body.getReader(),decoder=new TextDecoder();while(true){let part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});let blocks=buffer.split('\n\n');buffer=blocks.pop();for(let block of blocks){let line=block.split('\n').find(item=>item.startsWith('data: '));if(!line)continue;let event=JSON.parse(line.slice(6));if(event.type==='progress')updateProcessing(wait,event);else if(event.type==='result')result=event.data;else if(event.type==='error')throw Error(event.message||rt('model.failed'))}}if(!result)throw Error(t('api.no_result'));updateProcessing(wait,{phase:'complete',text:rt('model.complete'),percent:100});showChatResult(result)}catch(e){wait.querySelector('[data-process-text]').textContent=rt('model.failed')+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
 async function exportSession(){try{let x=await api('/api/export/session',{method:'POST'});$('sessionexport').innerHTML='<span class="ok">'+esc(t('export.complete',{path:x.path}))+'</span>'}catch(e){$('sessionexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function exportBgAnalysis(){try{let x=await api('/api/export/bg-analysis',{method:'POST'});$('analysisexport').innerHTML='<span class="ok">'+esc(t('export.complete',{path:x.path}))+'</span>'}catch(e){$('analysisexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function esc(s){let e=document.createElement('div');e.textContent=s;return e.innerHTML}function escAttr(s){return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;')}async function apply(planId,button){let review=button?.closest('.change-plan')||$('changes');if(!confirm(t('changes.confirm')))return;try{let x=await api('/api/apply',{method:'POST',body:JSON.stringify({confirmed:true,plan_id:planId})});review.innerHTML='<span class="ok">'+t('apply.complete',{count:x.applied})+'</span>';message(t('apply.message',{count:x.applied}))}catch(e){review.innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
@@ -2790,7 +2947,7 @@ function esc(s){let e=document.createElement('div');e.textContent=s;return e.inn
 let materialDraftDirty=false;
 function clearResultPanels(){lastUsageSnapshot=null;lastComparison=null;lastCoverageReport=null;lastCacheAudit=null;$('sources').textContent=t('evidence.none');$('changes').textContent=t('changes.none');$('analysisexport').textContent=t('export.assembly_unavailable');$('usagedetail').textContent=t('usage.unavailable');$('coveragestatus').textContent=t('material.updated');}
 function editCodebookDraft(){let profile=lastCodebookWorkspaceProfile;if(!profile)return;let host=$('chat');host.innerHTML='<section class="workspace-inner"><h1>'+t('rules.edit')+'</h1><p>'+t('rules.edit_help')+'</p><textarea id="ruleeditor" style="width:100%;min-height:380px"></textarea><div class="row"><button onclick="saveCodebookDraft()">'+t('rules.save_draft')+'</button><button class="ghost" onclick="showCodebookWorkspace(lastCodebookWorkspaceProfile)">'+t('rules.cancel')+'</button></div><div id="ruleediterror" class="error"></div></section>';$('ruleeditor').value=JSON.stringify(profile.draft,null,2);}
-async function saveCodebookDraft(){try{let draft=JSON.parse($('ruleeditor').value);if(!confirm(t('rules.save_confirm')))return;let profile=await api('/api/codebook/edit',{method:'POST',body:JSON.stringify({draft,confirmed:true})});renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){$('ruleediterror').textContent=e.message}}
+async function saveCodebookDraft(){try{let draft=JSON.parse($('ruleeditor').value);if(!confirm(t('rules.save_confirm')))return;let profile=await api('/api/codebook/edit',{method:'POST',body:JSON.stringify({draft,confirmed:true})});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile)}catch(e){$('ruleediterror').textContent=e.message}}
 </script></body></html>'''
 
 # Embed the packaged catalog without introducing an HTTP endpoint or network call.
