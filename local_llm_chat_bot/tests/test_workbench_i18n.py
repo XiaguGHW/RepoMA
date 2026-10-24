@@ -65,6 +65,7 @@ class CatalogTests(unittest.TestCase):
         self.assertIn('renderUsageDetailForLanguage', source)
         self.assertIn('renderCompareSlotsForLanguage', source)
         self.assertIn('renderSessionRowsForLanguage', source)
+        self.assertIn('renderCoverageReportForLanguage', source)
 
     def test_script_serialization(self):
         payload = catalog_script_json()
