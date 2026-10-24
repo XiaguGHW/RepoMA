@@ -61,6 +61,15 @@ because 2.4.0 crashed in this container's process discovery before checking code
 
 ## Current gates
 
+After step 2, discovery runs 97 tests: 83 pass, 13 fail and one native Windows
+junction/case test is skipped on Linux. R02/R03/R04 regressions now pass.
+Run the targeted backend suite with:
+`python -m unittest discover -s tests -p test_release_step_two.py -v`.
+Browser coverage includes attribute-safe paths/custom models and real two-page
+review/confirmation clicks. The remaining browser failures still track
+R13/R14/R15. Detailed results are recorded in
+docs/release-reports/Workbench_Repair_Step_02_2026-10-24.md at repository root.
+
 Ruff's complete E4/E7/E9/F rule selection is explicit in pyproject.toml.
 Full Ruff and mypy currently report existing application/test debt; they are
 not green gates yet. The fatal Ruff subset, new/modified test files' full Ruff

@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import uvicorn
@@ -312,6 +313,94 @@ class BrowserRelease(unittest.TestCase):
         self.assertIsNone(field.get_attribute("onpointerover"))
         self.assertFalse(self.page.evaluate("window.__auditXss === 1"))
         self.assertEqual(field.input_value(), payload)
+
+    def test_paths_and_custom_comparison_model_escape_attributes(self):
+        payload = '中文 ü <tag> & " onpointerover="window.__attributeProbe=1'
+        for kind, backing, field in [
+            ("workspace", "workspace", "contextworkspacepath"),
+            ("rules", "codebook", "contextcodebookpath"),
+            ("materials", "targetpath", "contexttargetpath"),
+        ]:
+            with self.subTest(kind=kind):
+                original = self.page.input_value("#" + backing)
+                self.page.evaluate(
+                    "([id,value])=>document.getElementById(id).value=value",
+                    [backing, payload],
+                )
+                self.open_drawer(kind)
+                control = self.page.locator("#" + field)
+                self.assertEqual(control.input_value(), payload)
+                self.assertIsNone(control.get_attribute("onpointerover"))
+                control.dispatch_event("pointerover")
+                self.assertFalse(self.page.evaluate("window.__attributeProbe===1"))
+                self.close_drawer()
+                self.page.evaluate(
+                    "([id,value])=>document.getElementById(id).value=value",
+                    [backing, original],
+                )
+        self.button("openCompareDrawer()").click()
+        self.page.select_option("#cmpsel0", "__custom__")
+        self.page.locator("#cmpcustom0").fill(payload)
+        # Isolate both attribute renderers from the separate language-drawer
+        # lifecycle issue tracked for the later localization stage.
+        self.page.evaluate("renderCompareSlotsForLanguage()")
+        control = self.page.locator("#cmpcustom0")
+        self.assertEqual(control.input_value(), payload)
+        self.assertIsNone(control.get_attribute("onpointerover"))
+        control.dispatch_event("pointerover")
+        self.assertFalse(self.page.evaluate("window.__attributeProbe===1"))
+
+    def test_two_pages_confirm_only_their_displayed_plan(self):
+        other = self.browser.new_page(viewport={"width": 1440, "height": 1000})
+        self.addCleanup(other.close)
+        other.on("dialog", lambda dialog: dialog.accept())
+        other.on("pageerror", lambda error: self.errors.append(str(error)))
+        other.goto(self.page.url)
+        other.wait_for_function(
+            "lastStatusSnapshot?.workspace && document.getElementById('setupmsg').textContent === t('workspace.opened')"
+        )
+
+        def action(name):
+            return json.dumps(
+                {
+                    "answer": name,
+                    "changes": [{"path": name + ".txt", "content": name}],
+                    "read_files": [],
+                }
+            )
+
+        first_page = self.page
+        with patch.object(
+            w.ACTIVE["llm"],
+            "ask_about_files",
+            side_effect=[action("page_A"), action("page_B")],
+        ):
+            self.ask("Prepare plan A")
+            first_id = first_page.locator(
+                ".change-plan button[data-plan-id]"
+            ).get_attribute("data-plan-id")
+            self.page = other
+            try:
+                self.ask("Prepare plan B")
+            finally:
+                self.page = first_page
+        second_id = other.locator(".change-plan button[data-plan-id]").get_attribute(
+            "data-plan-id"
+        )
+        self.assertNotEqual(first_id, second_id)
+        with first_page.expect_response(
+            lambda r: r.url.endswith("/api/apply")
+        ) as response:
+            first_page.locator(".change-plan button[data-plan-id]").click()
+        self.assertEqual(response.value.request.post_data_json["plan_id"], first_id)
+        self.assertEqual(response.value.status, 409)
+        self.assertFalse((self.f.workspace / "page_A.txt").exists())
+        self.assertFalse((self.f.workspace / "page_B.txt").exists())
+        with other.expect_response(lambda r: r.url.endswith("/api/apply")) as response:
+            other.locator(".change-plan button[data-plan-id]").click()
+        self.assertEqual(response.value.request.post_data_json["plan_id"], second_id)
+        self.assertEqual(response.value.status, 200)
+        self.assertEqual((self.f.workspace / "page_B.txt").read_text(), "page_B")
 
 
 class RecordedResult(unittest.TextTestResult):

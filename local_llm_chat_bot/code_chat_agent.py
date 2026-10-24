@@ -12,6 +12,7 @@ import json
 import math
 import os
 import re
+import stat
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -204,6 +205,7 @@ class ProjectState:
     def __init__(self, state_dir: Path, workspace: Path, session: str):
         self.workspace = workspace.expanduser().resolve()
         self.key = hashlib.sha256(str(self.workspace).encode()).hexdigest()[:16]
+        self.private_state_root = state_dir.expanduser().resolve()
         self.root = state_dir.expanduser().resolve() / "projects" / self.key / safe_name(session)
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = self.root / "state.json"
@@ -302,28 +304,57 @@ class ProjectState:
         return path.resolve().relative_to(self.workspace).as_posix()
 
     def resolve_relative(self, value: str) -> Path:
-        ensure_relative(value)
-        candidate = (self.workspace / value).resolve()
-        if any(part in IGNORED_DIRS for part in Path(value).parts) or candidate.name.startswith(".env") or candidate.suffix.lower() in {".pem", ".key"}:
-            raise ValueError("Private application state/configuration cannot be read or changed by a model")
+        value = ensure_relative(value)
+        original = self.workspace / value
+        candidate = original.resolve()
         try:
-            candidate.relative_to(self.workspace)
+            resolved_parts = candidate.relative_to(self.workspace).parts
         except ValueError as exc:
             raise ValueError("Path is outside the workspace") from exc
+        ignored = {os.path.normcase(part) for part in IGNORED_DIRS}
+        for parts in (Path(value).parts, resolved_parts):
+            if any(os.path.normcase(part) in ignored
+                   or part.lower().startswith(".env")
+                   or Path(part).suffix.lower() in {".pem", ".key"} for part in parts):
+                raise ValueError("Private application state/configuration cannot be read or changed by a model")
+        if candidate == self.private_state_root or self.private_state_root in candidate.parents:
+            raise ValueError("Private application state cannot be read or changed by a model")
+        # lstat every component, including directory links, junctions and other
+        # Windows reparse points. A missing tail is allowed for a new file.
+        component = self.workspace
+        for part in Path(value).parts:
+            component = component / part
+            try:
+                metadata = component.lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISLNK(metadata.st_mode) or (
+                getattr(metadata, "st_file_attributes", 0)
+                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+            ):
+                raise ValueError("Linked/reparse paths cannot be read or changed by a model")
         return candidate
 
     def scan(self):
         files = {}
         for root, dirs, names in os.walk(self.workspace):
-            dirs[:] = [d for d in dirs if d not in IGNORED_DIRS and not (Path(root) / d).is_symlink()]
+            safe_dirs = []
+            for directory in dirs:
+                try:
+                    self.resolve_relative((Path(root) / directory).relative_to(self.workspace).as_posix())
+                except (OSError, ValueError, RuntimeError):
+                    continue
+                safe_dirs.append(directory)
+            dirs[:] = safe_dirs
             for name in names:
                 path = Path(root) / name
                 if path.suffix.lower() not in CODE_EXTENSIONS:
                     continue
                 try:
+                    path = self.resolve_relative(path.relative_to(self.workspace).as_posix())
                     if path.is_symlink() or path.name.startswith(".env") or path.stat().st_size > MAX_FILE_BYTES: continue
                     raw = path.read_bytes()
-                except OSError:
+                except (OSError, ValueError):
                     continue
                 if len(raw) > MAX_FILE_BYTES or b"\x00" in raw:
                     continue

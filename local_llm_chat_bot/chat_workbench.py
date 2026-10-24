@@ -1312,8 +1312,7 @@ def progress_copy(data: dict[str, Any], zh: str, en: str, de: str) -> str:
 def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, Any]:
     state, documents, llm = data["state"], data["documents"], data["llm"]
     ensure_current_sources(data)
-    data["pending"] = []
-    if ACTIVE.get("state") is state: ACTIVE["pending"] = []
+    invalidate_pending(data)
     def report(phase: str, text: str, percent: int | None = None) -> None:
         if data.get("cancel_event") and data["cancel_event"].is_set():
             raise RuntimeError("Request cancelled; no changes applied")
@@ -1478,8 +1477,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
         if isinstance(change, dict) and state.resolve_relative(change.get("path", "")).exists() and change.get("path") not in complete:
             raise ValueError("A complete current file must be read before proposing its replacement")
     changes = build_diff(state, action.get("changes", []))
-    data["pending"] = changes
-    if ACTIVE.get("state") is state: ACTIVE["pending"] = changes
+    plan_id = publish_pending(data, changes)
     title_session_from_question(state, question)
     state.add_turn("user", question); state.add_turn("assistant", action.get("answer", ""))
     turn_token_usage = summarize_usage(usage_records)
@@ -1502,7 +1500,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
     report("complete", progress_copy(data, "处理完成。", "Processing complete.", "Verarbeitung abgeschlossen."), 100)
     return {"answer": action.get("answer", ""), "reasoning": "".join(reasoning), "notices": notices,
             "sources": evidence, "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [{k: v for k, v in item.items() if k != "content"} for item in changes],
-            "can_export_bg": bool(bg_context),
+            "plan_id": plan_id, "can_export_bg": bool(bg_context),
             "turn_usage": turn_token_usage,
             "model_response": llm.last_response_model or data["model"],
             "turn_cost": turn_token_usage["cost_usd"] if estimates else None,
@@ -1612,7 +1610,8 @@ def reset_context(data):
     state.data['history'] = []; state.data['summary'] = ''
     state.data.pop('last_bg_analysis', None)
     coverage_path(state).unlink(missing_ok=True)
-    data['pending'] = []
+    invalidate_pending(data)
+    data["context_revision"] = uuid.uuid4().hex
     state.save()
 
 
@@ -1719,7 +1718,7 @@ def activate_local_session(data: dict[str, Any], session_name: str) -> dict:
         data["documents"] = LocalDocumentLibrary(state.root.parent / "documents.json")
         data["model"] = canonical_model_id(state.data.get("selected_model") or data["model"])
         data["llm"] = LLMConnector(data["model"], data["llm"].api_key, session_id=state.data["session_id"])
-        data["pending"] = []
+        invalidate_pending(data)
         save_workbench_settings(state.workspace, state.root.name, data["model"], data.get("language", "zh"))
         return status_data(data)
 
@@ -2278,6 +2277,52 @@ def compare(request: CompareRequest):
 
 class ApplyRequest(BaseModel):
     confirmed: bool = False
+    plan_id: str = ""
+
+
+def invalidate_pending(data):
+    data["pending"] = []
+    data.pop("pending_plan", None)
+    if ACTIVE.get("state") is data.get("state") and ACTIVE is not data:
+        ACTIVE["pending"] = []
+        ACTIVE.pop("pending_plan", None)
+
+
+def plan_digest(changes):
+    return sha256(json.dumps(changes, ensure_ascii=False, sort_keys=True,
+                             separators=(",", ":")).encode("utf-8"))
+
+
+def plan_context(data):
+    state = data["state"]
+    rules = load_codebook_profile()
+    rule_path = Path(str(rules.get("source_path", "")))
+    return plan_digest({
+        "workspace": str(state.workspace), "session": str(state.root),
+        "session_id": state.data["session_id"], "model": data["model"],
+        "revision": data.get("context_revision"),
+        "target": state.data.get("selected_target"),
+        "bg": state.data.get("bg_context"),
+        "sources": state.data.get("active_source_ids"),
+        "documents": [{key: item.get(key) for key in ("id", "path", "sha256")}
+                      for item in data["documents"].list()],
+        "rules": rules,
+        "rule_source_sha256": file_digest(rule_path) if rule_path.is_file() else None,
+    })
+
+
+def publish_pending(data, changes):
+    """Bind the exact displayed ordered plan to this session and context."""
+    with LOCK:
+        invalidate_pending(data)
+        if not changes:
+            return None
+        plan = {"id": uuid.uuid4().hex, "context": plan_context(data),
+                "changes": plan_digest(changes)}
+        data["pending"], data["pending_plan"] = changes, plan
+        if ACTIVE.get("state") is data["state"]:
+            ACTIVE["pending"], ACTIVE["pending_plan"] = changes, plan
+        return plan["id"]
 
 
 @app.post("/api/apply")
@@ -2285,7 +2330,12 @@ class ApplyRequest(BaseModel):
 def apply(request: ApplyRequest):
     if not request.confirmed: raise HTTPException(400, "Explicit confirmation is required")
     data = session(); pending = data.get("pending", [])
-    if not pending: raise HTTPException(400, "No pending changes")
+    plan = data.get("pending_plan") or {}
+    if not request.plan_id or request.plan_id != plan.get("id") or not pending:
+        raise HTTPException(409, "This change plan is no longer current. Review the current plan again.")
+    if plan.get("context") != plan_context(data) or plan.get("changes") != plan_digest(pending):
+        raise HTTPException(409, "The reviewed plan or context changed. Request and review a new plan.")
+    ensure_current_sources(data)
     state = data["state"]
     backup_dir = state.root / "backups" / uuid.uuid4().hex
     staged, applied, originals = [], [], {}
@@ -2307,7 +2357,7 @@ def apply(request: ApplyRequest):
                 handle.write(item['content']); handle.flush(); os.fsync(handle.fileno())
         for path, temp in staged:
             os.replace(temp, path); applied.append(path)
-        data['pending'] = []
+        invalidate_pending(data)
         for path, _ in staged: state.refresh_file(state.relative(path))
     except Exception:
         for path in reversed(applied):
@@ -2325,7 +2375,7 @@ def apply(request: ApplyRequest):
 @app.delete("/api/pending")
 @context_mutation
 def cancel_pending():
-    session()["pending"] = []
+    invalidate_pending(session())
     return {"cancelled": True}
 
 
@@ -2514,11 +2564,11 @@ async function runDiagnostics(){
 function openContextDrawer(kind){
   closeContextDrawer();activeContextDrawer=kind;let title=$('contextdrawertitle'),body=$('contextdrawerbody');
   if(kind==='workspace'){
-    title.textContent=t('workspace.title');body.innerHTML='<div class="muted">'+t('workspace.description')+'</div><div class="field"><label>'+t('workspace.path_label')+'</label><div class="row"><input id="contextworkspacepath" placeholder="C:\\\\...\\\\项目文件夹" value="'+esc($('workspace').value)+'"><button class="ghost" onclick="contextPickWorkspace()">'+t('workspace.choose')+'</button></div></div><div class="row"><button onclick="contextOpenWorkspace()">'+t('workspace.open')+'</button></div><div id="contextworkspacemsg" class="muted" style="margin-top:10px"></div>';
+    title.textContent=t('workspace.title');body.innerHTML='<div class="muted">'+t('workspace.description')+'</div><div class="field"><label>'+t('workspace.path_label')+'</label><div class="row"><input id="contextworkspacepath" placeholder="C:\\\\...\\\\项目文件夹" value="'+escAttr($('workspace').value)+'"><button class="ghost" onclick="contextPickWorkspace()">'+t('workspace.choose')+'</button></div></div><div class="row"><button onclick="contextOpenWorkspace()">'+t('workspace.open')+'</button></div><div id="contextworkspacemsg" class="muted" style="margin-top:10px"></div>';
   }else if(kind==='rules'){
-    title.textContent=t('rules.title');body.innerHTML='<div class="muted">'+t('rules.description')+'</div><div class="field"><label>'+t('rules.file_label')+'</label><div class="row"><input id="contextcodebookpath" placeholder="'+t('rules.choose')+'" value="'+esc($('codebook').value)+'" oninput="contextSyncRule()"><button class="ghost" onclick="contextPickRule()">'+t('workspace.choose')+'</button></div></div><div class="row"><button onclick="contextSyncRule();prepareCodebook()">'+t('rules.prepare')+'</button><button class="ghost" onclick="viewCodebook()">'+t('rules.view')+'</button><button class="ghost" onclick="changeCodebook()">'+t('rules.replace')+'</button></div><div id="contextrulemsg" class="muted" style="margin-top:10px"></div><div class="card">'+$('codebookstatus').innerHTML+'</div>';
+    title.textContent=t('rules.title');body.innerHTML='<div class="muted">'+t('rules.description')+'</div><div class="field"><label>'+t('rules.file_label')+'</label><div class="row"><input id="contextcodebookpath" placeholder="'+t('rules.choose')+'" value="'+escAttr($('codebook').value)+'" oninput="contextSyncRule()"><button class="ghost" onclick="contextPickRule()">'+t('workspace.choose')+'</button></div></div><div class="row"><button onclick="contextSyncRule();prepareCodebook()">'+t('rules.prepare')+'</button><button class="ghost" onclick="viewCodebook()">'+t('rules.view')+'</button><button class="ghost" onclick="changeCodebook()">'+t('rules.replace')+'</button></div><div id="contextrulemsg" class="muted" style="margin-top:10px"></div><div class="card">'+$('codebookstatus').innerHTML+'</div>';
   }else if(kind==='materials'){
-    title.textContent=t('materials.title');body.innerHTML='<div class="muted">'+t('materials.description')+'</div><div class="field"><label>'+t('materials.target_label')+'</label><div class="row"><input id="contexttargetpath" placeholder="'+t('materials.target_placeholder')+'" value="'+esc($('targetpath').value)+'" oninput="contextSyncTarget()"><button class="ghost" onclick="contextPickTarget(\'file\')">'+t('materials.file')+'</button><button class="ghost" onclick="contextPickTarget(\'folder\')">'+t('materials.folder')+'</button></div></div><div class="row"><button class="ghost" onclick="contextSyncTarget();loadTargetTree()">'+t('materials.show_tree')+'</button><button class="ghost" onclick="contextSyncTarget();analyzeTarget()">'+t('materials.confirm_scope')+'</button></div><div id="contexttargetmsg" class="muted" style="margin:8px 0"></div><div id="contextmaterialmount"></div>';
+    title.textContent=t('materials.title');body.innerHTML='<div class="muted">'+t('materials.description')+'</div><div class="field"><label>'+t('materials.target_label')+'</label><div class="row"><input id="contexttargetpath" placeholder="'+t('materials.target_placeholder')+'" value="'+escAttr($('targetpath').value)+'" oninput="contextSyncTarget()"><button class="ghost" onclick="contextPickTarget(\'file\')">'+t('materials.file')+'</button><button class="ghost" onclick="contextPickTarget(\'folder\')">'+t('materials.folder')+'</button></div></div><div class="row"><button class="ghost" onclick="contextSyncTarget();loadTargetTree()">'+t('materials.show_tree')+'</button><button class="ghost" onclick="contextSyncTarget();analyzeTarget()">'+t('materials.confirm_scope')+'</button></div><div id="contexttargetmsg" class="muted" style="margin:8px 0"></div><div id="contextmaterialmount"></div>';
     moveContextElements(['treestatus','targettree','materialactions','bgstatus','coveragestatus'], $('contextmaterialmount'));
   }else if(kind==='scan'){
     title.textContent=t('scan.title');body.innerHTML='<div class="muted">'+t('scan.description')+'</div><div class="card" id="contextcoveragestatus">'+$('coveragestatus').innerHTML+'</div><div class="row"><button class="ghost" onclick="openScanReport()">'+t('scan.report')+'</button><button class="ghost" onclick="prepareCoverage(true)">'+t('scan.extend')+'</button></div>';
@@ -2583,7 +2633,7 @@ function setScanReportAvailable(report){lastScanReport=report||null;let button=$
 function openScanReport(){if(!lastScanReport)return;renderScanDrawer(lastScanReport);$('scanbackdrop').classList.add('open');loadCacheAudit()}
 function closeScanReport(){$('scanbackdrop')?.classList.remove('open')}
 function renderScanDrawer(x){let files=(x.files||[]).map(f=>{let index=f.index_cache_status==='reused'?rt('scan.index.reused'):f.index_cache_status==='changed'?rt('scan.index.changed'):f.index_cache_status==='new'?rt('scan.index.created'):'—';return `<article class="file-card"><b>${esc(f.name)}</b><br><span class="muted">${esc(f.material_role_label||'其他资料')} · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB<br>本地文本片段：${f.chunks} · ${index}</span></article>`}).join('')||'<div class="muted">'+rt('scan.report.none')+'</div>';let skipped=x.skipped_count?`<article class="file-card error"><b>跳过 / 失败 ${x.skipped_count} 个</b><br><span class="muted">${x.skipped.map(esc).join('<br>')}${x.skipped_count>x.skipped.length?'<br>其余失败项未展开。':''}</span></article>`:'';let audit='<details id="cacheauditpanel" class="file-card" ontoggle="if(this.open)loadCacheAudit()"><summary><b>'+rt('scan.report.cache')+'</b></summary><div class="muted" style="margin:7px 0">'+rt('scan.report.cache_detail')+'</div><div id="cacheaudit" class="list muted">'+rt('scan.report.cache_loading')+'</div></details>';$('scanreportbody').innerHTML='<div class="muted">'+rt('scan.report.added',{count:x.sources||0})+'</div>'+files+skipped+audit}
-function renderCacheAudit(x){let host=$('cacheaudit');if(!host)return;if(!x.files?.length){host.textContent=rt('material.none');return}let hasSummary=x.files.some(f=>(f.summary_entries||[]).length);if(!hasSummary){host.innerHTML='<div class="muted">'+rt('material.cache_empty')+'</div>';return}let dossier=x.dossier?.ready?`BG 综合档案：已缓存（${esc(x.dossier.model||'—')}）`:'BG 综合档案：尚未生成或材料范围已变化';let files=x.files.map(f=>{let summaries=(f.summary_entries||[]).map(s=>`${esc(s.model||'—')} · ${s.full?'全部页':'默认范围'} · ${s.complete?'完成':'未完成'}`).join('<br>')||'无摘要缓存';let read=(f.summary_entries||[]).length?'<br><button class="ghost" onclick="rebuildCachedFile(\''+esc(f.id)+'\')">仅重读此文件</button>':'';return `<div class="card"><b>${esc(f.name)}</b><br><span class="muted">索引：${esc(f.index_status)} · OCR：${esc(f.ocr_status)}<br>摘要：${summaries}</span>${read}</div>`}).join('');host.innerHTML='<div class="muted">'+dossier+(x.selection_current?'':'；当前材料范围待更新')+'</div><div class="row"><button class="ghost" onclick="rebuildDossier()">重建 BG 档案</button><button class="ghost" onclick="clearSummaryCaches()">清除摘要缓存</button></div>'+files}
+function renderCacheAudit(x){let host=$('cacheaudit');if(!host)return;if(!x.files?.length){host.textContent=rt('material.none');return}let hasSummary=x.files.some(f=>(f.summary_entries||[]).length);if(!hasSummary){host.innerHTML='<div class="muted">'+rt('material.cache_empty')+'</div>';return}let dossier=x.dossier?.ready?`BG 综合档案：已缓存（${esc(x.dossier.model||'—')}）`:'BG 综合档案：尚未生成或材料范围已变化';let files=x.files.map(f=>{let summaries=(f.summary_entries||[]).map(s=>`${esc(s.model||'—')} · ${s.full?'全部页':'默认范围'} · ${s.complete?'完成':'未完成'}`).join('<br>')||'无摘要缓存';let read=(f.summary_entries||[]).length?'<br><button class="ghost" data-document-id="'+escAttr(f.id)+'" onclick="rebuildCachedFile(this.dataset.documentId)">仅重读此文件</button>':'';return `<div class="card"><b>${esc(f.name)}</b><br><span class="muted">索引：${esc(f.index_status)} · OCR：${esc(f.ocr_status)}<br>摘要：${summaries}</span>${read}</div>`}).join('');host.innerHTML='<div class="muted">'+dossier+(x.selection_current?'':'；当前材料范围待更新')+'</div><div class="row"><button class="ghost" onclick="rebuildDossier()">重建 BG 档案</button><button class="ghost" onclick="clearSummaryCaches()">清除摘要缓存</button></div>'+files}
 async function loadCacheAudit(){let host=$('cacheaudit');if(!host)return;try{renderCacheAudit(await api('/api/cache/audit'))}catch(e){host.innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function rebuildCachedFile(id){if(!confirm('仅清除这份文件的本地摘要？下次分类会重新读取该文件；其他文件摘要保持不变。'))return;try{let x=await api('/api/cache/file/rebuild',{method:'POST',body:JSON.stringify({document_id:id,confirmed:true})});$('coveragestatus').textContent=x.message;renderCacheAudit(x.audit)}catch(e){$('cacheaudit').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function rebuildDossier(){if(!confirm(rt('dossier.confirm')))return;let host=$('cacheaudit');let button=host?.querySelector('button[onclick="rebuildDossier()"]');if(button)button.disabled=true;$('coveragestatus').textContent=rt('dossier.working');try{let x=await api('/api/cache/dossier/rebuild',{method:'POST',body:JSON.stringify({confirmed:true})});$('coveragestatus').textContent=x.message;renderCacheAudit(x.audit);renderStatus(await api('/api/status'))}catch(e){$('coveragestatus').innerHTML='<span class="error">'+esc(rt('dossier.failed')+e.message)+'</span>';if(host)host.innerHTML='<span class="error">'+esc(rt('dossier.failed')+e.message)+'</span>'}finally{if(button)button.disabled=false}}
@@ -2594,7 +2644,7 @@ function clearTargetTree(){savedTargetSelection=new Set();treeRestoreNote='';sca
 function renderStatusForLanguage(s){$('status').innerHTML=`${t('status.model')}：<b>${esc(s.model)}</b><br>${t('status.session')}：${esc(s.session_name||'default')}<br>${t('status.code')}：${t('status.files',{count:s.code_files})}<br>${t('status.documents')}：${t('status.items',{count:s.documents})}<br>${t('status.requests')}：${esc(s.requests)}<br>${t('status.tokens')}：${esc(s.input_tokens)} / ${esc(s.output_tokens)}<br>${t('status.cost')}：${esc(s.cost)}${s.unpriced_requests?' · '+t('usage.partial',{count:s.unpriced_requests}):''}<br>${s.bg_context?'<span class="ok">'+t('status.assembly_mode')+'：'+esc(s.bg_context.codebook_name)+'</span>':t('status.normal_mode')}`;refreshAppChrome();refreshContextPanel()}
 function renderUsageDetailForLanguage(u,model){if(!u)return;$('usagedetail').innerHTML=`${t('usage.actual_model')}：<b>${esc(model||'—')}</b><br>${t('usage.input_output_total')}：${esc(u.input)} / ${esc(u.output)} / ${esc(u.total)}<br>${t('usage.reasoning')}：${esc(u.reasoning||0)} ｜ ${t('usage.gemini_thinking')}：${esc(u.gemini_thinking||0)}<br>${t('usage.claude_cache')}：${esc(u.cache_read||0)} / ${esc(u.cache_write||0)}<br>${t('usage.estimate')}：${u.cost_usd==null?t('usage.unknown'):Number(u.cost_usd).toFixed(6)}`}
 function renderEvidenceSourcesForLanguage(sources,dfcEvidence){let normal=(sources||[]).map(s=>`<div class="card"><b>${esc(s.label||s.name||t('model.unknown_source'))}</b><br>${s.visual?'<span class="chip">'+t('evidence.visual')+'</span>':''}</div>`).join('');let dfc=(dfcEvidence||[]).map(d=>{let parts=(d.segments_used||[]).join('、')||'—';return `<div class="card"><b>DFC Struktur</b><br>${esc(d.name||'—')}<br><span class="chip">OCR：${esc(d.ocr_status||'—')}</span><span class="chip">${t('dfc.segment_info',{segments:esc(parts),total:esc(d.segments_total||0)})}</span></div>`}).join('');$('sources').innerHTML=(dfc+normal)||t('evidence.none')}
-function renderCompareSlotsForLanguage(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">'+t('compare.select_model')+'</option>'+compareOptions.map(([value,label])=>'<option value="'+value+'" '+(slot.value===value?'selected':'')+'>'+esc(label)+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>'+t('model.other')+'</option>';return '<div class="field"><label>'+t('compare.model_number',{index:index+1})+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+esc(slot.custom||'')+'" placeholder="'+t('model.id_placeholder')+'" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?t('compare.maximum'):t('compare.add');if(compareSlots.length>=4)$('comparestatus').textContent=t('compare.maximum')}
+function renderCompareSlotsForLanguage(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">'+t('compare.select_model')+'</option>'+compareOptions.map(([value,label])=>'<option value="'+escAttr(value)+'" '+(slot.value===value?'selected':'')+'>'+esc(label)+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>'+t('model.other')+'</option>';return '<div class="field"><label>'+t('compare.model_number',{index:index+1})+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+escAttr(slot.custom||'')+'" placeholder="'+t('model.id_placeholder')+'" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?t('compare.maximum'):t('compare.add');if(compareSlots.length>=4)$('comparestatus').textContent=t('compare.maximum')}
 function renderSessionRowsForLanguage(items,append){let list=$('sessionlist');if(!list)return;if(!append)list.innerHTML='';for(let item of items){let row=document.createElement('div');row.className='session-row'+(item.name===currentSessionName?' active':'');row.onclick=()=>openSessionByName(item.name);let title=document.createElement('span');title.className='session-title';title.textContent=item.title;row.append(title);if(item.pinned){let pin=document.createElement('span');pin.className='session-pin';pin.textContent='●';pin.title=t('session.pin_title');row.append(pin)}let more=document.createElement('button');more.className='session-more';more.textContent='•••';more.title=t('session.more_title');more.onclick=e=>{e.stopPropagation();openSessionMenu(e,item)};row.append(more);list.append(row)}if(sessionLoading){let loading=document.createElement('div');loading.id='sessionloading';loading.className='session-loading';loading.textContent=t('session.loading');list.append(loading)}}
 function openSessionMenuForLanguage(event,item){closeSessionMenu();let menu=document.createElement('div');menu.id='sessionmenu';menu.className='session-menu';let rect=event.currentTarget.getBoundingClientRect();menu.style.left=Math.min(window.innerWidth-145,rect.right+6)+'px';menu.style.top=rect.top+'px';menu.innerHTML='<button data-action="rename">'+t('actions.rename_full')+'</button><button data-action="pin">'+t(item.pinned?'session.unpin':'session.pin')+'</button><button class="delete" data-action="delete">'+t('actions.delete')+'</button>';menu.onclick=async e=>{let action=e.target.dataset.action;if(!action)return;if(action==='rename')await renameSession(item.name);if(action==='pin')await pinSession(item);if(action==='delete')await deleteSession(item.name);closeSessionMenu()};document.body.append(menu)}
 function renderCoverageReportForLanguage(x){
@@ -2616,7 +2666,7 @@ function renderCacheAuditForLanguage(x){
   if(!x.files?.length){host.textContent=t('material.none');return}
   if(!x.files.some(f=>(f.summary_entries||[]).length)){host.innerHTML='<div class="muted">'+t('material.cache_empty')+'</div>';return}
   let dossier=x.dossier?.ready?t('cache.dossier_ready',{model:esc(x.dossier.model||'—')}):t('cache.dossier_missing');
-  let files=x.files.map(f=>{let summaries=(f.summary_entries||[]).map(s=>`${esc(s.model||'—')} · ${t(s.full?'cache.full':'cache.default_scope')} · ${t(s.complete?'cache.complete':'cache.incomplete')}`).join('<br>')||t('cache.no_summary');let read=(f.summary_entries||[]).length?'<br><button class="ghost" onclick="rebuildCachedFile(\''+esc(f.id)+'\')">'+t('cache.rebuild_file')+'</button>':'';return `<div class="card"><b>${esc(f.name)}</b><br><span class="muted">${t('cache.index')}：${esc(f.index_status)} · OCR：${esc(f.ocr_status)}<br>${t('cache.summary')}：${summaries}</span>${read}</div>`}).join('');
+  let files=x.files.map(f=>{let summaries=(f.summary_entries||[]).map(s=>`${esc(s.model||'—')} · ${t(s.full?'cache.full':'cache.default_scope')} · ${t(s.complete?'cache.complete':'cache.incomplete')}`).join('<br>')||t('cache.no_summary');let read=(f.summary_entries||[]).length?'<br><button class="ghost" data-document-id="'+escAttr(f.id)+'" onclick="rebuildCachedFile(this.dataset.documentId)">'+t('cache.rebuild_file')+'</button>':'';return `<div class="card"><b>${esc(f.name)}</b><br><span class="muted">${t('cache.index')}：${esc(f.index_status)} · OCR：${esc(f.ocr_status)}<br>${t('cache.summary')}：${summaries}</span>${read}</div>`}).join('');
   host.innerHTML='<div class="muted">'+dossier+(x.selection_current?'':'；'+t('cache.scope_changed'))+'</div><div class="row"><button class="ghost" onclick="rebuildDossier()">'+t('cache.rebuild_dossier')+'</button><button class="ghost" onclick="clearSummaryCaches()">'+t('cache.clear')+'</button></div>'+files;
 }
 // Keep the last data payload, then redraw it with the active language.  The
@@ -2718,7 +2768,7 @@ async function analyzeTarget(){let confirm=$('confirmmaterials');if(confirm){con
 async function prepareCoverage(full=false){if(busy)return;busy=true;$('coveragestatus').textContent=rt(full?'coverage.preparing_full':'coverage.preparing');try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full})});renderCoverageReport(x)}catch(e){$('coveragestatus').innerHTML='<span class="error">'+esc(rt('coverage.failed')+e.message)+'</span>'}finally{busy=false}}
 async function clearBg(){try{renderStatus(await api('/api/bg',{method:'DELETE'}));$('bgstatus').textContent=t('bg.exited')}catch(e){$('bgstatus').textContent=e.message}}
 const compareOptions=[['claude-haiku-5-5','Claude Haiku 5.5'],['claude-sonnet-5-5','Claude Sonnet 5.5'],['claude-opus-5','Claude Opus 5'],['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite'],['gemini-2.5-pro','Gemini 2.5 Pro'],['gemini-2.5-flash','Gemini 2.5 Flash'],['deepseek-r1-0528-maas','DeepSeek R1 (0528)'],['llama-3.3-70b-instruct-maas','Llama 3.3 70B'],['glm-5-maas','GLM-5']];
-function renderCompareSlots(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">选择模型…</option>'+compareOptions.map(([value,label])=>'<option value="'+value+'" '+(slot.value===value?'selected':'')+'>'+label+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>其他：手动输入 Model ID…</option>';return '<div class="field"><label>对比模型 '+(index+1)+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+esc(slot.custom||'')+'" placeholder="输入准确的 Bosch Farm Model ID" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?'最多 4 个模型':'＋ 添加对比模型';if(compareSlots.length>=4)$('comparestatus').textContent='已达到最多 4 个对比模型。'}
+function renderCompareSlots(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">选择模型…</option>'+compareOptions.map(([value,label])=>'<option value="'+escAttr(value)+'" '+(slot.value===value?'selected':'')+'>'+label+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>其他：手动输入 Model ID…</option>';return '<div class="field"><label>对比模型 '+(index+1)+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+escAttr(slot.custom||'')+'" placeholder="输入准确的 Bosch Farm Model ID" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?'最多 4 个模型':'＋ 添加对比模型';if(compareSlots.length>=4)$('comparestatus').textContent='已达到最多 4 个对比模型。'}
 function changeCompareModel(index){let select=$('cmpsel'+index);compareSlots[index].value=select.value;if(select.value!=='__custom__')compareSlots[index].custom='';renderCompareSlots();if(select.value==='__custom__')setTimeout(()=>$('cmpcustom'+index).focus(),0)}
 function addCompareModel(){if(compareSlots.length>=4){$('comparestatus').textContent='最多只能同时对比 4 个模型。';return}compareSlots.push({value:'',custom:''});renderCompareSlots();$('cmpsel'+(compareSlots.length-1)).focus()}
 function removeCompareModel(index){compareSlots.splice(index,1);renderCompareSlots();$('comparestatus').textContent=''}
@@ -2731,11 +2781,11 @@ function renderComparisonForLanguage(record){
 async function compareModels(){if(busy)return;if(materialDraftDirty){message(t('materials.reconfirm'));return;}let q=$('question').value.trim()||lastQuestion;if(!q){$('comparestatus').innerHTML='<span class="error">'+t('compare.question_required')+'</span>';return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){$('comparestatus').innerHTML='<span class="error">'+t('compare.models_required')+'</span>';return}busy=true;lastQuestion=q;$('comparestatus').textContent=t('compare.running',{count:models.length});let wait=message(t('compare.in_progress',{models:models.join(' · ')}));try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models})});wait.remove();lastComparison={question:q,data:x};renderComparisonForLanguage(lastComparison);$('comparestatus').innerHTML='<span class="ok">'+t('compare.complete')+'</span>'}catch(e){wait.textContent=t('model.failed')+e.message;wait.classList.add('error');$('comparestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{busy=false;$('chat').scrollTop=1e9}}
 function processingCard(){let card=document.createElement('section');card.className='message assistant';card.style.border='1px solid #334155';card.innerHTML='<b>'+rt('model.processing')+'</b><div class="muted" data-process-text>'+rt('model.connecting')+'</div><div style="height:7px;background:#0b1220;border-radius:8px;overflow:hidden;margin-top:9px"><div data-process-bar style="height:100%;width:4%;background:#38bdf8;transition:width .25s ease"></div></div>';$('chat').append(card);return card}
 function updateProcessing(card,event){let text=card.querySelector('[data-process-text]'),bar=card.querySelector('[data-process-bar]');text.textContent=event.text||rt('model.waiting');if(typeof event.percent==='number')bar.style.width=Math.max(4,Math.min(100,event.percent))+'%';if(event.phase==='complete'){card.style.borderColor='#22c55e';bar.style.background='#22c55e'}}
-function showChatResult(x){message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>'+t('model.reasoning')+'</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${esc(c.path)}</b><br>${esc(c.reason)}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button onclick="apply()">'+t('changes.apply')+'</button>':t('changes.none');$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">'+t('export.assembly')+'</button>':t('export.assembly_unavailable');renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}
+function showChatResult(x){message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>'+t('model.reasoning')+'</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${esc(c.path)}</b><br>${esc(c.reason)}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button data-plan-id="'+escAttr(x.plan_id||'')+'" onclick="apply(this.dataset.planId,this)">'+t('changes.apply')+'</button>':t('changes.none');if(x.changes?.length){let review=$('changes').cloneNode(true);review.removeAttribute('id');review.className='message assistant change-plan';$('chat').append(review)}$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">'+t('export.assembly')+'</button>':t('export.assembly_unavailable');renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}
 async function chat(){if(busy||!$('question').value.trim())return;if(materialDraftDirty){message(t('materials.reconfirm'));return;}busy=true;let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');let wait=processingCard(),buffer='',result=null;try{let response;try{response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})})}catch(error){throw Error(rt('model.connection_failed')+(error?.message?` ${error.message}`:''))}if(!response.ok){await readApiResponse(response)}let reader=response.body.getReader(),decoder=new TextDecoder();while(true){let part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});let blocks=buffer.split('\n\n');buffer=blocks.pop();for(let block of blocks){let line=block.split('\n').find(item=>item.startsWith('data: '));if(!line)continue;let event=JSON.parse(line.slice(6));if(event.type==='progress')updateProcessing(wait,event);else if(event.type==='result')result=event.data;else if(event.type==='error')throw Error(event.message||rt('model.failed'))}}if(!result)throw Error(t('api.no_result'));updateProcessing(wait,{phase:'complete',text:rt('model.complete'),percent:100});showChatResult(result)}catch(e){wait.querySelector('[data-process-text]').textContent=rt('model.failed')+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
 async function exportSession(){try{let x=await api('/api/export/session',{method:'POST'});$('sessionexport').innerHTML='<span class="ok">'+esc(t('export.complete',{path:x.path}))+'</span>'}catch(e){$('sessionexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function exportBgAnalysis(){try{let x=await api('/api/export/bg-analysis',{method:'POST'});$('analysisexport').innerHTML='<span class="ok">'+esc(t('export.complete',{path:x.path}))+'</span>'}catch(e){$('analysisexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-function esc(s){let e=document.createElement('div');e.textContent=s;return e.innerHTML}async function apply(){if(!confirm(t('changes.confirm')))return;try{let x=await api('/api/apply',{method:'POST',body:JSON.stringify({confirmed:true})});$('changes').innerHTML='<span class="ok">'+t('apply.complete',{count:x.applied})+'</span>';message(t('apply.message',{count:x.applied}))}catch(e){$('changes').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+function esc(s){let e=document.createElement('div');e.textContent=s;return e.innerHTML}function escAttr(s){return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;')}async function apply(planId,button){let review=button?.closest('.change-plan')||$('changes');if(!confirm(t('changes.confirm')))return;try{let x=await api('/api/apply',{method:'POST',body:JSON.stringify({confirmed:true,plan_id:planId})});review.innerHTML='<span class="ok">'+t('apply.complete',{count:x.applied})+'</span>';message(t('apply.message',{count:x.applied}))}catch(e){review.innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 
 let materialDraftDirty=false;
 function clearResultPanels(){lastUsageSnapshot=null;lastComparison=null;lastCoverageReport=null;lastCacheAudit=null;$('sources').textContent=t('evidence.none');$('changes').textContent=t('changes.none');$('analysisexport').textContent=t('export.assembly_unavailable');$('usagedetail').textContent=t('usage.unavailable');$('coveragestatus').textContent=t('material.updated');}

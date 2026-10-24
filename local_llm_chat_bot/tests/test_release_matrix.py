@@ -147,7 +147,7 @@ class ApiAndFileMatrix(unittest.TestCase):
         a=self.workspace/'a.txt'; b=self.workspace/'b.txt'; a.write_text('A'); b.write_text('B')
         state=w.ACTIVE['state']
         changes=w.build_diff(state,[{'path':'a.txt','content':'new A'},{'path':'b.txt','content':'new B'}])
-        w.ACTIVE['pending']=changes
+        plan_id = w.publish_pending(w.ACTIVE, changes)
         with self.assertRaises(w.HTTPException): w.apply(w.ApplyRequest(confirmed=False))
         self.assertEqual(a.read_text(),'A')
         real_replace=os.replace
@@ -155,7 +155,7 @@ class ApiAndFileMatrix(unittest.TestCase):
             if Path(dest)==b: raise PermissionError('file locked')
             return real_replace(source,dest)
         with patch.object(w.os,'replace',side_effect=fail_second), self.assertRaises(PermissionError):
-            w.apply(w.ApplyRequest(confirmed=True))
+            w.apply(w.ApplyRequest(confirmed=True, plan_id=plan_id))
         self.assertEqual(a.read_text(),'A'); self.assertEqual(b.read_text(),'B')
         self.assertTrue(list((state.root/'backups').rglob('a.txt')))
         w.cancel_pending(); self.assertEqual(w.ACTIVE['pending'],[])
