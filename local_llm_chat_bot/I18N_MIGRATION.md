@@ -25,12 +25,22 @@ No new API endpoint or external translation service is used.
 - Run `python -m unittest discover -s local_llm_chat_bot/tests -p test_workbench_i18n.py`
   from the repository root. Install Node.js to include embedded JS checks.
 
-## Deliberately not completed in step 2
+## Step 3a: static interface binding
 
-The legacy DOM translation observer remains until static markup and dynamic
-renderers are migrated. Existing hardcoded strings not yet wired to keys,
-server progress/errors, language persistence races and open-panel rerendering
-still need subsequent steps. Catalog tests do NOT prove browser switching is
-fixed. Full browser tests must check ZH → EN → DE → ZH → EN → DE, asynchronous
-updates and unchanged source content/selections. The translator loop test is
-only a unit test, not a substitute for those browser checks.
+The former page-wide text `MutationObserver` is removed. At startup,
+`bindInitialStaticI18n()` records only known, server-rendered UI copy and
+`applyLanguage()` updates that fixed collection plus explicitly registered
+elements. Runtime content is never observed or inferred as a translation key.
+
+Dynamic renderers still need to use semantic keys and rerender from their data
+when the language changes. Do not reintroduce a whole-page text observer as a
+shortcut for those renderers.
+
+## Still to be completed
+
+Existing hardcoded strings not yet wired to keys, server progress/errors,
+language persistence races and open-panel rerendering still need subsequent
+steps. Catalog tests do NOT prove browser switching is fixed. Full browser
+tests must check ZH → EN → DE → ZH → EN → DE, asynchronous updates and
+unchanged source content/selections. The translator loop test is only a unit
+test, not a substitute for those browser checks.
