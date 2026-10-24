@@ -61,6 +61,33 @@ because 2.4.0 crashed in this container's process discovery before checking code
 
 ## Current gates
 
+After step 5 (R11), discovery runs 144 tests: 138 pass, 5 fail and the native
+Windows test remains skipped on Linux. The 20 new accounting tests and both
+R11 audit regressions pass. Run the accounting tests with:
+`python -m unittest discover -s tests -p test_release_step_five.py -v`.
+The browser suite has 10 methods: 7 pass; 3 retain 8 known R13/R14/R15 failures.
+Its new test checks real unknown-usage responses in chat, cumulative status,
+Codebook preparation and comparison cards.
+
+All session model paths share accounted_model_call, including repairs and
+failed responses. The ledger counts dispatched transport attempts, not stream
+chunks; reused local summaries/dossiers add no requests. OpenAI SDK automatic
+retries are disabled so they cannot bypass accounting; explicit stream fallback
+and HTTP retries each have their own ledger entry. Returned usage is saved before
+output validation. Per-turn totals include automatic preparation and dossier work.
+
+Token totals are null when incomplete, alongside known_input/known_output and
+usage_complete. cost_usd is null for incomplete costs; known_cost_usd sums fully
+priced calls only. Persisted estimated_cost_usd retains that known subtotal;
+unpriced_requests and cost_complete identify incomplete cumulative cost. Existing
+historical omissions cannot be reconstructed from the old counters.
+Cache pricing is optional configuration in model_pricing.json entries:
+cache_read_usd_per_million and cache_write_usd_per_million. No rates are guessed.
+Canonical input includes cache tokens; Claude's separate counts are added once,
+while OpenAI/Gemini cache hits are subtracted from prompt totals before pricing
+uncached input. Missing required cache prices leave the cost unknown.
+See docs/release-reports/Workbench_Repair_Step_05_2026-10-25.md at repository root.
+
 After step 4, discovery runs 124 tests: 116 pass, 7 fail and the native Windows
 test is skipped on Linux. R09/R10 audit regressions now pass.
 Run the new response-round/reference tests with:

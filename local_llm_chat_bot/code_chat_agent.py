@@ -15,9 +15,10 @@ import re
 import stat
 import sys
 import uuid
+from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
-from release_safety import context_state_error
+from release_safety import context_state_error, normalize_usage
 
 try:
     from dotenv import load_dotenv
@@ -173,6 +174,8 @@ class PricingCatalog:
             return None
         entry = max(candidates, key=lambda item: item[0])[1]
         try:
+            if any(isinstance(entry[key], bool) for key in ("input_usd_per_million", "output_usd_per_million")):
+                return None
             input_price = float(entry["input_usd_per_million"])
             output_price = float(entry["output_usd_per_million"])
             ends = entry.get("promotion_ends")
@@ -183,18 +186,38 @@ class PricingCatalog:
                 return None
         except (ValueError, TypeError, OverflowError):
             return None
-        return {"name": entry.get("display_name", model), "input_price": input_price, "output_price": output_price}
+        price = {"name": entry.get("display_name", model), "input_price": input_price, "output_price": output_price}
+        for field in ("cache_read", "cache_write"):
+            value = entry.get(field + "_usd_per_million")
+            try:
+                number = float(value) if value is not None and not isinstance(value, bool) else None
+                price[field + "_price"] = number if number is not None and math.isfinite(number) and number >= 0 else None
+            except (ValueError, TypeError, OverflowError):
+                price[field + "_price"] = None
+        return price
 
-    def estimate(self, model: str, input_tokens: int, output_tokens: int):
-        if input_tokens is None or output_tokens is None: return None
+    def estimate(self, model: str, input_tokens: int | None, output_tokens: int | None, *, usage=None):
+        if usage is None:
+            usage = normalize_usage({"input_tokens": input_tokens, "output_tokens": output_tokens})
+        else:
+            usage = normalize_usage(usage)
+        input_tokens, output_tokens = usage["input_tokens"], usage["output_tokens"]
+        if not usage["usage_complete"]: return None
         price = self.price_for(model)
         if not price:
             return None
+        counts = [(usage["uncached_input_tokens"], price["input_price"]), (output_tokens, price["output_price"])]
+        for field, key in (("cache_read", "cache_read_input_tokens"), ("cache_write", "cache_creation_input_tokens")):
+            count = usage[key]
+            if count:
+                counts.append((count, price[field + "_price"]))
+        if any(count is None or rate is None for count, rate in counts): return None
+        cost = sum((Decimal(count) * Decimal(str(rate)) for count, rate in counts), Decimal(0)) / Decimal(1_000_000)
         return {
             **price,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
-            "cost_usd": input_tokens * price["input_price"] / 1_000_000 + output_tokens * price["output_price"] / 1_000_000,
+            "cost_usd": float(cost),
         }
 
 
@@ -227,8 +250,16 @@ class ProjectState:
                 if not isinstance(data.get(key), type(value)): data[key] = value
             for key, value in defaults["usage"].items():
                 current = data["usage"].get(key)
+                if key in {"input", "output"} and current is None and data["usage"].get("accounting_version") == 2:
+                    continue
                 if not isinstance(current, (int, float)) or not math.isfinite(current) or current < 0:
                     data["usage"][key] = value
+            if data["usage"].get("accounting_version") == 2:
+                for field in ("input", "output"):
+                    known = data["usage"].get("known_" + field)
+                    if type(known) is not int or known < 0:
+                        data["usage"]["known_" + field] = 0
+                        data["usage"][field] = None
             data["history"] = [v for v in data["history"] if isinstance(v, dict) and isinstance(v.get("content"), str) and v.get("role") in {"user", "assistant"}]
             data["files"] = {k:v for k,v in data["files"].items() if isinstance(v, dict)}
             if context_problem or context_state_error(data):
@@ -435,19 +466,26 @@ class ProjectState:
         return records[-limit:]
 
     def note_usage(self, usage, pricing: PricingCatalog, model: str):
-        usage = usage if isinstance(usage, dict) else {}
-        from release_safety import normalize_usage
         usage = normalize_usage(usage)
         input_tokens, output_tokens = usage["input_tokens"], usage["output_tokens"]
         aggregate = self.data["usage"]
+        if aggregate.get("accounting_version") != 2:
+            for field in ("input", "output"):
+                aggregate["known_" + field] = aggregate[field]
+                if aggregate["unpriced_requests"]:
+                    aggregate[field] = None  # Legacy unknown counts cannot be reconstructed.
+            aggregate["accounting_version"] = 2
         aggregate["requests"] += 1
-        aggregate["input"] += input_tokens or 0
-        aggregate["output"] += output_tokens or 0
-        estimate = pricing.estimate(model, input_tokens, output_tokens)
+        for field, count in (("input", input_tokens), ("output", output_tokens)):
+            aggregate["known_" + field] += count if count is not None else 0
+            aggregate[field] = aggregate["known_" + field] if aggregate[field] is not None and count is not None else None
+        aggregate["usage_complete"] = aggregate["input"] is not None and aggregate["output"] is not None and aggregate.get("usage_complete", True) and usage["usage_complete"]
+        estimate = pricing.estimate(model, input_tokens, output_tokens, usage=usage)
         if estimate:
-            aggregate["estimated_cost_usd"] += estimate["cost_usd"]
+            aggregate["estimated_cost_usd"] = float(Decimal(str(aggregate["estimated_cost_usd"])) + Decimal(str(estimate["cost_usd"])))
         else:
             aggregate["unpriced_requests"] += 1
+        aggregate["cost_complete"] = not aggregate["unpriced_requests"]
         self.save()
         return estimate
 

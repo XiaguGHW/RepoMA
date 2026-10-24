@@ -14,11 +14,11 @@ from openai import OpenAI
 # Use the transport bundled with the installed SDK (httpx or httpx2).
 from openai import _base_client
 
-httpx = getattr(_base_client, "httpx2", None) or _base_client.httpx
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import excel_chat_agent as agent
 import llm_connector_with_prompt_caching as connector
+
+httpx = getattr(_base_client, "httpx2", None) or _base_client.httpx
 
 
 def complete(content="已读取工作表。", reasoning="先检查工作簿结构。"):
@@ -66,7 +66,8 @@ class StreamingTests(unittest.TestCase):
         def handle(request):
             self.requests.append(json.loads(request.content))
             return self.responses.pop(0)
-        return OpenAI(**kwargs, max_retries=0, http_client=httpx.Client(transport=httpx.MockTransport(handle)))
+        kwargs.setdefault('max_retries', 0)
+        return OpenAI(**kwargs, http_client=httpx.Client(transport=httpx.MockTransport(handle)))
 
     def test_default_request_keeps_nonstream_contract(self):
         self.responses = [httpx.Response(200, json=complete())]

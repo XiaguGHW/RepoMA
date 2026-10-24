@@ -348,6 +348,7 @@
       "rules.cancel": "取消",
       "rules.save_confirm": "保存此规则草稿并清除旧分类上下文？",
       "usage.unknown": "未知",
+      "usage.known_subtotal": "已知部分小计",
       "usage.partial": "另有 {count} 次请求费用未知"
     },
     "en": {
@@ -698,6 +699,7 @@
       "rules.cancel": "Cancel",
       "rules.save_confirm": "Save this rule draft and clear the previous classification context?",
       "usage.unknown": "Unknown",
+      "usage.known_subtotal": "Known subtotal",
       "usage.partial": "Cost unknown for {count} additional requests"
     },
     "de": {
@@ -1048,6 +1050,7 @@
       "rules.cancel": "Abbrechen",
       "rules.save_confirm": "Diesen Regelentwurf speichern und den bisherigen Klassifikationskontext löschen?",
       "usage.unknown": "Unbekannt",
+      "usage.known_subtotal": "Bekannte Teilsumme",
       "usage.partial": "Kosten für {count} weitere Anfragen unbekannt"
     }
   },

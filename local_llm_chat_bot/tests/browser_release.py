@@ -332,6 +332,41 @@ class BrowserRelease(unittest.TestCase):
         self.select_bg(self.f.bg_b)
         self.assertEqual(self.page.input_value("#answermode"), "classification")
 
+    def test_unknown_usage_is_visible_in_chat_status_rules_and_comparison(self):
+        self.language('en')
+        self.page.select_option('#model', 'gemini-2.5-pro')
+        self.page.wait_for_function("lastStatusSnapshot.model==='gemini-2.5-pro'")
+        self.f.response_transform = lambda response, *_: {
+            key: value for key, value in response.items() if key != 'usageMetadata'
+        }
+        self.ask('Explain the fixture')
+        self.assertIn('Unknown', self.page.locator('#usagedetail').inner_text())
+        self.assertIn('Known subtotal', self.page.locator('#status').inner_text())
+        self.assertIn('Unknown', self.page.locator('#status').inner_text())
+        self.assertNotIn('null', self.page.locator('#usagedetail').inner_text())
+        self.f.response_transform = None
+        self.ask('Explain again')
+        self.assertIn('Unknown', self.page.locator('#status').inner_text())
+        self.assertIn('20 / 10', self.page.locator('#status').inner_text())
+        self.f.response_transform = lambda response, *_: {
+            key: value for key, value in response.items() if key != 'usageMetadata'
+        }
+        self.prepare_rules()
+        self.lock_rules()
+        self.assertIn('Unknown', self.page.locator('.codebook-workspace').inner_text())
+        self.button('leaveCodebookWorkspace()').click()
+        self.select_bg(self.f.bg_a)
+        self.page.locator('#question').fill('classify')
+        self.button('openCompareDrawer()').click()
+        self.page.select_option('#cmpsel0', 'gemini-2.5-pro')
+        self.button('addCompareModel()').click()
+        self.page.select_option('#cmpsel1', 'gemini-2.5-flash')
+        self.button('compareModels()').click()
+        self.page.locator('.comparison-grid .answer').first.wait_for()
+        self.assertIn('Unknown', self.page.locator('.comparison-grid').inner_text())
+        self.assertFalse(self.errors, self.errors)
+        self.completed('unknown usage display')
+
     def test_material_drawer_geometry_and_real_actions(self):
         self.language("en")
         self.prepare_rules()

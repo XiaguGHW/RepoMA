@@ -2,11 +2,13 @@
 import math
 import os
 import re
+from typing import Any
 
 
 def token_count(value):
     try:
         if value is None or isinstance(value, bool): return None
+        if isinstance(value, int): return value if value >= 0 else None
         number = float(value)
         return int(number) if math.isfinite(number) and number >= 0 and number.is_integer() else None
     except (ValueError, TypeError, OverflowError):
@@ -21,10 +23,53 @@ def normalize_usage(raw):
     outgoing = first('output_tokens', 'completion_tokens', 'candidatesTokenCount', 'outputTokenCount')
     if 'candidatesTokenCount' in raw and not raw.get('_usage_normalized') and outgoing is not None:
         outgoing += token_count(raw.get('thoughtsTokenCount')) or 0
+    detail = raw.get('prompt_tokens_details')
+    detail = detail if isinstance(detail, dict) else {}
+    cache_read = (token_count(raw['cache_read_input_tokens']) if 'cache_read_input_tokens' in raw else
+                  token_count(raw['cachedContentTokenCount']) if 'cachedContentTokenCount' in raw else
+                  token_count(detail['cached_tokens']) if 'cached_tokens' in detail else 0)
+    cache_write = token_count(raw['cache_creation_input_tokens']) if 'cache_creation_input_tokens' in raw else 0
+    # Claude reports uncached input separately; OpenAI/Gemini include cache hits
+    # in their prompt total. Canonical input is the total in every provider.
+    if not raw.get('_usage_normalized') and 'input_tokens' in raw and 'prompt_tokens' not in raw and (
+            'cache_read_input_tokens' in raw or 'cache_creation_input_tokens' in raw):
+        uncached = incoming
+        incoming = incoming + cache_read + cache_write if all(v is not None for v in (incoming, cache_read, cache_write)) else None
+    else:
+        uncached = token_count(raw.get('uncached_input_tokens')) if raw.get('_usage_normalized') else (
+            incoming - cache_read - cache_write if all(v is not None for v in (incoming, cache_read, cache_write)) and incoming >= cache_read + cache_write else None)
     total = first('total_tokens', 'totalTokenCount')
     if total is None and incoming is not None and outgoing is not None: total = incoming + outgoing
     return {**raw, 'input_tokens': incoming, 'output_tokens': outgoing, 'total_tokens': total,
-            'usage_complete': incoming is not None and outgoing is not None, '_usage_normalized': True}
+            'uncached_input_tokens': uncached, 'cache_read_input_tokens': cache_read,
+            'cache_creation_input_tokens': cache_write,
+            'usage_complete': incoming is not None and outgoing is not None and uncached is not None and cache_read is not None and cache_write is not None,
+            '_usage_normalized': True}
+
+
+def summarize_usage(records):
+    """Keep unknown totals separate from known subtotals, including true zero."""
+    records = [normalize_usage(record) for record in records]
+    summary: dict[str, Any] = {'requests': len(records)}
+    fields = {'input': 'input_tokens', 'output': 'output_tokens', 'total': 'total_tokens',
+              'cache_read': 'cache_read_input_tokens', 'cache_write': 'cache_creation_input_tokens'}
+    for name, key in fields.items():
+        values = [record[key] for record in records]
+        summary['known_' + name] = sum(value for value in values if value is not None)
+        summary[name] = summary['known_' + name] if all(value is not None for value in values) else None
+    summary['usage_complete'] = all(record['usage_complete'] for record in records)
+    for name, key in [('reasoning', 'reasoning_tokens'), ('gemini_thinking', 'thoughtsTokenCount')]:
+        values = []
+        for record in records:
+            detail = record.get('completion_tokens_details') or record.get('output_tokens_details') or {}
+            source = detail if name == 'reasoning' and isinstance(detail, dict) else record
+            values.append(token_count(source[key]) if key in source else 0)
+        summary[name] = sum(values) if all(v is not None for v in values) else None
+    costs = [record.get('cost_usd') for record in records]
+    summary['known_cost_usd'] = math.fsum(cost for cost in costs if isinstance(cost, (int, float)) and math.isfinite(cost) and cost >= 0)
+    summary['cost_complete'] = all(isinstance(cost, (int, float)) and math.isfinite(cost) and cost >= 0 for cost in costs)
+    summary['cost_usd'] = summary['known_cost_usd'] if summary['cost_complete'] else None
+    return summary
 
 
 def safe_error(error, key=None):

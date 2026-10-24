@@ -60,6 +60,7 @@ class LLMConnector:
         self.last_usage = None
         self.last_reasoning = ""
         self.last_response_model = None
+        self.usage_attempts: list[dict] = []
         self._stream_rejected = False
         self._family = self._detect_family(model_name)
         logging.info("LLMConnector ready: model=%s, family=%s, session_id=%s", model_name, self._family, session_id)
@@ -81,6 +82,7 @@ class LLMConnector:
         self.last_usage = None
         self.last_reasoning = ""
         self.last_response_model = None
+        self.usage_attempts = []
         if self._family == "openai":
             return self._call_openai(file_paths, user_prompt, system_prompt, generation_config,
                                      stream=stream, event_handler=event_handler, thinking=thinking)
@@ -99,6 +101,12 @@ class LLMConnector:
     def get_last_token_usage(self) -> dict | None:
         return self.last_usage
 
+    def _begin_usage_attempt(self):
+        """One ledger entry per dispatched request, even without returned usage."""
+        self.last_usage = None
+        self.last_response_model = None
+        self.usage_attempts.append({"usage": {}, "model": self.model_name})
+
     def _record_usage(self, usage) -> None:
         """Store raw provider usage plus a common input/output/total schema."""
         if usage is None:
@@ -116,6 +124,19 @@ class LLMConnector:
 
         from release_safety import normalize_usage
         self.last_usage = normalize_usage(raw)
+        if self.usage_attempts:
+            self.usage_attempts[-1].update(usage=self.last_usage, model=self.last_response_model or self.model_name)
+
+    def _record_error_usage(self, error):
+        body = getattr(error, "body", None)
+        response = getattr(error, "response", None)
+        if response is not None:
+            try:
+                body = response.json()
+            except (ValueError, AttributeError):
+                pass
+        if isinstance(body, dict) and isinstance(body.get("usage"), dict):
+            self._record_usage(body["usage"])
 
     def _get_common_headers(self) -> dict:
         return {"X-Session-ID": str(self.session_id)} if self.session_id else {}
@@ -192,7 +213,8 @@ class LLMConnector:
                     else f"{base}/openai/deployments/{self.model_name}")
         headers = self._get_common_headers()
         headers["genaiplatform-farm-subscription-key"] = self.api_key
-        client = OpenAI(api_key="dummy-key", base_url=base_url, default_headers=headers)
+        # SDK-hidden retries cannot be reconciled with the request ledger.
+        client = OpenAI(api_key="dummy-key", base_url=base_url, default_headers=headers, max_retries=0)
         content = [{"type": "text", "text": user_prompt}]
         for fp in file_paths:
             for b64 in self._file_to_openai_images(fp):
@@ -240,10 +262,12 @@ class LLMConnector:
         response_stream = None
         try:
             try:
+                self._begin_usage_attempt()
                 result = client.chat.completions.create(**kwargs)
             except Exception as exc:
                 # Fall back only for an explicit rejection of streaming, before
                 # receiving any content. Never replay a partially received answer.
+                self._record_error_usage(exc)
                 error = str(exc).lower()
                 unsupported = getattr(exc, "status_code", None) in {400, 422, 501} and "stream" in error and any(
                     term in error for term in ("not supported", "unsupported", "not allowed", "unknown", "unrecognized", "not implemented", "unexpected", "extra inputs")
@@ -255,6 +279,7 @@ class LLMConnector:
                 kwargs.pop("stream", None)
                 kwargs.pop("stream_options", None)
                 emit("notice", "Farm 拒绝流式输出，本次连接改用完整响应；仍显示等待耗时。")
+                self._begin_usage_attempt()
                 result = client.chat.completions.create(**kwargs)
             if not use_stream:
                 capture_metadata(result)
@@ -297,6 +322,7 @@ class LLMConnector:
             return text
         except Exception as exc:
             from release_safety import safe_error
+            self._record_error_usage(exc)
             logging.error("OpenAI request failed: %s", type(exc).__name__)
             return "Error: " + safe_error(exc, self.api_key)
         finally:
@@ -389,11 +415,17 @@ class LLMConnector:
         retryable = {429, 500, 502, 503, 504}
         for attempt in range(1, 4):
             try:
+                self._begin_usage_attempt()
                 response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=300)
-                if response.ok:
+                try:
                     reply = response.json()
-                    if "usageMetadata" in reply:
-                        self._record_usage(reply["usageMetadata"])
+                except (ValueError, AttributeError):
+                    reply = {}
+                if isinstance(reply, dict):
+                    self.last_response_model = reply.get("modelVersion") or reply.get("model")
+                    if "usageMetadata" in reply or "usage" in reply:
+                        self._record_usage(reply.get("usageMetadata", reply.get("usage")))
+                if response.ok:
                     return extractor(reply)
                 if response.status_code in retryable and attempt < 3:
                     time.sleep(2 ** attempt); continue

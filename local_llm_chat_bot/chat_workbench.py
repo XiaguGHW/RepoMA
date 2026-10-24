@@ -26,7 +26,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
-from release_safety import safe_error, normalize_usage, context_state_error, valid_rule_profile
+from release_safety import safe_error, normalize_usage, summarize_usage, context_state_error, valid_rule_profile
 from dotenv import load_dotenv
 from workbench_i18n import catalog_script_json
 from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative, classification_manifest,
@@ -393,7 +393,12 @@ def status_data(data: dict[str, Any]) -> dict[str, Any]:
         "session_name": state.root.name,
         "code_files": len(state.data["files"]), "documents": len(data["documents"].list()),
         "requests": usage["requests"], "input_tokens": usage["input"], "output_tokens": usage["output"],
-        "cost": round(float(usage.get("estimated_cost_usd", 0)), 6),
+        "known_input_tokens": usage.get("known_input", usage["input"]),
+        "known_output_tokens": usage.get("known_output", usage["output"]),
+        "usage_complete": usage.get("usage_complete", not usage.get("unpriced_requests")),
+        "cost": None if usage.get("unpriced_requests") else round(float(usage.get("estimated_cost_usd", 0)), 6),
+        "known_cost_usd": usage.get("estimated_cost_usd", 0),
+        "cost_complete": not usage.get("unpriced_requests"),
         "unpriced_requests": usage.get("unpriced_requests", 0),
         "bg_context": state.data.get("bg_context"),
         "context_issue": context_issue(data),
@@ -612,7 +617,29 @@ CODEBOOK_MERGE_SYSTEM = """You consolidate page-by-page Codebook transcriptions.
 CODEBOOK_JSON_REPAIR_SYSTEM = """Return ONLY one complete, valid JSON object. Do not use Markdown fences or commentary. Preserve every fact, class name, rule, table value and page number from the supplied candidate; only repair JSON syntax such as missing commas, quotes, brackets or escaping."""
 
 
-def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str) -> tuple[dict, dict | None]:
+def accounted_model_call(data, connector, *args, usage_records=None, **kwargs):
+    """Record dispatches before response validation; failed output still costs."""
+    connector.last_usage = None
+    connector.last_response_model = None
+    connector.usage_attempts = None
+    try:
+        return connector.ask_about_files(*args, **kwargs)
+    finally:
+        attempts = connector.usage_attempts
+        if attempts is None:  # Custom/test connector with no transport ledger.
+            attempts = [{"usage": connector.get_last_token_usage(),
+                         "model": connector.last_response_model or connector.model_name}]
+        elif attempts and connector.last_response_model:
+            attempts[-1]["model"] = connector.last_response_model
+        for attempt in attempts:
+            usage = normalize_usage(attempt["usage"])
+            estimate = data["state"].note_usage(usage, data["pricing"], attempt["model"])
+            usage["cost_usd"] = estimate["cost_usd"] if estimate else None
+            if usage_records is not None:
+                usage_records.append(usage)
+
+
+def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data, usage_records=None) -> tuple[dict, dict | None]:
     """Parse the final Codebook JSON, making one syntax-only repair attempt if needed."""
     try:
         return parse_codebook_draft(raw), None
@@ -622,8 +649,9 @@ def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str) -> tuple
             "do not summarize, add, omit, translate, or change any factual content.\n"
             f"Parser error: {initial_error}\n\n--- CANDIDATE JSON ---\n{raw}"
         )
-        repaired = connector.ask_about_files([], repair_prompt, CODEBOOK_JSON_REPAIR_SYSTEM,
-                                             {"maxOutputTokens": 4096, "temperature": 0}, stream=True)
+        repaired = accounted_model_call(data, connector, [], repair_prompt, CODEBOOK_JSON_REPAIR_SYSTEM,
+                                        {"maxOutputTokens": 4096, "temperature": 0}, stream=True,
+                                        usage_records=usage_records)
         repaired = require_model_success(repaired, "Codebook JSON 自动修复请求")
         repair_usage = connector.get_last_token_usage() or {}
         try:
@@ -637,32 +665,28 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str) -> di
     connector = LLMConnector(model, data["llm"].api_key, session_id=f"codebook_{os.urandom(6).hex()}")
     ocr_runtime = data["documents"].ocr_runtime_status() if path.suffix.lower() == ".pdf" else {"available": False, "status": "not applicable to DOCX"}
     records = data["documents"].codebook_page_records(path, app_state_home() / "codebook_visual_cache") if path.suffix.lower() == ".pdf" else []
-    groups, notes, usages = codebook_page_groups(document), [], []
+    groups, notes = codebook_page_groups(document), []
+    usages: list[dict] = []
     if not records and not groups:
         raise HTTPException(400, "Codebook 没有可读取的页面。")
     if records:
         for record in records:
             prompt = f"Codebook page {record['page']} of {len(records)}. Page type: {record['page_type']}.\n--- NATIVE TEXT ---\n{record['native_text'] or '[none]'}\n--- OCR TEXT ({record['ocr_status']}) ---\n{record['ocr_text'] or '[none]'}"
-            raw = connector.ask_about_files([record["image_path"]], prompt, CODEBOOK_PAGE_SYSTEM, {"maxOutputTokens": 2200, "temperature": 0}, stream=True)
+            raw = accounted_model_call(data, connector, [record["image_path"]], prompt, CODEBOOK_PAGE_SYSTEM, {"maxOutputTokens": 2200, "temperature": 0}, stream=True, usage_records=usages)
             raw = require_model_success(raw, f"Codebook 第 {record['page']} 页读取")
-            notes.append(raw); usages.append(connector.get_last_token_usage() or {})
+            notes.append(raw)
     else:
         for index, group in enumerate(groups, start=1):
             prompt = f"Codebook DOCX section {index}/{len(groups)}.\n" + "\n\n".join(f"--- {item['label']} ---\n{item['text']}" for item in group)
-            raw = connector.ask_about_files([], prompt, CODEBOOK_PAGE_SYSTEM, {"maxOutputTokens": 2200, "temperature": 0}, stream=True)
+            raw = accounted_model_call(data, connector, [], prompt, CODEBOOK_PAGE_SYSTEM, {"maxOutputTokens": 2200, "temperature": 0}, stream=True, usage_records=usages)
             raw = require_model_success(raw, f"Codebook DOCX 第 {index} 段读取")
-            notes.append(raw); usages.append(connector.get_last_token_usage() or {})
+            notes.append(raw)
     merge_prompt = "Consolidate every Codebook page note below. All classes, tables and boundary rules must be retained.\n\n" + "\n\n".join(
         f"--- PAGE GROUP {index} ---\n{note}" for index, note in enumerate(notes, start=1))
-    merged = connector.ask_about_files([], merge_prompt, CODEBOOK_MERGE_SYSTEM, {"maxOutputTokens": 3500, "temperature": 0}, stream=True)
+    merged = accounted_model_call(data, connector, [], merge_prompt, CODEBOOK_MERGE_SYSTEM, {"maxOutputTokens": 3500, "temperature": 0}, stream=True, usage_records=usages)
     merged = require_model_success(merged, "Codebook 规则汇总")
-    usages.append(connector.get_last_token_usage() or {})
-    draft, repair_usage = parse_codebook_draft_with_repair(connector, merged)
-    if repair_usage is not None:
-        usages.append(repair_usage)
+    draft, _ = parse_codebook_draft_with_repair(connector, merged, data=data, usage_records=usages)
     usage = summarize_usage(usages)
-    estimate = data["pricing"].estimate(connector.last_response_model or model, usage["input"], usage["output"])
-    usage["cost_usd"] = float(estimate["cost_usd"]) if estimate else None
     page_numbers = {((item.get("visual") or {}).get("page")) for group in groups for item in group}
     page_count = len([number for number in page_numbers if isinstance(number, int)]) or len(document.get("chunks", []))
     return {"status": "draft", "source_path": str(path), "source_name": path.name, "sha256": file_digest(path),
@@ -671,31 +695,6 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str) -> di
             "page_groups": len(records) or len(groups), "usage": usage, "draft": draft, "document_id": document["id"],
             "page_records": [{key: record[key] for key in ("page", "page_type", "ocr_status", "embedded_image_count")} for record in records],
             "page_transcriptions": notes, "ocr_runtime": ocr_runtime}
-
-
-def summarize_usage(records: list[dict]) -> dict[str, int | float]:
-    summary: dict[str, int | float] = {
-        "input": 0, "output": 0, "total": 0, "reasoning": 0,
-        "gemini_thinking": 0, "cache_read": 0, "cache_write": 0,
-    }
-    for usage in records:
-        if not isinstance(usage, dict):
-            continue
-        def number(value) -> int:
-            try:
-                return int(value or 0)
-            except (TypeError, ValueError):
-                return 0
-        summary["input"] += number(usage.get("input_tokens"))
-        summary["output"] += number(usage.get("output_tokens"))
-        summary["total"] += number(usage.get("total_tokens")) or (number(usage.get("input_tokens")) + number(usage.get("output_tokens")))
-        summary["cache_read"] += number(usage.get("cache_read_input_tokens"))
-        summary["cache_write"] += number(usage.get("cache_creation_input_tokens"))
-        detail = usage.get("completion_tokens_details") or usage.get("output_tokens_details") or {}
-        if isinstance(detail, dict):
-            summary["reasoning"] += number(detail.get("reasoning_tokens"))
-        summary["gemini_thinking"] += number(usage.get("thoughtsTokenCount"))
-    return summary
 
 
 def write_session_export(data: dict[str, Any]) -> Path:
@@ -712,7 +711,8 @@ def write_session_export(data: dict[str, Any]) -> Path:
         f"- 当前模型：{data['model']}",
         f"- 累计请求：{usage.get('requests', 0)}",
         f"- 累计 token：输入 {usage.get('input', 0)} ｜ 输出 {usage.get('output', 0)}",
-        "- 累计预估费用：$" + f"{float(usage.get('estimated_cost_usd', 0)):.6f}",
+        ("- 累计预估费用：未知；已知部分小计：$" if usage.get("unpriced_requests") else "- 累计预估费用：$") + f"{float(usage.get('estimated_cost_usd', 0)):.6f}",
+        f"- 已知 Token 小计：输入 {usage.get('known_input', usage.get('input', 0))} ｜ 输出 {usage.get('known_output', usage.get('output', 0))}",
         "", "## 对话记录", "",
     ]
     for item in transcript:
@@ -849,7 +849,7 @@ def load_bg_dossier_cache(coverage: dict, model: str) -> dict | None:
     return payload if str(payload.get("summary", "")).strip() else None
 
 
-def prepare_bg_dossier(data: dict[str, Any], coverage: dict, *, force: bool = False) -> tuple[dict | None, dict | None, bool]:
+def prepare_bg_dossier(data: dict[str, Any], coverage: dict, *, force: bool = False, usage_records=None) -> tuple[dict | None, dict | None, bool]:
     """Consolidate reusable per-file facts once; raw evidence remains query-specific."""
     ensure_current_sources(data)
     if not coverage_matches_current_selection(data, coverage):
@@ -866,8 +866,13 @@ def prepare_bg_dossier(data: dict[str, Any], coverage: dict, *, force: bool = Fa
         for item in records)
     system_prompt = "You are a careful technical evidence consolidator. Use only supplied file summaries. Write concise Chinese factual evidence for later Baugruppe questions; do not classify it and do not invent facts. Preserve every source file name and page/section label, distinguish confirmed facts from uncertainty, and omit irrelevant detail."
     request = "Create one reusable BG comprehensive evidence dossier with sections: composition/BOM; motion and main functional chain; actuators/transmission; relevant geometry/interfaces; DFC hierarchy; conflicts or limitations; source evidence. Every factual bullet must retain its source file and page/section label.\n\n" + sources
-    raw = require_model_success(data["llm"].ask_about_files([], request, system_prompt, {"maxOutputTokens": 2400, "temperature": 0}, stream=True), "装配体综合证据汇总")
-    usage = data["llm"].get_last_token_usage() or {}
+    records_used: list[dict] = []
+    try:
+        raw = require_model_success(accounted_model_call(data, data["llm"], [], request, system_prompt, {"maxOutputTokens": 2400, "temperature": 0}, stream=True, usage_records=records_used), "装配体综合证据汇总")
+    finally:
+        if usage_records is not None:
+            usage_records.extend(records_used)
+    usage = summarize_usage(records_used)
     dossier = {"version": BG_DOSSIER_CACHE_VERSION, "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                "identity": bg_dossier_identity(coverage, data["model"]), "model": data["model"],
                "summary": raw, "source_files": [{"name": item.get("name"), "sha256": item.get("sha256"),
@@ -1018,7 +1023,7 @@ def summary_groups(document: dict, chunks: list[dict], limit: int = 24_000) -> l
     return groups
 
 
-def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None) -> dict:
+def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, usage_records=None) -> dict:
     """Prepare auditable, document-aware evidence before a BG classification question."""
     ensure_current_sources(data)
     state, documents, llm = data["state"], data["documents"], data["llm"]
@@ -1073,25 +1078,29 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None) ->
                 if progress:
                     progress("reading", f"正在理解 {document['name']}（文本组 {number}/{len(groups)}）",
                              12 + int((file_index - 1 + number / max(len(groups), 1)) / max(total_documents, 1) * 48))
-                raw = llm.ask_about_files([], f"文件：{document['name']}。这是第 {number}/{len(groups)} 个完整文本片段组。提取结构、部件、驱动、运动、接口、尺寸和不确定处，并保留页面/表格标签。\n\n{group}",
-                                         summary_system, {"maxOutputTokens": 900, "temperature": 0}, stream=True)
+                attempts: list[dict] = []
+                try:
+                    raw = accounted_model_call(data, llm, [], f"文件：{document['name']}。这是第 {number}/{len(groups)} 个完整文本片段组。提取结构、部件、驱动、运动、接口、尺寸和不确定处，并保留页面/表格标签。\n\n{group}",
+                                               summary_system, {"maxOutputTokens": 900, "temperature": 0}, stream=True, usage_records=attempts)
+                finally:
+                    total_calls += len(attempts)
+                    if usage_records is not None: usage_records.extend(attempts)
                 raw = require_model_success(raw, f"文件 {document['name']} 的文本片段读取")
                 notes.append(raw.strip())
-                usage = llm.get_last_token_usage() or {}
-                state.note_usage(usage, data["pricing"], data["model"])
-                total_calls += 1
             except Exception as exc:
                 failures.append(f"组 {number}: {exc}")
         if notes and len(notes) > 1:
             try:
                 merged = "\n\n".join(f"[片段组 {i}]\n{note}" for i, note in enumerate(notes, start=1))
-                raw = llm.ask_about_files([], f"请将下列同一文件的全部片段笔记合成为一份不遗漏冲突或不确定处的技术摘要。必须保留证据标签。\n\n文件：{document['name']}\n\n{merged}",
-                                         summary_system, {"maxOutputTokens": 1400, "temperature": 0}, stream=True)
+                attempts = []
+                try:
+                    raw = accounted_model_call(data, llm, [], f"请将下列同一文件的全部片段笔记合成为一份不遗漏冲突或不确定处的技术摘要。必须保留证据标签。\n\n文件：{document['name']}\n\n{merged}",
+                                               summary_system, {"maxOutputTokens": 1400, "temperature": 0}, stream=True, usage_records=attempts)
+                finally:
+                    total_calls += len(attempts)
+                    if usage_records is not None: usage_records.extend(attempts)
                 raw = require_model_success(raw, f"文件 {document['name']} 的摘要汇总")
                 summary = raw.strip()
-                usage = llm.get_last_token_usage() or {}
-                state.note_usage(usage, data["pricing"], data["model"])
-                total_calls += 1
             except Exception as exc:
                 summary = "\n\n".join(notes); failures.append(f"汇总: {exc}")
         else:
@@ -1434,6 +1443,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
         if kind == "reasoning": reasoning.append(text)
         elif kind == "notice": notices.append(text)
 
+    usage_records: list[dict] = []
     coverage = load_coverage(state)
     auto_prepared = False
     classification_request = bool(bg_context) and require_classification
@@ -1443,21 +1453,17 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     preparation_request = bool(bg_context)
     if not coverage_matches_current_selection(data, coverage) and preparation_request:
         report("reading", progress_copy(data, "正在进行文件的读取与理解…", "Reading and understanding the files…", "Dateien werden gelesen und inhaltlich erschlossen…"), 12)
-        coverage = prepare_coverage(data, progress=report)
+        coverage = prepare_coverage(data, progress=report, usage_records=usage_records)
         auto_prepared = True
         report("reading", progress_copy(data, "文件读取与理解完成。", "File reading and understanding complete.", "Dateien wurden gelesen und erschlossen."), 62)
     elif preparation_request:
         report("reading", progress_copy(data, "已复用当前材料的读取与理解结果。", "Reusing the current material-reading results.", "Die vorhandenen Lese- und Verständnisresultate werden wiederverwendet."), 62)
     coverage_summaries = coverage.get("files", []) if coverage.get("complete") else []
-    dossier, usage_records, estimates = None, [], []
+    dossier = None
     if coverage_summaries:
         try:
             report("dossier", progress_copy(data, "正在整理 Baugruppe 综合证据档案…", "Consolidating the Baugruppe comprehensive evidence dossier…", "Das umfassende Evidenzdossier der Baugruppe wird konsolidiert…"), 70)
-            dossier, dossier_usage, dossier_created = prepare_bg_dossier(data, coverage)
-            if dossier_usage:
-                usage_records.append(dossier_usage)
-                estimate = state.note_usage(dossier_usage, data["pricing"], data["model"])
-                if estimate: estimates.append(estimate)
+            dossier, _, dossier_created = prepare_bg_dossier(data, coverage, usage_records=usage_records)
             if dossier_created:
                 notices.append("已生成并保存 BG 综合证据档案；后续追问将复用该档案，仅补充本问题命中的原始证据。")
             elif dossier:
@@ -1479,25 +1485,18 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
             report("model", progress_copy(data, "模型正在生成回答…", "The model is generating its answer…", "Das Modell erstellt die Antwort…"), 92)
 
     report("model", progress_copy(data, "正在等待模型输出…", "Waiting for model output…", "Warte auf die Modellausgabe…"), 90)
-    raw = llm.ask_about_files(visuals, model_prompt,
-                               SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=model_events)
+    raw = accounted_model_call(data, llm, visuals, model_prompt,
+                               SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=model_events, usage_records=usage_records)
     raw = require_model_success(raw, "模型回答请求")
-    usage_records.append(llm.get_last_token_usage() or {})
-    estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
-    if estimate: estimates.append(estimate)
     validation = {"required": classification_request, "repairs": 0}
     scope = classification_scope(documents, bg_context)
 
     def repair_classification(repair_prompt):
         report("validation", progress_copy(data, "正在修复分类结构或引用…", "Repairing classification structure or references…",
                                            "Klassifikationsstruktur oder Quellenverweise werden korrigiert…"), 96)
-        repaired = llm.ask_about_files(visuals, repair_prompt, SYSTEM,
-                                      {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=model_events)
+        repaired = accounted_model_call(data, llm, visuals, repair_prompt, SYSTEM,
+                                      {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=model_events, usage_records=usage_records)
         repaired = require_model_success(repaired, "分类输出修复请求")
-        usage_records.append(llm.get_last_token_usage() or {})
-        estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
-        if estimate:
-            estimates.append(estimate)
         return repaired
 
     def validated_action(raw_response: str, request_prompt: str) -> dict:
@@ -1523,7 +1522,8 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
         return {"answer": answer, "reasoning": "".join(reasoning), "notices": notices,
                 "sources": evidence, "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [], "can_export_bg": False,
                 "classification": None, "coverage_summary": coverage_summary_for_answer(coverage) if classification_request else None,
-                "turn_cost": sum(item["cost_usd"] for item in estimates) if estimates else None,
+                "turn_usage": summarize_usage(usage_records), "model_response": llm.last_response_model or data["model"],
+                "turn_cost": summarize_usage(usage_records)["cost_usd"],
                 "usage": status_data(data)}
     requested = [ensure_relative(item) for item in action.get("read_files", [])[:4] if isinstance(item, str)]
     complete = {}
@@ -1537,12 +1537,9 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
                                   [] if dossier else coverage_summaries, dossier, data.get("language", "zh"),
                                   require_classification=classification_request)
         report("model", progress_copy(data, "正在补充读取模型请求的本地文件并生成回答…", "Reading requested local files and generating the answer…", "Vom Modell angeforderte lokale Dateien werden ergänzt gelesen und die Antwort wird erstellt…"), 93)
-        raw = llm.ask_about_files(visuals, model_prompt,
-                                   SYSTEM, {"maxOutputTokens": 3000, "temperature": 0}, stream=True, event_handler=model_events)
+        raw = accounted_model_call(data, llm, visuals, model_prompt,
+                                   SYSTEM, {"maxOutputTokens": 3000, "temperature": 0}, stream=True, event_handler=model_events, usage_records=usage_records)
         raw = require_model_success(raw, "补充材料后的模型回答请求")
-        usage_records.append(llm.get_last_token_usage() or {})
-        estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
-        if estimate: estimates.append(estimate)
         try:
             action = validated_action(raw, model_prompt)
         except Exception as exc:
@@ -1557,7 +1554,6 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     title_session_from_question(state, question)
     state.add_turn("user", question); state.add_turn("assistant", action.get("answer", ""))
     turn_token_usage = summarize_usage(usage_records)
-    turn_token_usage["cost_usd"] = sum(item["cost_usd"] for item in estimates) if estimates and len(estimates) == len(usage_records) else None
     if bg_context:
         state.data["last_bg_analysis"] = {
             "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -1579,7 +1575,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
             "plan_id": plan_id, "can_export_bg": bool(bg_context),
             "turn_usage": turn_token_usage,
             "model_response": llm.last_response_model or data["model"],
-            "turn_cost": turn_token_usage["cost_usd"] if estimates else None,
+            "turn_cost": turn_token_usage["cost_usd"],
             "classification": action.get("classification"),
             "coverage_summary": coverage_summary_for_answer(coverage) if action.get("classification") is not None else None,
             "usage": status_data(data)}
@@ -1624,24 +1620,23 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
             if kind == "notice":
                 notices.append(text)
 
+        usage_records: list[dict] = []
         try:
             connector = LLMConnector(model, data["llm"].api_key,
                                      session_id=f"{state.data['session_id']}-comparison-{index}")
-            raw = connector.ask_about_files(
+            raw = accounted_model_call(data, connector,
                 visuals, prompt, SYSTEM, {"maxOutputTokens": 4096, "temperature": 0},
-                stream=True, event_handler=events,
+                stream=True, event_handler=events, usage_records=usage_records,
             )
             raw = require_model_success(raw, f"对比模型 {model} 的回答请求")
-            usage_records = [connector.get_last_token_usage() or {}]
             actual_model = connector.last_response_model or model
             validation = {"required": True, "repairs": 0}
 
             def repair_comparison(repair_prompt):
-                repaired = connector.ask_about_files(visuals, repair_prompt, SYSTEM,
+                repaired = accounted_model_call(data, connector, visuals, repair_prompt, SYSTEM,
                                                       {"maxOutputTokens": 4096, "temperature": 0},
-                                                      stream=True, event_handler=events)
+                                                      stream=True, event_handler=events, usage_records=usage_records)
                 repaired = require_model_success(repaired, f"对比模型 {model} 的分类输出修复请求")
-                usage_records.append(connector.get_last_token_usage() or {})
                 return repaired
 
             action = validated_model_action(raw, prompt, evidence=evidence,
@@ -1650,14 +1645,13 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
             answer = action["answer"]
             classification = action["classification"]
             token_usage = summarize_usage(usage_records)
-            estimate = data["pricing"].estimate(actual_model, token_usage["input"], token_usage["output"])
-            token_usage["cost_usd"] = float(estimate["cost_usd"]) if estimate else None
             results.append({"requested_model": model, "model_response": actual_model, "ok": True,
                             "answer": answer, "classification": classification, "usage": token_usage, "notices": notices})
         except Exception as exc:
             results.append({"requested_model": model, "model_response": model, "ok": False,
-                            "answer": "", "error": str(exc), "usage": None, "notices": notices})
+                            "answer": "", "error": str(exc), "usage": summarize_usage(usage_records), "notices": notices})
     return {"question": question, "results": results,
+            "usage": status_data(data),
             "sources": [str(item.get("label", item.get("name", "未知来源"))) for item in evidence]}
 
 
@@ -2364,10 +2358,8 @@ def rebuild_bg_dossier(request: CacheConfirmRequest):
             # so a failed rebuild cannot masquerade as a completed cache or
             # discard a previously valid audit record.
             dossier, usage, _created = prepare_bg_dossier(data, coverage, force=True)
-        if usage:
-            data["state"].note_usage(usage, data["pricing"], data["model"])
         return {"message": "BG 综合证据档案已重新生成。", "dossier": dossier,
-                "usage": summarize_usage([usage or {}]), "audit": cache_audit(data)}
+                "usage": usage or summarize_usage([]), "audit": cache_audit(data)}
     finally:
         MODEL_WORK_IN_PROGRESS.clear()
 
@@ -2805,7 +2797,9 @@ function message(text,kind='assistant'){let e=document.createElement('div');e.cl
 function classificationCard(c){let card=document.createElement('section');card.className='classification-card';let alternative=c.alternative_label?'<br>'+t('classification.alternative')+'：'+esc(c.alternative_label):'';let evidence=(c.evidence_labels||[]).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>'+t('classification.none')+'</li>';let uncertainty=(c.uncertainties||[]).filter(Boolean).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>'+t('classification.not_reported')+'</li>';let rules=(c.codebook_rule_ids||[]).map(esc).join('、')||t('classification.not_returned');let rulePages=(c.codebook_rule_pages||[]).length?t('classification.rule_pages')+' '+c.codebook_rule_pages.map(esc).join('、'):t('classification.rule_refs')+' '+((c.codebook_rule_refs||[]).map(esc).join('、')||t('classification.not_returned'));let bgPages=(c.bg_evidence_pages||[]).map(esc).join('、')||t('classification.not_returned');card.innerHTML='<h3>'+t('classification.title')+'</h3><div class="result">'+t('classification.label')+'：<b>'+esc(c.label||'—')+'</b></div><div>'+t('classification.confidence')+'：'+esc(c.confidence||'—')+alternative+'</div><div><b>'+t('classification.rules')+'</b>：'+rules+'（'+rulePages+'）</div><div><b>'+t('classification.evidence_pages')+'</b>：'+bgPages+'</div><div><b>'+t('classification.evidence')+'</b><ul>'+evidence+'</ul></div><div><b>'+t('classification.uncertainty')+'</b><ul>'+uncertainty+'</ul></div>';return card}
 function coverageSummaryCard(summary){if(!summary?.files?.length)return null;let card=document.createElement('section');card.className='classification-card';card.style.borderColor='#475569';let rows=summary.files.map(f=>{let read=Array.isArray(f.pages_read)?f.pages_read.length:0,unread=Array.isArray(f.pages_unread)?f.pages_unread.length:0;let pages=f.pages_total?(' · '+t('coverage.read')+' '+read+'/'+f.pages_total+' '+(uiLanguage==='en'?'pages':'页')+(unread?'；'+t('coverage.unread')+' '+unread+' '+(uiLanguage==='en'?'pages':'页'):'')):'';let cache=f.cache_status==='reused'?t('coverage.reused'):t('coverage.created');return '<li><b>'+esc(f.name)+'</b>：'+esc(f.scope||t('coverage.default_scope'))+pages+' · '+cache+'</li>'}).join('');card.innerHTML='<h3>'+t('coverage.title')+'</h3><div class="muted">'+t('coverage.summary',{files:summary.files.length,reused:summary.reused_files||0,created:summary.created_files||0,calls:summary.model_calls||0})+'</div><ul>'+rows+'</ul>';return card}
 function renderStatus(s){lastStatusSnapshot=s;$('status').innerHTML=`${t('status.model')}：<b>${s.model}</b><br>${t('status.session')}：${s.session_name||'default'}<br>${t('status.code')}：${s.code_files} ${uiLanguage==='en'?'files':'文件'}<br>${t('status.documents')}：${s.documents} ${uiLanguage==='en'?'items':'个'}<br>${t('status.requests')}：${s.requests}<br>${t('status.tokens')}：${s.input_tokens} / ${s.output_tokens}<br>${t('status.cost')}：${s.cost}<br>${s.bg_context?'<span class="ok">'+t('status.assembly_mode')+'：'+s.bg_context.codebook_name+'</span>':t('status.normal_mode')}`;refreshAppChrome();refreshContextPanel()}
-function renderUsageDetail(u,model){if(!u)return;lastUsageSnapshot={usage:u,model};$('usagedetail').innerHTML=`实际模型：<b>${esc(model||'—')}</b><br>输入 / 输出 / 总计：${u.input} / ${u.output} / ${u.total}<br>推理：${u.reasoning||0} ｜ Gemini thinking：${u.gemini_thinking||0}<br>Claude 缓存读 / 写：${u.cache_read||0} / ${u.cache_write||0}<br>本轮估算：${u.cost_usd==null?t('usage.unknown'):Number(u.cost_usd).toFixed(6)}`}
+function usageNumber(value){return value==null?t('usage.unknown'):esc(value)}
+function usageCost(u){return u.cost_usd==null?t('usage.unknown')+(u.known_cost_usd!=null?' · '+t('usage.known_subtotal')+': $'+Number(u.known_cost_usd).toFixed(6):''):'$'+Number(u.cost_usd).toFixed(6)}
+function renderUsageDetail(u,model){if(!u)return;lastUsageSnapshot={usage:u,model};return renderUsageDetailForLanguage(u,model)}
 function renderEvidenceSources(sources,dfcEvidence){let normal=(sources||[]).map(s=>`<div class="card"><b>${esc(s.label||s.name||'未知来源')}</b><br>${s.visual?'<span class="chip">视觉证据已附带</span>':''}</div>`).join('');let dfc=(dfcEvidence||[]).map(d=>{let parts=(d.segments_used||[]).join('、')||'无';return `<div class="card"><b>DFC Struktur</b><br>${esc(d.name||'—')}<br><span class="chip">OCR：${esc(d.ocr_status||'—')}</span><span class="chip">本轮：第 ${esc(parts)} 段 / 共 ${esc(d.segments_total||0)} 段</span></div>`}).join('');$('sources').innerHTML=(dfc+normal)||'无可用来源'}
 function toggleCustomModel(){let custom=$('model').value==='__custom__';$('custommodelrow').style.display=custom?'flex':'none';if(custom)$('custommodel').focus()}
 function setSelectedModel(model){let known=[...$('model').options].some(option=>option.value===model);$('model').value=known?model:'__custom__';$('custommodel').value=known?'':model;toggleCustomModel();loadModelStatus()}
@@ -2816,7 +2810,7 @@ function codebookList(items){let values=Array.isArray(items)?items.filter(Boolea
 function renderCodebookStatus(profile){lastCodebookProfile=profile;let host=$('codebookstatus');if(!profile||profile.status==='none'||!profile.status){host.textContent=t('rulews.not_prepared');return}let lock=profile.status==='locked';host.innerHTML=(lock?'<span class="ok">'+t('rulews.locked')+'</span>':'<span class="error">'+t('rulews.draft')+'</span>')+'：<b>'+esc(profile.source_path||profile.source_name||'—')+'</b><br>'+esc(profile.page_count||0)+' '+t('rulews.pages')+' · '+esc(profile.parser_model||'—')+(lock?'<br>'+t('rulews.reused'):'<br>'+t('rulews.confirm'))}
 async function loadCodebookStatus(){try{renderCodebookStatus(await api('/api/codebook'))}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function leaveCodebookWorkspace(){lastCodebookWorkspaceProfile=null;let composer=$('composer');composer.style.display='flex';$('chat').classList.remove('codebook-workspace');loadHistory()}
-function showCodebookWorkspace(profile){lastCodebookWorkspaceProfile=profile;let draft=profile.draft||{};$('composer').style.display='none';let classes=(draft.classes||[]).map(item=>'<article class="card codebook-class"><h3>'+esc(item.name||t('rulews.untitled'))+'</h3><div>'+esc(item.definition||t('rulews.no_definition'))+'</div><b>'+t('rulews.decision_rules')+'</b>'+codebookList(item.decision_rules)+'<b>'+t('rulews.boundaries')+'</b>'+codebookList(item.boundaries)+'<div class="muted">'+t('rulews.evidence_pages')+'：'+esc((item.evidence_pages||[]).join('、')||'—')+'</div></article>').join('')||'<div class="card error">'+t('rulews.no_class')+'</div>';let usage=profile.usage||{},ocr=profile.ocr_runtime||{},locked=profile.status==='locked';let ocrText=ocr.status==='not applicable to DOCX'?t('rulews.ocr_docx'):(ocr.available?(t('rulews.ocr_enabled')+' · '+esc(ocr.command||'Tesseract')+(ocr.german_available?' · deu':' · eng')):(t('rulews.ocr_disabled')+' · '+esc(ocr.status||'Tesseract')));$('chat').className='chat codebook-workspace';$('chat').innerHTML='<section class="workspace-inner"><h1>'+t('rulews.title')+'</h1><div class="muted">'+(locked?t('rulews.locked_intro'):t('rulews.draft_intro'))+'</div><div class="card"><b>'+t('rulews.source')+'：</b>'+esc(profile.source_name||'—')+'<br><span class="muted">'+t('rulews.parser_model')+'：'+esc(profile.parser_model||'—')+' · '+t('rulews.pages')+'：'+esc(profile.page_count||0)+' · '+t('rulews.groups')+'：'+esc(profile.page_groups||0)+' · Token：'+esc(usage.input||0)+' / '+esc(usage.output||0)+(usage.cost_usd===null||usage.cost_usd===undefined?'':' · $'+Number(usage.cost_usd).toFixed(6))+'<br>'+ocrText+'</span></div><h2>'+t('rulews.classes')+'</h2>'+classes+'<h2>'+t('rulews.global_rules')+'</h2><div class="card">'+codebookList(draft.global_rules)+'</div><h2>'+t('rulews.table_rules')+'</h2><div class="card">'+codebookList(draft.table_rules)+'</div><h2>'+t('rulews.uncertainties')+'</h2><div class="card">'+codebookList(draft.uncertainties)+'</div><div class="workspace-actions"><button class="ghost" onclick="editCodebookDraft()">'+t('rules.edit')+'</button>'+ (locked?'<button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.back')+'</button>':'<button onclick="lockCodebook()">'+t('rulews.lock_action')+'</button><button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.defer')+'</button>')+'</div></section>';$('chat').scrollTop=0}
+function showCodebookWorkspace(profile){lastCodebookWorkspaceProfile=profile;let draft=profile.draft||{};$('composer').style.display='none';let classes=(draft.classes||[]).map(item=>'<article class="card codebook-class"><h3>'+esc(item.name||t('rulews.untitled'))+'</h3><div>'+esc(item.definition||t('rulews.no_definition'))+'</div><b>'+t('rulews.decision_rules')+'</b>'+codebookList(item.decision_rules)+'<b>'+t('rulews.boundaries')+'</b>'+codebookList(item.boundaries)+'<div class="muted">'+t('rulews.evidence_pages')+'：'+esc((item.evidence_pages||[]).join('、')||'—')+'</div></article>').join('')||'<div class="card error">'+t('rulews.no_class')+'</div>';let usage=profile.usage||{},ocr=profile.ocr_runtime||{},locked=profile.status==='locked';let ocrText=ocr.status==='not applicable to DOCX'?t('rulews.ocr_docx'):(ocr.available?(t('rulews.ocr_enabled')+' · '+esc(ocr.command||'Tesseract')+(ocr.german_available?' · deu':' · eng')):(t('rulews.ocr_disabled')+' · '+esc(ocr.status||'Tesseract')));$('chat').className='chat codebook-workspace';$('chat').innerHTML='<section class="workspace-inner"><h1>'+t('rulews.title')+'</h1><div class="muted">'+(locked?t('rulews.locked_intro'):t('rulews.draft_intro'))+'</div><div class="card"><b>'+t('rulews.source')+'：</b>'+esc(profile.source_name||'—')+'<br><span class="muted">'+t('rulews.parser_model')+'：'+esc(profile.parser_model||'—')+' · '+t('rulews.pages')+'：'+esc(profile.page_count||0)+' · '+t('rulews.groups')+'：'+esc(profile.page_groups||0)+' · Token：'+usageNumber(usage.input)+' / '+usageNumber(usage.output)+(' · '+usageCost(usage))+'<br>'+ocrText+'</span></div><h2>'+t('rulews.classes')+'</h2>'+classes+'<h2>'+t('rulews.global_rules')+'</h2><div class="card">'+codebookList(draft.global_rules)+'</div><h2>'+t('rulews.table_rules')+'</h2><div class="card">'+codebookList(draft.table_rules)+'</div><h2>'+t('rulews.uncertainties')+'</h2><div class="card">'+codebookList(draft.uncertainties)+'</div><div class="workspace-actions"><button class="ghost" onclick="editCodebookDraft()">'+t('rules.edit')+'</button>'+ (locked?'<button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.back')+'</button>':'<button onclick="lockCodebook()">'+t('rulews.lock_action')+'</button><button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.defer')+'</button>')+'</div></section>';$('chat').scrollTop=0}
 async function prepareCodebook(){let path=$('codebook').value.trim();if(!path){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.choose_file')+'</span>';return}let model=prompt(t('rulews.model_prompt'),selectedModel());if(model===null)return;model=model.trim();if(!model){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.model_required')+'</span>';return}try{$('codebookstatus').textContent=t('rulews.preparing');let profile=await api('/api/codebook/prepare',{method:'POST',body:JSON.stringify({path,model})});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile)}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function viewCodebook(){try{let profile=await api('/api/codebook');if(!profile||!profile.status)throw Error(t('rulews.not_prepared'));renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function lockCodebook(){if(!confirm(t('rulews.lock_confirm')))return;try{let profile=await api('/api/codebook/lock',{method:'POST'});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile);$('setupmsg').innerHTML='<span class="ok">'+t('rulews.lock_success')+'</span>'}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
@@ -2861,8 +2855,8 @@ async function clearSummaryCaches(){if(!confirm('清除所有本地材料摘要�
 function clearTargetTree(){savedTargetSelection=new Set();treeRestoreNote='';scannedSelection='';setScanReportAvailable(null);$('targettree').textContent='选择文件夹后显示可展开的文件树。';$('targettree').classList.add('muted');$('treestatus').textContent='';updateMaterialFlowButtons()}
 // These renderers deliberately receive data, never pre-rendered text.  This
 // makes a language switch deterministic even after a scan or cache view is open.
-function renderStatusForLanguage(s){$('status').innerHTML=`${t('status.model')}：<b>${esc(s.model)}</b><br>${t('status.session')}：${esc(s.session_name||'default')}<br>${t('status.code')}：${t('status.files',{count:s.code_files})}<br>${t('status.documents')}：${t('status.items',{count:s.documents})}<br>${t('status.requests')}：${esc(s.requests)}<br>${t('status.tokens')}：${esc(s.input_tokens)} / ${esc(s.output_tokens)}<br>${t('status.cost')}：${esc(s.cost)}${s.unpriced_requests?' · '+t('usage.partial',{count:s.unpriced_requests}):''}<br>${s.bg_context?'<span class="ok">'+t('status.assembly_mode')+'：'+esc(s.bg_context.codebook_name)+'</span>':t('status.normal_mode')}`;refreshAppChrome();refreshContextPanel()}
-function renderUsageDetailForLanguage(u,model){if(!u)return;$('usagedetail').innerHTML=`${t('usage.actual_model')}：<b>${esc(model||'—')}</b><br>${t('usage.input_output_total')}：${esc(u.input)} / ${esc(u.output)} / ${esc(u.total)}<br>${t('usage.reasoning')}：${esc(u.reasoning||0)} ｜ ${t('usage.gemini_thinking')}：${esc(u.gemini_thinking||0)}<br>${t('usage.claude_cache')}：${esc(u.cache_read||0)} / ${esc(u.cache_write||0)}<br>${t('usage.estimate')}：${u.cost_usd==null?t('usage.unknown'):Number(u.cost_usd).toFixed(6)}`}
+function renderStatusForLanguage(s){let tokens=usageNumber(s.input_tokens)+' / '+usageNumber(s.output_tokens);if(s.usage_complete===false)tokens+=' · '+t('usage.known_subtotal')+': '+usageNumber(s.known_input_tokens)+' / '+usageNumber(s.known_output_tokens);let cost=usageCost({cost_usd:s.cost,known_cost_usd:s.known_cost_usd});$('status').innerHTML=`${t('status.model')}：<b>${esc(s.model)}</b><br>${t('status.session')}：${esc(s.session_name||'default')}<br>${t('status.code')}：${t('status.files',{count:s.code_files})}<br>${t('status.documents')}：${t('status.items',{count:s.documents})}<br>${t('status.requests')}：${esc(s.requests)}<br>${t('status.tokens')}：${tokens}<br>${t('status.cost')}：${cost}${s.unpriced_requests?' · '+t('usage.partial',{count:s.unpriced_requests}):''}<br>${s.bg_context?'<span class="ok">'+t('status.assembly_mode')+'：'+esc(s.bg_context.codebook_name)+'</span>':t('status.normal_mode')}`;refreshAppChrome();refreshContextPanel()}
+function renderUsageDetailForLanguage(u,model){if(!u)return;$('usagedetail').innerHTML=`${t('usage.actual_model')}：<b>${esc(model||'—')}</b><br>${t('usage.input_output_total')}：${usageNumber(u.input)} / ${usageNumber(u.output)} / ${usageNumber(u.total)}${u.usage_complete===false?' · '+t('usage.known_subtotal')+': '+usageNumber(u.known_input)+' / '+usageNumber(u.known_output):''}<br>${t('usage.reasoning')}：${usageNumber(u.reasoning)} ｜ ${t('usage.gemini_thinking')}：${usageNumber(u.gemini_thinking)}<br>${t('usage.claude_cache')}：${usageNumber(u.cache_read)} / ${usageNumber(u.cache_write)}<br>${t('usage.estimate')}：${usageCost(u)}`}
 function renderEvidenceSourcesForLanguage(sources,dfcEvidence){let normal=(sources||[]).map(s=>`<div class="card"><b>${esc(s.label||s.name||t('model.unknown_source'))}</b><br>${s.visual?'<span class="chip">'+t('evidence.visual')+'</span>':''}</div>`).join('');let dfc=(dfcEvidence||[]).map(d=>{let parts=(d.segments_used||[]).join('、')||'—';return `<div class="card"><b>DFC Struktur</b><br>${esc(d.name||'—')}<br><span class="chip">OCR：${esc(d.ocr_status||'—')}</span><span class="chip">${t('dfc.segment_info',{segments:esc(parts),total:esc(d.segments_total||0)})}</span></div>`}).join('');$('sources').innerHTML=(dfc+normal)||t('evidence.none')}
 function renderCompareSlotsForLanguage(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">'+t('compare.select_model')+'</option>'+compareOptions.map(([value,label])=>'<option value="'+escAttr(value)+'" '+(slot.value===value?'selected':'')+'>'+esc(label)+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>'+t('model.other')+'</option>';return '<div class="field"><label>'+t('compare.model_number',{index:index+1})+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+escAttr(slot.custom||'')+'" placeholder="'+t('model.id_placeholder')+'" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?t('compare.maximum'):t('compare.add');if(compareSlots.length>=4)$('comparestatus').textContent=t('compare.maximum')}
 function renderSessionRowsForLanguage(items,append){let list=$('sessionlist');if(!list)return;if(!append)list.innerHTML='';for(let item of items){let row=document.createElement('div');row.className='session-row'+(item.name===currentSessionName?' active':'');row.onclick=()=>openSessionByName(item.name);let title=document.createElement('span');title.className='session-title';title.textContent=item.title;row.append(title);if(item.pinned){let pin=document.createElement('span');pin.className='session-pin';pin.textContent='●';pin.title=t('session.pin_title');row.append(pin)}let more=document.createElement('button');more.className='session-more';more.textContent='•••';more.title=t('session.more_title');more.onclick=e=>{e.stopPropagation();openSessionMenu(e,item)};row.append(more);list.append(row)}if(sessionLoading){let loading=document.createElement('div');loading.id='sessionloading';loading.className='session-loading';loading.textContent=t('session.loading');list.append(loading)}}
@@ -2985,7 +2979,7 @@ makeTreeNode=makeTreeNodeForLanguage;
 loadTargetTree=loadTargetTreeForLanguage;
 function selectedTargetPaths(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].map(x=>x.dataset.path)}
 async function analyzeTarget(){let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent=rt('scan.reading')}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error(t('materials.selection_required'));let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');materialDraftDirty=false;clearResultPanels();await loadHistory();renderStatus(x.status);$('bgstatus').textContent=t(x.classification?'materials.confirmed_bg':'materials.confirmed_normal',{kind:tr(x.target_kind),count:x.sources});renderScanReport(x);$('coveragestatus').textContent=rt('material.updated');loadDocs();loadCacheAudit()}catch(e){$('bgstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{if(confirm)confirm.textContent=t('materials.confirm_selected');updateMaterialFlowButtons()}}
-async function prepareCoverage(full=false){if(busy)return;busy=true;$('coveragestatus').textContent=rt(full?'coverage.preparing_full':'coverage.preparing');try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full})});renderCoverageReport(x)}catch(e){$('coveragestatus').innerHTML='<span class="error">'+esc(rt('coverage.failed')+e.message)+'</span>'}finally{busy=false}}
+async function prepareCoverage(full=false){if(busy)return;busy=true;$('coveragestatus').textContent=rt(full?'coverage.preparing_full':'coverage.preparing');try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full})});renderCoverageReport(x);renderStatus(await api('/api/status'))}catch(e){$('coveragestatus').innerHTML='<span class="error">'+esc(rt('coverage.failed')+e.message)+'</span>'}finally{busy=false}}
 async function clearBg(){try{renderStatus(await api('/api/bg',{method:'DELETE'}));$('bgstatus').textContent=t('bg.exited')}catch(e){$('bgstatus').textContent=e.message}}
 const compareOptions=[['claude-haiku-5-5','Claude Haiku 5.5'],['claude-sonnet-5-5','Claude Sonnet 5.5'],['claude-opus-5','Claude Opus 5'],['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite'],['gemini-2.5-pro','Gemini 2.5 Pro'],['gemini-2.5-flash','Gemini 2.5 Flash'],['deepseek-r1-0528-maas','DeepSeek R1 (0528)'],['llama-3.3-70b-instruct-maas','Llama 3.3 70B'],['glm-5-maas','GLM-5']];
 function renderCompareSlots(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">选择模型…</option>'+compareOptions.map(([value,label])=>'<option value="'+escAttr(value)+'" '+(slot.value===value?'selected':'')+'>'+label+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>其他：手动输入 Model ID…</option>';return '<div class="field"><label>对比模型 '+(index+1)+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+escAttr(slot.custom||'')+'" placeholder="输入准确的 Bosch Farm Model ID" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?'最多 4 个模型':'＋ 添加对比模型';if(compareSlots.length>=4)$('comparestatus').textContent='已达到最多 4 个对比模型。'}
@@ -2996,9 +2990,9 @@ function selectedCompareModels(){return compareSlots.map((slot,index)=>slot.valu
 function renderComparisonForLanguage(record){
   $('comparison-result')?.remove();let x=record.data,box=document.createElement('section');box.id='comparison-result';box.className='comparison';
   box.innerHTML='<div class="message assistant"><b>'+t('compare.title')+'</b><br>'+t('compare.question')+'：'+esc(record.question)+'<br><span class="muted">'+t('compare.same_evidence')+'：'+(x.sources||[]).map(esc).join(' · ')+'</span></div><div class="comparison-grid"></div>';
-  let grid=box.querySelector('.comparison-grid');for(let r of x.results||[]){let card=document.createElement('article');card.className='card';if(!r.ok){card.innerHTML='<b>'+esc(r.requested_model)+'</b><p class="error">'+t('compare.request_failed')+'</p><div class="muted">'+esc(r.error||t('compare.unknown_error'))+'</div>';grid.append(card);continue}let u=r.usage||{},cost=u.cost_usd===null||u.cost_usd===undefined?t('compare.price_unavailable'):'$'+Number(u.cost_usd).toFixed(6),classification=r.classification?'<div class="chip">'+t('classification.verified')+'：'+esc(r.classification.label)+' · '+esc(r.classification.confidence)+'</div>':'';card.innerHTML='<b>'+esc(r.model_response)+'</b>'+(r.model_response!==r.requested_model?'<div class="muted">'+t('compare.requested_model')+'：'+esc(r.requested_model)+'</div>':'')+'<div class="muted ok">'+t('compare.success')+' · Token '+(u.input||0)+' / '+(u.output||0)+' · '+cost+'</div>'+classification+'<hr><div class="answer"></div>'+(r.notices?.length?'<div class="muted">'+r.notices.map(esc).join('<br>')+'</div>':'');card.querySelector('.answer').textContent=r.answer;grid.append(card)}$('chat').append(box);
+  let grid=box.querySelector('.comparison-grid');for(let r of x.results||[]){let card=document.createElement('article');card.className='card';if(!r.ok){card.innerHTML='<b>'+esc(r.requested_model)+'</b><p class="error">'+t('compare.request_failed')+'</p><div class="muted">'+esc(r.error||t('compare.unknown_error'))+'</div>';grid.append(card);continue}let u=r.usage||{},cost=usageCost(u),classification=r.classification?'<div class="chip">'+t('classification.verified')+'：'+esc(r.classification.label)+' · '+esc(r.classification.confidence)+'</div>':'';card.innerHTML='<b>'+esc(r.model_response)+'</b>'+(r.model_response!==r.requested_model?'<div class="muted">'+t('compare.requested_model')+'：'+esc(r.requested_model)+'</div>':'')+'<div class="muted ok">'+t('compare.success')+' · Token '+usageNumber(u.input)+' / '+usageNumber(u.output)+' · '+cost+'</div>'+classification+'<hr><div class="answer"></div>'+(r.notices?.length?'<div class="muted">'+r.notices.map(esc).join('<br>')+'</div>':'');card.querySelector('.answer').textContent=r.answer;grid.append(card)}$('chat').append(box);
 }
-async function compareModels(){if(busy)return;if(lastStatusSnapshot?.context_issue){message(t('context.reconfirm'));return;}if(materialDraftDirty){message(t('materials.reconfirm'));return;}let q=$('question').value.trim()||lastQuestion;if(!q){$('comparestatus').innerHTML='<span class="error">'+t('compare.question_required')+'</span>';return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){$('comparestatus').innerHTML='<span class="error">'+t('compare.models_required')+'</span>';return}busy=true;lastQuestion=q;$('comparestatus').textContent=t('compare.running',{count:models.length});let wait=message(t('compare.in_progress',{models:models.join(' · ')}));try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models})});wait.remove();lastComparison={question:q,data:x};renderComparisonForLanguage(lastComparison);$('comparestatus').innerHTML='<span class="ok">'+t('compare.complete')+'</span>'}catch(e){wait.textContent=t('model.failed')+e.message;wait.classList.add('error');$('comparestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{busy=false;$('chat').scrollTop=1e9}}
+async function compareModels(){if(busy)return;if(lastStatusSnapshot?.context_issue){message(t('context.reconfirm'));return;}if(materialDraftDirty){message(t('materials.reconfirm'));return;}let q=$('question').value.trim()||lastQuestion;if(!q){$('comparestatus').innerHTML='<span class="error">'+t('compare.question_required')+'</span>';return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){$('comparestatus').innerHTML='<span class="error">'+t('compare.models_required')+'</span>';return}busy=true;lastQuestion=q;$('comparestatus').textContent=t('compare.running',{count:models.length});let wait=message(t('compare.in_progress',{models:models.join(' · ')}));try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models})});wait.remove();lastComparison={question:q,data:x};renderComparisonForLanguage(lastComparison);renderStatus(x.usage);$('comparestatus').innerHTML='<span class="ok">'+t('compare.complete')+'</span>'}catch(e){wait.textContent=t('model.failed')+e.message;wait.classList.add('error');$('comparestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{busy=false;$('chat').scrollTop=1e9}}
 function processingCard(){let card=document.createElement('section');card.className='message assistant';card.style.border='1px solid #334155';card.innerHTML='<b>'+rt('model.processing')+'</b><div class="muted" data-process-text>'+rt('model.connecting')+'</div><div style="height:7px;background:#0b1220;border-radius:8px;overflow:hidden;margin-top:9px"><div data-process-bar style="height:100%;width:4%;background:#38bdf8;transition:width .25s ease"></div></div>';$('chat').append(card);return card}
 function updateProcessing(card,event){let text=card.querySelector('[data-process-text]'),bar=card.querySelector('[data-process-bar]');text.textContent=event.text||rt('model.waiting');if(typeof event.percent==='number')bar.style.width=Math.max(4,Math.min(100,event.percent))+'%';if(event.phase==='complete'){card.style.borderColor='#22c55e';bar.style.background='#22c55e'}}
 function showChatResult(x){message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>'+t('model.reasoning')+'</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${esc(c.path)}</b><br>${esc(c.reason)}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button data-plan-id="'+escAttr(x.plan_id||'')+'" onclick="apply(this.dataset.planId,this)">'+t('changes.apply')+'</button>':t('changes.none');if(x.changes?.length){let review=$('changes').cloneNode(true);review.removeAttribute('id');review.className='message assistant change-plan';$('chat').append(review)}$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">'+t('export.assembly')+'</button>':t('export.assembly_unavailable');renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}

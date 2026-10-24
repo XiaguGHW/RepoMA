@@ -26,6 +26,7 @@ class FixtureEnvironment:
         from docx import Document
         document=Document();document.add_paragraph('Rotationseinheit: rotates an object. Rule rotation-1.');self.rules=self.root/'Rules ü.docx';document.save(self.rules)
         self.calls=[]; calls=self.calls
+        self.response_transform=None; fixture=self
         class Handler(BaseHTTPRequestHandler):
             def log_message(self,*args): pass
             def do_POST(self):
@@ -60,6 +61,8 @@ class FixtureEnvironment:
                 else: text='Fixture evidence: the object is rotated by a motor; facts.txt.'
                 response={'candidates':[{'content':{'parts':[{'text':text}]},'finishReason':'STOP'}],
                           'usageMetadata':{'promptTokenCount':20,'candidatesTokenCount':10,'totalTokenCount':30}}
+                if fixture.response_transform:
+                    response=fixture.response_transform(response, prompt, system)
                 encoded=json.dumps(response).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(encoded)));self.end_headers();self.wfile.write(encoded)
         self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
