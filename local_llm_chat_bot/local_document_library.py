@@ -160,7 +160,8 @@ class LocalDocumentLibrary:
         if self.path.exists():
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
-                if isinstance(data.get("documents"), list):
+                if isinstance(data, dict) and isinstance(data.get("documents"), list):
+                    data["documents"] = [d for d in data["documents"] if isinstance(d, dict) and all(k in d for k in ("id", "path", "name", "chunks"))]
                     return data
             except (OSError, json.JSONDecodeError):
                 pass
@@ -204,6 +205,8 @@ class LocalDocumentLibrary:
         if path.suffix.lower() not in SUPPORTED_DOCUMENT_EXTENSIONS:
             allowed = ", ".join(sorted(SUPPORTED_DOCUMENT_EXTENSIONS))
             raise ValueError(f"Unsupported file type {path.suffix or '(none)'}. Supported: {allowed}")
+        if path.stat().st_size > MAX_DOCUMENT_BYTES:
+            raise ValueError(f"{path.name}: File is larger than {MAX_DOCUMENT_BYTES // (1024 * 1024)} MB.")
         raw = path.read_bytes()
         if len(raw) > MAX_DOCUMENT_BYTES:
             raise ValueError(f"File is larger than {MAX_DOCUMENT_BYTES // (1024 * 1024)} MB.")
@@ -361,7 +364,7 @@ class LocalDocumentLibrary:
         allowed = set(allowed_ids or [])
         paths = []
         for document in self.data["documents"]:
-            if allowed and document.get("id") not in allowed:
+            if allowed_ids is not None and document.get("id") not in allowed:
                 continue
             path = Path(document.get("path", ""))
             if (path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} and path.parent.name.casefold() == "bilder"
@@ -509,7 +512,7 @@ class LocalDocumentLibrary:
         words = _expanded_tokens(question)
         chars = set(re.findall(r"[\u4e00-\u9fff]", question.lower()))
         allowed = set(allowed_ids or [])
-        documents = [item for item in self.data["documents"] if not allowed or item["id"] in allowed]
+        documents = [item for item in self.data["documents"] if allowed_ids is None or item["id"] in allowed]
         if classification:
             documents.sort(key=lambda item: (MATERIAL_ROLE_PRIORITY.get(item.get("material_role", "other"), 50), item.get("name", "").casefold()))
         scored = []
@@ -839,6 +842,8 @@ class LocalDocumentLibrary:
         if suffix == ".csv":
             return self._csv(path)
         if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+            from PIL import Image
+            with Image.open(path) as image: image.verify()
             kind = self.image_type(path)
             label_type = "DFC structure screenshot" if kind == "dfc_structure_screenshot" else "image"
             return [{"label": f"{path.name} — {label_type}", "text": f"Visual evidence: {path.name}", "visual": {"kind": kind, "path": str(path)}}]
@@ -885,19 +890,20 @@ class LocalDocumentLibrary:
                 rows = []
                 for number, row in enumerate(sheet.iter_rows(values_only=True), start=1):
                     if number > MAX_EXCEL_ROWS_PER_SHEET:
-                        rows.append(f"[Stopped after {MAX_EXCEL_ROWS_PER_SHEET} rows]")
+                        rows.append((number, f"[Stopped after {MAX_EXCEL_ROWS_PER_SHEET} rows]"))
                         break
                     values = [str(value).replace("\n", " ")[:500] if value is not None else "" for value in row]
                     if any(values):
-                        rows.append(f"Row {number}: " + " | ".join(values))
+                        rows.append((number, f"Row {number}: " + " | ".join(values)))
                 # Keep ranges small enough that the matching rows can also be
                 # rendered as a visual table for the model when needed.
                 for start in range(0, len(rows), 80):
                     end = min(len(rows), start + 80)
-                    label = f"{path.name} — sheet {sheet.title}, rows {start + 1}-{end}"
-                    range_chunks = _chunks(label, "\n".join(rows[start:end]))
+                    first_row, last_row = rows[start][0], rows[end - 1][0]
+                    label = f"{path.name} — sheet {sheet.title}, rows {first_row}-{last_row}"
+                    range_chunks = _chunks(label, "\n".join(text for _, text in rows[start:end]))
                     for chunk in range_chunks:
-                        chunk["visual"] = {"kind": "excel_range", "path": str(path), "sheet": sheet.title, "start_row": start + 1, "end_row": end}
+                        chunk["visual"] = {"kind": "excel_range", "path": str(path), "sheet": sheet.title, "start_row": first_row, "end_row": last_row}
                     chunks.extend(range_chunks)
         finally:
             workbook.close()
@@ -1006,3 +1012,4 @@ class LocalDocumentLibrary:
                 draw.text((x + 3, y + 4), row[c] if c < len(row) else "", fill="black", font=font)
         image.save(target)
         return target
+

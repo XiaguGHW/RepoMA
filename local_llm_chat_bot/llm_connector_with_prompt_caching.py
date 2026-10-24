@@ -36,7 +36,12 @@ def farm_base_url() -> str:
     endpoints functional without requiring users to export an environment
     variable before launching Python.
     """
-    return os.getenv("BOSCH_FARM_BASE_URL", DEFAULT_FARM_BASE).rstrip("/")
+    value = os.getenv("BOSCH_FARM_BASE_URL", DEFAULT_FARM_BASE).strip().rstrip("/")
+    from urllib.parse import urlsplit
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("BOSCH_FARM_BASE_URL must be an HTTP(S) URL without embedded credentials")
+    return value
 
 
 MIME_MAP = {".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
@@ -46,6 +51,9 @@ class LLMConnector:
     """One small interface for Bosch Farm Gemini, Claude and OpenAI-style models."""
 
     def __init__(self, model_name: str, api_key: str, session_id: str | None = None):
+        model_name = str(model_name).strip()
+        if not model_name or any(c.isspace() for c in model_name) or any(c in model_name for c in "?#\\"):
+            raise ValueError("Enter one exact Bosch Farm model ID without spaces")
         self.model_name = model_name
         self.api_key = api_key
         self.session_id = session_id
@@ -106,27 +114,8 @@ class LLMConnector:
         if not isinstance(raw, dict):
             return
 
-        def count(*names):
-            for name in names:
-                value = raw.get(name)
-                if value is not None:
-                    try:
-                        return int(value)
-                    except (TypeError, ValueError):
-                        pass
-            return 0
-
-        input_tokens = count("prompt_tokens", "input_tokens", "promptTokenCount", "inputTokenCount")
-        output_tokens = count("completion_tokens", "output_tokens", "candidatesTokenCount", "outputTokenCount")
-        total_tokens = count("total_tokens", "totalTokenCount") or (input_tokens + output_tokens)
-
-        # Keep provider-specific fields for diagnostics/cache pricing, while
-        # exposing one stable schema to the workbench and terminal client.
-        raw["input_tokens"] = input_tokens
-        raw["output_tokens"] = output_tokens
-        raw["total_tokens"] = total_tokens
-        self.last_usage = raw
-        logging.info("BMF usage: input=%s output=%s total=%s", input_tokens, output_tokens, total_tokens)
+        from release_safety import normalize_usage
+        self.last_usage = normalize_usage(raw)
 
     def _get_common_headers(self) -> dict:
         return {"X-Session-ID": str(self.session_id)} if self.session_id else {}
@@ -147,12 +136,11 @@ class LLMConnector:
     @staticmethod
     def _extract_gemini_text(reply: dict) -> str:
         candidates = reply.get("candidates", [])
-        if candidates:
-            for part in candidates[0].get("content", {}).get("parts", []):
-                if "text" in part:
-                    return part["text"]
-        reason = (candidates or [{}])[0].get("finishReason", "unknown")
-        return f"(no text content, finishReason={reason})"
+        candidate = candidates[0] if candidates else {}
+        reason = candidate.get("finishReason", "unknown")
+        if reason not in {"STOP", "unknown"}: return f"Error: incomplete Gemini response ({reason})"
+        texts = [p["text"] for p in candidate.get("content", {}).get("parts", []) if isinstance(p, dict) and isinstance(p.get("text"), str) and not p.get("thought")]
+        return "".join(texts) or f"(no text content, finishReason={reason})"
 
     def _call_claude(self, file_paths, user_prompt, system_prompt, generation_config):
         url = f"{farm_base_url()}/google/v1/publishers/anthropic/models/{self.model_name}:rawPredict"
@@ -190,7 +178,9 @@ class LLMConnector:
             self._record_usage(usage)
             logging.info("BMF Claude cache: write=%s read=%s", usage.get("cache_creation_input_tokens", 0), usage.get("cache_read_input_tokens", 0))
         content = reply.get("content", [])
-        return content[0].get("text", "(no text content)") if content else "(no text content)"
+        if reply.get("stop_reason") not in {None, "end_turn", "stop_sequence"}:
+            return f"Error: incomplete Claude response ({reply.get('stop_reason')})"
+        return "".join(block["text"] for block in content if isinstance(block, dict) and isinstance(block.get("text"), str) and block.get("type", "text") == "text") or "(no text content)"
 
     def _call_openai(self, file_paths, user_prompt, system_prompt, generation_config, *,
                      stream=False, event_handler=None, thinking="auto"):
@@ -268,6 +258,8 @@ class LLMConnector:
                 result = client.chat.completions.create(**kwargs)
             if not use_stream:
                 capture_metadata(result)
+                if not result.choices or result.choices[0].finish_reason not in {None, "stop"}:
+                    raise ValueError("Incomplete or blocked model response")
                 message = result.choices[0].message
                 self.last_reasoning = getattr(message, "reasoning_content", None) or ""
                 emit("reasoning", self.last_reasoning)
@@ -295,6 +287,8 @@ class LLMConnector:
                     texts.append(content_delta)
                     emit("content", content_delta)
             self.last_reasoning = "".join(thoughts)
+            if finish_reason not in {None, "stop"}:
+                raise ValueError(f"Incomplete stream ({finish_reason})")
             if finish_reason is None:
                 raise ValueError("流式连接提前结束，未收到完成标记；本轮不执行工具。")
             text = "".join(texts).strip()
@@ -302,8 +296,9 @@ class LLMConnector:
                 raise ValueError(f"接口未返回最终正文（finish_reason={finish_reason}）；可能输出预算耗尽。")
             return text
         except Exception as exc:
-            logging.exception("OpenAI call failed")
-            return f"Error: {exc}"
+            from release_safety import safe_error
+            logging.error("OpenAI request failed: %s", type(exc).__name__)
+            return "Error: " + safe_error(exc, self.api_key)
         finally:
             if response_stream is not None:
                 response_stream.close()
@@ -402,14 +397,14 @@ class LLMConnector:
                     return extractor(reply)
                 if response.status_code in retryable and attempt < 3:
                     time.sleep(2 ** attempt); continue
-                logging.error("HTTP %s: %s", response.status_code, response.text)
+                logging.error("HTTP %s", response.status_code)
                 return f"HTTP error {response.status_code}"
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
-                if attempt == 3: return f"Error after 3 attempts: {exc}"
+                if attempt == 3: return f"Error after 3 attempts: {type(exc).__name__}"
                 time.sleep(2 ** attempt)
             except Exception as exc:
-                logging.exception("Unexpected request error")
-                return f"Error: {exc}"
+                logging.error("Unexpected request error: %s", type(exc).__name__)
+                return f"Error: invalid provider response ({type(exc).__name__})"
         return "Error: retries exhausted"
 
 
@@ -422,3 +417,4 @@ class LLMConnector:
 #    python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --show-reasoning --no-stream
 # 5) Optionally request DeepSeek thinking explicitly, only if Farm supports it:
 #    python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --show-reasoning --thinking enabled
+

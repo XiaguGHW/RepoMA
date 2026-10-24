@@ -10,6 +10,8 @@ import argparse
 import csv
 import hashlib
 import json
+import os
+import uuid
 import re
 import sys
 from copy import copy
@@ -395,12 +397,36 @@ def command_apply(args) -> None:
         sheet_name, address = split_qualified(edit["cell"])
         if sheet_name != sheet.title:
             die("Cross-sheet edits are not allowed in a participant-column plan.")
+        from openpyxl.utils.cell import coordinate_from_string
+        column, row = coordinate_from_string(address)
+        if column_index_from_string(column) != target_col or not first_row <= row <= last_row:
+            die("Edit is outside the reviewed target column/range.")
+        if isinstance(edit["value"], str) and edit["value"].startswith("="):
+            die("Participant values must not introduce formulas.")
         sheet[address].value = edit["value"]
     output.parent.mkdir(parents=True, exist_ok=True)
-    book.save(output)
-    verification = verify_plan(output, plan)
-    if not verification["ok"]:
-        die("Output was written but verification failed: " + "; ".join(verification["errors"]))
+    if output.suffix.lower() != source.suffix.lower():
+        die("Output extension must match the source workbook (including macros).")
+    temporary = output.with_name("." + output.stem + "." + uuid.uuid4().hex + output.suffix)
+    try:
+        book.save(temporary)
+        book.close()
+        verification = verify_plan(temporary, plan)
+        if not verification["ok"]:
+            die("Staged output failed verification; destination was not changed: " + "; ".join(verification["errors"]))
+        if sha256(source) != plan["source_sha256"]:
+            die("Source changed during saving. Review a new plan.")
+        if args.force:
+            if output.exists():
+                from shutil import copy2
+                copy2(output, output.with_name(output.name + "." + uuid.uuid4().hex + ".bak"))
+            os.replace(temporary, output)
+        else:
+            # Atomic publication without overwriting a concurrently created file.
+            os.link(temporary, output)
+    finally:
+        book.close()
+        temporary.unlink(missing_ok=True)
     json_out({"output": str(output), "verification": verification, "source_unchanged_sha256": sha256(source) == plan["source_sha256"]})
 
 
@@ -418,6 +444,7 @@ def verify_plan(workbook: Path, plan: dict[str, Any]) -> dict[str, Any]:
     expected_formula_fingerprint = plan.get("source_formula_fingerprint")
     if expected_formula_fingerprint and actual_formula_fingerprint != expected_formula_fingerprint:
         errors.append("Formula locations or formula text changed outside the reviewed value edits.")
+    book.close()
     return {"ok": not errors, "checked_cells": checked, "formula_fingerprint": actual_formula_fingerprint, "errors": errors}
 
 
@@ -474,3 +501,4 @@ if __name__ == "__main__":
 # 7) Inspect array formulas, including their anchor and covered range:
 #    python excel_agent.py trace "C:\Users\wdu4fel\Documents\Python_Projects\整理129BG资料\129BG.xlsx" --cell "Klassifikation_Übersicht_Gesamt!M30"
 #    python excel_agent.py range "C:\Users\wdu4fel\Documents\Python_Projects\整理129BG资料\129BG.xlsx" --sheet "Klassifikation_Übersicht_Gesamt" --range "M30:Y30"
+

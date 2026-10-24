@@ -13,6 +13,39 @@ from workbench_i18n import load_catalog, validate_catalog, catalog_script_json
 
 
 class CatalogTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node.js required for UI handler checks')
+    def test_material_confirmation_preserves_current_selection(self):
+        source = (ROOT / 'chat_workbench.py').read_text(encoding='utf-8')
+        handler = source.split('function contextSyncTarget(){', 1)[1].split('\nfunction ', 1)[0]
+        handler = 'function contextSyncTarget(){' + handler
+        self.assertIn('onclick="contextSyncTarget();analyzeTarget()"', source)
+        assertions = r'''
+const assert=require('node:assert/strict');
+const fields={contexttargetpath:{value:' C:\\BG A '},targetpath:{value:'C:\\BG A'}};
+const $=id=>fields[id];
+let materialDraftDirty=false,selected=['C:\\BG A\\facts.txt'],submitted=null,clears=0;
+function clearTargetTree(){selected=[];clears++}
+function refreshContextPanel(){}
+function analyzeTarget(){submitted=[...selected]}
+contextSyncTarget();analyzeTarget();
+assert.deepEqual(submitted,['C:\\BG A\\facts.txt'],'Confirm must submit the checked files');
+assert.equal(clears,0,'An unchanged target must retain its file tree');
+assert.equal(materialDraftDirty,false,'Confirming an unchanged target must not mark it changed');
+selected=[];materialDraftDirty=true;
+contextSyncTarget();analyzeTarget();
+assert.deepEqual(submitted,[],'An empty selection must not restore previously selected files');
+assert.equal(materialDraftDirty,true);
+fields.contexttargetpath.value='C:\\BG B';selected=['C:\\BG A\\facts.txt'];
+contextSyncTarget();
+assert.deepEqual(selected,[],'A new target must clear the old file selection');
+assert.equal(clears,1);
+assert.equal(fields.targetpath.value,'C:\\BG B');
+assert.equal(materialDraftDirty,true);
+'''
+        result = subprocess.run(['node'], input=handler + '\n' + assertions,
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_complete_catalog(self):
         validate_catalog(load_catalog())
 
@@ -111,3 +144,4 @@ for(const language of ['zh','en','de','zh','en','de']){
 
 if __name__ == '__main__':
     unittest.main()
+

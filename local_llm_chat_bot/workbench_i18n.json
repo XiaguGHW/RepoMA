@@ -333,7 +333,16 @@
       "coverage.dossier_pending": "首次分类后生成装配体综合证据档案",
       "coverage.ready": "分类证据已准备",
       "coverage.incomplete": "分类证据不完整",
-      "coverage.overview": "{done}/{total} 个文件；复用 {reused} 个，本轮预读 {created} 个；本次模型调用 {calls} 次。"
+      "coverage.overview": "{done}/{total} 个文件；复用 {reused} 个，本轮预读 {created} 个；本次模型调用 {calls} 次。",
+      "changes.confirm": "确认应用所显示的修改？现有文件会先备份，失败时回滚。",
+      "materials.reconfirm": "材料选择尚未确认，请先确认当前材料范围。",
+      "rules.edit": "编辑规则草稿",
+      "rules.edit_help": "仅修改本地结构化草稿；原始 PDF/DOCX 保持不变。保存后需重新锁定并确认材料。",
+      "rules.save_draft": "保存草稿",
+      "rules.cancel": "取消",
+      "rules.save_confirm": "保存此规则草稿并清除旧分类上下文？",
+      "usage.unknown": "未知",
+      "usage.partial": "另有 {count} 次请求费用未知"
     },
     "en": {
       "workspace.title": "Workspace",
@@ -668,7 +677,16 @@
       "coverage.dossier_pending": "Assembly evidence dossier will be prepared after the first classification",
       "coverage.ready": "Classification evidence ready",
       "coverage.incomplete": "Classification evidence incomplete",
-      "coverage.overview": "{done}/{total} files; {reused} reused, {created} pre-read in this request; {calls} model calls."
+      "coverage.overview": "{done}/{total} files; {reused} reused, {created} pre-read in this request; {calls} model calls.",
+      "changes.confirm": "Apply the displayed changes? Existing files will be backed up and rolled back if saving fails.",
+      "materials.reconfirm": "Material selection has changed. Confirm the current selection first.",
+      "rules.edit": "Edit rule draft",
+      "rules.edit_help": "Edit the local structured draft. The source PDF/DOCX stays unchanged. Lock it and confirm materials after saving.",
+      "rules.save_draft": "Save draft",
+      "rules.cancel": "Cancel",
+      "rules.save_confirm": "Save this rule draft and clear the previous classification context?",
+      "usage.unknown": "Unknown",
+      "usage.partial": "Cost unknown for {count} additional requests"
     },
     "de": {
       "workspace.title": "Arbeitsbereich",
@@ -1003,7 +1021,16 @@
       "coverage.dossier_pending": "Baugruppen-Evidenzdossier wird nach der ersten Klassifikation vorbereitet",
       "coverage.ready": "Klassifikationsevidenz bereit",
       "coverage.incomplete": "Klassifikationsevidenz unvollständig",
-      "coverage.overview": "{done}/{total} Dateien; {reused} wiederverwendet, {created} in dieser Anfrage voranalysiert; {calls} Modellaufrufe."
+      "coverage.overview": "{done}/{total} Dateien; {reused} wiederverwendet, {created} in dieser Anfrage voranalysiert; {calls} Modellaufrufe.",
+      "changes.confirm": "Angezeigte Änderungen anwenden? Vorhandene Dateien werden gesichert und bei einem Speicherfehler wiederhergestellt.",
+      "materials.reconfirm": "Die Materialauswahl wurde geändert. Bitte zuerst die aktuelle Auswahl bestätigen.",
+      "rules.edit": "Regelentwurf bearbeiten",
+      "rules.edit_help": "Lokalen strukturierten Entwurf bearbeiten. Die PDF/DOCX-Quelldatei bleibt unverändert. Danach sperren und Materialien bestätigen.",
+      "rules.save_draft": "Entwurf speichern",
+      "rules.cancel": "Abbrechen",
+      "rules.save_confirm": "Diesen Regelentwurf speichern und den bisherigen Klassifikationskontext löschen?",
+      "usage.unknown": "Unbekannt",
+      "usage.partial": "Kosten für {count} weitere Anfragen unbekannt"
     }
   },
   "legacy_keys": {

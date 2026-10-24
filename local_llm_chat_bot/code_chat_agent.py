@@ -9,6 +9,7 @@ import argparse
 import difflib
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -24,7 +25,7 @@ except ImportError:
 
 
 CODE_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".c", ".cpp", ".h", ".cs", ".go", ".rs", ".rb", ".php", ".sql", ".sh", ".ps1", ".html", ".css", ".json", ".yaml", ".yml", ".toml", ".ini", ".md"}
-IGNORED_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache", ".pytest_cache", "dist", "build", ".next"}
+IGNORED_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache", ".pytest_cache", "dist", "build", ".next", "AI_Bot_State", ".bosch_chat", ".excel_chat", "visual_cache"}
 MAX_FILE_BYTES = 1_000_000
 MAX_SNIPPETS = 6
 MAX_SNIPPET_CHARS = 4_000
@@ -81,7 +82,8 @@ def sha256(data: bytes) -> str:
 
 
 def safe_name(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)[:80] or "session"
+    name = re.sub(r"[^A-Za-z0-9_.-]+", "_", value)[:80].strip(". ")
+    return "session_" + name if name.upper().split(".")[0] in {"CON", "PRN", "AUX", "NUL", *[f"COM{i}" for i in range(1,10)], *[f"LPT{i}" for i in range(1,10)]} else (name or "session")
 
 
 def write_json_atomically(path: Path, payload) -> None:
@@ -150,7 +152,9 @@ class PricingCatalog:
             return
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            self.entries = data.get("entries", [])
+            self.entries = data.get("entries", []) if isinstance(data, dict) else []
+            if not isinstance(self.entries, list): self.entries = []
+            self.entries = [e for e in self.entries if isinstance(e, dict)]
         except (OSError, json.JSONDecodeError) as exc:
             self.error = str(exc)
 
@@ -160,21 +164,27 @@ class PricingCatalog:
         for entry in self.entries:
             if "input_usd_per_million" not in entry or "output_usd_per_million" not in entry:
                 continue
-            for alias in entry.get("match", []):
-                if name.startswith(str(alias).lower()):
+            for alias in (entry.get("match") or []) if isinstance(entry.get("match"), list) else []:
+                if name == str(alias).lower() or name.startswith(str(alias).lower() + "-") or name.startswith(str(alias).lower() + "@"):
                     candidates.append((len(str(alias)), entry))
         if not candidates:
             return None
         entry = max(candidates, key=lambda item: item[0])[1]
-        input_price = float(entry["input_usd_per_million"])
-        output_price = float(entry["output_usd_per_million"])
-        ends = entry.get("promotion_ends")
-        if ends and datetime.now(timezone.utc).date().isoformat() > ends:
-            input_price = float(entry.get("standard_input_usd_per_million", input_price))
-            output_price = float(entry.get("standard_output_usd_per_million", output_price))
+        try:
+            input_price = float(entry["input_usd_per_million"])
+            output_price = float(entry["output_usd_per_million"])
+            ends = entry.get("promotion_ends")
+            if isinstance(ends, str) and datetime.now(timezone.utc).date().isoformat() > ends:
+                input_price = float(entry.get("standard_input_usd_per_million", input_price))
+                output_price = float(entry.get("standard_output_usd_per_million", output_price))
+            if not all(math.isfinite(v) and v >= 0 for v in (input_price, output_price)):
+                return None
+        except (ValueError, TypeError, OverflowError):
+            return None
         return {"name": entry.get("display_name", model), "input_price": input_price, "output_price": output_price}
 
     def estimate(self, model: str, input_tokens: int, output_tokens: int):
+        if input_tokens is None or output_tokens is None: return None
         price = self.price_for(model)
         if not price:
             return None
@@ -203,21 +213,22 @@ class ProjectState:
         self.memory = self._load_memory()
 
     def _load(self):
-        if self.path.exists():
-            try:
-                data = json.loads(self.path.read_text(encoding="utf-8"))
-                if data.get("workspace") == str(self.workspace):
-                    usage = data.setdefault("usage", {})
-                    usage.setdefault("requests", 0)
-                    usage.setdefault("input", 0)
-                    usage.setdefault("output", 0)
-                    usage.setdefault("estimated_cost_usd", 0.0)
-                    usage.setdefault("unpriced_requests", 0)
-                    return data
-            except (OSError, json.JSONDecodeError):
-                pass
-        return {"workspace": str(self.workspace), "session_id": uuid.uuid4().hex,
-                "files": {}, "history": [], "summary": "", "usage": {"requests": 0, "input": 0, "output": 0, "estimated_cost_usd": 0.0, "unpriced_requests": 0}}
+        defaults = {"workspace": str(self.workspace), "session_id": uuid.uuid4().hex,
+                    "files": {}, "history": [], "summary": "", "usage": {"requests": 0, "input": 0, "output": 0, "estimated_cost_usd": 0.0, "unpriced_requests": 0}}
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or data.get("workspace") != str(self.workspace): return defaults
+            for key, value in defaults.items():
+                if not isinstance(data.get(key), type(value)): data[key] = value
+            for key, value in defaults["usage"].items():
+                current = data["usage"].get(key)
+                if not isinstance(current, (int, float)) or not math.isfinite(current) or current < 0:
+                    data["usage"][key] = value
+            data["history"] = [v for v in data["history"] if isinstance(v, dict) and isinstance(v.get("content"), str) and v.get("role") in {"user", "assistant"}]
+            data["files"] = {k:v for k,v in data["files"].items() if isinstance(v, dict)}
+            return data
+        except (OSError, ValueError):
+            return defaults
 
     def save(self):
         write_json_atomically(self.path, self.data)
@@ -226,7 +237,7 @@ class ProjectState:
         if self.memory_path.exists():
             try:
                 data = json.loads(self.memory_path.read_text(encoding="utf-8"))
-                if isinstance(data.get("items"), list):
+                if isinstance(data, dict) and isinstance(data.get("items"), list):
                     return data
             except (OSError, json.JSONDecodeError):
                 pass
@@ -291,7 +302,10 @@ class ProjectState:
         return path.resolve().relative_to(self.workspace).as_posix()
 
     def resolve_relative(self, value: str) -> Path:
+        ensure_relative(value)
         candidate = (self.workspace / value).resolve()
+        if any(part in IGNORED_DIRS for part in Path(value).parts) or candidate.name.startswith(".env") or candidate.suffix.lower() in {".pem", ".key"}:
+            raise ValueError("Private application state/configuration cannot be read or changed by a model")
         try:
             candidate.relative_to(self.workspace)
         except ValueError as exc:
@@ -301,12 +315,13 @@ class ProjectState:
     def scan(self):
         files = {}
         for root, dirs, names in os.walk(self.workspace):
-            dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
+            dirs[:] = [d for d in dirs if d not in IGNORED_DIRS and not (Path(root) / d).is_symlink()]
             for name in names:
                 path = Path(root) / name
                 if path.suffix.lower() not in CODE_EXTENSIONS:
                     continue
                 try:
+                    if path.is_symlink() or path.name.startswith(".env") or path.stat().st_size > MAX_FILE_BYTES: continue
                     raw = path.read_bytes()
                 except OSError:
                     continue
@@ -374,15 +389,13 @@ class ProjectState:
 
     def note_usage(self, usage, pricing: PricingCatalog, model: str):
         usage = usage if isinstance(usage, dict) else {}
-        input_tokens = int(usage.get("prompt_tokens", usage.get("input_tokens", usage.get("promptTokenCount", usage.get("inputTokenCount", 0)))) or 0)
-        output_tokens = int(usage.get("completion_tokens", usage.get("output_tokens", usage.get("candidatesTokenCount", usage.get("outputTokenCount", 0)))) or 0)
-        total = input_tokens + output_tokens
-        if not total:
-            return None
+        from release_safety import normalize_usage
+        usage = normalize_usage(usage)
+        input_tokens, output_tokens = usage["input_tokens"], usage["output_tokens"]
         aggregate = self.data["usage"]
         aggregate["requests"] += 1
-        aggregate["input"] += input_tokens
-        aggregate["output"] += output_tokens
+        aggregate["input"] += input_tokens or 0
+        aggregate["output"] += output_tokens or 0
         estimate = pricing.estimate(model, input_tokens, output_tokens)
         if estimate:
             aggregate["estimated_cost_usd"] += estimate["cost_usd"]
@@ -433,6 +446,8 @@ def parse_json(answer: str) -> dict:
     data.setdefault("changes", [])
     data.setdefault("memory_action", {"operation": "none", "id": "", "content": ""})
     data.setdefault("classification", None)
+    if not isinstance(data["answer"], str) or not isinstance(data["read_files"], list) or not isinstance(data["changes"], list):
+        raise ValueError("Invalid action field types")
     return data
 
 
@@ -490,8 +505,9 @@ def streamed_answer_handler():
 
 
 def ensure_relative(path: str) -> str:
+    path = path.replace("\\", "/")
     item = Path(path)
-    if item.is_absolute() or ".." in item.parts or not path.strip():
+    if item.is_absolute() or ".." in item.parts or ":" in path or not path.strip():
         raise ValueError(f"Unsafe path from model: {path!r}")
     return item.as_posix()
 
@@ -528,7 +544,7 @@ BG CLASSIFICATION MODE (active):
 - Treat the Codebook as the rule source. Cite evidence labels exactly as supplied.
 - A source marked visual/scanned may require visual inspection; do not infer text that was not supplied.
 - When the user asks for a classification, include a `classification` object in the JSON action:
-  {"label": "exact Codebook class name", "confidence": "high|medium|low", "alternative_label": "exact Codebook class name or empty", "codebook_rule_ids": ["exact rule id from the locked profile"], "codebook_rule_pages": [1], "evidence_labels": ["exact supplied document label", "..."], "bg_evidence_pages": ["file name — page 2"], "uncertainties": ["concise limitation or empty list"]}.
+  {{"label": "exact Codebook class name", "confidence": "high|medium|low", "alternative_label": "exact Codebook class name or empty", "codebook_rule_ids": ["exact rule id from the locked profile"], "codebook_rule_pages": [1], "evidence_labels": ["exact supplied document label", "..."], "bg_evidence_pages": ["file name — page 2"], "uncertainties": ["concise limitation or empty list"]}}.
 - Copy the class and evidence-label spelling exactly. Use only evidence labels supplied in this prompt. A non-empty evidence_labels list is mandatory for a classification.
 - A non-empty codebook_rule_ids list is mandatory; it must name the actual locked rule(s) used for the decision. Keep Codebook-rule pages and BG-evidence pages separate.
 """
@@ -907,3 +923,4 @@ if __name__ == "__main__":
 # python code_chat_agent.py --workspace "C:\\Users\\XXXXX\\Documents\\Python_Projects\\bosch_chat\\bot_workspace" --state-dir "C:\\Users\\XXXXX\\Documents\\Python_Projects\\bosch_chat\\AI_Bot_State" --model gpt-6-luna-2026-09-22 --env-file "C:\\Users\\XXXXX\\Documents\\Python_Projects\\bosch_chat\\.env"
 # Price table defaults to model_pricing.json beside this script; use --pricing-file to choose another local JSON file.
 # State, indexes and conversation summaries are stored only under --state-dir.
+

@@ -13,16 +13,19 @@ import os
 import re
 import shutil
 import threading
+import uuid
+from functools import wraps
 from queue import Empty, Queue
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from pydantic import BaseModel, Field
 import uvicorn
 
+from release_safety import safe_error, normalize_usage
 from dotenv import load_dotenv
 from workbench_i18n import catalog_script_json
 from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative,
@@ -46,7 +49,7 @@ MODEL_ID_MIGRATIONS = {"claude-haiku-5.5": "claude-haiku-5-5"}
 
 
 def canonical_model_id(value: Any) -> str:
-    model = str(value or "").strip()
+    model = str(value or "").strip().lower()
     return MODEL_ID_MIGRATIONS.get(model, model)
 
 
@@ -124,7 +127,7 @@ def load_material_selection(folder: Path) -> tuple[set[str], int, int]:
     except (OSError, ValueError):
         items = []
     restored, missing, changed = set(), 0, 0
-    for item in items:
+    for item in items if isinstance(items, list) else []:
         if not isinstance(item, dict) or not isinstance(item.get("path"), str):
             continue
         try:
@@ -162,7 +165,7 @@ def save_material_selection(folder: Path, files: list[Path]) -> None:
     records[str(folder)] = {"updated_at": datetime.now().astimezone().isoformat(timespec="seconds"), "files": entries}
     # A bounded history keeps this settings file permanently lightweight.
     if len(records) > 100:
-        keep = sorted(records, key=lambda key: str(records[key].get("updated_at", "")), reverse=True)[:100]
+        keep = sorted(records, key=lambda key: str((records[key] if isinstance(records[key], dict) else {}).get("updated_at", "")), reverse=True)[:100]
         records = {key: records[key] for key in keep}
     write_json_atomically(material_selections_path(), records)
 
@@ -273,7 +276,7 @@ def save_workbench_settings(workspace: Path, session_name: str, model: str, lang
 
 class Setup(BaseModel):
     workspace: str
-    state_dir: str
+    state_dir: str = ""
     model: str = "gpt-5.5"
     session: str = "default"
     env_file: str = ""
@@ -332,11 +335,11 @@ class CodebookPrepareRequest(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    question: str
+    question: str = Field(max_length=50000)
 
 
 class CompareRequest(BaseModel):
-    question: str
+    question: str = Field(max_length=50000)
     models: list[str]
 
 
@@ -367,12 +370,16 @@ def reject_context_change_while_processing() -> None:
 
 def begin_model_work() -> dict[str, Any]:
     """Reserve the single model slot and capture its complete request context."""
-    with LOCK:
+    if not LOCK.acquire(blocking=False):
+        raise HTTPException(409, "A request is already in progress. Please wait.")
+    try:
         if MODEL_WORK_IN_PROGRESS.is_set():
             raise HTTPException(409, "已有模型请求正在处理中，请等待其完成。")
         data = dict(session())
         MODEL_WORK_IN_PROGRESS.set()
         return data
+    finally:
+        LOCK.release()
 
 
 def status_data(data: dict[str, Any]) -> dict[str, Any]:
@@ -384,6 +391,7 @@ def status_data(data: dict[str, Any]) -> dict[str, Any]:
         "code_files": len(state.data["files"]), "documents": len(data["documents"].list()),
         "requests": usage["requests"], "input_tokens": usage["input"], "output_tokens": usage["output"],
         "cost": round(float(usage.get("estimated_cost_usd", 0)), 6),
+        "unpriced_requests": usage.get("unpriced_requests", 0),
         "bg_context": state.data.get("bg_context"),
     }
 
@@ -396,6 +404,7 @@ def session_list_item(root: Path) -> dict[str, Any]:
         data = json.loads(state_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         pass
+    if not isinstance(data, dict): data = {}
     title = str(data.get("sidebar_title") or root.name)
     try:
         updated = state_file.stat().st_mtime
@@ -507,16 +516,18 @@ def selected_target_files(folder: Path, values: list[str]) -> list[Path]:
     """Validate explicit UI selections and keep them inside the picked folder."""
     selected, seen = [], set()
     for value in values:
+        candidate = Path(value).expanduser()
+        candidate = candidate if candidate.is_absolute() else folder / candidate
         try:
-            path = Path(value).expanduser().resolve()
-            path.relative_to(folder)
+            path = candidate.resolve(); path.relative_to(folder)
+            paths = sorted(path.rglob('*')) if path.is_dir() else [path]
+            for item in paths:
+                if item.is_symlink(): continue
+                item = item.resolve(); item.relative_to(folder)
+                if item.is_file() and item.suffix.lower() in SUPPORTED_DOCUMENT_EXTENSIONS and str(item) not in seen:
+                    selected.append(item); seen.add(str(item))
         except (OSError, ValueError):
             continue
-        if not path.is_file() or path.suffix.lower() not in SUPPORTED_DOCUMENT_EXTENSIONS:
-            continue
-        key = str(path)
-        if key not in seen:
-            selected.append(path); seen.add(key)
     return selected
 
 
@@ -551,6 +562,7 @@ def parse_codebook_draft(raw: str) -> dict:
     if not isinstance(draft, dict) or not isinstance(draft.get("classes"), list):
         raise ValueError("Codebook JSON 缺少 classes 列表")
     classes = []
+    seen_names = set()
     for item in draft["classes"]:
         if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not item["name"].strip():
             continue
@@ -562,15 +574,18 @@ def parse_codebook_draft(raw: str) -> dict:
                 elif isinstance(value, dict) and str(value.get("text", "")).strip():
                     result.append({"id": str(value.get("id") or f"{prefix}-{index}"),
                                    "text": str(value["text"]).strip(),
-                                   "pages": [int(page) for page in value.get("pages", []) if str(page).isdigit()]})
+                                   "pages": [int(page) for page in (value.get("pages") or []) if str(page).isdigit()]})
             return result
         name = item["name"].strip()
+        if name.casefold() in seen_names or not isinstance(item.get("definition"), str) or not item["definition"].strip():
+            raise ValueError("Codebook requires unique class names and non-empty definitions")
+        seen_names.add(name.casefold())
         key = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-") or "class"
         classes.append({
             "name": name, "definition": str(item.get("definition", "")).strip(),
             "decision_rules": rules(item.get("decision_rules", []), f"{key}-rule"),
             "boundaries": rules(item.get("boundaries", []), f"{key}-boundary"),
-            "evidence_pages": [int(page) for page in item.get("evidence_pages", []) if str(page).isdigit()],
+            "evidence_pages": [int(page) for page in (item.get("evidence_pages") or []) if str(page).isdigit()],
         })
     if not classes:
         raise ValueError("Codebook JSON 未包含有效类别")
@@ -580,7 +595,7 @@ def parse_codebook_draft(raw: str) -> dict:
             if isinstance(value, str): result.append({"id": f"{prefix}-{index}", "text": value, "pages": []})
             elif isinstance(value, dict) and str(value.get("text", "")).strip():
                 result.append({"id": str(value.get("id") or f"{prefix}-{index}"), "text": str(value["text"]).strip(),
-                               "pages": [int(page) for page in value.get("pages", []) if str(page).isdigit()],
+                               "pages": [int(page) for page in (value.get("pages") or []) if str(page).isdigit()],
                                "table": value.get("table") if isinstance(value.get("table"), dict) else None})
         return result
     return {"classes": classes, "global_rules": profile_rules(draft.get("global_rules", []), "global"),
@@ -726,7 +741,7 @@ def write_bg_analysis_export(state: ProjectState) -> Path:
         "- 推理 token（若网关返回）： " + str(token.get("reasoning", 0)),
         "- Gemini thinking token（若网关返回）： " + str(token.get("gemini_thinking", 0)),
         "- Claude 缓存：读取 " + str(token.get("cache_read", 0)) + " ｜ 写入 " + str(token.get("cache_write", 0)),
-        "- 本轮预估费用：$" + format(float(token.get("cost_usd", 0)), ".6f"),
+        "- 本轮预估费用：" + ("unknown" if token.get("cost_usd") is None else "$" + format(float(token["cost_usd"]), ".6f")),
         "",
         "## 用户问题",
         "",
@@ -1247,8 +1262,9 @@ def validate_classification(action: dict, evidence: list[dict], codebook: str, p
     label = classification.get("label")
     if not isinstance(label, str) or not label.strip():
         return "缺少类别 label"
-    if codebook and label.casefold() not in codebook.casefold():
-        return "类别名称未在当前 Codebook 中找到"
+    names = {item.get("name") for item in (profile or {}).get("classes", []) if isinstance(item, dict)}
+    if not names or label not in names:
+        return "Class label must exactly match one locked Codebook class"
     if classification.get("confidence") not in {"high", "medium", "low"}:
         return "confidence 必须为 high、medium 或 low"
     evidence_labels = classification.get("evidence_labels")
@@ -1272,7 +1288,7 @@ def validate_classification(action: dict, evidence: list[dict], codebook: str, p
     if not isinstance(classification.get("bg_evidence_pages"), list) or not classification["bg_evidence_pages"]:
         return "缺少 bg_evidence_pages"
     alternative = classification.get("alternative_label", "")
-    if alternative and (not isinstance(alternative, str) or (codebook and alternative.casefold() not in codebook.casefold())):
+    if alternative and (not isinstance(alternative, str) or alternative not in names):
         return "备选类别未在当前 Codebook 中找到"
     uncertainties = classification.get("uncertainties", [])
     if not isinstance(uncertainties, list) or not all(isinstance(item, str) for item in uncertainties):
@@ -1295,13 +1311,18 @@ def progress_copy(data: dict[str, Any], zh: str, en: str, de: str) -> str:
 
 def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, Any]:
     state, documents, llm = data["state"], data["documents"], data["llm"]
+    ensure_current_sources(data)
+    data["pending"] = []
+    if ACTIVE.get("state") is state: ACTIVE["pending"] = []
     def report(phase: str, text: str, percent: int | None = None) -> None:
+        if data.get("cancel_event") and data["cancel_event"].is_set():
+            raise RuntimeError("Request cancelled; no changes applied")
         if progress:
             progress(phase, text, percent)
 
     report("search", progress_copy(data, "正在检查当前材料与已有理解结果…", "Checking current materials and existing understanding…", "Aktuelle Materialien und vorhandenes Verständnis werden geprüft…"), 5)
     bg_context = state.data.get("bg_context")
-    active_source_ids = state.data.get("active_source_ids")
+    active_source_ids = state.data.get("active_source_ids", [])
     matches = state.search(question)
     snippets = {item: excerpt(state, item, question) for item in matches}
     preferred = ([bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))) if bg_context else active_source_ids
@@ -1387,7 +1408,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
     def validated_action(raw_response: str, request_prompt: str) -> dict:
         try:
             action = parse_json(raw_response)
-            problem = validate_classification(action, evidence, codebook_text(documents, bg_context), (bg_context or {}).get("locked_profile")) if classification_request else None
+            problem = validate_classification(action, evidence, codebook_text(documents, bg_context), (bg_context or {}).get("locked_profile")) if classification_request or action.get("classification") is not None else None
         except Exception as exc:
             if not classification_request:
                 raise
@@ -1413,6 +1434,8 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
         report("validation", progress_copy(data, "正在核验模型分类输出…", "Validating the model classification output…", "Die Klassifikationsausgabe des Modells wird geprüft…"), 96)
         action = validated_action(raw, model_prompt)
     except Exception:
+        if bg_context:
+            raise ValueError("Classification validation failed after one repair; no classification result was accepted")
         # Some Bosch Farm models return a normal natural-language answer despite
         # the code-action schema. A read-only question must remain useful:
         # show that answer and never treat it as a file modification.
@@ -1448,14 +1471,19 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
         try:
             action = validated_action(raw, model_prompt)
         except Exception as exc:
+            if classification_request: raise
             notices.append(f"补充读取后的分类输出未通过校验：{exc}；未显示分类结论卡。")
             action = {"answer": raw.strip() or "模型没有返回可显示的文字。", "changes": [], "classification": None}
+    for change in action.get("changes", []):
+        if isinstance(change, dict) and state.resolve_relative(change.get("path", "")).exists() and change.get("path") not in complete:
+            raise ValueError("A complete current file must be read before proposing its replacement")
     changes = build_diff(state, action.get("changes", []))
     data["pending"] = changes
+    if ACTIVE.get("state") is state: ACTIVE["pending"] = changes
     title_session_from_question(state, question)
     state.add_turn("user", question); state.add_turn("assistant", action.get("answer", ""))
     turn_token_usage = summarize_usage(usage_records)
-    turn_token_usage["cost_usd"] = sum(item["cost_usd"] for item in estimates)
+    turn_token_usage["cost_usd"] = sum(item["cost_usd"] for item in estimates) if estimates and len(estimates) == len(usage_records) else None
     if bg_context:
         state.data["last_bg_analysis"] = {
             "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -1563,15 +1591,75 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
             "sources": [str(item.get("label", item.get("name", "未知来源"))) for item in evidence]}
 
 
+def context_mutation(function):
+    @wraps(function)
+    def guarded(*args, **kwargs):
+        if not LOCK.acquire(blocking=False):
+            raise HTTPException(409, "A request is in progress. Wait before changing context.")
+        try:
+            reject_context_change_while_processing()
+            return function(*args, **kwargs)
+        finally:
+            LOCK.release()
+    return guarded
+
+
+def reset_context(data):
+    state = data["state"]
+    if state.transcript_path.exists():
+        archive = state.root / "archives"; archive.mkdir(exist_ok=True)
+        state.transcript_path.rename(archive / (uuid.uuid4().hex + '.jsonl'))
+    state.data['history'] = []; state.data['summary'] = ''
+    state.data.pop('last_bg_analysis', None)
+    coverage_path(state).unlink(missing_ok=True)
+    data['pending'] = []
+    state.save()
+
+
+def ensure_current_sources(data):
+    state = data['state']; context = state.data.get('bg_context')
+    if context:
+        profile = load_codebook_profile()
+        path = Path(context.get('codebook_path', ''))
+        if profile.get('status') != 'locked' or profile.get('draft') != context.get('locked_profile') or not path.is_file() or file_digest(path) != profile.get('sha256'):
+            raise HTTPException(409, 'Codebook changed or is not locked. Confirm the current rules and materials again.')
+    ids = set(state.data.get('active_source_ids') or [])
+    for item in data['documents'].list():
+        if item.get('id') in ids:
+            path = Path(item['path'])
+            if not path.is_file() or file_digest(path) != item.get('sha256'):
+                raise HTTPException(409, f"Source changed or disappeared: {path.name}. Confirm materials again.")
+
+
+@app.exception_handler(Exception)
+@app.exception_handler(ValueError)
+@app.exception_handler(OSError)
+@app.exception_handler(RuntimeError)
+async def readable_error(request: Request, exc: Exception):
+    return JSONResponse(status_code=400, content={"detail": safe_error(exc)})
+
+
+@app.middleware("http")
+async def local_origin_only(request: Request, call_next):
+    from urllib.parse import urlsplit
+    origin = request.headers.get('origin')
+    host = request.headers.get('host', '').split(':')[0]
+    if host not in {'127.0.0.1', 'localhost', 'testserver'} or (origin and urlsplit(origin).netloc != request.headers.get('host')):
+        return JSONResponse(status_code=403, content={"detail": "Local same-origin access only"})
+    return await call_next(request)
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return HTML
 
 
 @app.post("/api/setup")
+@context_mutation
 def setup(request: Setup):
     reject_context_change_while_processing()
-    workspace = Path(request.workspace).expanduser().resolve()
+    if not request.workspace.strip(): raise HTTPException(400, "Select the application workspace first")
+    workspace = Path(request.workspace.strip().strip('"')).expanduser().resolve()
     if not workspace.is_dir(): raise HTTPException(400, f"工作区不存在：{workspace}")
     env_file = Path(__file__).resolve().parent / ".env"
     load_dotenv(env_file)
@@ -1583,10 +1671,12 @@ def setup(request: Setup):
     price_file = Path(__file__).resolve().parent / "model_pricing.json"
     language = normalize_language(request.language)
     model = canonical_model_id(request.model)
+    connector = LLMConnector(model, key, session_id=state.data["session_id"])
     with LOCK:
         reject_context_change_while_processing()
+        state.scan()
         ACTIVE.clear(); ACTIVE.update({"state": state, "documents": documents, "model": model, "language": language,
-                                        "llm": LLMConnector(model, key, session_id=state.data["session_id"]),
+                                        "llm": connector,
                                         "pricing": PricingCatalog(price_file), "pending": []})
         state.scan()
         state.data["selected_model"] = model
@@ -1600,6 +1690,7 @@ def status(): return status_data(session())
 
 
 @app.post("/api/model")
+@context_mutation
 def switch_model(request: ModelSwitchRequest):
     reject_context_change_while_processing()
     model = canonical_model_id(request.model)
@@ -1612,6 +1703,7 @@ def switch_model(request: ModelSwitchRequest):
             data["llm"] = LLMConnector(model, data["llm"].api_key, session_id=data["state"].data["session_id"])
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+        if data["model"] != model: reset_context(data)
         data["model"] = model
         data["state"].data["selected_model"] = model
         data["state"].save()
@@ -1633,6 +1725,7 @@ def activate_local_session(data: dict[str, Any], session_name: str) -> dict:
 
 
 @app.post("/api/session/rename")
+@context_mutation
 def rename_session(request: SessionRenameRequest):
     with LOCK:
         reject_context_change_while_processing()
@@ -1654,6 +1747,7 @@ def rename_session(request: SessionRenameRequest):
 
 
 @app.post("/api/session/delete")
+@context_mutation
 def delete_session(request: SessionDeleteRequest):
     with LOCK:
         reject_context_change_while_processing()
@@ -1682,9 +1776,13 @@ def settings():
 @app.post("/api/language")
 def set_language(request: LanguageRequest):
     language = normalize_language(request.language)
-    data = session()
-    data["language"] = language
-    save_workbench_settings(data["state"].workspace, data["state"].root.name, data["model"], language)
+    with LOCK:
+        if ACTIVE:
+            data = session(); data['language'] = language
+            save_workbench_settings(data['state'].workspace, data['state'].root.name, data['model'], language)
+        else:
+            settings = load_workbench_settings(); settings['language'] = language
+            write_json_atomically(workbench_settings_path(), settings)
     return {"language": language}
 
 
@@ -1697,6 +1795,7 @@ def sessions(offset: int = 0, limit: int = 10):
 
 
 @app.post("/api/session/open")
+@context_mutation
 def open_saved_session(request: SessionOpenRequest):
     with LOCK:
         reject_context_change_while_processing()
@@ -1708,6 +1807,7 @@ def open_saved_session(request: SessionOpenRequest):
 
 
 @app.post("/api/session/new")
+@context_mutation
 def create_session():
     with LOCK:
         reject_context_change_while_processing()
@@ -1717,6 +1817,7 @@ def create_session():
 
 
 @app.post("/api/session/pin")
+@context_mutation
 def pin_session(request: SessionPinRequest):
     reject_context_change_while_processing()
     data = session(); name = safe_name(request.name.strip())
@@ -1822,21 +1923,27 @@ def documents():
     return [{"id": item["id"], "name": item["name"], "path": item["path"], "chunks": len(item.get("chunks", [])),
              "material_role": item.get("material_role", "other"),
              "material_role_label": material_role_label(item.get("material_role", "other"))}
-            for item in session()["documents"].list()]
+            for item in session()["documents"].list() if item["id"] in set(session()["state"].data.get("active_source_ids") or [])]
 
 
 @app.post("/api/document")
+@context_mutation
 def add_document(request: PathRequest):
     reject_context_change_while_processing()
     item = session()["documents"].add(str(safe_file(request.path)))
+    state = session()["state"]
+    state.data.setdefault("active_source_ids", []).append(item["id"])
+    state.save()
     return {"id": item["id"], "name": item["name"], "chunks": len(item["chunks"]),
             "material_role": item.get("material_role", "other"),
             "material_role_label": material_role_label(item.get("material_role", "other"))}
 
 
 @app.post("/api/bg")
+@context_mutation
 def activate_bg(request: BGRequest):
     reject_context_change_while_processing()
+    return analyze_target(TargetRequest(target=request.folder, selected_paths=["."]))
     data = session(); codebook = data["documents"].add(str(safe_file(request.codebook)))
     folder = Path(request.folder.strip().strip('"')).expanduser().resolve()
     sources, skipped = data["documents"].add_folder(str(folder))
@@ -1847,11 +1954,14 @@ def activate_bg(request: BGRequest):
 
 
 @app.post("/api/target")
+@context_mutation
 def analyze_target(request: TargetRequest):
     """Index one file or explicitly selected files in one folder."""
     reject_context_change_while_processing()
     data = session()
+    if not request.target.strip(): raise HTTPException(400, "Select a file or folder")
     target = Path(request.target.strip().strip('"')).expanduser().resolve()
+    codebook_path = None
     if target.is_file():
         sources, skipped, target_kind = [data["documents"].add(str(target))], [], "文件"
     elif target.is_dir():
@@ -1865,12 +1975,13 @@ def analyze_target(request: TargetRequest):
             except Exception as exc:
                 skipped.append(f"{path.name}: {exc}")
         if not sources:
-            raise HTTPException(400, "所选文件均无法读取；请查看扫描报告。")
+            raise HTTPException(400, "No selected file could be read: " + "; ".join(skipped[:10]))
         save_material_selection(target, selected)
         target_kind = "文件夹"
     else:
         raise HTTPException(400, f"文件或文件夹不存在：{target}")
     profile = load_codebook_profile()
+    reset_context(data)
     if profile.get("status") == "locked":
         codebook_path = Path(str(profile.get("source_path", "")))
         if not codebook_path.is_file() or file_digest(codebook_path) != profile.get("sha256"):
@@ -1880,6 +1991,7 @@ def analyze_target(request: TargetRequest):
             "codebook_id": codebook["id"], "codebook_name": codebook["name"],
             "source_ids": [item["id"] for item in sources], "folder": str(target),
             "locked_profile": profile.get("draft", {}), "codebook_path": str(codebook_path),
+            "codebook_sha256": profile.get("sha256"),
         }
     else:
         data["state"].data.pop("bg_context", None)
@@ -1927,6 +2039,8 @@ def codebook_prepare(request: CodebookPrepareRequest):
         with LOCK:
             profile = prepare_codebook_profile(data, path, model)
             save_codebook_profile(profile)
+            reset_context(data)
+            data["state"].data.pop("bg_context", None)
             data["state"].data["selected_codebook_path"] = str(path)
             data["state"].save()
         return profile
@@ -1936,7 +2050,29 @@ def codebook_prepare(request: CodebookPrepareRequest):
         MODEL_WORK_IN_PROGRESS.clear()
 
 
+class CodebookEditRequest(BaseModel):
+    draft: dict
+    confirmed: bool = False
+
+
+@app.post("/api/codebook/edit")
+@context_mutation
+def codebook_edit(request: CodebookEditRequest):
+    if not request.confirmed: raise HTTPException(400, "Explicit confirmation required")
+    profile = load_codebook_profile()
+    if not profile.get('source_path'): raise HTTPException(400, "Prepare a Codebook first")
+    draft = parse_codebook_draft(json.dumps(request.draft))
+    previous = dict(profile)
+    profile['draft'] = draft; profile['status'] = 'draft'
+    profile['previous_draft'] = previous.get('draft', {})
+    save_codebook_profile(profile)
+    if ACTIVE:
+        reset_context(ACTIVE); ACTIVE['state'].data.pop('bg_context', None); ACTIVE['state'].save()
+    return profile
+
+
 @app.post("/api/codebook/lock")
+@context_mutation
 def codebook_lock():
     reject_context_change_while_processing()
     profile = load_codebook_profile()
@@ -1945,16 +2081,20 @@ def codebook_lock():
     path = Path(str(profile.get("source_path", "")))
     if not path.is_file() or file_digest(path) != profile.get("sha256"):
         raise HTTPException(409, "Codebook 文件已变化；请重新准备。")
+    profile["draft"] = parse_codebook_draft(json.dumps(profile["draft"]))
     profile["status"] = "locked"
     profile["locked_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
     save_codebook_profile(profile)
     if ACTIVE:
+        reset_context(ACTIVE)
+        ACTIVE["state"].data.pop("bg_context", None)
         ACTIVE["state"].data["selected_codebook_path"] = str(path)
         ACTIVE["state"].save()
     return profile
 
 
 @app.delete("/api/codebook")
+@context_mutation
 def codebook_clear():
     reject_context_change_while_processing()
     try:
@@ -1965,6 +2105,7 @@ def codebook_clear():
     # currently open session.  Other sessions are likewise harmless until they
     # explicitly analyse a target again, at which time the global lock is read.
     if ACTIVE:
+        reset_context(ACTIVE)
         ACTIVE["state"].data.pop("bg_context", None)
         ACTIVE["state"].save()
     return {"status": "none"}
@@ -1991,6 +2132,7 @@ def cache_audit_status():
 
 
 @app.post("/api/cache/file/rebuild")
+@context_mutation
 def rebuild_cached_file(request: CacheFileRequest):
     reject_context_change_while_processing()
     if not request.confirmed:
@@ -2033,6 +2175,7 @@ def rebuild_bg_dossier(request: CacheConfirmRequest):
 
 
 @app.post("/api/cache/clear")
+@context_mutation
 def clear_summary_caches(request: CacheConfirmRequest):
     reject_context_change_while_processing()
     if not request.confirmed:
@@ -2048,9 +2191,10 @@ def clear_summary_caches(request: CacheConfirmRequest):
 
 
 @app.delete("/api/bg")
+@context_mutation
 def clear_bg():
     reject_context_change_while_processing()
-    data = session(); data["state"].data.pop("bg_context", None); data["state"].save(); return status_data(data)
+    data = session(); reset_context(data); data["state"].data.pop("bg_context", None); data["state"].save(); return status_data(data)
 
 
 @app.post("/api/export/session")
@@ -2094,7 +2238,7 @@ def chat_stream(request: ChatRequest):
                 result = call_model(data, question, progress=publish)
             events.put({"type": "result", "data": result})
         except Exception as exc:
-            events.put({"type": "error", "message": str(exc)})
+            events.put({"type": "error", "message": safe_error(exc)})
         finally:
             MODEL_WORK_IN_PROGRESS.clear()
             events.put({"type": "end"})
@@ -2132,26 +2276,63 @@ def compare(request: CompareRequest):
         MODEL_WORK_IN_PROGRESS.clear()
 
 
+class ApplyRequest(BaseModel):
+    confirmed: bool = False
+
+
 @app.post("/api/apply")
-def apply():
-    reject_context_change_while_processing()
+@context_mutation
+def apply(request: ApplyRequest):
+    if not request.confirmed: raise HTTPException(400, "Explicit confirmation is required")
     data = session(); pending = data.get("pending", [])
-    if not pending: raise HTTPException(400, "没有待应用的修改。")
+    if not pending: raise HTTPException(400, "No pending changes")
     state = data["state"]
-    for item in pending:
-        path = state.resolve_relative(item["path"])
-        current = sha256(path.read_bytes()) if path.exists() else None
-        if current != item["before"]: raise HTTPException(409, f"{item['path']} 在显示 diff 后已改变。")
-    for item in pending:
-        path = state.resolve_relative(item["path"]); path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(item["content"], encoding="utf-8", newline=""); state.refresh_file(item["path"])
-    count = len(pending); data["pending"] = []
-    return {"applied": count}
+    backup_dir = state.root / "backups" / uuid.uuid4().hex
+    staged, applied, originals = [], [], {}
+    try:
+        for item in pending:
+            path = state.resolve_relative(item["path"])
+            if path.suffix.lower() not in {".py", ".txt", ".md", ".json", ".csv", ".html", ".css", ".js"}:
+                raise ValueError("Binary documents and Excel must use the dedicated copy-based editor")
+            old = path.read_bytes() if path.exists() else None
+            if (sha256(old) if old is not None else None) != item["before"]:
+                raise HTTPException(409, f"{item['path']} changed after review")
+            originals[path] = old
+            if old is not None:
+                backup = backup_dir / item["path"]; backup.parent.mkdir(parents=True, exist_ok=True); backup.write_bytes(old)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temp = path.with_name('.' + path.name + '.' + uuid.uuid4().hex + '.tmp')
+            staged.append((path, temp))
+            with temp.open('w', encoding='utf-8', newline='') as handle:
+                handle.write(item['content']); handle.flush(); os.fsync(handle.fileno())
+        for path, temp in staged:
+            os.replace(temp, path); applied.append(path)
+        data['pending'] = []
+        for path, _ in staged: state.refresh_file(state.relative(path))
+    except Exception:
+        for path in reversed(applied):
+            old = originals[path]
+            if old is None: path.unlink(missing_ok=True)
+            else:
+                rollback = path.with_name('.' + path.name + '.rollback')
+                rollback.write_bytes(old); os.replace(rollback, path)
+        raise
+    finally:
+        for _, temp in staged: temp.unlink(missing_ok=True)
+    return {"applied": len(pending), "backup": str(backup_dir)}
+
+
+@app.delete("/api/pending")
+@context_mutation
+def cancel_pending():
+    session()["pending"] = []
+    return {"cancelled": True}
 
 
 HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bosch Local Workbench</title>
 <style>
 *{box-sizing:border-box}:root{--left-panel-width:264px;--ui-bg:#0b1020;--ui-surface:#111a2c;--ui-surface-2:#172338;--ui-surface-3:#1d2b43;--ui-line:#283750;--ui-line-soft:#1c2a40;--ui-text:#edf3fb;--ui-muted:#92a2b8;--ui-faint:#687992;--ui-blue:#4f9bf5;--ui-cyan:#54c7dc;--ui-green:#43c59e;--ui-shadow:0 18px 60px rgba(0,0,0,.38)}body{margin:0;background:radial-gradient(900px 500px at 55% -220px,#1d407050,transparent 72%),var(--ui-bg);color:var(--ui-text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Arial,sans-serif}button,input,select{font:inherit}button{background:var(--ui-blue);color:white;border:0;border-radius:9px;padding:8px 10px;cursor:pointer}button.ghost{background:var(--ui-surface-2);color:#cbd9e9;border:1px solid var(--ui-line)}button.ghost:hover{background:var(--ui-surface-3);border-color:#456183}.topbar{height:58px;display:flex;align-items:center;gap:14px;padding:0 18px;border-bottom:1px solid var(--ui-line-soft);background:rgba(12,18,32,.82);backdrop-filter:blur(18px);position:relative;z-index:6}.app-brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.02em;font-size:15px}.brand-mark{width:25px;height:25px;border-radius:8px;background:linear-gradient(135deg,#65b9ff,#3275d1);box-shadow:0 0 22px #4f9bf568;position:relative}.brand-mark:after{content:"";position:absolute;inset:6px;border:2px solid white;border-left-color:transparent;border-radius:5px}.topbar-workspace{border:0;border-left:1px solid var(--ui-line);border-radius:0;background:transparent;color:var(--ui-muted);padding:4px 0 4px 14px;font-size:12px;max-width:370px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap}.topbar-workspace:hover{color:white}.top-spacer{flex:1}.topbar-status{display:flex;align-items:center;gap:7px;color:var(--ui-muted);font-size:12px}.status-dot{width:7px;height:7px;border-radius:50%;background:var(--ui-green);box-shadow:0 0 0 3px #43c59e22}.shell{height:calc(100vh - 58px);display:grid;grid-template-columns:var(--left-panel-width) 8px minmax(420px,1fr) 300px}.side{background:#0d1525;border-right:1px solid var(--ui-line-soft);padding:0;overflow:hidden}.splitter{cursor:col-resize;background:#162238;touch-action:none;transition:background .15s}.splitter:hover,.splitter.dragging{background:#345a80}.right{border-left:1px solid var(--ui-line-soft);border-right:0;background:#0e1728;padding:15px 13px;overflow:auto}.main{display:flex;flex-direction:column;min-width:0;position:relative;background:linear-gradient(120deg,rgba(14,24,42,.55),rgba(11,16,32,.2))}.chat-header{height:60px;border-bottom:1px solid var(--ui-line-soft);padding:0 28px;display:flex;align-items:center;gap:12px}.chat-title{font-weight:650;letter-spacing:-.01em}.chat-subtitle{font-size:12px;color:var(--ui-muted)}.header-spacer{flex:1}.header-icon{display:inline-grid;place-items:center;width:31px;height:31px;border:1px solid var(--ui-line);background:var(--ui-surface);color:var(--ui-muted);border-radius:8px;cursor:pointer}.header-icon:hover{color:white;border-color:#466185}.brand{font-weight:700;font-size:16px;margin-bottom:16px}.muted{color:var(--ui-muted);font-size:12px}.field{margin:10px 0}.field label{display:block;font-size:12px;color:#a9b6c8;margin-bottom:5px}input,select{width:100%;background:#0f172a;border:1px solid #3b4960;border-radius:8px;padding:8px;color:#f8fafc}.row{display:flex;gap:7px}.row>*{min-width:0}.row input{flex:1}.chat{flex:1;overflow:auto;padding:34px max(8%,42px)}.message{max-width:920px;margin:0 auto 18px;padding:13px 15px;border-radius:12px;white-space:pre-wrap;line-height:1.55}.user{background:#1d3a60;margin-left:auto;max-width:78%}.assistant{background:#17243a;border:1px solid #273b57}.reason{margin:8px auto 18px;max-width:920px;background:#121d30;border:1px solid #2b3e5a;border-radius:10px;padding:9px}.reason summary{cursor:pointer;color:#b9c9e2}.reason pre{white-space:pre-wrap;font-size:12px;color:#aab7c8}.composer-wrap{padding:0 28px 22px;background:linear-gradient(transparent,var(--ui-bg) 26%)}.composer{max-width:900px;width:100%;margin:auto;background:#141f33;border:1px solid #33435e;border-radius:14px;box-shadow:0 14px 40px #00000038;overflow:hidden;display:flex;flex-wrap:wrap;gap:0;padding:0}.composer input#question{border:0;background:transparent;padding:15px 14px;min-width:0;flex:1}.composer>button{margin:9px 10px 9px 0;height:38px}.composer-tools{width:100%;min-height:40px;border-top:1px solid #293851;display:flex;align-items:center;padding:5px 8px 5px 12px;gap:7px}.composer-tools .spacer{flex:1}.composer-tools select{width:auto;max-width:330px;color:#dbe8f8;background:#1c2b43;border:1px solid #354863;border-radius:999px;padding:5px 28px 5px 10px;font-size:12px}.composer-tools #custommodelrow{margin:0;align-items:center}.composer-tools #custommodelrow input{width:250px;padding:5px 8px}.composer-tools #custommodelrow button{padding:5px 8px}.model-test{font-size:12px;color:#a9bdd5;background:transparent;border:1px solid transparent;padding:5px 7px}.model-test:hover{background:#1e2e47;color:#fff}.card{border:1px solid #2b3e59;border-radius:10px;padding:10px;margin:10px 0;background:#121d30}.list{font-size:12px;line-height:1.5;word-break:break-word}.diff{white-space:pre-wrap;background:#0b1220;border-radius:6px;padding:8px;max-height:230px;overflow:auto;color:#d7e1ed}.ok{color:#86efac}.error{color:#fca5a5}.chip{display:inline-block;padding:3px 6px;border-radius:5px;background:#22314a;color:#bcd5ff;margin:2px;font-size:11px}.check{display:block;margin:5px 0;color:#dbeafe;font-size:12px}.check input{width:auto;margin-right:5px}.comparison{max-width:1180px;margin:0 auto 20px}.comparison-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:10px}.comparison .card{margin:0}.comparison .answer{white-space:pre-wrap;line-height:1.5;max-height:440px;overflow:auto}.target-tree{max-height:360px;overflow:auto;border:1px solid #334155;border-radius:8px;padding:7px;background:#0f172a}.target-tree details{margin:3px 0}.target-tree summary{cursor:pointer;list-style:none}.target-tree summary::-webkit-details-marker{display:none}.target-tree summary:before{content:'▸';display:inline-block;width:13px;color:#94a3b8}.target-tree details[open]>summary:before{content:'▾'}.target-tree label{cursor:pointer;margin-left:4px}.target-tree input{width:auto;vertical-align:middle}.tree-children{margin-left:17px;border-left:1px solid #29374d;padding-left:7px}.tree-file{margin:3px 0}.unsupported{color:#64748b}.classification-card{max-width:920px;margin:-8px auto 18px;border:1px solid #388ee8;border-radius:12px;padding:13px 15px;background:#10263a;line-height:1.55}.classification-card h3{margin:0 0 8px;color:#bae6fd;font-size:14px}.classification-card ul{margin:5px 0 0;padding-left:20px}.classification-card .result{font-size:16px;color:#f8fafc}.codebook-workspace{padding-top:28px}.codebook-workspace .workspace-inner{max-width:980px;margin:auto}.codebook-workspace h1{font-size:22px;margin:0 0 7px}.codebook-workspace h2{font-size:16px;margin:22px 0 8px}.codebook-class{border-left:3px solid #38bdf8}.codebook-class h3{margin:0 0 7px}.codebook-class ul{margin:7px 0;padding-left:20px;line-height:1.55}.workspace-actions{display:flex;gap:8px;position:sticky;bottom:0;padding:12px 0;background:#111827}.language-picker{position:relative;top:auto;right:auto;z-index:50;display:flex;align-items:center;gap:5px;padding:5px 7px;background:#172033;border:1px solid var(--ui-line);border-radius:8px;color:#cbd5e1;font-size:12px}.language-picker select{width:auto;background:transparent;border:0;color:#f8fafc;padding:3px}.context-title{font-size:12px;letter-spacing:.08em;color:var(--ui-faint);margin:2px 4px 11px;text-transform:uppercase}.context-card{width:100%;display:block;text-align:left;padding:13px;margin:0 0 10px;border:1px solid var(--ui-line);border-radius:11px;background:linear-gradient(150deg,#142138,#101a2b);color:#e5e7eb;transition:.18s}.context-card:hover{border-color:#42658f;background:#182841;transform:translateY(-1px)}.context-card strong{display:block;font-size:13px;margin-bottom:5px}.context-card span{display:block;color:var(--ui-muted);font-size:12px;line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.context-card em{font-style:normal;color:#67e8f9;font-size:11px;float:right}.context-store{display:none}.context-backdrop{position:fixed;inset:58px 0 0;background:#05091475;z-index:45;opacity:0;pointer-events:none;transition:opacity .18s;backdrop-filter:blur(2px)}.context-backdrop.open{opacity:1;pointer-events:auto}.context-drawer{position:absolute;right:300px;top:0;bottom:0;width:min(680px,calc(100vw - 340px));display:flex;flex-direction:column;background:#111c30;border:1px solid #3a4d68;border-right:3px solid #38bdf8;border-radius:12px 0 0 12px;box-shadow:-14px 18px 48px rgba(0,0,0,.48);transform:translateX(34px);opacity:0;transition:transform .22s ease,opacity .18s}.context-backdrop.open .context-drawer{transform:translateX(0);opacity:1}.context-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid var(--ui-line)}.context-drawer-head h2{font-size:16px;margin:0}.context-drawer-body{overflow:auto;padding:16px 18px}.context-drawer-body .target-tree{max-height:none}.context-drawer-body .field:first-child{margin-top:0}.welcome{max-width:750px;margin:20px auto}.welcome .eyebrow{color:var(--ui-cyan);font-size:12px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.welcome h1{font-size:31px;letter-spacing:-.04em;line-height:1.18;margin:10px 0}.welcome p{max-width:580px;color:var(--ui-muted);font-size:15px}.left-content{display:none!important}.side.left{display:flex!important;flex-direction:column!important;padding:0!important}.session-panel{border:0!important;margin:0!important;padding:16px 8px 8px!important;min-height:0!important;max-height:none!important;flex:1}.session-new{width:100%;margin:0 0 12px!important;text-align:left!important;padding:9px 10px!important;background:var(--ui-surface-2)!important;border:1px solid var(--ui-line)!important}.session-list{padding:0;overflow:auto}.session-row{border-radius:8px!important;margin:2px 0!important;padding:9px 7px!important;color:#b9c5d6!important}.session-row:hover,.session-row.active{background:#1a2c46!important;color:#fff!important}.session-more{font-size:15px!important}.session-menu{background:#19263a!important;border-color:#384b67!important;border-radius:10px!important;box-shadow:var(--ui-shadow)!important}.session-menu button{color:#dbe6f5!important}.session-menu button:hover{background:#293a56!important}@media(max-width:900px){.shell{grid-template-columns:minmax(220px,var(--left-panel-width)) 8px minmax(320px,1fr)}.right{display:none}.context-drawer{right:0;width:min(94vw,680px)}}
+.message,.reason,.classification-card,.codebook-class,.context-drawer-body{overflow-wrap:anywhere;min-width:0}.workspace-actions{flex-wrap:wrap}.message pre,.reason pre{max-width:100%;overflow:auto}textarea{font:inherit;background:#0f172a;color:#f8fafc;border:1px solid #3b4960;border-radius:8px;padding:10px}@media(max-width:650px){.shell{grid-template-columns:minmax(0,1fr)}.side,.splitter{display:none!important}.topbar{padding:0 8px;gap:6px}.app-brand{font-size:11px;max-width:105px}.topbar-status{display:none}.topbar-workspace{max-width:140px}.chat{padding:16px 10px}.composer-wrap{padding:0 10px 10px}.chat-header{padding:0 12px}.composer-tools{flex-wrap:wrap}.composer-tools select{max-width:100%}.context-drawer{width:96vw;right:0}.language-picker{padding:3px}.message{padding:10px}.context-backdrop{inset:58px 0 0}}
 </style></head><body><header class="topbar"><div class="app-brand"><span class="brand-mark"></span>Bosch Baugruppen Assistant</div><button class="topbar-workspace" id="workspaceshortcut" onclick="openContextDrawer('workspace')">选择工作区文件夹</button><div class="top-spacer"></div><div class="topbar-status"><span class="status-dot"></span><span id="topbarstatus">本地运行</span></div><div class="language-picker"><span>GUI:</span><select id="language" onchange="changeLanguage()"><option value="zh">ZH</option><option value="en">EN</option><option value="de">DE</option></select></div></header><div class="shell"><aside class="side"><div class="brand">Bosch Local Workbench</div><div class="muted">仅本机 127.0.0.1 · 缓存固定保存在程序目录 AI_Bot_State</div>
 <div class="field"><label>工作区文件夹</label><div class="row"><input id="workspace" placeholder="C:\\...\\项目文件夹"><button class="ghost" onclick="pickWorkspace()">选择</button></div><div id="setupmsg" class="muted"></div></div><hr><div class="field"><label>模型</label>
 <select id="model" onchange="modelChanged()">
@@ -2222,7 +2403,9 @@ function applyLanguage(){
   for(let item of initialStaticAttributes)item.el.setAttribute(item.attr,t(item.key));
   for(let [selector,key,prefix=''] of STATIC_ELEMENT_BINDINGS){let el=document.querySelector(selector);if(el)el.textContent=prefix+t(key)}
 }
-async function changeLanguage(){uiLanguage=$('language').value;applyLanguage();rerenderLanguageSensitiveUI();try{if($('workspace').value.trim())await api('/api/language',{method:'POST',body:JSON.stringify({language:uiLanguage})})}catch(e){console.warn('Could not persist UI language',e)}}
+let languageSave=Promise.resolve();
+async function changeLanguage(){uiLanguage=$('language').value;applyLanguage();rerenderLanguageSensitiveUI();let language=uiLanguage;languageSave=languageSave.catch(()=>{}).then(()=>api('/api/language',{method:'POST',body:JSON.stringify({language})}));try{await languageSave}catch(e){console.warn('Language save failed',e)}}
+
 async function restoreLastWorkspace(){
   try{
     let s=await api('/api/settings');
@@ -2230,7 +2413,7 @@ async function restoreLastWorkspace(){
     if(!s.workspace)return;
     $('workspace').value=s.workspace;
     setSelectedModel(s.model||'claude-haiku-5-5');
-    $('session').innerHTML='<option>'+ (s.session||'default') +'</option>';
+    $('session').innerHTML='<option>'+ esc(s.session||'default') +'</option>';
     $('setupmsg').textContent=t('workspace.restoring');
     await setup();
   }catch{
@@ -2304,8 +2487,8 @@ function closeContextDrawer(){
   for(let item of contextMoved){if(item.marker.parentNode)item.marker.parentNode.replaceChild(item.el,item.marker)}
   contextMoved=[];activeContextDrawer=null;$('contextbackdrop')?.classList.remove('open');refreshContextPanel();
 }
-async function contextPickTarget(kind){try{let path=(await api('/api/pick/'+kind)).path||'';if(!path)return;$('targetpath').value=path;$('contexttargetpath').value=path;if(kind==='folder')await loadTargetTree();else clearTargetTree();refreshContextPanel()}catch(e){$('contexttargetmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-function contextSyncTarget(){let value=$('contexttargetpath').value.trim();$('targetpath').value=value;clearTargetTree();refreshContextPanel()}
+async function contextPickTarget(kind){try{let path=(await api('/api/pick/'+kind)).path||'';if(!path)return;materialDraftDirty=true;$('targetpath').value=path;$('contexttargetpath').value=path;if(kind==='folder')await loadTargetTree();else clearTargetTree();refreshContextPanel()}catch(e){$('contexttargetmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+function contextSyncTarget(){let value=$('contexttargetpath').value.trim();if(value!==$('targetpath').value.trim()){materialDraftDirty=true;$('targetpath').value=value;clearTargetTree()}refreshContextPanel()}
 function contextSyncRule(){let value=$('contextcodebookpath').value.trim();$('codebook').value=value;refreshContextPanel()}
 async function contextPickRule(){try{let path=(await api('/api/pick/file')).path||'';if(!path)return;$('codebook').value=path;$('contextcodebookpath').value=path;refreshContextPanel()}catch(e){$('contextrulemsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function renderDiagnostics(report){
@@ -2352,7 +2535,7 @@ function message(text,kind='assistant'){let e=document.createElement('div');e.cl
 function classificationCard(c){let card=document.createElement('section');card.className='classification-card';let alternative=c.alternative_label?'<br>'+t('classification.alternative')+'：'+esc(c.alternative_label):'';let evidence=(c.evidence_labels||[]).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>'+t('classification.none')+'</li>';let uncertainty=(c.uncertainties||[]).filter(Boolean).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>'+t('classification.not_reported')+'</li>';let rules=(c.codebook_rule_ids||[]).map(esc).join('、')||t('classification.not_returned');let rulePages=(c.codebook_rule_pages||[]).map(esc).join('、')||t('classification.not_returned');let bgPages=(c.bg_evidence_pages||[]).map(esc).join('、')||t('classification.not_returned');card.innerHTML='<h3>'+t('classification.title')+'</h3><div class="result">'+t('classification.label')+'：<b>'+esc(c.label||'—')+'</b></div><div>'+t('classification.confidence')+'：'+esc(c.confidence||'—')+alternative+'</div><div><b>'+t('classification.rules')+'</b>：'+rules+'（'+t('classification.rule_pages')+' '+rulePages+'）</div><div><b>'+t('classification.evidence_pages')+'</b>：'+bgPages+'</div><div><b>'+t('classification.evidence')+'</b><ul>'+evidence+'</ul></div><div><b>'+t('classification.uncertainty')+'</b><ul>'+uncertainty+'</ul></div>';return card}
 function coverageSummaryCard(summary){if(!summary?.files?.length)return null;let card=document.createElement('section');card.className='classification-card';card.style.borderColor='#475569';let rows=summary.files.map(f=>{let read=Array.isArray(f.pages_read)?f.pages_read.length:0,unread=Array.isArray(f.pages_unread)?f.pages_unread.length:0;let pages=f.pages_total?(' · '+t('coverage.read')+' '+read+'/'+f.pages_total+' '+(uiLanguage==='en'?'pages':'页')+(unread?'；'+t('coverage.unread')+' '+unread+' '+(uiLanguage==='en'?'pages':'页'):'')):'';let cache=f.cache_status==='reused'?t('coverage.reused'):t('coverage.created');return '<li><b>'+esc(f.name)+'</b>：'+esc(f.scope||t('coverage.default_scope'))+pages+' · '+cache+'</li>'}).join('');card.innerHTML='<h3>'+t('coverage.title')+'</h3><div class="muted">'+t('coverage.summary',{files:summary.files.length,reused:summary.reused_files||0,created:summary.created_files||0,calls:summary.model_calls||0})+'</div><ul>'+rows+'</ul>';return card}
 function renderStatus(s){lastStatusSnapshot=s;$('status').innerHTML=`${t('status.model')}：<b>${s.model}</b><br>${t('status.session')}：${s.session_name||'default'}<br>${t('status.code')}：${s.code_files} ${uiLanguage==='en'?'files':'文件'}<br>${t('status.documents')}：${s.documents} ${uiLanguage==='en'?'items':'个'}<br>${t('status.requests')}：${s.requests}<br>${t('status.tokens')}：${s.input_tokens} / ${s.output_tokens}<br>${t('status.cost')}：${s.cost}<br>${s.bg_context?'<span class="ok">'+t('status.assembly_mode')+'：'+s.bg_context.codebook_name+'</span>':t('status.normal_mode')}`;refreshAppChrome();refreshContextPanel()}
-function renderUsageDetail(u,model){if(!u)return;lastUsageSnapshot={usage:u,model};$('usagedetail').innerHTML=`实际模型：<b>${esc(model||'—')}</b><br>输入 / 输出 / 总计：${u.input} / ${u.output} / ${u.total}<br>推理：${u.reasoning||0} ｜ Gemini thinking：${u.gemini_thinking||0}<br>Claude 缓存读 / 写：${u.cache_read||0} / ${u.cache_write||0}<br>本轮估算：${Number(u.cost_usd||0).toFixed(6)}`}
+function renderUsageDetail(u,model){if(!u)return;lastUsageSnapshot={usage:u,model};$('usagedetail').innerHTML=`实际模型：<b>${esc(model||'—')}</b><br>输入 / 输出 / 总计：${u.input} / ${u.output} / ${u.total}<br>推理：${u.reasoning||0} ｜ Gemini thinking：${u.gemini_thinking||0}<br>Claude 缓存读 / 写：${u.cache_read||0} / ${u.cache_write||0}<br>本轮估算：${u.cost_usd==null?t('usage.unknown'):Number(u.cost_usd).toFixed(6)}`}
 function renderEvidenceSources(sources,dfcEvidence){let normal=(sources||[]).map(s=>`<div class="card"><b>${esc(s.label||s.name||'未知来源')}</b><br>${s.visual?'<span class="chip">视觉证据已附带</span>':''}</div>`).join('');let dfc=(dfcEvidence||[]).map(d=>{let parts=(d.segments_used||[]).join('、')||'无';return `<div class="card"><b>DFC Struktur</b><br>${esc(d.name||'—')}<br><span class="chip">OCR：${esc(d.ocr_status||'—')}</span><span class="chip">本轮：第 ${esc(parts)} 段 / 共 ${esc(d.segments_total||0)} 段</span></div>`}).join('');$('sources').innerHTML=(dfc+normal)||'无可用来源'}
 function toggleCustomModel(){let custom=$('model').value==='__custom__';$('custommodelrow').style.display=custom?'flex':'none';if(custom)$('custommodel').focus()}
 function setSelectedModel(model){let known=[...$('model').options].some(option=>option.value===model);$('model').value=known?model:'__custom__';$('custommodel').value=known?'':model;toggleCustomModel();loadModelStatus()}
@@ -2363,7 +2546,7 @@ function codebookList(items){let values=Array.isArray(items)?items.filter(Boolea
 function renderCodebookStatus(profile){lastCodebookProfile=profile;let host=$('codebookstatus');if(!profile||profile.status==='none'||!profile.status){host.textContent=t('rulews.not_prepared');return}let lock=profile.status==='locked';host.innerHTML=(lock?'<span class="ok">'+t('rulews.locked')+'</span>':'<span class="error">'+t('rulews.draft')+'</span>')+'：<b>'+esc(profile.source_name||'—')+'</b><br>'+esc(profile.page_count||0)+' '+t('rulews.pages')+' · '+esc(profile.parser_model||'—')+(lock?'<br>'+t('rulews.reused'):'<br>'+t('rulews.confirm'))}
 async function loadCodebookStatus(){try{renderCodebookStatus(await api('/api/codebook'))}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function leaveCodebookWorkspace(){lastCodebookWorkspaceProfile=null;let composer=$('composer');composer.style.display='flex';$('chat').classList.remove('codebook-workspace');loadHistory()}
-function showCodebookWorkspace(profile){lastCodebookWorkspaceProfile=profile;let draft=profile.draft||{};$('composer').style.display='none';let classes=(draft.classes||[]).map(item=>'<article class="card codebook-class"><h3>'+esc(item.name||t('rulews.untitled'))+'</h3><div>'+esc(item.definition||t('rulews.no_definition'))+'</div><b>'+t('rulews.decision_rules')+'</b>'+codebookList(item.decision_rules)+'<b>'+t('rulews.boundaries')+'</b>'+codebookList(item.boundaries)+'<div class="muted">'+t('rulews.evidence_pages')+'：'+esc((item.evidence_pages||[]).join('、')||'—')+'</div></article>').join('')||'<div class="card error">'+t('rulews.no_class')+'</div>';let usage=profile.usage||{},ocr=profile.ocr_runtime||{},locked=profile.status==='locked';let ocrText=ocr.status==='not applicable to DOCX'?t('rulews.ocr_docx'):(ocr.available?(t('rulews.ocr_enabled')+' · '+esc(ocr.command||'Tesseract')+(ocr.german_available?' · deu':' · eng')):(t('rulews.ocr_disabled')+' · '+esc(ocr.status||'Tesseract')));$('chat').className='chat codebook-workspace';$('chat').innerHTML='<section class="workspace-inner"><h1>'+t('rulews.title')+'</h1><div class="muted">'+(locked?t('rulews.locked_intro'):t('rulews.draft_intro'))+'</div><div class="card"><b>'+t('rulews.source')+'：</b>'+esc(profile.source_name||'—')+'<br><span class="muted">'+t('rulews.parser_model')+'：'+esc(profile.parser_model||'—')+' · '+t('rulews.pages')+'：'+esc(profile.page_count||0)+' · '+t('rulews.groups')+'：'+esc(profile.page_groups||0)+' · Token：'+esc(usage.input||0)+' / '+esc(usage.output||0)+(usage.cost_usd===null||usage.cost_usd===undefined?'':' · $'+Number(usage.cost_usd).toFixed(6))+'<br>'+ocrText+'</span></div><h2>'+t('rulews.classes')+'</h2>'+classes+'<h2>'+t('rulews.global_rules')+'</h2><div class="card">'+codebookList(draft.global_rules)+'</div><h2>'+t('rulews.table_rules')+'</h2><div class="card">'+codebookList(draft.table_rules)+'</div><h2>'+t('rulews.uncertainties')+'</h2><div class="card">'+codebookList(draft.uncertainties)+'</div><div class="workspace-actions">'+(locked?'<button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.back')+'</button>':'<button onclick="lockCodebook()">'+t('rulews.lock_action')+'</button><button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.defer')+'</button>')+'</div></section>';$('chat').scrollTop=0}
+function showCodebookWorkspace(profile){lastCodebookWorkspaceProfile=profile;let draft=profile.draft||{};$('composer').style.display='none';let classes=(draft.classes||[]).map(item=>'<article class="card codebook-class"><h3>'+esc(item.name||t('rulews.untitled'))+'</h3><div>'+esc(item.definition||t('rulews.no_definition'))+'</div><b>'+t('rulews.decision_rules')+'</b>'+codebookList(item.decision_rules)+'<b>'+t('rulews.boundaries')+'</b>'+codebookList(item.boundaries)+'<div class="muted">'+t('rulews.evidence_pages')+'：'+esc((item.evidence_pages||[]).join('、')||'—')+'</div></article>').join('')||'<div class="card error">'+t('rulews.no_class')+'</div>';let usage=profile.usage||{},ocr=profile.ocr_runtime||{},locked=profile.status==='locked';let ocrText=ocr.status==='not applicable to DOCX'?t('rulews.ocr_docx'):(ocr.available?(t('rulews.ocr_enabled')+' · '+esc(ocr.command||'Tesseract')+(ocr.german_available?' · deu':' · eng')):(t('rulews.ocr_disabled')+' · '+esc(ocr.status||'Tesseract')));$('chat').className='chat codebook-workspace';$('chat').innerHTML='<section class="workspace-inner"><h1>'+t('rulews.title')+'</h1><div class="muted">'+(locked?t('rulews.locked_intro'):t('rulews.draft_intro'))+'</div><div class="card"><b>'+t('rulews.source')+'：</b>'+esc(profile.source_name||'—')+'<br><span class="muted">'+t('rulews.parser_model')+'：'+esc(profile.parser_model||'—')+' · '+t('rulews.pages')+'：'+esc(profile.page_count||0)+' · '+t('rulews.groups')+'：'+esc(profile.page_groups||0)+' · Token：'+esc(usage.input||0)+' / '+esc(usage.output||0)+(usage.cost_usd===null||usage.cost_usd===undefined?'':' · $'+Number(usage.cost_usd).toFixed(6))+'<br>'+ocrText+'</span></div><h2>'+t('rulews.classes')+'</h2>'+classes+'<h2>'+t('rulews.global_rules')+'</h2><div class="card">'+codebookList(draft.global_rules)+'</div><h2>'+t('rulews.table_rules')+'</h2><div class="card">'+codebookList(draft.table_rules)+'</div><h2>'+t('rulews.uncertainties')+'</h2><div class="card">'+codebookList(draft.uncertainties)+'</div><div class="workspace-actions"><button class="ghost" onclick="editCodebookDraft()">'+t('rules.edit')+'</button>'+ (locked?'<button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.back')+'</button>':'<button onclick="lockCodebook()">'+t('rulews.lock_action')+'</button><button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.defer')+'</button>')+'</div></section>';$('chat').scrollTop=0}
 async function prepareCodebook(){let path=$('codebook').value.trim();if(!path){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.choose_file')+'</span>';return}let model=prompt(t('rulews.model_prompt'),selectedModel());if(model===null)return;model=model.trim();if(!model){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.model_required')+'</span>';return}try{$('codebookstatus').textContent=t('rulews.preparing');let profile=await api('/api/codebook/prepare',{method:'POST',body:JSON.stringify({path,model})});renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function viewCodebook(){try{let profile=await api('/api/codebook');if(!profile||!profile.status)throw Error(t('rulews.not_prepared'));renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function lockCodebook(){if(!confirm(t('rulews.lock_confirm')))return;try{let profile=await api('/api/codebook/lock',{method:'POST'});renderCodebookStatus(profile);showCodebookWorkspace(profile);$('setupmsg').innerHTML='<span class="ok">'+t('rulews.lock_success')+'</span>'}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
@@ -2375,7 +2558,7 @@ function closeSessionMenu(){$('sessionmenu')?.remove()}
 function renderSessionRows(items,append){let list=$('sessionlist');if(!append)list.innerHTML='';for(let item of items){let row=document.createElement('div');row.className='session-row'+(item.name===currentSessionName?' active':'');row.onclick=()=>openSessionByName(item.name);let title=document.createElement('span');title.className='session-title';title.textContent=item.title;row.append(title);if(item.pinned){let pin=document.createElement('span');pin.className='session-pin';pin.textContent='●';pin.title='已置顶';row.append(pin)}let more=document.createElement('button');more.className='session-more';more.textContent='•••';more.title='更多';more.onclick=e=>{e.stopPropagation();openSessionMenu(e,item)};row.append(more);list.append(row)}if(sessionLoading){let loading=document.createElement('div');loading.id='sessionloading';loading.className='session-loading';loading.textContent='正在加载…';list.append(loading)}}
 async function loadSessions(reset=true){if(sessionLoading)return;if(reset){sessionOffset=0;sessionHasMore=false;renderSessionRows([],true)}sessionLoading=true;try{let x=await api('/api/sessions?offset='+sessionOffset+'&limit=10');currentSessionName=x.current;let existingCount=$('sessionlist').querySelectorAll('.session-row').length,items=x.sessions;renderSessionRows(items,!reset);let rows=[...$('sessionlist').querySelectorAll('.session-row')];items.forEach((item,index)=>rows[existingCount+index].dataset.name=item.name);sessionOffset+=items.length;sessionHasMore=!!x.has_more}catch(e){$('sessionmsg').textContent=e.message}finally{sessionLoading=false;$('sessionloading')?.remove()}}
 async function restoreSessionTree(target,paths){$('treestatus').textContent=rt('session.restoring');let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(paths||[]);treeRestoreNote=rt('session.restored');let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates()}
-async function restoreSessionContext(){try{let x=await api('/api/session/context');setSelectedModel(x.model);let target=x.target||{};$('targetpath').value=target.path||'';$('codebook').value=x.codebook_path||'';if(target.path&&target.kind==='文件夹'){await restoreSessionTree(target.path,target.selected_paths)}else{clearTargetTree()}await loadCodebookStatus();loadDocs();loadCoverage()}catch(e){console.warn('Could not restore session context',e);$('treestatus').innerHTML='<span class="error">'+esc(rt('session.restore_failed')+e.message)+'</span>'}}
+async function restoreSessionContext(){try{let x=await api('/api/session/context');setSelectedModel(x.model);let target=x.target||{};$('targetpath').value=target.path||'';$('codebook').value=x.codebook_path||'';if(target.path&&target.kind==='文件夹'){await restoreSessionTree(target.path,target.selected_paths)}else{clearTargetTree()}materialDraftDirty=false;await loadCodebookStatus();loadDocs();loadCoverage()}catch(e){console.warn('Could not restore session context',e);$('treestatus').innerHTML='<span class="error">'+esc(rt('session.restore_failed')+e.message)+'</span>'}}
 async function openSessionByName(name){try{closeSessionMenu();let s=await api('/api/session/open',{method:'POST',body:JSON.stringify({name})});renderStatus(s);await restoreSessionContext();await loadHistory();await loadSessions(true)}catch(e){$('sessionmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function newSession(){try{let s=await api('/api/session/new',{method:'POST'});renderStatus(s);$('targetpath').value='';$('codebook').value='';clearTargetTree();await loadHistory();await loadSessions(true);loadDocs();loadCodebookStatus()}catch(e){$('sessionmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function openSessionMenu(event,item){closeSessionMenu();let menu=document.createElement('div');menu.id='sessionmenu';menu.className='session-menu';let rect=event.currentTarget.getBoundingClientRect();menu.style.left=Math.min(window.innerWidth-145,rect.right+6)+'px';menu.style.top=rect.top+'px';menu.innerHTML='<button data-action="rename">重命名</button><button data-action="pin">'+(item.pinned?'取消置顶':'置顶')+'</button><button class="delete" data-action="delete">删除</button>';menu.onclick=async e=>{let action=e.target.dataset.action;if(!action)return;if(action==='rename')await renameSession(item.name);if(action==='pin')await pinSession(item);if(action==='delete')await deleteSession(item.name);closeSessionMenu()};document.body.append(menu)}
@@ -2383,14 +2566,14 @@ async function renameSession(name){let value=prompt(t('session.rename_prompt'),n
 async function pinSession(item){try{await api('/api/session/pin',{method:'POST',body:JSON.stringify({name:item.name,pinned:!item.pinned})});await loadSessions(true)}catch(e){alert(e.message)}}
 async function deleteSession(name){if(!confirm(t('session.delete_confirm')))return;try{let wasCurrent=name===currentSessionName;let s=await api('/api/session/delete',{method:'POST',body:JSON.stringify({confirmed:true,name})});renderStatus(s);if(wasCurrent){await restoreSessionContext();await loadHistory()}await loadSessions(true)}catch(e){alert(e.message)}}
 async function loadHistory(){try{let x=await api('/api/history');$('chat').innerHTML='';if(!x.history.length){message(t('session.new_hint'));return}for(let item of x.history)message(item.content,item.role==='user'?'user':'assistant')}catch{}}
-async function setup(){try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default',language:uiLanguage})});renderStatus(s);$('setupmsg').textContent=t('workspace.opened');refreshAppChrome();loadDocs();loadSessions();loadHistory();loadCodebookStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
+async function setup(){try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default',language:uiLanguage})});renderStatus(s);await restoreSessionContext();$('setupmsg').textContent=t('workspace.opened');refreshAppChrome();loadDocs();loadSessions();loadHistory();loadCodebookStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function openLegacySession(){if(!$('session').value)return;await setup()}
-async function switchModel(){try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));let s=await api('/api/model',{method:'POST',body:JSON.stringify({model})});renderStatus(s);$('modelmsg').innerHTML='<span class="ok">'+t('model.switched_prefix')+esc(model)+t('model.context_unchanged')+'</span>'}catch(e){$('modelmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
+async function switchModel(){try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));let s=await api('/api/model',{method:'POST',body:JSON.stringify({model})});renderStatus(s);clearResultPanels();await loadHistory();$('modelmsg').innerHTML='<span class="ok">'+t('model.switched_prefix')+esc(model)+t('model.context_unchanged')+'</span>'}catch(e){$('modelmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function loadModelStatus(){try{let x=await api('/api/model-tests');let r=x.tests[selectedModel()];if(!r){$('modelstatus').textContent=t('model.untested');return}if(!r.ok){$('modelstatus').innerHTML='<span class="error">'+t('model.last_failed')+esc(r.tested_at)+'</span>';return}$('modelstatus').innerHTML='<span class="ok">'+t('model.last_available')+esc(r.tested_at)+'；'+esc(r.streaming||t('model.stream_status_unknown'))+'；'+t('model.usage_label')+' '+t(r.usage_available===false?'model.usage_missing':'model.usage_returned')+'</span>'}catch{}}
-async function testModel(){try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));$('setupmsg').textContent=t('model.testing');let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});$('setupmsg').innerHTML=x.ok?'<span class="ok">'+t('model.available')+esc(x.model)+'；'+esc(x.streaming||'')+t('usage.input_fragment')+esc(x.input_tokens)+t('usage.output_fragment')+esc(x.output_tokens)+t('usage.token_suffix')+' '+(x.usage_available===false?t('usage.unavailable'):'')+'</span>':'<span class="error">'+t('model.test_failed')+esc(x.message)+'</span>';loadModelStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
+async function testModel(){try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));$('setupmsg').textContent=t('model.testing');let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});$('setupmsg').innerHTML=x.ok?'<span class="ok">'+t('model.available')+esc(x.model)+'；'+esc(x.streaming||'')+t('usage.input_fragment')+esc(x.input_tokens)+t('usage.output_fragment')+esc(x.output_tokens)+t('usage.token_suffix')+' '+(x.usage_available===false?t('usage.unavailable'):'')+'</span>':'<span class="error">'+t('model.test_failed')+esc(x.message)+'</span>';loadModelStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function renderDocuments(documents){lastDocumentsSnapshot=documents;$('docs').innerHTML=documents.map(d=>`<div class="card">${esc(d.name)}<br><span class="muted">${esc(d.material_role_label||t('material.role_other'))} · ${d.chunks} chunks</span></div>`).join('')||t('materials.empty')}
 async function loadDocs(){try{renderDocuments(await api('/api/documents'))}catch{}}
-async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:JSON.stringify({path:$('docpath').value})});$('docpath').value='';loadDocs();$('setupmsg').textContent=`已索引 ${d.name}（${d.chunks} chunks）`}catch(e){$('setupmsg').innerHTML='<span class="error">'+e.message+'</span>'}}
+async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:JSON.stringify({path:$('docpath').value})});$('docpath').value='';loadDocs();$('setupmsg').textContent=`已索引 ${d.name}（${d.chunks} chunks）`}catch(e){$('setupmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function renderScanReport(x){setScanReportAvailable(x);renderScanDrawer(x)}
 function renderCoverageReport(x){if(!x||!x.files){$('coveragestatus').textContent='分类/Codebook 问题会自动准备证据；也可在提问前手动准备。';return}if(x.current_selection===false){$('coveragestatus').innerHTML='<span class="muted">材料选择或模型已更新；下次分类准备时会复用未变文件的本地摘要，仅预读新增/变更文件。</span>';return}let done=x.files.filter(f=>f.complete).length;let details=x.files.map(f=>{let pages=f.pages_total?`页：已读 ${(f.pages_read||[]).join('、')||'—'}${(f.pages_unread||[]).length?'；未读 '+f.pages_unread.join('、'):''}`:'无页码';let dfc=f.dfc_structure?` · <span class="chip">DFC Struktur：${esc(f.dfc_structure.ocr_status||'—')}，${esc(f.dfc_structure.segments_total||0)} 段</span>`:'';let cache=f.cache_status==='reused'?' · <span class="chip">本地摘要已复用</span>':f.cache_status==='created'?' · <span class="chip">本轮新预读</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${f.text_groups_processed}/${f.text_groups_total} 个文本组 · ${esc(f.reading_scope||'')} · ${esc(pages)}${cache}${dfc}${f.failures?.length?'（'+esc(f.failures.join('；'))+'）':''}`}).join('');let dossier=x.bg_dossier?.ready?' · <span class="chip">BG 综合证据档案已缓存</span>':' · <span class="chip">首次分类后生成 BG 综合证据档案</span>';$('coveragestatus').innerHTML=(x.complete?'<span class="ok">分类证据已准备：</span>':'<span class="error">分类证据不完整：</span>')+` ${done}/${x.files.length} 个文件；复用 ${x.reused_files||0} 个，新预读 ${x.created_files||0} 个；本次 ${x.model_calls||0} 次模型调用。`+dossier+details}
 async function loadCoverage(){try{renderCoverageReport(await api('/api/coverage'))}catch{}}
@@ -2408,8 +2591,8 @@ async function clearSummaryCaches(){if(!confirm('清除所有本地材料摘要�
 function clearTargetTree(){savedTargetSelection=new Set();treeRestoreNote='';scannedSelection='';setScanReportAvailable(null);$('targettree').textContent='选择文件夹后显示可展开的文件树。';$('targettree').classList.add('muted');$('treestatus').textContent='';updateMaterialFlowButtons()}
 // These renderers deliberately receive data, never pre-rendered text.  This
 // makes a language switch deterministic even after a scan or cache view is open.
-function renderStatusForLanguage(s){$('status').innerHTML=`${t('status.model')}：<b>${esc(s.model)}</b><br>${t('status.session')}：${esc(s.session_name||'default')}<br>${t('status.code')}：${t('status.files',{count:s.code_files})}<br>${t('status.documents')}：${t('status.items',{count:s.documents})}<br>${t('status.requests')}：${esc(s.requests)}<br>${t('status.tokens')}：${esc(s.input_tokens)} / ${esc(s.output_tokens)}<br>${t('status.cost')}：${esc(s.cost)}<br>${s.bg_context?'<span class="ok">'+t('status.assembly_mode')+'：'+esc(s.bg_context.codebook_name)+'</span>':t('status.normal_mode')}`;refreshAppChrome();refreshContextPanel()}
-function renderUsageDetailForLanguage(u,model){if(!u)return;$('usagedetail').innerHTML=`${t('usage.actual_model')}：<b>${esc(model||'—')}</b><br>${t('usage.input_output_total')}：${esc(u.input)} / ${esc(u.output)} / ${esc(u.total)}<br>${t('usage.reasoning')}：${esc(u.reasoning||0)} ｜ ${t('usage.gemini_thinking')}：${esc(u.gemini_thinking||0)}<br>${t('usage.claude_cache')}：${esc(u.cache_read||0)} / ${esc(u.cache_write||0)}<br>${t('usage.estimate')}：${Number(u.cost_usd||0).toFixed(6)}`}
+function renderStatusForLanguage(s){$('status').innerHTML=`${t('status.model')}：<b>${esc(s.model)}</b><br>${t('status.session')}：${esc(s.session_name||'default')}<br>${t('status.code')}：${t('status.files',{count:s.code_files})}<br>${t('status.documents')}：${t('status.items',{count:s.documents})}<br>${t('status.requests')}：${esc(s.requests)}<br>${t('status.tokens')}：${esc(s.input_tokens)} / ${esc(s.output_tokens)}<br>${t('status.cost')}：${esc(s.cost)}${s.unpriced_requests?' · '+t('usage.partial',{count:s.unpriced_requests}):''}<br>${s.bg_context?'<span class="ok">'+t('status.assembly_mode')+'：'+esc(s.bg_context.codebook_name)+'</span>':t('status.normal_mode')}`;refreshAppChrome();refreshContextPanel()}
+function renderUsageDetailForLanguage(u,model){if(!u)return;$('usagedetail').innerHTML=`${t('usage.actual_model')}：<b>${esc(model||'—')}</b><br>${t('usage.input_output_total')}：${esc(u.input)} / ${esc(u.output)} / ${esc(u.total)}<br>${t('usage.reasoning')}：${esc(u.reasoning||0)} ｜ ${t('usage.gemini_thinking')}：${esc(u.gemini_thinking||0)}<br>${t('usage.claude_cache')}：${esc(u.cache_read||0)} / ${esc(u.cache_write||0)}<br>${t('usage.estimate')}：${u.cost_usd==null?t('usage.unknown'):Number(u.cost_usd).toFixed(6)}`}
 function renderEvidenceSourcesForLanguage(sources,dfcEvidence){let normal=(sources||[]).map(s=>`<div class="card"><b>${esc(s.label||s.name||t('model.unknown_source'))}</b><br>${s.visual?'<span class="chip">'+t('evidence.visual')+'</span>':''}</div>`).join('');let dfc=(dfcEvidence||[]).map(d=>{let parts=(d.segments_used||[]).join('、')||'—';return `<div class="card"><b>DFC Struktur</b><br>${esc(d.name||'—')}<br><span class="chip">OCR：${esc(d.ocr_status||'—')}</span><span class="chip">${t('dfc.segment_info',{segments:esc(parts),total:esc(d.segments_total||0)})}</span></div>`}).join('');$('sources').innerHTML=(dfc+normal)||t('evidence.none')}
 function renderCompareSlotsForLanguage(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">'+t('compare.select_model')+'</option>'+compareOptions.map(([value,label])=>'<option value="'+value+'" '+(slot.value===value?'selected':'')+'>'+esc(label)+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>'+t('model.other')+'</option>';return '<div class="field"><label>'+t('compare.model_number',{index:index+1})+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+esc(slot.custom||'')+'" placeholder="'+t('model.id_placeholder')+'" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?t('compare.maximum'):t('compare.add');if(compareSlots.length>=4)$('comparestatus').textContent=t('compare.maximum')}
 function renderSessionRowsForLanguage(items,append){let list=$('sessionlist');if(!list)return;if(!append)list.innerHTML='';for(let item of items){let row=document.createElement('div');row.className='session-row'+(item.name===currentSessionName?' active':'');row.onclick=()=>openSessionByName(item.name);let title=document.createElement('span');title.className='session-title';title.textContent=item.title;row.append(title);if(item.pinned){let pin=document.createElement('span');pin.className='session-pin';pin.textContent='●';pin.title=t('session.pin_title');row.append(pin)}let more=document.createElement('button');more.className='session-more';more.textContent='•••';more.title=t('session.more_title');more.onclick=e=>{e.stopPropagation();openSessionMenu(e,item)};row.append(more);list.append(row)}if(sessionLoading){let loading=document.createElement('div');loading.id='sessionloading';loading.className='session-loading';loading.textContent=t('session.loading');list.append(loading)}}
@@ -2455,7 +2638,7 @@ function updateTreeStatus(){let count=treeFileCount(),signature=selectedTargetPa
 function refreshFolderState(folder){let files=[...folder.querySelectorAll('input.tree-file:not(:disabled)')];let box=folder.querySelector(':scope > summary input.tree-folder');if(!box||!files.length)return;let checked=files.filter(x=>x.checked).length;box.checked=checked===files.length;box.indeterminate=checked>0&&checked<files.length}
 function refreshAllFolderStates(){[...$('targettree').querySelectorAll('details')].reverse().forEach(refreshFolderState);updateTreeStatus()}
 function recommendedTreePaths(node,paths=[]){if(node.type==='file'){if(node.recommended)paths.push(node.relative);return paths}(node.children||[]).forEach(child=>recommendedTreePaths(child,paths));return paths}
-function makeTreeNode(node,depth=0){if(node.type==='folder'){let details=document.createElement('details');details.open=depth<1;let summary=document.createElement('summary');let box=document.createElement('input');box.type='checkbox';box.className='tree-folder';box.addEventListener('click',e=>e.stopPropagation());box.addEventListener('change',()=>{details.querySelectorAll('input.tree-file:not(:disabled)').forEach(x=>x.checked=box.checked);refreshAllFolderStates()});let label=document.createElement('label');label.textContent='📁 '+node.name;summary.append(box,label);details.append(summary);let children=document.createElement('div');children.className='tree-children';node.children.forEach(child=>children.append(makeTreeNode(child,depth+1)));details.append(children);return details}let row=document.createElement('div');row.className='tree-file'+(node.supported?'':' unsupported');let box=document.createElement('input');box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.checked=!!node.supported&&savedTargetSelection.has(node.relative);box.disabled=!node.supported;box.addEventListener('change',refreshAllFolderStates);let label=document.createElement('label');let role=node.material_role_label?` · ${node.material_role_label}`:'';let hint=node.supported&&!node.recommended?' · 默认不选':'';label.textContent='📄 '+node.name+(node.supported?` · ${(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1)} MB${role}${hint}`:` · 不支持${role}`);row.append(box,label);return row}
+function makeTreeNode(node,depth=0){if(node.type==='folder'){let details=document.createElement('details');details.open=depth<1;let summary=document.createElement('summary');let box=document.createElement('input');box.type='checkbox';box.className='tree-folder';box.addEventListener('click',e=>e.stopPropagation());box.addEventListener('change',()=>{materialDraftDirty=true;details.querySelectorAll('input.tree-file:not(:disabled)').forEach(x=>x.checked=box.checked);refreshAllFolderStates()});let label=document.createElement('label');label.textContent='📁 '+node.name;summary.append(box,label);details.append(summary);let children=document.createElement('div');children.className='tree-children';node.children.forEach(child=>children.append(makeTreeNode(child,depth+1)));details.append(children);return details}let row=document.createElement('div');row.className='tree-file'+(node.supported?'':' unsupported');let box=document.createElement('input');box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.checked=!!node.supported&&savedTargetSelection.has(node.relative);box.disabled=!node.supported;box.addEventListener('change',()=>{materialDraftDirty=true;refreshAllFolderStates()});let label=document.createElement('label');let role=node.material_role_label?` · ${tr(node.material_role_label)}`:'';let hint=node.supported&&!node.recommended?' · 默认不选':'';label.textContent='📄 '+node.name+(node.supported?` · ${(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1)} MB${role}${hint}`:` · 不支持${role}`);row.append(box,label);return row}
 async function loadTargetTree(){let target=$('targetpath').value.trim();if(!target){$('treestatus').innerHTML='<span class="error">请先选择或粘贴一个 BG 文件夹路径。</span>';return}try{$('treestatus').textContent='正在仅读取文件夹结构…';let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(x.saved_selection||[]);let notes=[];if(savedTargetSelection.size)notes.push(`已恢复上次的 ${savedTargetSelection.size} 项选择。`);else{savedTargetSelection=new Set(recommendedTreePaths(x.tree));notes.push(`已按资料类型默认选择 ${savedTargetSelection.size} 项原始资料；派生重复资料默认未选。`)}if(x.changed_saved_files)notes.push(`${x.changed_saved_files} 个已选文件内容已变化。`);if(x.missing_saved_files)notes.push(`${x.missing_saved_files} 个原选文件不存在，未恢复。`);treeRestoreNote=notes.join(' ');let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates();if(x.truncated)$('treestatus').innerHTML='<span class="error">文件树超过 5000 项，已截断；请进入更具体的 BG 文件夹。</span>'}catch(e){$('treestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 // The server returns data and stable identifiers; the browser owns localized
 // presentation.  Keeping the payload lets a language switch redraw the same
@@ -2490,13 +2673,13 @@ function updateTreeStatusForLanguage(){
 function makeTreeNodeForLanguage(node,depth=0){
   if(node.type==='folder'){
     let details=document.createElement('details');details.open=depth<1;let summary=document.createElement('summary');let box=document.createElement('input');
-    box.type='checkbox';box.className='tree-folder';box.addEventListener('click',e=>e.stopPropagation());box.addEventListener('change',()=>{details.querySelectorAll('input.tree-file:not(:disabled)').forEach(x=>x.checked=box.checked);refreshAllFolderStates()});
+    box.type='checkbox';box.className='tree-folder';box.addEventListener('click',e=>e.stopPropagation());box.addEventListener('change',()=>{materialDraftDirty=true;details.querySelectorAll('input.tree-file:not(:disabled)').forEach(x=>x.checked=box.checked);refreshAllFolderStates()});
     let label=document.createElement('label');label.textContent='📁 '+node.name;summary.append(box,label);details.append(summary);
     let children=document.createElement('div');children.className='tree-children';(node.children||[]).forEach(child=>children.append(makeTreeNodeForLanguage(child,depth+1)));details.append(children);return details;
   }
   let row=document.createElement('div');row.className='tree-file'+(node.supported?'':' unsupported');let box=document.createElement('input');
-  box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.checked=!!node.supported&&savedTargetSelection.has(node.relative);box.disabled=!node.supported;box.addEventListener('change',refreshAllFolderStates);
-  let label=document.createElement('label'),role=node.material_role_label?` · ${node.material_role_label}`:'',size=(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1);
+  box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.checked=!!node.supported&&savedTargetSelection.has(node.relative);box.disabled=!node.supported;box.addEventListener('change',()=>{materialDraftDirty=true;refreshAllFolderStates()});
+  let label=document.createElement('label'),role=node.material_role_label?` · ${tr(node.material_role_label)}`:'',size=(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1);
   label.textContent='📄 '+node.name+(node.supported?` · ${size} MB${role}${node.recommended?'':' · '+t('tree.not_recommended')}`:` · ${t('tree.unsupported')}${role}`);row.append(box,label);return row;
 }
 function renderTargetTreeForLanguage(x){
@@ -2531,7 +2714,7 @@ updateTreeStatus=updateTreeStatusForLanguage;
 makeTreeNode=makeTreeNodeForLanguage;
 loadTargetTree=loadTargetTreeForLanguage;
 function selectedTargetPaths(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].map(x=>x.dataset.path)}
-async function analyzeTarget(){let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent=rt('scan.reading')}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error(t('materials.selection_required'));let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');renderStatus(x.status);$('bgstatus').textContent=t(x.classification?'materials.confirmed_bg':'materials.confirmed_normal',{kind:x.target_kind,count:x.sources});renderScanReport(x);$('coveragestatus').textContent=rt('material.updated');loadDocs();loadCacheAudit()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}finally{if(confirm)confirm.textContent=t('materials.confirm_selected');updateMaterialFlowButtons()}}
+async function analyzeTarget(){let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent=rt('scan.reading')}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error(t('materials.selection_required'));let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');materialDraftDirty=false;renderStatus(x.status);clearResultPanels();await loadHistory();$('bgstatus').textContent=t(x.classification?'materials.confirmed_bg':'materials.confirmed_normal',{kind:tr(x.target_kind),count:x.sources});renderScanReport(x);$('coveragestatus').textContent=rt('material.updated');loadDocs();loadCacheAudit()}catch(e){$('bgstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{if(confirm)confirm.textContent=t('materials.confirm_selected');updateMaterialFlowButtons()}}
 async function prepareCoverage(full=false){if(busy)return;busy=true;$('coveragestatus').textContent=rt(full?'coverage.preparing_full':'coverage.preparing');try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full})});renderCoverageReport(x)}catch(e){$('coveragestatus').innerHTML='<span class="error">'+esc(rt('coverage.failed')+e.message)+'</span>'}finally{busy=false}}
 async function clearBg(){try{renderStatus(await api('/api/bg',{method:'DELETE'}));$('bgstatus').textContent=t('bg.exited')}catch(e){$('bgstatus').textContent=e.message}}
 const compareOptions=[['claude-haiku-5-5','Claude Haiku 5.5'],['claude-sonnet-5-5','Claude Sonnet 5.5'],['claude-opus-5','Claude Opus 5'],['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite'],['gemini-2.5-pro','Gemini 2.5 Pro'],['gemini-2.5-flash','Gemini 2.5 Flash'],['deepseek-r1-0528-maas','DeepSeek R1 (0528)'],['llama-3.3-70b-instruct-maas','Llama 3.3 70B'],['glm-5-maas','GLM-5']];
@@ -2545,14 +2728,19 @@ function renderComparisonForLanguage(record){
   box.innerHTML='<div class="message assistant"><b>'+t('compare.title')+'</b><br>'+t('compare.question')+'：'+esc(record.question)+'<br><span class="muted">'+t('compare.same_evidence')+'：'+(x.sources||[]).map(esc).join(' · ')+'</span></div><div class="comparison-grid"></div>';
   let grid=box.querySelector('.comparison-grid');for(let r of x.results||[]){let card=document.createElement('article');card.className='card';if(!r.ok){card.innerHTML='<b>'+esc(r.requested_model)+'</b><p class="error">'+t('compare.request_failed')+'</p><div class="muted">'+esc(r.error||t('compare.unknown_error'))+'</div>';grid.append(card);continue}let u=r.usage||{},cost=u.cost_usd===null||u.cost_usd===undefined?t('compare.price_unavailable'):'$'+Number(u.cost_usd).toFixed(6),classification=r.classification?'<div class="chip">'+t('classification.verified')+'：'+esc(r.classification.label)+' · '+esc(r.classification.confidence)+'</div>':'';card.innerHTML='<b>'+esc(r.model_response)+'</b>'+(r.model_response!==r.requested_model?'<div class="muted">'+t('compare.requested_model')+'：'+esc(r.requested_model)+'</div>':'')+'<div class="muted ok">'+t('compare.success')+' · Token '+(u.input||0)+' / '+(u.output||0)+' · '+cost+'</div>'+classification+'<hr><div class="answer"></div>'+(r.notices?.length?'<div class="muted">'+r.notices.map(esc).join('<br>')+'</div>':'');card.querySelector('.answer').textContent=r.answer;grid.append(card)}$('chat').append(box);
 }
-async function compareModels(){if(busy)return;let q=$('question').value.trim()||lastQuestion;if(!q){$('comparestatus').innerHTML='<span class="error">'+t('compare.question_required')+'</span>';return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){$('comparestatus').innerHTML='<span class="error">'+t('compare.models_required')+'</span>';return}busy=true;lastQuestion=q;$('comparestatus').textContent=t('compare.running',{count:models.length});let wait=message(t('compare.in_progress',{models:models.join(' · ')}));try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models})});wait.remove();lastComparison={question:q,data:x};renderComparisonForLanguage(lastComparison);$('comparestatus').innerHTML='<span class="ok">'+t('compare.complete')+'</span>'}catch(e){wait.textContent=t('model.failed')+e.message;wait.classList.add('error');$('comparestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{busy=false;$('chat').scrollTop=1e9}}
+async function compareModels(){if(busy)return;if(materialDraftDirty){message(t('materials.reconfirm'));return;}let q=$('question').value.trim()||lastQuestion;if(!q){$('comparestatus').innerHTML='<span class="error">'+t('compare.question_required')+'</span>';return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){$('comparestatus').innerHTML='<span class="error">'+t('compare.models_required')+'</span>';return}busy=true;lastQuestion=q;$('comparestatus').textContent=t('compare.running',{count:models.length});let wait=message(t('compare.in_progress',{models:models.join(' · ')}));try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models})});wait.remove();lastComparison={question:q,data:x};renderComparisonForLanguage(lastComparison);$('comparestatus').innerHTML='<span class="ok">'+t('compare.complete')+'</span>'}catch(e){wait.textContent=t('model.failed')+e.message;wait.classList.add('error');$('comparestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{busy=false;$('chat').scrollTop=1e9}}
 function processingCard(){let card=document.createElement('section');card.className='message assistant';card.style.border='1px solid #334155';card.innerHTML='<b>'+rt('model.processing')+'</b><div class="muted" data-process-text>'+rt('model.connecting')+'</div><div style="height:7px;background:#0b1220;border-radius:8px;overflow:hidden;margin-top:9px"><div data-process-bar style="height:100%;width:4%;background:#38bdf8;transition:width .25s ease"></div></div>';$('chat').append(card);return card}
 function updateProcessing(card,event){let text=card.querySelector('[data-process-text]'),bar=card.querySelector('[data-process-bar]');text.textContent=event.text||rt('model.waiting');if(typeof event.percent==='number')bar.style.width=Math.max(4,Math.min(100,event.percent))+'%';if(event.phase==='complete'){card.style.borderColor='#22c55e';bar.style.background='#22c55e'}}
-function showChatResult(x){message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>'+t('model.reasoning')+'</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${c.path}</b><br>${c.reason}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button onclick="apply()">'+t('changes.apply')+'</button>':t('changes.none');$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">'+t('export.assembly')+'</button>':t('export.assembly_unavailable');renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}
-async function chat(){if(busy||!$('question').value.trim())return;busy=true;let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');let wait=processingCard(),buffer='',result=null;try{let response;try{response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})})}catch(error){throw Error(rt('model.connection_failed')+(error?.message?` ${error.message}`:''))}if(!response.ok){await readApiResponse(response)}let reader=response.body.getReader(),decoder=new TextDecoder();while(true){let part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});let blocks=buffer.split('\n\n');buffer=blocks.pop();for(let block of blocks){let line=block.split('\n').find(item=>item.startsWith('data: '));if(!line)continue;let event=JSON.parse(line.slice(6));if(event.type==='progress')updateProcessing(wait,event);else if(event.type==='result')result=event.data;else if(event.type==='error')throw Error(event.message||rt('model.failed'))}}if(!result)throw Error(t('api.no_result'));updateProcessing(wait,{phase:'complete',text:rt('model.complete'),percent:100});showChatResult(result)}catch(e){wait.querySelector('[data-process-text]').textContent=rt('model.failed')+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
+function showChatResult(x){message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>'+t('model.reasoning')+'</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${esc(c.path)}</b><br>${esc(c.reason)}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button onclick="apply()">'+t('changes.apply')+'</button>':t('changes.none');$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">'+t('export.assembly')+'</button>':t('export.assembly_unavailable');renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}
+async function chat(){if(busy||!$('question').value.trim())return;if(materialDraftDirty){message(t('materials.reconfirm'));return;}busy=true;let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');let wait=processingCard(),buffer='',result=null;try{let response;try{response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})})}catch(error){throw Error(rt('model.connection_failed')+(error?.message?` ${error.message}`:''))}if(!response.ok){await readApiResponse(response)}let reader=response.body.getReader(),decoder=new TextDecoder();while(true){let part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});let blocks=buffer.split('\n\n');buffer=blocks.pop();for(let block of blocks){let line=block.split('\n').find(item=>item.startsWith('data: '));if(!line)continue;let event=JSON.parse(line.slice(6));if(event.type==='progress')updateProcessing(wait,event);else if(event.type==='result')result=event.data;else if(event.type==='error')throw Error(event.message||rt('model.failed'))}}if(!result)throw Error(t('api.no_result'));updateProcessing(wait,{phase:'complete',text:rt('model.complete'),percent:100});showChatResult(result)}catch(e){wait.querySelector('[data-process-text]').textContent=rt('model.failed')+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
 async function exportSession(){try{let x=await api('/api/export/session',{method:'POST'});$('sessionexport').innerHTML='<span class="ok">'+esc(t('export.complete',{path:x.path}))+'</span>'}catch(e){$('sessionexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function exportBgAnalysis(){try{let x=await api('/api/export/bg-analysis',{method:'POST'});$('analysisexport').innerHTML='<span class="ok">'+esc(t('export.complete',{path:x.path}))+'</span>'}catch(e){$('analysisexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-function esc(s){let e=document.createElement('div');e.textContent=s;return e.innerHTML}async function apply(){try{let x=await api('/api/apply',{method:'POST'});$('changes').innerHTML='<span class="ok">'+t('apply.complete',{count:x.applied})+'</span>';message(t('apply.message',{count:x.applied}))}catch(e){$('changes').innerHTML='<span class="error">'+e.message+'</span>'}}
+function esc(s){let e=document.createElement('div');e.textContent=s;return e.innerHTML}async function apply(){if(!confirm(t('changes.confirm')))return;try{let x=await api('/api/apply',{method:'POST',body:JSON.stringify({confirmed:true})});$('changes').innerHTML='<span class="ok">'+t('apply.complete',{count:x.applied})+'</span>';message(t('apply.message',{count:x.applied}))}catch(e){$('changes').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+
+let materialDraftDirty=false;
+function clearResultPanels(){lastUsageSnapshot=null;lastComparison=null;lastCoverageReport=null;lastCacheAudit=null;$('sources').textContent=t('evidence.none');$('changes').textContent=t('changes.none');$('analysisexport').textContent=t('export.assembly_unavailable');$('usagedetail').textContent=t('usage.unavailable');$('coveragestatus').textContent=t('material.updated');}
+function editCodebookDraft(){let profile=lastCodebookWorkspaceProfile;if(!profile)return;let host=$('chat');host.innerHTML='<section class="workspace-inner"><h1>'+t('rules.edit')+'</h1><p>'+t('rules.edit_help')+'</p><textarea id="ruleeditor" style="width:100%;min-height:380px"></textarea><div class="row"><button onclick="saveCodebookDraft()">'+t('rules.save_draft')+'</button><button class="ghost" onclick="showCodebookWorkspace(lastCodebookWorkspaceProfile)">'+t('rules.cancel')+'</button></div><div id="ruleediterror" class="error"></div></section>';$('ruleeditor').value=JSON.stringify(profile.draft,null,2);}
+async function saveCodebookDraft(){try{let draft=JSON.parse($('ruleeditor').value);if(!confirm(t('rules.save_confirm')))return;let profile=await api('/api/codebook/edit',{method:'POST',body:JSON.stringify({draft,confirmed:true})});renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){$('ruleediterror').textContent=e.message}}
 </script></body></html>'''
 
 # Embed the packaged catalog without introducing an HTTP endpoint or network call.
@@ -2562,3 +2750,4 @@ HTML = HTML.replace('__WORKBENCH_I18N_JSON__', catalog_script_json())
 if __name__ == "__main__":
     print("Bosch Local Workbench: http://127.0.0.1:8765")
     uvicorn.run(app, host="127.0.0.1", port=8765)
+
