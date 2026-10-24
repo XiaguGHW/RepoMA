@@ -67,6 +67,18 @@ class CatalogTests(unittest.TestCase):
         self.assertIn('renderSessionRowsForLanguage', source)
         self.assertIn('renderCoverageReportForLanguage', source)
 
+    def test_dynamic_controls_have_explicit_language_refresh(self):
+        """Late-created controls cannot rely on the initial DOM text scan."""
+        source = (ROOT / 'chat_workbench.py').read_text(encoding='utf-8')
+        self.assertIn('function localizeComposerControls()', source)
+        self.assertIn("setI18nText($('composermodelnote'),'model.current')", source)
+        self.assertIn("setI18nText($('modeltestbutton'),'model.test')", source)
+        self.assertIn('function localizeSessionChrome()', source)
+        self.assertIn("setI18nText($('newsessionbutton'),'session.new')", source)
+        rerender = source.split('function rerenderLanguageSensitiveUI()', 1)[1].split('\n}', 1)[0]
+        self.assertIn('localizeComposerControls();', rerender)
+        self.assertIn('localizeSessionChrome();', rerender)
+
     def test_script_serialization(self):
         payload = catalog_script_json()
         self.assertNotIn('<', payload)
