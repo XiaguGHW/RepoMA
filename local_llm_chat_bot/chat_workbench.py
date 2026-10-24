@@ -2182,7 +2182,17 @@ const LEGACY_KEYS=CATALOG.legacy_keys;
 const UI=Object.fromEntries(['zh','en','de'].map(language=>[
   language,Object.fromEntries(Object.entries(LEGACY_KEYS).map(([source,key])=>[source,I18N[language][key]]))
 ]));
-const originalText=new WeakMap(),originalAttr=new WeakMap();
+// Bind only server-rendered interface copy once.  Model responses, filenames,
+// user input and text added later must never enter this collection.
+let initialStaticI18nBound=false;
+const initialStaticText=[],initialStaticAttributes=[];
+const STATIC_ELEMENT_BINDINGS=[
+  ['.chat-title','chat.title'],['.chat-subtitle','chat.subtitle'],
+  ['.welcome .eyebrow','welcome.eyebrow'],['.welcome h1','welcome.title'],
+  ['.welcome p','welcome.description'],['.welcome .row button','welcome.choose_folder','▣\u00a0 '],
+  ['.welcome .row button.ghost','welcome.manage_rules','▤\u00a0 '],
+  ['#contextpanel > .context-title','context.title']
+];
 function t(key,variables={}){
   const template=(I18N[uiLanguage]||I18N.zh)[key];
   if(template===undefined){console.warn('Unknown UI translation key:',key);return key}
@@ -2191,8 +2201,27 @@ function t(key,variables={}){
 function setI18nText(element,key,variables){if(element)element.textContent=t(key,variables)}
 function tr(source){return LEGACY_KEYS[source]?t(LEGACY_KEYS[source]):source}
 function rt(key,values={}){return t(key,values)}
-function applyLanguage(){let dict=UI[uiLanguage]||{};document.documentElement.lang=uiLanguage;document.documentElement.dataset.uiLanguage=uiLanguage;document.title='Bosch Local Workbench';let walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);for(let node;node=walker.nextNode();){let source=originalText.get(node);if(source===undefined){source=node.nodeValue;originalText.set(node,source)}let key=source.trim(),translated=dict[key];if(translated){let lead=source.match(/^\s*/)[0],tail=source.match(/\s*$/)[0],next=lead+translated+tail;if(node.nodeValue!==next)node.nodeValue=next}}for(let el of document.querySelectorAll('[placeholder],[title]'))for(let attr of ['placeholder','title'])if(el.hasAttribute(attr)){let saved=originalAttr.get(el)||{};if(!(attr in saved)){saved[attr]=el.getAttribute(attr);originalAttr.set(el,saved)}let next=dict[saved[attr]]||saved[attr];if(el.getAttribute(attr)!==next)el.setAttribute(attr,next)}}
-function initLegacyDynamicTranslations(){if(window.__legacyTranslationObserver)return;let queued=false;let refresh=()=>{if(queued)return;queued=true;queueMicrotask(()=>{queued=false;applyLanguage()})};window.__legacyTranslationObserver=new MutationObserver(refresh);window.__legacyTranslationObserver.observe(document.body,{childList:true,subtree:true,characterData:true})}
+function bindInitialStaticI18n(){
+  if(initialStaticI18nBound)return;
+  initialStaticI18nBound=true;
+  let walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
+  for(let node;node=walker.nextNode();){
+    let source=node.nodeValue,key=LEGACY_KEYS[source.trim()];
+    if(key)initialStaticText.push({node,key,lead:source.match(/^\s*/)[0],tail:source.match(/\s*$/)[0]});
+  }
+  for(let el of document.querySelectorAll('[placeholder],[title],[aria-label]'))for(let attr of ['placeholder','title','aria-label']){
+    let source=el.getAttribute(attr),key=source&&LEGACY_KEYS[source];
+    if(key)initialStaticAttributes.push({el,attr,key});
+  }
+}
+function applyLanguage(){
+  bindInitialStaticI18n();
+  document.documentElement.lang=uiLanguage;document.documentElement.dataset.uiLanguage=uiLanguage;
+  document.title='Bosch Local Workbench';
+  for(let item of initialStaticText)item.node.nodeValue=item.lead+t(item.key)+item.tail;
+  for(let item of initialStaticAttributes)item.el.setAttribute(item.attr,t(item.key));
+  for(let [selector,key,prefix=''] of STATIC_ELEMENT_BINDINGS){let el=document.querySelector(selector);if(el)el.textContent=prefix+t(key)}
+}
 async function changeLanguage(){uiLanguage=$('language').value;applyLanguage();try{if($('workspace').value.trim())await api('/api/language',{method:'POST',body:JSON.stringify({language:uiLanguage})})}catch(e){console.warn('Could not persist UI language',e)}}
 async function restoreLastWorkspace(){
   try{
@@ -2211,7 +2240,7 @@ async function restoreLastWorkspace(){
 function setLeftPanelWidth(width){let available=Math.max(240,window.innerWidth-420-300-8);let bounded=Math.max(235,Math.min(Number(width)||270,Math.min(600,available)));document.documentElement.style.setProperty('--left-panel-width',bounded+'px');let drawerStyle=$('scan-drawer-position')||Object.assign(document.createElement('style'),{id:'scan-drawer-position'});drawerStyle.textContent='#scanbackdrop .scan-drawer{left:'+bounded+'px!important}';if(!drawerStyle.parentNode)document.head.append(drawerStyle);localStorage.setItem('bosch-workbench-left-panel-width',String(bounded))}
 function initLeftSplitter(){let splitter=$('leftsplitter');if(!splitter)return;let saved=Number(localStorage.getItem('bosch-workbench-left-panel-width'));if(saved)setLeftPanelWidth(saved);let dragging=false;function stop(){if(!dragging)return;dragging=false;splitter.classList.remove('dragging');document.body.style.userSelect=''}splitter.addEventListener('pointerdown',event=>{dragging=true;splitter.classList.add('dragging');splitter.setPointerCapture(event.pointerId);document.body.style.userSelect='none';event.preventDefault()});splitter.addEventListener('pointermove',event=>{if(dragging)setLeftPanelWidth(event.clientX)});splitter.addEventListener('pointerup',stop);splitter.addEventListener('pointercancel',stop);window.addEventListener('resize',()=>setLeftPanelWidth(Number(getComputedStyle(document.documentElement).getPropertyValue('--left-panel-width').replace('px',''))||270))}
 function initDarkScrollbars(){let style=document.createElement('style');style.textContent='*{scrollbar-color:#52637a #182235;scrollbar-width:thin}::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-track{background:#182235;border-radius:10px}::-webkit-scrollbar-thumb{background:#52637a;border:2px solid #182235;border-radius:10px}::-webkit-scrollbar-thumb:hover{background:#70839c}::-webkit-scrollbar-corner{background:#182235}select{width:100%;background:#0f172a!important;color:#e5e7eb!important;border:1px solid #3b4960!important;border-radius:6px;padding:8px;outline:none}select:hover{border-color:#526b88!important}select:focus{border-color:#3b82a8!important;box-shadow:0 0 0 2px rgba(59,130,168,.18)}select option{background:#172033;color:#e5e7eb}.language-picker select{width:auto;padding:3px 6px}.splitter{background:#263449!important}.splitter:hover,.splitter.dragging{background:#3b82a8!important}';document.head.append(style)}
-window.addEventListener('DOMContentLoaded',()=>{applyLanguage();initLegacyDynamicTranslations();initDarkScrollbars();initLeftSplitter();initSessionSidebar();initComposerControls();initVisualAdjustments();initLanguageLayout();renderCompareSlots();loadCodebookStatus();ensureMaterialFlow();initContextPanel();refreshAppChrome();restoreLastWorkspace()});
+window.addEventListener('DOMContentLoaded',()=>{bindInitialStaticI18n();applyLanguage();initDarkScrollbars();initLeftSplitter();initSessionSidebar();initComposerControls();initVisualAdjustments();initLanguageLayout();renderCompareSlots();loadCodebookStatus();ensureMaterialFlow();initContextPanel();refreshAppChrome();restoreLastWorkspace()});
 function responseTextSummary(raw){let text=String(raw||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();return text.length>360?text.slice(0,357)+'…':text}
 function apiErrorMessage(response,body){let detail='';if(body&&typeof body==='object')detail=typeof body.detail==='string'?body.detail:(typeof body.message==='string'?body.message:'');let summary=detail||responseTextSummary(typeof body==='string'?body:'');return `HTTP ${response.status}${response.statusText?` ${response.statusText}`:''}${summary?`：${summary}`:'：请求失败'}`}
 async function readApiResponse(response){let raw=await response.text(),body=null;if(raw.trim()){try{body=JSON.parse(raw)}catch{body=raw}}if(!response.ok)throw Error(apiErrorMessage(response,body));if(body===null||typeof body==='string')throw Error(`HTTP ${response.status}：本地服务返回的不是 JSON 数据。${responseTextSummary(raw)?' 响应：'+responseTextSummary(raw):''}`);return body}
