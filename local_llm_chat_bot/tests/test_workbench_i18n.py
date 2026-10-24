@@ -43,6 +43,14 @@ class CatalogTests(unittest.TestCase):
         for key in re.findall(r"\b(?:t|rt)\('([^']+)'", source):
             self.assertIn(key, keys)
 
+    def test_translation_does_not_observe_or_reclassify_runtime_text(self):
+        source = (ROOT / 'chat_workbench.py').read_text(encoding='utf-8')
+        self.assertIn('function bindInitialStaticI18n()', source)
+        self.assertIn('const initialStaticText=[],initialStaticAttributes=[]', source)
+        self.assertNotIn('initLegacyDynamicTranslations', source)
+        self.assertNotIn('originalText=', source)
+        self.assertNotIn('__legacyTranslationObserver', source)
+
     def test_script_serialization(self):
         payload = catalog_script_json()
         self.assertNotIn('<', payload)
