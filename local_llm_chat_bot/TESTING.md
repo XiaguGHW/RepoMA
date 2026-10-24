@@ -61,6 +61,17 @@ because 2.4.0 crashed in this container's process discovery before checking code
 
 ## Current gates
 
+After step 4, discovery runs 124 tests: 116 pass, 7 fail and the native Windows
+test is skipped on Linux. R09/R10 audit regressions now pass.
+Run the new response-round/reference tests with:
+`python -m unittest discover -s tests -p test_release_step_four.py -v`.
+BG chat defaults to required classification. Use require_classification=false
+for an explanation-only API request, or select Explanation follow-up in the UI.
+Any returned classification is still fully validated. Nonpaged Codebooks use
+codebook_rule_refs with supplied section/chunk labels and empty physical pages.
+The browser suite now covers this mode and reference display.
+See docs/release-reports/Workbench_Repair_Step_04_2026-10-24.md at repository root.
+
 After step 3, discovery runs 106 tests: 96 pass, 9 fail and the native Windows
 test remains skipped on Linux. R05/R06/R07/R08 audit regressions now pass.
 Run the new scope/recovery/rollback matrix with:

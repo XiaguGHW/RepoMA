@@ -297,6 +297,41 @@ class BrowserRelease(unittest.TestCase):
         )
         self.assertIn("New same-BG fixture class", card.inner_text())
 
+    def test_explicit_explanation_mode_and_nonpaged_rule_references(self):
+        self.language("en")
+        self.page.select_option("#model", "gemini-2.5-pro")
+        self.page.wait_for_function('lastStatusSnapshot.model === "gemini-2.5-pro"')
+        self.prepare_rules()
+        self.lock_rules()
+        self.button("leaveCodebookWorkspace()").click()
+        self.select_bg(self.f.bg_a)
+        self.assertEqual(self.page.input_value("#answermode"), "classification")
+        self.ask("Classify this Baugruppe")
+        card = self.page.locator(".classification-card").filter(
+            has=self.page.get_by_role(
+                "heading", name="Classification result (validated)", exact=True
+            )
+        )
+        self.assertIn("Section/chunk references", card.inner_text())
+        self.assertIn(self.f.rules.name, card.inner_text())
+        self.page.select_option("#answermode", "explanation")
+        self.language("de")
+        self.assertEqual(self.page.input_value("#answermode"), "explanation")
+        with self.page.expect_response(
+            lambda response: response.url.endswith("/api/chat/stream")
+        ) as response:
+            self.ask("Erläutere die Motorfunktion")
+        self.assertFalse(
+            response.value.request.post_data_json["require_classification"]
+        )
+        self.assertEqual(card.count(), 1)
+        self.assertNotIn(
+            "classification",
+            self.page.locator("#chat .message.error").all_text_contents(),
+        )
+        self.select_bg(self.f.bg_b)
+        self.assertEqual(self.page.input_value("#answermode"), "classification")
+
     def test_material_drawer_geometry_and_real_actions(self):
         self.language("en")
         self.prepare_rules()

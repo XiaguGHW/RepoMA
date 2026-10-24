@@ -43,13 +43,19 @@ class FixtureEnvironment:
                         profile_match=re.search(r'primary rule source\): (\{[^\n]+\})',prompt)
                         profile=json.loads(profile_match.group(1)) if profile_match else PROFILE
                         cls=profile['classes'][0]
+                        reference_match=re.search(r'Classification reference manifest: (\{[^\n]+\})',prompt)
+                        references=json.loads(reference_match.group(1)) if reference_match else {}
+                        bg_labels=references.get('bg_labels', labels[:1])
+                        rule_labels=references.get('codebook_labels', [])
                         language='de' if 'primarily in German' in prompt else 'zh' if 'primarily in Chinese' in prompt else 'en'
                         answer={'en':'The fixture rotates the object.\n\n| Part | Function |\n|---|---|\n| Motor | Rotation |',
                                 'de':'Die Testbaugruppe dreht das Objekt.', 'zh':'测试装配体使对象旋转。'}[language]
                         classification={'label':'Rotation' if 'TEST_UNKNOWN' in prompt else cls['name'], 'confidence':'high',
-                            'alternative_label':'','codebook_rule_ids':[cls['decision_rules'][0]['id']], 'codebook_rule_pages':[1],
-                            'evidence_labels':labels[:1], 'bg_evidence_pages':labels[:1], 'uncertainties':[]}
-                        text=json.dumps({'answer':answer,'classification':classification if 'BG CLASSIFICATION MODE' in prompt else None,
+                            'alternative_label':'','codebook_rule_ids':[cls['decision_rules'][0]['id']],
+                            'codebook_rule_pages':[] if references.get('codebook_source_kind')=='nonpaged' else [1],
+                            'codebook_rule_refs':rule_labels[:1],
+                            'evidence_labels':bg_labels[:1], 'bg_evidence_pages':bg_labels[:1], 'uncertainties':[]}
+                        text=json.dumps({'answer':answer,'classification':classification if 'BG CLASSIFICATION MODE' in prompt and '- EXPLANATION MODE:' not in prompt else None,
                                          'changes':[],'read_files':[]},ensure_ascii=False)
                 else: text='Fixture evidence: the object is rotated by a motor; facts.txt.'
                 response={'candidates':[{'content':{'parts':[{'text':text}]},'finishReason':'STOP'}],

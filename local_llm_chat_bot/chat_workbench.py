@@ -29,7 +29,7 @@ import uvicorn
 from release_safety import safe_error, normalize_usage, context_state_error, valid_rule_profile
 from dotenv import load_dotenv
 from workbench_i18n import catalog_script_json
-from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative,
+from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative, classification_manifest,
                              excerpt, parse_json, prompt_for, safe_name, sha256)
 from local_document_library import (LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS,
                                     material_is_recommended, material_role, material_role_label)
@@ -338,6 +338,7 @@ class CodebookPrepareRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str = Field(max_length=50000)
+    require_classification: bool = True
 
 
 class CompareRequest(BaseModel):
@@ -1264,54 +1265,124 @@ def relevant_codebook_page_evidence(question: str, bg_context: dict | None, maxi
     return selected
 
 
-def validate_classification(action: dict, evidence: list[dict], codebook: str, profile: dict | None = None) -> str | None:
-    """Validate the machine-readable part without judging technical correctness."""
+def classification_scope(documents, context):
+    if not context:
+        return None
+    scope = dict(context)
+    source = next((item for item in documents.list() if item["id"] == context["codebook_id"]), None)
+    scope["_codebook_pages"] = document_pages(source) if source else []
+    return scope
+
+
+def validate_classification(action: dict, evidence: list[dict], codebook: str,
+                            profile: dict | None = None, bg_context: dict | None = None) -> str | None:
+    """Check schema, fixed labels and provenance, not engineering semantics."""
     classification = action.get("classification")
     if not isinstance(classification, dict):
-        return "缺少 classification 对象"
+        return "Missing classification object"
+    if not isinstance(profile, dict):
+        return "No locked Codebook rules are available"
+    names = {item["name"] for item in profile.get("classes", [])
+             if isinstance(item, dict) and isinstance(item.get("name"), str)}
     label = classification.get("label")
-    if not isinstance(label, str) or not label.strip():
-        return "缺少类别 label"
-    names = {item.get("name") for item in (profile or {}).get("classes", []) if isinstance(item, dict)}
-    if not names or label not in names:
+    if not isinstance(label, str) or not label or label not in names:
         return "Class label must exactly match one locked Codebook class"
-    if classification.get("confidence") not in {"high", "medium", "low"}:
-        return "confidence 必须为 high、medium 或 low"
-    evidence_labels = classification.get("evidence_labels")
-    supplied = {str(item.get("label", "")) for item in evidence}
-    if not isinstance(evidence_labels, list) or not evidence_labels:
-        return "缺少 evidence_labels"
-    if not all(isinstance(item, str) and item in supplied for item in evidence_labels):
-        return "evidence_labels 必须完全匹配本轮提供的证据标签"
-    rule_ids = classification.get("codebook_rule_ids")
-    known_rules = set()
-    for group in ((profile or {}).get("global_rules", []), (profile or {}).get("table_rules", [])):
-        known_rules.update(str(item.get("id")) for item in group if isinstance(item, dict))
-    for item in (profile or {}).get("classes", []):
-        if isinstance(item, dict):
-            for group in (item.get("decision_rules", []), item.get("boundaries", [])):
-                known_rules.update(str(rule.get("id")) for rule in group if isinstance(rule, dict))
-    if known_rules and (not isinstance(rule_ids, list) or not rule_ids or not all(str(item) in known_rules for item in rule_ids)):
-        return "codebook_rule_ids 必须引用锁定 Codebook 中实际存在的规则 ID"
-    if known_rules and (not isinstance(classification.get("codebook_rule_pages"), list) or not classification["codebook_rule_pages"]):
-        return "缺少 codebook_rule_pages"
-    if not isinstance(classification.get("bg_evidence_pages"), list) or not classification["bg_evidence_pages"]:
-        return "缺少 bg_evidence_pages"
+    confidence = classification.get("confidence")
+    if not isinstance(confidence, str) or confidence not in {"high", "medium", "low"}:
+        return "confidence must be high, medium or low"
     alternative = classification.get("alternative_label", "")
-    if alternative and (not isinstance(alternative, str) or alternative not in names):
-        return "备选类别未在当前 Codebook 中找到"
+    if not isinstance(alternative, str) or (alternative and alternative not in names):
+        return "alternative_label must be empty or one exact locked class"
     uncertainties = classification.get("uncertainties", [])
-    if not isinstance(uncertainties, list) or not all(isinstance(item, str) for item in uncertainties):
-        return "uncertainties 必须为文字列表"
+    if not isinstance(uncertainties, list) or any(not isinstance(item, str) for item in uncertainties):
+        return "uncertainties must be a string list"
+
+    manifest = classification_manifest(evidence, bg_context)
+    supplied = {item.get("label") for item in evidence if isinstance(item.get("label"), str)}
+    labels = classification.get("evidence_labels")
+    if not isinstance(labels, list) or not labels or any(not isinstance(item, str) or item not in supplied for item in labels):
+        return "evidence_labels must copy supplied evidence labels exactly"
+    bg_refs = classification.get("bg_evidence_pages")
+    if not isinstance(bg_refs, list) or not bg_refs or any(
+        not isinstance(item, str) or item not in manifest["bg_labels"] or item not in labels for item in bg_refs
+    ):
+        return "bg_evidence_pages must copy cited BG page/sheet/row/chunk labels; Codebook-only evidence is not BG evidence"
+
+    rules: dict[str, dict] = {}
+    groups = [profile.get("global_rules", []), profile.get("table_rules", [])]
+    for item in profile.get("classes", []):
+        if isinstance(item, dict):
+            groups.extend([item.get("decision_rules", []), item.get("boundaries", [])])
+    for group in groups:
+        for rule in group if isinstance(group, list) else []:
+            if isinstance(rule, dict) and isinstance(rule.get("id"), str) and rule["id"]:
+                if rule["id"] in rules and rules[rule["id"]] != rule:
+                    return "The locked profile contains an ambiguous rule ID"
+                rules[rule["id"]] = rule
+    rule_ids = classification.get("codebook_rule_ids")
+    if not isinstance(rule_ids, list) or not rule_ids or any(not isinstance(item, str) or item not in rules for item in rule_ids):
+        return "codebook_rule_ids must reference existing string IDs from the locked rules"
+
+    pages = classification.get("codebook_rule_pages")
+    if not isinstance(pages, list) or any(type(page) is not int or page < 1 for page in pages):
+        return "codebook_rule_pages must be positive integer pages, or an empty list for nonpaged rules"
+    rule_refs = classification.get("codebook_rule_refs", [])
+    if not isinstance(rule_refs, list) or any(not isinstance(item, str) or item not in manifest["codebook_labels"] for item in rule_refs):
+        return "codebook_rule_refs must copy supplied Codebook source labels"
+    if bg_context and manifest["codebook_source_kind"] == "nonpaged":
+        if pages or not rule_refs:
+            return "Nonpaged Codebooks require actual section/chunk refs and empty codebook_rule_pages"
+    else:
+        allowed_pages = {page for rule_id in rule_ids for page in rules[rule_id].get("pages", [])
+                         if type(page) is int and page > 0}
+        if not pages or not set(pages).issubset(allowed_pages):
+            return "Codebook pages must belong to the cited rule or boundary-rule sources"
+        if bg_context and not set(pages).issubset(set(bg_context.get("_codebook_pages", []))):
+            return "Codebook page reference is outside the actual source document"
     return None
 
 
-def classification_repair_prompt(base_prompt: str, reason: str) -> str:
+class ClassificationValidationError(ValueError):
+    """An unvalidated classification must never become a fallback answer/plan."""
+
+
+def classification_repair_prompt(base_prompt: str, reason: str, *, required: bool = True) -> str:
+    obligation = ("A complete valid classification object is required; do not omit it."
+                  if required else "Classification may be null in explanation mode; any non-null object must pass all rules.")
     return base_prompt + f"""
 
-IMPORTANT: Your preceding classification response was rejected locally: {reason}.
-Return the complete JSON action again, with a valid `classification` object. Do not omit any required fields. Copy the exact class name and rule IDs from the supplied Codebook and copy evidence_labels exactly from the supplied document labels. Include separate codebook_rule_pages and bg_evidence_pages. Do not add commentary outside JSON.
+IMPORTANT: The preceding JSON action was rejected locally: {reason}.
+Return the complete valid JSON action again. {obligation}
+Copy exact locked class names, existing string rule IDs, and supplied reference-manifest labels.
+Use physical Codebook pages only for PDF sources and only for the cited rule pages.
+For nonpaged Codebooks use actual section/chunk labels in codebook_rule_refs, with codebook_rule_pages=[].
+BG evidence must use BG labels, not Codebook labels. Do not add commentary outside JSON.
 """
+
+
+def validated_model_action(raw, prompt, *, evidence, scope, validation, repair, notices):
+    """One validator for every round; one repair budget for the entire answer."""
+    while True:
+        action = None
+        try:
+            action = parse_json(raw)
+            if action.get("classification") is not None:
+                validation["required"] = True
+            problem = validate_classification(
+                action, evidence, "", (scope or {}).get("locked_profile"), scope
+            ) if validation["required"] else None
+        except (ValueError, TypeError) as exc:
+            problem = str(exc)
+        if not problem:
+            return action
+        if not scope and not validation["required"]:
+            raise ValueError(problem)
+        if validation["repairs"] >= 1 or not scope:
+            raise ClassificationValidationError("Classification/action validation failed: " + problem)
+        validation["repairs"] += 1
+        notices.append(f"分类 JSON 校验未通过（{problem}），已自动重试一次。")
+        raw = repair(classification_repair_prompt(prompt, problem, required=validation["required"]))
+        # No success notice until this same validator accepts the repaired action.
 
 
 def progress_copy(data: dict[str, Any], zh: str, en: str, de: str) -> str:
@@ -1319,7 +1390,7 @@ def progress_copy(data: dict[str, Any], zh: str, en: str, de: str) -> str:
     return {"en": en, "de": de}.get(normalize_language(data.get("language", "zh")), zh)
 
 
-def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, Any]:
+def call_model(data: dict[str, Any], question: str, progress=None, *, require_classification: bool = True) -> dict[str, Any]:
     state, documents, llm = data["state"], data["documents"], data["llm"]
     ensure_current_sources(data)
     invalidate_pending(data)
@@ -1365,7 +1436,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
 
     coverage = load_coverage(state)
     auto_prepared = False
-    classification_request = bool(bg_context) and needs_bg_preparation(question, bg_context)
+    classification_request = bool(bg_context) and require_classification
     # Once a material range is confirmed as a Baugruppe, its first question
     # should transparently prepare the shared understanding, even if the user
     # phrases it as a natural question rather than using a classification word.
@@ -1397,7 +1468,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
             dossier = None
     model_prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
                               coverage_summaries=[] if dossier else coverage_summaries, bg_dossier=dossier,
-                              response_language=data.get("language", "zh"))
+                              response_language=data.get("language", "zh"), require_classification=classification_request)
     report("model", progress_copy(data, f"正在连接 {data['model']} 并提交问题…", f"Connecting to {data['model']} and submitting the question…", f"Verbindung zu {data['model']} wird hergestellt und die Frage übermittelt…"), 86)
     model_started = False
     def model_events(kind: str, text: str):
@@ -1414,37 +1485,31 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
     usage_records.append(llm.get_last_token_usage() or {})
     estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
     if estimate: estimates.append(estimate)
-    def validated_action(raw_response: str, request_prompt: str) -> dict:
-        try:
-            action = parse_json(raw_response)
-            problem = validate_classification(action, evidence, codebook_text(documents, bg_context), (bg_context or {}).get("locked_profile")) if classification_request or action.get("classification") is not None else None
-        except Exception as exc:
-            if not classification_request:
-                raise
-            action, problem = None, str(exc)
-        if not problem:
-            return action
-        notices.append(f"分类 JSON 校验未通过（{problem}），已自动重试一次。")
-        report("validation", progress_copy(data, "正在校验分类证据与 Codebook 规则；模型输出需补全，正在自动重试…", "Validating classification evidence and Codebook rules; the output needs completion and is being retried…", "Klassifikationsevidenz und Codebook-Regeln werden geprüft; die Ausgabe wird zur Vervollständigung erneut angefordert…"), 96)
-        repaired = llm.ask_about_files(visuals, classification_repair_prompt(request_prompt, problem),
-                                       SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=model_events)
+    validation = {"required": classification_request, "repairs": 0}
+    scope = classification_scope(documents, bg_context)
+
+    def repair_classification(repair_prompt):
+        report("validation", progress_copy(data, "正在修复分类结构或引用…", "Repairing classification structure or references…",
+                                           "Klassifikationsstruktur oder Quellenverweise werden korrigiert…"), 96)
+        repaired = llm.ask_about_files(visuals, repair_prompt, SYSTEM,
+                                      {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=model_events)
         repaired = require_model_success(repaired, "分类输出修复请求")
         usage_records.append(llm.get_last_token_usage() or {})
         estimate = state.note_usage(usage_records[-1], data["pricing"], data["model"])
-        if estimate: estimates.append(estimate)
-        action = parse_json(repaired)
-        problem = validate_classification(action, evidence, codebook_text(documents, bg_context), (bg_context or {}).get("locked_profile")) if classification_request else None
-        if problem:
-            raise ValueError(f"自动重试后仍无有效分类 JSON：{problem}")
-        notices.append("分类 JSON 已在自动重试后通过校验。")
-        return action
+        if estimate:
+            estimates.append(estimate)
+        return repaired
+
+    def validated_action(raw_response: str, request_prompt: str) -> dict:
+        return validated_model_action(raw_response, request_prompt, evidence=evidence, scope=scope,
+                                      validation=validation, repair=repair_classification, notices=notices)
 
     try:
         report("validation", progress_copy(data, "正在核验模型分类输出…", "Validating the model classification output…", "Die Klassifikationsausgabe des Modells wird geprüft…"), 96)
         action = validated_action(raw, model_prompt)
-    except Exception:
-        if bg_context:
-            raise ValueError("Classification validation failed after one repair; no classification result was accepted")
+    except Exception as exc:
+        if bg_context or isinstance(exc, ClassificationValidationError):
+            raise ClassificationValidationError(str(exc)) from exc
         # Some Bosch Farm models return a normal natural-language answer despite
         # the code-action schema. A read-only question must remain useful:
         # show that answer and never treat it as a file modification.
@@ -1469,7 +1534,8 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
             state.refresh_file(relative)
     if complete:
         model_prompt = prompt_for(state, question, snippets, complete, evidence, bg_context,
-                                  [] if dossier else coverage_summaries, dossier, data.get("language", "zh"))
+                                  [] if dossier else coverage_summaries, dossier, data.get("language", "zh"),
+                                  require_classification=classification_request)
         report("model", progress_copy(data, "正在补充读取模型请求的本地文件并生成回答…", "Reading requested local files and generating the answer…", "Vom Modell angeforderte lokale Dateien werden ergänzt gelesen und die Antwort wird erstellt…"), 93)
         raw = llm.ask_about_files(visuals, model_prompt,
                                    SYSTEM, {"maxOutputTokens": 3000, "temperature": 0}, stream=True, event_handler=model_events)
@@ -1480,7 +1546,7 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
         try:
             action = validated_action(raw, model_prompt)
         except Exception as exc:
-            if classification_request: raise
+            if bg_context or isinstance(exc, ClassificationValidationError): raise
             notices.append(f"补充读取后的分类输出未通过校验：{exc}；未显示分类结论卡。")
             action = {"answer": raw.strip() or "模型没有返回可显示的文字。", "changes": [], "classification": None}
     for change in action.get("changes", []):
@@ -1514,8 +1580,8 @@ def call_model(data: dict[str, Any], question: str, progress=None) -> dict[str, 
             "turn_usage": turn_token_usage,
             "model_response": llm.last_response_model or data["model"],
             "turn_cost": turn_token_usage["cost_usd"] if estimates else None,
-            "classification": action.get("classification") if classification_request else None,
-            "coverage_summary": coverage_summary_for_answer(coverage) if classification_request else None,
+            "classification": action.get("classification"),
+            "coverage_summary": coverage_summary_for_answer(coverage) if action.get("classification") is not None else None,
             "usage": status_data(data)}
 
 
@@ -1568,26 +1634,21 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
             raw = require_model_success(raw, f"对比模型 {model} 的回答请求")
             usage_records = [connector.get_last_token_usage() or {}]
             actual_model = connector.last_response_model or model
-            classification = None
-            try:
-                action = parse_json(raw)
-                problem = validate_classification(action, evidence, codebook_text(documents, bg_context), (bg_context or {}).get("locked_profile"))
-                if problem:
-                    notices.append(f"分类 JSON 校验未通过（{problem}），已自动重试一次。")
-                    raw = connector.ask_about_files(visuals, classification_repair_prompt(prompt, problem), SYSTEM,
-                                                     {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=events)
-                    raw = require_model_success(raw, f"对比模型 {model} 的分类输出修复请求")
-                    usage_records.append(connector.get_last_token_usage() or {})
-                    action = parse_json(raw)
-                    problem = validate_classification(action, evidence, codebook_text(documents, bg_context), (bg_context or {}).get("locked_profile"))
-                    if problem:
-                        raise ValueError(f"自动重试后仍无有效分类 JSON：{problem}")
-                    notices.append("分类 JSON 已在自动重试后通过校验。")
-                answer = str(action.get("answer", "")).strip() or raw.strip()
-                classification = action.get("classification")
-            except Exception as exc:
-                answer = raw.strip() or "模型没有返回可显示的文字。"
-                notices.append(f"未显示该模型的分类结论卡：{exc}")
+            validation = {"required": True, "repairs": 0}
+
+            def repair_comparison(repair_prompt):
+                repaired = connector.ask_about_files(visuals, repair_prompt, SYSTEM,
+                                                      {"maxOutputTokens": 4096, "temperature": 0},
+                                                      stream=True, event_handler=events)
+                repaired = require_model_success(repaired, f"对比模型 {model} 的分类输出修复请求")
+                usage_records.append(connector.get_last_token_usage() or {})
+                return repaired
+
+            action = validated_model_action(raw, prompt, evidence=evidence,
+                                            scope=classification_scope(documents, bg_context),
+                                            validation=validation, repair=repair_comparison, notices=notices)
+            answer = action["answer"]
+            classification = action["classification"]
             token_usage = summarize_usage(usage_records)
             estimate = data["pricing"].estimate(actual_model, token_usage["input"], token_usage["output"])
             token_usage["cost_usd"] = float(estimate["cost_usd"]) if estimate else None
@@ -2354,7 +2415,7 @@ def chat(request: ChatRequest):
     data = begin_model_work()
     try:
         with LOCK:
-            return call_model(data, request.question.strip())
+            return call_model(data, request.question.strip(), require_classification=request.require_classification)
     finally:
         MODEL_WORK_IN_PROGRESS.clear()
 
@@ -2380,7 +2441,7 @@ def chat_stream(request: ChatRequest):
     def worker() -> None:
         try:
             with LOCK:
-                result = call_model(data, question, progress=publish)
+                result = call_model(data, question, progress=publish, require_classification=request.require_classification)
             events.put({"type": "result", "data": result})
         except Exception as exc:
             events.put({"type": "error", "message": safe_error(exc)})
@@ -2650,7 +2711,7 @@ async function pickWorkspace(){try{let path=(await api('/api/pick/folder')).path
 function refreshAppChrome(){let path=$('workspace')?.value.trim();let short=path?path.replace(/\\/g,'/').split('/').filter(Boolean).slice(-2).join(' / '):tr('选择工作区文件夹');if($('workspaceshortcut'))$('workspaceshortcut').textContent=short;if($('topbarstatus'))$('topbarstatus').textContent=path?tr('本地运行 · 工作区已打开'):tr('本地运行')}
 function initVisualAdjustments(){if($('visual-adjustments'))return;let style=document.createElement('style');style.id='visual-adjustments';style.textContent='.composer-tools select{border-radius:8px!important}';document.head.append(style)}
 function initLanguageLayout(){if($('language-layout'))return;let style=document.createElement('style');style.id='language-layout';style.textContent=`html[lang="zh"] body,html[lang="zh"] button,html[lang="zh"] input,html[lang="zh"] select{font-family:"Microsoft YaHei UI","Microsoft YaHei","Noto Sans SC","Segoe UI",sans-serif;letter-spacing:0}html[lang="en"] body,html[lang="en"] button,html[lang="en"] input,html[lang="en"] select,html[lang="de"] body,html[lang="de"] button,html[lang="de"] input,html[lang="de"] select{font-family:Inter,"Segoe UI",Arial,sans-serif}html[lang="zh"] .chat-subtitle,html[lang="zh"] .muted{line-height:1.55}html[lang="de"] .context-card strong,html[lang="de"] .context-drawer-head h2{letter-spacing:0}html[lang="de"] .context-card strong{padding-right:42px}.row{flex-wrap:wrap;align-items:center}.row input{min-width:min(100%,185px)}.row button{white-space:normal;line-height:1.25;min-height:34px}.context-card{min-height:78px}.context-card strong{position:relative;line-height:1.3;padding-right:50px;overflow-wrap:anywhere}.context-card em{position:absolute;right:0;top:0;float:none;white-space:nowrap}.context-card span{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.context-drawer-head h2,.context-drawer-body label,.classification-card h3{overflow-wrap:anywhere}.context-drawer-body button,.workspace-actions button{max-width:100%;overflow-wrap:anywhere}.composer-tools{flex-wrap:wrap;row-gap:5px}.composer-tools .spacer{min-width:0}.composer-tools select{min-width:170px;max-width:min(330px,100%)}html[lang="de"] .composer-tools select{max-width:285px}@media(max-width:1180px){.shell{grid-template-columns:minmax(220px,var(--left-panel-width)) 8px minmax(360px,1fr) 260px}.right{padding:13px 10px}.context-drawer{right:260px;width:min(640px,calc(100vw - 300px))}.chat-header{padding:0 20px}.composer-wrap{padding-left:20px;padding-right:20px}}@media(max-width:760px){.topbar{gap:8px;padding:0 10px}.app-brand{font-size:13px}.topbar-workspace{max-width:145px}.shell{grid-template-columns:minmax(180px,42vw) 7px minmax(0,1fr)}.chat{padding:20px 14px}.chat-header{padding:0 14px}.composer-wrap{padding:0 14px 14px}.welcome h1{font-size:26px}.composer-tools .spacer{display:none}.composer-tools select{width:100%;max-width:none}.composer-tools #custommodelrow{width:100%;flex-wrap:wrap}.composer-tools #custommodelrow input{width:100%}.context-drawer{width:100%;border-radius:0}.context-card{min-height:0}}`;document.head.append(style)}
-function initComposerControls(){if($('composertools'))return;let composer=$('composer');if(!composer)return;let tools=document.createElement('div');tools.id='composertools';tools.className='composer-tools';let note=document.createElement('span');note.id='composermodelnote';note.className='muted';let spacer=document.createElement('span');spacer.className='spacer';let model=$('model'),custom=$('custommodelrow'),modelmsg=$('modelmsg'),test=document.querySelector('button[onclick="testModel()"]');if(model)tools.append(note,model);if(custom)tools.append(custom);if(test){test.id='modeltestbutton';test.className='model-test';tools.append(test)}if(modelmsg)tools.append(modelmsg);tools.append(spacer);composer.append(tools);localizeComposerControls()}
+function initComposerControls(){if($('composertools'))return;let composer=$('composer');if(!composer)return;let tools=document.createElement('div');tools.id='composertools';tools.className='composer-tools';let note=document.createElement('span');note.id='composermodelnote';note.className='muted';let spacer=document.createElement('span');spacer.className='spacer';let model=$('model'),custom=$('custommodelrow'),modelmsg=$('modelmsg'),test=document.querySelector('button[onclick="testModel()"]');if(model)tools.append(note,model);if(custom)tools.append(custom);if(test){test.id='modeltestbutton';test.className='model-test';tools.append(test)}if(modelmsg)tools.append(modelmsg);tools.append(spacer);let mode=document.createElement('select');mode.id='answermode';for(let value of ['classification','explanation']){let option=document.createElement('option');option.value=value;option.textContent=(value==='classification'?t('answer.classification'):t('answer.explanation'));mode.append(option)}tools.append(mode);composer.append(tools);mode.setAttribute('aria-label',t('answer.mode'));localizeComposerControls()}
 function localizeComposerControls(){setI18nText($('composermodelnote'),'model.current');setI18nText($('modeltestbutton'),'model.test')}
 async function contextPickWorkspace(){try{let path=(await api('/api/pick/folder')).path||'';if(!path)return;$('workspace').value=path;$('contextworkspacepath').value=path;await setup();refreshAppChrome();closeContextDrawer()}catch(e){$('contextworkspacemsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function contextOpenWorkspace(){let path=$('contextworkspacepath').value.trim();if(!path){$('contextworkspacemsg').innerHTML='<span class="error">'+t('workspace.path_required')+'</span>';return}$('workspace').value=path;await setup();refreshAppChrome();closeContextDrawer()}
@@ -2673,6 +2734,8 @@ function renderContextGuard(){
   if(!host&&$('composer')){host=document.createElement('div');host.id='contextguard';host.className='muted';$('composer').before(host)}
   if(host)host.textContent=issue?t('context.reconfirm'):'';
   if($('question'))$('question').disabled=issue;
+  let mode=$('answermode'),revision=lastStatusSnapshot?.context_revision||'';
+  if(mode){mode.disabled=issue||!lastStatusSnapshot?.bg_context;if(mode.dataset.scope!==revision){mode.value='classification';mode.dataset.scope=revision}mode.setAttribute('aria-label',t('answer.mode'));for(let option of mode.options)option.textContent=(option.value==='classification'?t('answer.classification'):t('answer.explanation'))}
   document.querySelectorAll('button[onclick="chat()"],button[onclick="compareModels()"]').forEach(button=>button.disabled=issue);
   let draft=$('contextcodebookpath')?.value.trim(),prepared=lastCodebookProfile?.source_path||'';
   if($('contextrulemsg'))$('contextrulemsg').textContent=draft&&draft!==prepared?t('rules.pending_path',{path:prepared||'—'}):'';
@@ -2739,7 +2802,7 @@ function openContextDrawer(kind){
 }
 function openCompareDrawer(){openContextDrawer('compare')}
 function message(text,kind='assistant'){let e=document.createElement('div');e.className='message '+kind;e.textContent=text;$('chat').append(e);$('chat').scrollTop=1e9;return e}
-function classificationCard(c){let card=document.createElement('section');card.className='classification-card';let alternative=c.alternative_label?'<br>'+t('classification.alternative')+'：'+esc(c.alternative_label):'';let evidence=(c.evidence_labels||[]).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>'+t('classification.none')+'</li>';let uncertainty=(c.uncertainties||[]).filter(Boolean).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>'+t('classification.not_reported')+'</li>';let rules=(c.codebook_rule_ids||[]).map(esc).join('、')||t('classification.not_returned');let rulePages=(c.codebook_rule_pages||[]).map(esc).join('、')||t('classification.not_returned');let bgPages=(c.bg_evidence_pages||[]).map(esc).join('、')||t('classification.not_returned');card.innerHTML='<h3>'+t('classification.title')+'</h3><div class="result">'+t('classification.label')+'：<b>'+esc(c.label||'—')+'</b></div><div>'+t('classification.confidence')+'：'+esc(c.confidence||'—')+alternative+'</div><div><b>'+t('classification.rules')+'</b>：'+rules+'（'+t('classification.rule_pages')+' '+rulePages+'）</div><div><b>'+t('classification.evidence_pages')+'</b>：'+bgPages+'</div><div><b>'+t('classification.evidence')+'</b><ul>'+evidence+'</ul></div><div><b>'+t('classification.uncertainty')+'</b><ul>'+uncertainty+'</ul></div>';return card}
+function classificationCard(c){let card=document.createElement('section');card.className='classification-card';let alternative=c.alternative_label?'<br>'+t('classification.alternative')+'：'+esc(c.alternative_label):'';let evidence=(c.evidence_labels||[]).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>'+t('classification.none')+'</li>';let uncertainty=(c.uncertainties||[]).filter(Boolean).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>'+t('classification.not_reported')+'</li>';let rules=(c.codebook_rule_ids||[]).map(esc).join('、')||t('classification.not_returned');let rulePages=(c.codebook_rule_pages||[]).length?t('classification.rule_pages')+' '+c.codebook_rule_pages.map(esc).join('、'):t('classification.rule_refs')+' '+((c.codebook_rule_refs||[]).map(esc).join('、')||t('classification.not_returned'));let bgPages=(c.bg_evidence_pages||[]).map(esc).join('、')||t('classification.not_returned');card.innerHTML='<h3>'+t('classification.title')+'</h3><div class="result">'+t('classification.label')+'：<b>'+esc(c.label||'—')+'</b></div><div>'+t('classification.confidence')+'：'+esc(c.confidence||'—')+alternative+'</div><div><b>'+t('classification.rules')+'</b>：'+rules+'（'+rulePages+'）</div><div><b>'+t('classification.evidence_pages')+'</b>：'+bgPages+'</div><div><b>'+t('classification.evidence')+'</b><ul>'+evidence+'</ul></div><div><b>'+t('classification.uncertainty')+'</b><ul>'+uncertainty+'</ul></div>';return card}
 function coverageSummaryCard(summary){if(!summary?.files?.length)return null;let card=document.createElement('section');card.className='classification-card';card.style.borderColor='#475569';let rows=summary.files.map(f=>{let read=Array.isArray(f.pages_read)?f.pages_read.length:0,unread=Array.isArray(f.pages_unread)?f.pages_unread.length:0;let pages=f.pages_total?(' · '+t('coverage.read')+' '+read+'/'+f.pages_total+' '+(uiLanguage==='en'?'pages':'页')+(unread?'；'+t('coverage.unread')+' '+unread+' '+(uiLanguage==='en'?'pages':'页'):'')):'';let cache=f.cache_status==='reused'?t('coverage.reused'):t('coverage.created');return '<li><b>'+esc(f.name)+'</b>：'+esc(f.scope||t('coverage.default_scope'))+pages+' · '+cache+'</li>'}).join('');card.innerHTML='<h3>'+t('coverage.title')+'</h3><div class="muted">'+t('coverage.summary',{files:summary.files.length,reused:summary.reused_files||0,created:summary.created_files||0,calls:summary.model_calls||0})+'</div><ul>'+rows+'</ul>';return card}
 function renderStatus(s){lastStatusSnapshot=s;$('status').innerHTML=`${t('status.model')}：<b>${s.model}</b><br>${t('status.session')}：${s.session_name||'default'}<br>${t('status.code')}：${s.code_files} ${uiLanguage==='en'?'files':'文件'}<br>${t('status.documents')}：${s.documents} ${uiLanguage==='en'?'items':'个'}<br>${t('status.requests')}：${s.requests}<br>${t('status.tokens')}：${s.input_tokens} / ${s.output_tokens}<br>${t('status.cost')}：${s.cost}<br>${s.bg_context?'<span class="ok">'+t('status.assembly_mode')+'：'+s.bg_context.codebook_name+'</span>':t('status.normal_mode')}`;refreshAppChrome();refreshContextPanel()}
 function renderUsageDetail(u,model){if(!u)return;lastUsageSnapshot={usage:u,model};$('usagedetail').innerHTML=`实际模型：<b>${esc(model||'—')}</b><br>输入 / 输出 / 总计：${u.input} / ${u.output} / ${u.total}<br>推理：${u.reasoning||0} ｜ Gemini thinking：${u.gemini_thinking||0}<br>Claude 缓存读 / 写：${u.cache_read||0} / ${u.cache_write||0}<br>本轮估算：${u.cost_usd==null?t('usage.unknown'):Number(u.cost_usd).toFixed(6)}`}
@@ -2939,7 +3002,7 @@ async function compareModels(){if(busy)return;if(lastStatusSnapshot?.context_iss
 function processingCard(){let card=document.createElement('section');card.className='message assistant';card.style.border='1px solid #334155';card.innerHTML='<b>'+rt('model.processing')+'</b><div class="muted" data-process-text>'+rt('model.connecting')+'</div><div style="height:7px;background:#0b1220;border-radius:8px;overflow:hidden;margin-top:9px"><div data-process-bar style="height:100%;width:4%;background:#38bdf8;transition:width .25s ease"></div></div>';$('chat').append(card);return card}
 function updateProcessing(card,event){let text=card.querySelector('[data-process-text]'),bar=card.querySelector('[data-process-bar]');text.textContent=event.text||rt('model.waiting');if(typeof event.percent==='number')bar.style.width=Math.max(4,Math.min(100,event.percent))+'%';if(event.phase==='complete'){card.style.borderColor='#22c55e';bar.style.background='#22c55e'}}
 function showChatResult(x){message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>'+t('model.reasoning')+'</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${esc(c.path)}</b><br>${esc(c.reason)}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button data-plan-id="'+escAttr(x.plan_id||'')+'" onclick="apply(this.dataset.planId,this)">'+t('changes.apply')+'</button>':t('changes.none');if(x.changes?.length){let review=$('changes').cloneNode(true);review.removeAttribute('id');review.className='message assistant change-plan';$('chat').append(review)}$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">'+t('export.assembly')+'</button>':t('export.assembly_unavailable');renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}
-async function chat(){if(busy||!$('question').value.trim())return;if(lastStatusSnapshot?.context_issue){message(t('context.reconfirm'));return;}if(materialDraftDirty){message(t('materials.reconfirm'));return;}busy=true;let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');let wait=processingCard(),buffer='',result=null;try{let response;try{response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})})}catch(error){throw Error(rt('model.connection_failed')+(error?.message?` ${error.message}`:''))}if(!response.ok){await readApiResponse(response)}let reader=response.body.getReader(),decoder=new TextDecoder();while(true){let part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});let blocks=buffer.split('\n\n');buffer=blocks.pop();for(let block of blocks){let line=block.split('\n').find(item=>item.startsWith('data: '));if(!line)continue;let event=JSON.parse(line.slice(6));if(event.type==='progress')updateProcessing(wait,event);else if(event.type==='result')result=event.data;else if(event.type==='error')throw Error(event.message||rt('model.failed'))}}if(!result)throw Error(t('api.no_result'));updateProcessing(wait,{phase:'complete',text:rt('model.complete'),percent:100});showChatResult(result)}catch(e){wait.querySelector('[data-process-text]').textContent=rt('model.failed')+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
+async function chat(){if(busy||!$('question').value.trim())return;if(lastStatusSnapshot?.context_issue){message(t('context.reconfirm'));return;}if(materialDraftDirty){message(t('materials.reconfirm'));return;}busy=true;let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');let wait=processingCard(),buffer='',result=null;try{let response;try{response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,require_classification:$('answermode')?.value!=='explanation'})})}catch(error){throw Error(rt('model.connection_failed')+(error?.message?` ${error.message}`:''))}if(!response.ok){await readApiResponse(response)}let reader=response.body.getReader(),decoder=new TextDecoder();while(true){let part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});let blocks=buffer.split('\n\n');buffer=blocks.pop();for(let block of blocks){let line=block.split('\n').find(item=>item.startsWith('data: '));if(!line)continue;let event=JSON.parse(line.slice(6));if(event.type==='progress')updateProcessing(wait,event);else if(event.type==='result')result=event.data;else if(event.type==='error')throw Error(event.message||rt('model.failed'))}}if(!result)throw Error(t('api.no_result'));updateProcessing(wait,{phase:'complete',text:rt('model.complete'),percent:100});showChatResult(result)}catch(e){wait.querySelector('[data-process-text]').textContent=rt('model.failed')+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
 async function exportSession(){try{let x=await api('/api/export/session',{method:'POST'});$('sessionexport').innerHTML='<span class="ok">'+esc(t('export.complete',{path:x.path}))+'</span>'}catch(e){$('sessionexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function exportBgAnalysis(){try{let x=await api('/api/export/bg-analysis',{method:'POST'});$('analysisexport').innerHTML='<span class="ok">'+esc(t('export.complete',{path:x.path}))+'</span>'}catch(e){$('analysisexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function esc(s){let e=document.createElement('div');e.textContent=s;return e.innerHTML}function escAttr(s){return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;')}async function apply(planId,button){let review=button?.closest('.change-plan')||$('changes');if(!confirm(t('changes.confirm')))return;try{let x=await api('/api/apply',{method:'POST',body:JSON.stringify({confirmed:true,plan_id:planId})});review.innerHTML='<span class="ok">'+t('apply.complete',{count:x.applied})+'</span>';message(t('apply.message',{count:x.applied}))}catch(e){review.innerHTML='<span class="error">'+esc(e.message)+'</span>'}}

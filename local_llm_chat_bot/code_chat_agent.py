@@ -559,10 +559,31 @@ def ensure_relative(path: str) -> str:
     return item.as_posix()
 
 
+def classification_manifest(evidence, context):
+    context = context or {}
+    source_ids = set(context.get("source_ids", []))
+    codebook_id = context.get("codebook_id")
+    bg_labels, rule_labels = [], []
+    for item in evidence:
+        label = item.get("label")
+        if not isinstance(label, str) or not label:
+            continue
+        is_rule = item.get("id") == codebook_id or item.get("id") == "locked-codebook-page"
+        if is_rule and codebook_id:
+            rule_labels.append(label)
+        elif not context or item.get("id") in source_ids:
+            bg_labels.append(label)
+    return {
+        "bg_labels": list(dict.fromkeys(bg_labels)),
+        "codebook_labels": list(dict.fromkeys(rule_labels)),
+        "codebook_source_kind": "pdf" if Path(str(context.get("codebook_path", ""))).suffix.lower() == ".pdf" else "nonpaged",
+    }
+
+
 def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], full_files: dict[str, str] | None = None,
                document_snippets: list[dict] | None = None, bg_context: dict | None = None,
                coverage_summaries: list[dict] | None = None, bg_dossier: dict | None = None,
-               response_language: str = "zh"):
+               response_language: str = "zh", require_classification: bool = True):
     recent = "\n".join(f"{turn['role']}: {turn['content']}" for turn in state.data["history"][-HISTORY_MESSAGES_PER_REQUEST:]) or "(new conversation)"
     memories = state.search_memory(question)
     memory_text = "\n".join(f"- [{item['id']}] {item['content']}" for item in memories) or "(No relevant confirmed long-term memory.)"
@@ -582,18 +603,24 @@ def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], ful
     if bg_context:
         locked_profile = bg_context.get("locked_profile") or {}
         profile_text = json.dumps(locked_profile, ensure_ascii=False) if locked_profile else "(No locked structured profile available.)"
+        manifest = json.dumps(classification_manifest(document_snippets or [], bg_context), ensure_ascii=False)
+        response_mode = "CLASSIFICATION REQUIRED: return a complete classification object." if require_classification else "EXPLANATION MODE: classification may be null; any non-null classification must meet every validation rule."
         bg_instruction = f"""
 BG CLASSIFICATION MODE (active):
 - Codebook: {bg_context.get('codebook_name', 'unknown')}
 - Baugruppe folder: {bg_context.get('folder', 'unknown')}
 - Locked Codebook profile (user-confirmed; use this as the primary rule source): {profile_text}
+- Classification reference manifest: {manifest}
+- {response_mode}
 - Give the full detailed classification format required by the system prompt.
 - Treat the Codebook as the rule source. Cite evidence labels exactly as supplied.
 - A source marked visual/scanned may require visual inspection; do not infer text that was not supplied.
-- When the user asks for a classification, include a `classification` object in the JSON action:
-  {{"label": "exact Codebook class name", "confidence": "high|medium|low", "alternative_label": "exact Codebook class name or empty", "codebook_rule_ids": ["exact rule id from the locked profile"], "codebook_rule_pages": [1], "evidence_labels": ["exact supplied document label", "..."], "bg_evidence_pages": ["file name — page 2"], "uncertainties": ["concise limitation or empty list"]}}.
+- In CLASSIFICATION REQUIRED mode include this `classification` object; in EXPLANATION MODE it may be null:
+  {{"label": "exact Codebook class name", "confidence": "high|medium|low", "alternative_label": "exact Codebook class name or empty", "codebook_rule_ids": ["exact rule id from the locked profile"], "codebook_rule_pages": [], "codebook_rule_refs": ["exact codebook_labels entry"], "evidence_labels": ["exact supplied document label"], "bg_evidence_pages": ["exact bg_labels entry"], "uncertainties": []}}.
 - Copy the class and evidence-label spelling exactly. Use only evidence labels supplied in this prompt. A non-empty evidence_labels list is mandatory for a classification.
 - A non-empty codebook_rule_ids list is mandatory; it must name the actual locked rule(s) used for the decision. Keep Codebook-rule pages and BG-evidence pages separate.
+- For a PDF Codebook, codebook_rule_pages must contain actual positive integer pages of the cited rules. For DOCX/TXT or other nonpaged rules, leave codebook_rule_pages empty and cite actual supplied Codebook section/chunk labels in codebook_rule_refs. Never invent physical pages for nonpaged text.
+- bg_evidence_pages must copy supplied BG labels, including their actual page/sheet/row/chunk range. Codebook labels are not BG evidence.
 """
     language_name = {"zh": "Chinese", "en": "English", "de": "German"}.get(str(response_language).lower(), "Chinese")
     return f"""Workspace: {state.workspace}

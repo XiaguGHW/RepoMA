@@ -2,6 +2,10 @@
   "messages": {
     "zh": {
       "workspace.title": "工作区",
+      "answer.mode": "回答模式",
+      "answer.classification": "固定规则分类",
+      "answer.explanation": "解释性追问",
+      "classification.rule_refs": "章节/文本块",
       "context.reconfirm": "请重新确认所选材料和已锁定的分类规则后再继续。",
       "rules.pending_path": "此路径尚未准备；已准备的规则路径：{path}",
       "workspace.description": "工作区用于保存本地会话、索引、材料缓存和分类规则状态；不会写入所选装配体的原始文件夹。",
@@ -348,6 +352,10 @@
     },
     "en": {
       "workspace.title": "Workspace",
+      "answer.mode": "Response mode",
+      "answer.classification": "Fixed-rule classification",
+      "answer.explanation": "Explanation follow-up",
+      "classification.rule_refs": "Section/chunk references",
       "context.reconfirm": "Confirm the selected materials and locked classification rules again to continue.",
       "rules.pending_path": "This path has not been prepared. Prepared rules: {path}",
       "workspace.description": "The workspace stores local chats, indexes, material cache and rule status; it does not modify the selected assembly source folder.",
@@ -694,6 +702,10 @@
     },
     "de": {
       "workspace.title": "Arbeitsbereich",
+      "answer.mode": "Antwortmodus",
+      "answer.classification": "Klassifikation nach festen Regeln",
+      "answer.explanation": "Erläuternde Rückfrage",
+      "classification.rule_refs": "Abschnitts-/Textblockverweise",
       "context.reconfirm": "Bestätigen Sie die ausgewählten Unterlagen und die gesperrten Klassifikationsregeln erneut.",
       "rules.pending_path": "Dieser Pfad wurde noch nicht vorbereitet. Vorbereitete Regeln: {path}",
       "workspace.description": "Der Arbeitsbereich speichert lokale Chats, Indizes, Material-Cache und Regelstatus; der gewählte Quellordner der Baugruppe wird nicht verändert.",
