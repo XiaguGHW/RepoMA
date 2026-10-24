@@ -2173,7 +2173,7 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 <main class="main"><div class="chat-header"><div><div class="chat-title">Baugruppen 分析</div><div class="chat-subtitle">基于当前分类规则与已选材料</div></div><div class="header-spacer"></div><button class="header-icon" title="多模型对比" onclick="openCompareDrawer()">⇄</button><button class="header-icon" title="导出会话" onclick="exportSession()">⇩</button></div><div class="chat" id="chat"><section class="welcome"><div class="eyebrow">Baugruppen Intelligence</div><h1>你想进行什么分析？</h1><p>选择单一文件或一个 BG 文件夹。程序会先在本地读取、提取文字与结构，再将必要信息交给模型。</p><div class="row" style="margin-top:22px"><button onclick="openContextDrawer('materials')">▣&nbsp; 选择 BG 文件夹</button><button class="ghost" onclick="openContextDrawer('rules')">▤&nbsp; 管理分类规则</button></div></section></div><div class="composer-wrap"><div class="composer" id="composer"><input id="question" placeholder="问代码，或根据分类规则判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button></div></div></main>
 <aside class="side right" id="contextpanel"><div class="context-title">当前上下文</div><button class="context-card" onclick="openContextDrawer('rules')"><strong>分类规则 <em>管理 ›</em></strong><span id="context-rule-summary">尚未选择分类规则文件</span></button><button class="context-card" onclick="openContextDrawer('materials')"><strong>本次材料 <em>管理 ›</em></strong><span id="context-material-summary">尚未选择文件或 BG 文件夹</span></button><button class="context-card" onclick="openContextDrawer('scan')"><strong>扫描状态 <em>查看 ›</em></strong><span id="context-scan-summary">等待选择材料</span></button><button class="context-card" onclick="openContextDrawer('audit')"><strong>材料缓存与审计 <em>查看 ›</em></strong><span id="context-audit-summary">尚无本地读取或模型缓存</span></button><div class="context-store"><div id="status" class="card muted">尚未打开工作区</div><div id="sessionexport" class="card"><button class="ghost" onclick="exportSession()">导出完整会话</button></div><div id="usagedetail" class="card muted">完成一次请求后显示。</div><div id="analysisexport" class="card muted">仅在 Baugruppe 分析完成后可导出。</div><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><div id="changes" class="list">无</div></div></aside></div>
 <script>
-const $=id=>document.getElementById(id);let busy=false,lastQuestion='',compareSlots=[{value:'claude-haiku-5-5',custom:''}],savedTargetSelection=new Set(),treeRestoreNote='',lastScanReport=null,scannedSelection='',uiLanguage='zh',activeContextDrawer=null,lastStatusSnapshot=null,lastUsageSnapshot=null,lastCodebookProfile=null,lastCodebookWorkspaceProfile=null,lastDocumentsSnapshot=null,lastCoverageReport=null,lastCacheAudit=null,lastSessionRows=[];
+const $=id=>document.getElementById(id);let busy=false,lastQuestion='',compareSlots=[{value:'claude-haiku-5-5',custom:''}],savedTargetSelection=new Set(),treeRestoreNote='',lastScanReport=null,scannedSelection='',uiLanguage='zh',activeContextDrawer=null,lastStatusSnapshot=null,lastUsageSnapshot=null,lastCodebookProfile=null,lastCodebookWorkspaceProfile=null,lastDocumentsSnapshot=null,lastCoverageReport=null,lastCacheAudit=null,lastSessionRows=[],lastTargetTreePayload=null;
 // Single source of translated copy. Compatibility adapters are temporary;
 // new UI components must use t('area.item', parameters).
 const CATALOG=__WORKBENCH_I18N_JSON__;
@@ -2247,6 +2247,8 @@ function rerenderLanguageSensitiveUI(){
   if(lastUsageSnapshot)renderUsageDetail(lastUsageSnapshot.usage,lastUsageSnapshot.model);
   if(lastCodebookProfile)renderCodebookStatus(lastCodebookProfile);
   if(lastDocumentsSnapshot)renderDocuments(lastDocumentsSnapshot);
+  if(lastTargetTreePayload){captureTargetTreeSelection();renderTargetTreeForLanguage(lastTargetTreePayload);}
+  localizeMaterialFlowControls();
   if(lastCoverageReport)renderCoverageReport(lastCoverageReport);
   if(lastScanReport){setScanReportAvailable(lastScanReport);if($('scanbackdrop')?.classList.contains('open'))renderScanDrawer(lastScanReport)}
   if(lastCacheAudit)renderCacheAudit(lastCacheAudit);
@@ -2445,6 +2447,79 @@ function refreshAllFolderStates(){[...$('targettree').querySelectorAll('details'
 function recommendedTreePaths(node,paths=[]){if(node.type==='file'){if(node.recommended)paths.push(node.relative);return paths}(node.children||[]).forEach(child=>recommendedTreePaths(child,paths));return paths}
 function makeTreeNode(node,depth=0){if(node.type==='folder'){let details=document.createElement('details');details.open=depth<1;let summary=document.createElement('summary');let box=document.createElement('input');box.type='checkbox';box.className='tree-folder';box.addEventListener('click',e=>e.stopPropagation());box.addEventListener('change',()=>{details.querySelectorAll('input.tree-file:not(:disabled)').forEach(x=>x.checked=box.checked);refreshAllFolderStates()});let label=document.createElement('label');label.textContent='📁 '+node.name;summary.append(box,label);details.append(summary);let children=document.createElement('div');children.className='tree-children';node.children.forEach(child=>children.append(makeTreeNode(child,depth+1)));details.append(children);return details}let row=document.createElement('div');row.className='tree-file'+(node.supported?'':' unsupported');let box=document.createElement('input');box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.checked=!!node.supported&&savedTargetSelection.has(node.relative);box.disabled=!node.supported;box.addEventListener('change',refreshAllFolderStates);let label=document.createElement('label');let role=node.material_role_label?` · ${node.material_role_label}`:'';let hint=node.supported&&!node.recommended?' · 默认不选':'';label.textContent='📄 '+node.name+(node.supported?` · ${(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1)} MB${role}${hint}`:` · 不支持${role}`);row.append(box,label);return row}
 async function loadTargetTree(){let target=$('targetpath').value.trim();if(!target){$('treestatus').innerHTML='<span class="error">请先选择或粘贴一个 BG 文件夹路径。</span>';return}try{$('treestatus').textContent='正在仅读取文件夹结构…';let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(x.saved_selection||[]);let notes=[];if(savedTargetSelection.size)notes.push(`已恢复上次的 ${savedTargetSelection.size} 项选择。`);else{savedTargetSelection=new Set(recommendedTreePaths(x.tree));notes.push(`已按资料类型默认选择 ${savedTargetSelection.size} 项原始资料；派生重复资料默认未选。`)}if(x.changed_saved_files)notes.push(`${x.changed_saved_files} 个已选文件内容已变化。`);if(x.missing_saved_files)notes.push(`${x.missing_saved_files} 个原选文件不存在，未恢复。`);treeRestoreNote=notes.join(' ');let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates();if(x.truncated)$('treestatus').innerHTML='<span class="error">文件树超过 5000 项，已截断；请进入更具体的 BG 文件夹。</span>'}catch(e){$('treestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+// The server returns data and stable identifiers; the browser owns localized
+// presentation.  Keeping the payload lets a language switch redraw the same
+// selection without another folder read or a change to selection semantics.
+function localizeMaterialFlowControls(){
+  let confirm=$('confirmmaterials'),report=$('viewscanreport'),backdrop=$('scanbackdrop');
+  if(confirm&&!busy)confirm.textContent=t('materials.confirm_selected');
+  if(report)report.textContent=t('scan.report');
+  if(backdrop){
+    backdrop.setAttribute('aria-label',t('scan.report.title'));
+    let title=backdrop.querySelector('.scan-drawer-head b'),note=backdrop.querySelector('.scan-drawer-head .muted');
+    if(title)title.textContent=t('scan.report.title');
+    if(note)note.textContent=t('scan.report.local');
+  }
+}
+function updateMaterialFlowButtonsForLanguage(){
+  let confirm=$('confirmmaterials'),report=$('viewscanreport');
+  if(confirm)confirm.disabled=treeFileCount()===0;
+  if(report){report.disabled=!lastScanReport;report.textContent=t('scan.report')}
+}
+function setScanReportAvailableForLanguage(report){lastScanReport=report||null;updateMaterialFlowButtonsForLanguage()}
+function clearTargetTreeForLanguage(){
+  savedTargetSelection=new Set();treeRestoreNote='';scannedSelection='';lastTargetTreePayload=null;setScanReportAvailableForLanguage(null);
+  $('targettree').textContent=t('tree.placeholder');$('targettree').classList.add('muted');$('treestatus').textContent='';updateMaterialFlowButtonsForLanguage();
+}
+function updateTreeStatusForLanguage(){
+  let count=treeFileCount(),signature=selectedTargetPaths().sort().join('|');
+  if(scannedSelection&&signature!==scannedSelection)setScanReportAvailableForLanguage(null);
+  $('treestatus').textContent=(count?t('tree.selected',{count}):t('tree.none'))+(treeRestoreNote?' '+treeRestoreNote:'');
+  updateMaterialFlowButtonsForLanguage();
+}
+function makeTreeNodeForLanguage(node,depth=0){
+  if(node.type==='folder'){
+    let details=document.createElement('details');details.open=depth<1;let summary=document.createElement('summary');let box=document.createElement('input');
+    box.type='checkbox';box.className='tree-folder';box.addEventListener('click',e=>e.stopPropagation());box.addEventListener('change',()=>{details.querySelectorAll('input.tree-file:not(:disabled)').forEach(x=>x.checked=box.checked);refreshAllFolderStates()});
+    let label=document.createElement('label');label.textContent='📁 '+node.name;summary.append(box,label);details.append(summary);
+    let children=document.createElement('div');children.className='tree-children';(node.children||[]).forEach(child=>children.append(makeTreeNodeForLanguage(child,depth+1)));details.append(children);return details;
+  }
+  let row=document.createElement('div');row.className='tree-file'+(node.supported?'':' unsupported');let box=document.createElement('input');
+  box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.checked=!!node.supported&&savedTargetSelection.has(node.relative);box.disabled=!node.supported;box.addEventListener('change',refreshAllFolderStates);
+  let label=document.createElement('label'),role=node.material_role_label?` · ${node.material_role_label}`:'',size=(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1);
+  label.textContent='📄 '+node.name+(node.supported?` · ${size} MB${role}${node.recommended?'':' · '+t('tree.not_recommended')}`:` · ${t('tree.unsupported')}${role}`);row.append(box,label);return row;
+}
+function renderTargetTreeForLanguage(x){
+  lastTargetTreePayload=x;let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNodeForLanguage(x.tree));refreshAllFolderStates();
+  if(x.truncated)$('treestatus').innerHTML='<span class="error">'+t('tree.truncated')+'</span>';
+}
+function captureTargetTreeSelection(){
+  if(!lastTargetTreePayload?.tree)return;
+  let selected=new Set(selectedTargetPaths()),relative=new Set();
+  (function visit(node){if(node.type==='file'){if(selected.has(node.path))relative.add(node.relative);return}(node.children||[]).forEach(visit)})(lastTargetTreePayload.tree);
+  savedTargetSelection=relative;
+}
+async function loadTargetTreeForLanguage(){
+  let target=$('targetpath').value.trim();
+  if(!target){$('treestatus').innerHTML='<span class="error">'+t('tree.path_required')+'</span>';return}
+  try{
+    $('treestatus').textContent=t('tree.loading');let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(x.saved_selection||[]);
+    let notes=[];
+    if(savedTargetSelection.size)notes.push(t('tree.restored',{count:savedTargetSelection.size}));
+    else{savedTargetSelection=new Set(recommendedTreePaths(x.tree));notes.push(t('tree.default_selection',{count:savedTargetSelection.size}));}
+    if(x.changed_saved_files)notes.push(t('tree.changed',{count:x.changed_saved_files}));
+    if(x.missing_saved_files)notes.push(t('tree.missing',{count:x.missing_saved_files}));
+    treeRestoreNote=notes.join(' ');renderTargetTreeForLanguage(x);
+  }catch(e){$('treestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}
+}
+// Compatibility assignments ensure every old event handler uses the localized
+// renderers while preserving the original public function names.
+updateMaterialFlowButtons=updateMaterialFlowButtonsForLanguage;
+setScanReportAvailable=setScanReportAvailableForLanguage;
+clearTargetTree=clearTargetTreeForLanguage;
+updateTreeStatus=updateTreeStatusForLanguage;
+makeTreeNode=makeTreeNodeForLanguage;
+loadTargetTree=loadTargetTreeForLanguage;
 function selectedTargetPaths(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].map(x=>x.dataset.path)}
 async function analyzeTarget(){let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent=rt('scan.reading')}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error('请先在文件树中勾选至少一个材料。');let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');renderStatus(x.status);$('bgstatus').textContent=x.classification?`已确认 ${x.target_kind}中的 ${x.sources} 个选定材料；Codebook 分类已就绪。`:`已确认 ${x.target_kind}中的 ${x.sources} 个选定材料；可直接开始普通材料问答。`;renderScanReport(x);$('coveragestatus').textContent=rt('material.updated');loadDocs();loadCacheAudit()}catch(e){$('bgstatus').innerHTML='<span class="error">'+e.message+'</span>'}finally{if(confirm)confirm.textContent=tr('确认选中材料');updateMaterialFlowButtons()}}
 async function prepareCoverage(full=false){if(busy)return;busy=true;$('coveragestatus').textContent=rt(full?'coverage.preparing_full':'coverage.preparing');try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full})});renderCoverageReport(x)}catch(e){$('coveragestatus').innerHTML='<span class="error">'+esc(rt('coverage.failed')+e.message)+'</span>'}finally{busy=false}}
