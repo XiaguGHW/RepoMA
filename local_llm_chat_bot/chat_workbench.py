@@ -2313,7 +2313,12 @@ function renderDiagnostics(report){
   let ready=report.overall==='ready';
   let rows=(report.checks||[]).map(check=>{
     let marker=check.ok===true?'<span class="ok">✓</span>':check.required===false?'<span class="muted">△</span>':'<span class="error">×</span>';
-    return '<div class="card"><b>'+marker+' '+esc(check.label||'—')+'</b><br><span class="muted">'+esc(check.detail||'—')+'</span></div>';
+    let key='diagnostic.'+String(check.id||''),label=(I18N[uiLanguage]||I18N.zh)[key]?t(key):String(check.label||'—');
+    // The endpoint deliberately remains language-neutral.  Convert its stable
+    // status fields at presentation time; raw details stay visible only in ZH
+    // or as a technical fallback for unknown future checks.
+    let detail=uiLanguage==='zh'?String(check.detail||'—'):check.ok===true?t('diagnostic.available'):check.ok===null?t('diagnostic.not_tested'):t('diagnostic.not_available');
+    return '<div class="card"><b>'+marker+' '+esc(label)+'</b><br><span class="muted">'+esc(detail)+'</span></div>';
   }).join('');
   host.innerHTML='<div class="'+(ready?'ok':'error')+'"><b>'+t(ready?'audit.diagnostics_ready':'audit.diagnostics_attention')+'</b></div>'+rows;
 }
