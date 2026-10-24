@@ -6,6 +6,7 @@ files, credentials and session data stay on the computer that starts it.
 from __future__ import annotations
 
 import difflib
+import asyncio
 import copy
 import hashlib
 import importlib.util
@@ -14,9 +15,11 @@ import os
 import re
 import shutil
 import threading
+import time
 import uuid
 from functools import wraps
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -34,6 +37,8 @@ from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relati
 from local_document_library import (LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS,
                                     material_is_recommended, material_role, material_role_label)
 from llm_connector_with_prompt_caching import LLMConnector, farm_base_url
+from request_runtime import (RequestControl, RequestStopped, RequestCancelled, RequestTimedOut,
+                             ResponseLimitExceeded, AnswerPreview, looks_like_action)
 
 
 app = FastAPI(title="Bosch Local Workbench", docs_url=None, redoc_url=None)
@@ -43,6 +48,8 @@ ACTIVE: dict[str, Any] = {}
 # addition to LOCK so a second browser action cannot replace ACTIVE while that
 # request is queued for the lock or is using a captured session context.
 MODEL_WORK_IN_PROGRESS = threading.Event()
+CHAT_TASK_GUARD = threading.Lock()
+CHAT_TASK: dict[str, Any] = {}
 
 # Retain existing local settings/sessions made by early workbench releases,
 # while never sending their obsolete dotted Farm IDs to the endpoint again.
@@ -337,6 +344,7 @@ class CodebookPrepareRequest(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    request_id: str = Field(default="", pattern=r"^(?:[a-f0-9]{32})?$")
     question: str = Field(max_length=50000)
     require_classification: bool = True
 
@@ -379,6 +387,8 @@ def begin_model_work() -> dict[str, Any]:
         if MODEL_WORK_IN_PROGRESS.is_set():
             raise HTTPException(409, "已有模型请求正在处理中，请等待其完成。")
         data = dict(session())
+        data["request_control"] = RequestControl()
+        data["cancel_event"] = data["request_control"].cancel_event
         MODEL_WORK_IN_PROGRESS.set()
         return data
     finally:
@@ -619,12 +629,20 @@ CODEBOOK_JSON_REPAIR_SYSTEM = """Return ONLY one complete, valid JSON object. Do
 
 def accounted_model_call(data, connector, *args, usage_records=None, **kwargs):
     """Record dispatches before response validation; failed output still costs."""
+    check_request(data)
     connector.last_usage = None
     connector.last_response_model = None
     connector.usage_attempts = None
+    old_control = getattr(connector, "request_control", None)
+    connector.request_control = data.get("request_control")
     try:
-        return connector.ask_about_files(*args, **kwargs)
+        result = connector.ask_about_files(*args, **kwargs)
+        check_request(data)
+        if data.get("request_control"):
+            data["request_control"].limit(len(result))
+        return result
     finally:
+        connector.request_control = old_control
         attempts = connector.usage_attempts
         if attempts is None:  # Custom/test connector with no transport ledger.
             attempts = [{"usage": connector.get_last_token_usage(),
@@ -637,6 +655,31 @@ def accounted_model_call(data, connector, *args, usage_records=None, **kwargs):
             usage["cost_usd"] = estimate["cost_usd"] if estimate else None
             if usage_records is not None:
                 usage_records.append(usage)
+
+
+def check_request(data):
+    control = data.get("request_control")
+    if control:
+        control.check()
+    elif data.get("cancel_event") and data["cancel_event"].is_set():
+        raise RequestCancelled("Request cancelled")
+
+
+@contextmanager
+def commit_answer(data):
+    control = data.get("request_control")
+    if control:
+        with control.commit():
+            yield
+    else:
+        check_request(data)
+        yield
+
+
+def check_answer_size(data, answer):
+    control = data.get("request_control")
+    if control and len(answer) > control.policy.max_answer_chars:
+        raise ResponseLimitExceeded("Answer exceeds the configured size limit")
 
 
 def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data, usage_records=None) -> tuple[dict, dict | None]:
@@ -1087,6 +1130,8 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                     if usage_records is not None: usage_records.extend(attempts)
                 raw = require_model_success(raw, f"文件 {document['name']} 的文本片段读取")
                 notes.append(raw.strip())
+            except RequestStopped:
+                raise
             except Exception as exc:
                 failures.append(f"组 {number}: {exc}")
         if notes and len(notes) > 1:
@@ -1101,6 +1146,8 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                     if usage_records is not None: usage_records.extend(attempts)
                 raw = require_model_success(raw, f"文件 {document['name']} 的摘要汇总")
                 summary = raw.strip()
+            except RequestStopped:
+                raise
             except Exception as exc:
                 summary = "\n\n".join(notes); failures.append(f"汇总: {exc}")
         else:
@@ -1369,12 +1416,25 @@ BG evidence must use BG labels, not Codebook labels. Do not add commentary outsi
 """
 
 
+def complete_model_action(raw):
+    """Require the whole action, rather than extracting a complete inner object."""
+    text = raw.strip()
+    if text.startswith("```"):
+        fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.I | re.S)
+        if not fenced:
+            raise ValueError("Incomplete fenced JSON action")
+        text = fenced.group(1)
+    if not isinstance(json.loads(text), dict):
+        raise ValueError("Model action must be one complete object")
+    return parse_json(text)
+
+
 def validated_model_action(raw, prompt, *, evidence, scope, validation, repair, notices):
     """One validator for every round; one repair budget for the entire answer."""
     while True:
         action = None
         try:
-            action = parse_json(raw)
+            action = complete_model_action(raw)
             if action.get("classification") is not None:
                 validation["required"] = True
             problem = validate_classification(
@@ -1404,8 +1464,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     ensure_current_sources(data)
     invalidate_pending(data)
     def report(phase: str, text: str, percent: int | None = None) -> None:
-        if data.get("cancel_event") and data["cancel_event"].is_set():
-            raise RuntimeError("Request cancelled; no changes applied")
+        check_request(data)
         if progress:
             progress(phase, text, percent)
 
@@ -1469,6 +1528,8 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
             elif dossier:
                 notices.append("已复用 BG 综合证据档案；本轮未重复发送全部逐文件摘要。")
             report("dossier", progress_copy(data, "BG 综合证据档案已准备完成。", "BG comprehensive evidence dossier ready.", "Das BG-Gesamtevidenzdossier ist bereit."), 80)
+        except RequestStopped:
+            raise
         except Exception as exc:
             notices.append(f"BG 综合证据档案未能生成，已回退为逐文件摘要：{exc}")
             dossier = None
@@ -1477,16 +1538,37 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
                               response_language=data.get("language", "zh"), require_classification=classification_request)
     report("model", progress_copy(data, f"正在连接 {data['model']} 并提交问题…", f"Connecting to {data['model']} and submitting the question…", f"Verbindung zu {data['model']} wird hergestellt und die Frage übermittelt…"), 86)
     model_started = False
+    preview = AnswerPreview()
     def model_events(kind: str, text: str):
         nonlocal model_started
         events(kind, text)
+        check_request(data)
+        if kind == "content":
+            delta = preview.feed(text)
+            if delta and data.get("answer_events"):
+                data["answer_events"]({"type": "answer_delta", "text": delta})
         if not model_started:
             model_started = True
             report("model", progress_copy(data, "模型正在生成回答…", "The model is generating its answer…", "Das Modell erstellt die Antwort…"), 92)
 
+    def answer_call(prompt, tokens):
+        nonlocal preview
+        check_request(data)
+        limit = data["request_control"].policy.max_answer_chars if data.get("request_control") else 131072
+        preview = AnswerPreview(limit)
+        if data.get("answer_events"):
+            data["answer_events"]({"type": "answer_reset"})
+        raw_response = accounted_model_call(data, llm, visuals, prompt, SYSTEM,
+                                            {"maxOutputTokens": tokens, "temperature": 0}, stream=True,
+                                            event_handler=model_events, usage_records=usage_records)
+        # Non-streaming providers cannot emit early chunks; still use the same
+        # safe answer decoder, without replaying chunks from streaming providers.
+        if not preview.started and not preview.disabled:
+            model_events("content", raw_response)
+        return raw_response
+
     report("model", progress_copy(data, "正在等待模型输出…", "Waiting for model output…", "Warte auf die Modellausgabe…"), 90)
-    raw = accounted_model_call(data, llm, visuals, model_prompt,
-                               SYSTEM, {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=model_events, usage_records=usage_records)
+    raw = answer_call(model_prompt, 4096)
     raw = require_model_success(raw, "模型回答请求")
     validation = {"required": classification_request, "repairs": 0}
     scope = classification_scope(documents, bg_context)
@@ -1494,28 +1576,35 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     def repair_classification(repair_prompt):
         report("validation", progress_copy(data, "正在修复分类结构或引用…", "Repairing classification structure or references…",
                                            "Klassifikationsstruktur oder Quellenverweise werden korrigiert…"), 96)
-        repaired = accounted_model_call(data, llm, visuals, repair_prompt, SYSTEM,
-                                      {"maxOutputTokens": 4096, "temperature": 0}, stream=True, event_handler=model_events, usage_records=usage_records)
+        repaired = answer_call(repair_prompt, 4096)
         repaired = require_model_success(repaired, "分类输出修复请求")
         return repaired
 
     def validated_action(raw_response: str, request_prompt: str) -> dict:
-        return validated_model_action(raw_response, request_prompt, evidence=evidence, scope=scope,
-                                      validation=validation, repair=repair_classification, notices=notices)
+        result = validated_model_action(raw_response, request_prompt, evidence=evidence, scope=scope,
+                                        validation=validation, repair=repair_classification, notices=notices)
+        check_answer_size(data, result["answer"])
+        return result
 
     try:
         report("validation", progress_copy(data, "正在核验模型分类输出…", "Validating the model classification output…", "Die Klassifikationsausgabe des Modells wird geprüft…"), 96)
         action = validated_action(raw, model_prompt)
+    except RequestStopped:
+        raise
     except Exception as exc:
         if bg_context or isinstance(exc, ClassificationValidationError):
             raise ClassificationValidationError(str(exc)) from exc
+        if looks_like_action(raw):
+            raise ValueError("Incomplete or invalid action JSON; no answer committed") from exc
         # Some Bosch Farm models return a normal natural-language answer despite
         # the code-action schema. A read-only question must remain useful:
         # show that answer and never treat it as a file modification.
         answer = raw.strip() or "模型没有返回可显示的文字。"
-        title_session_from_question(state, question)
-        state.add_turn("user", question)
-        state.add_turn("assistant", answer)
+        check_answer_size(data, answer)
+        with commit_answer(data):
+            title_session_from_question(state, question)
+            state.add_turn("user", question)
+            state.add_turn("assistant", answer)
         if auto_prepared:
             notices.insert(0, f"已在回答前自动准备 {len(coverage.get('files', []))} 个文件的分类证据（{coverage.get('model_calls', 0)} 次预读调用）。")
         report("complete", progress_copy(data, "处理完成。", "Processing complete.", "Verarbeitung abgeschlossen."), 100)
@@ -1528,6 +1617,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     requested = [ensure_relative(item) for item in action.get("read_files", [])[:4] if isinstance(item, str)]
     complete = {}
     for relative in requested:
+        check_request(data)
         path = state.resolve_relative(relative)
         if path.is_file() and path.stat().st_size <= 1_000_000:
             complete[relative] = path.read_text(encoding="utf-8", errors="replace")
@@ -1537,36 +1627,41 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
                                   [] if dossier else coverage_summaries, dossier, data.get("language", "zh"),
                                   require_classification=classification_request)
         report("model", progress_copy(data, "正在补充读取模型请求的本地文件并生成回答…", "Reading requested local files and generating the answer…", "Vom Modell angeforderte lokale Dateien werden ergänzt gelesen und die Antwort wird erstellt…"), 93)
-        raw = accounted_model_call(data, llm, visuals, model_prompt,
-                                   SYSTEM, {"maxOutputTokens": 3000, "temperature": 0}, stream=True, event_handler=model_events, usage_records=usage_records)
+        raw = answer_call(model_prompt, 3000)
         raw = require_model_success(raw, "补充材料后的模型回答请求")
         try:
             action = validated_action(raw, model_prompt)
+        except RequestStopped:
+            raise
         except Exception as exc:
             if bg_context or isinstance(exc, ClassificationValidationError): raise
+            if looks_like_action(raw):
+                raise ValueError("Incomplete or invalid action JSON; no answer committed") from exc
+            check_answer_size(data, raw)
             notices.append(f"补充读取后的分类输出未通过校验：{exc}；未显示分类结论卡。")
             action = {"answer": raw.strip() or "模型没有返回可显示的文字。", "changes": [], "classification": None}
     for change in action.get("changes", []):
         if isinstance(change, dict) and state.resolve_relative(change.get("path", "")).exists() and change.get("path") not in complete:
             raise ValueError("A complete current file must be read before proposing its replacement")
-    changes = build_diff(state, action.get("changes", []))
-    plan_id = publish_pending(data, changes)
-    title_session_from_question(state, question)
-    state.add_turn("user", question); state.add_turn("assistant", action.get("answer", ""))
-    turn_token_usage = summarize_usage(usage_records)
-    if bg_context:
-        state.data["last_bg_analysis"] = {
-            "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-            "session": state.root.name,
-            "model": llm.last_response_model or data["model"],
-            "question": question,
-            "answer": action.get("answer", ""),
-            "sources": [str(item.get("label", item.get("name", "未知来源"))) for item in evidence],
-            "dfc_evidence": visual_report.get("dfc", []),
-            "bg_context": dict(bg_context),
-            "token_usage": turn_token_usage,
-        }
-        state.save()
+    with commit_answer(data):
+        changes = build_diff(state, action.get("changes", []))
+        plan_id = publish_pending(data, changes)
+        title_session_from_question(state, question)
+        state.add_turn("user", question); state.add_turn("assistant", action.get("answer", ""))
+        turn_token_usage = summarize_usage(usage_records)
+        if bg_context:
+            state.data["last_bg_analysis"] = {
+                "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "session": state.root.name,
+                "model": llm.last_response_model or data["model"],
+                "question": question,
+                "answer": action.get("answer", ""),
+                "sources": [str(item.get("label", item.get("name", "未知来源"))) for item in evidence],
+                "dfc_evidence": visual_report.get("dfc", []),
+                "bg_context": dict(bg_context),
+                "token_usage": turn_token_usage,
+            }
+            state.save()
     if auto_prepared:
         notices.insert(0, f"已在回答前自动准备 {len(coverage.get('files', []))} 个文件的分类证据（{coverage.get('model_calls', 0)} 次预读调用）。")
     report("complete", progress_copy(data, "处理完成。", "Processing complete.", "Verarbeitung abgeschlossen."), 100)
@@ -2412,9 +2507,39 @@ def chat(request: ChatRequest):
         MODEL_WORK_IN_PROGRESS.clear()
 
 
+class ChatCancelRequest(BaseModel):
+    request_id: str
+
+
+def chat_task_status(task):
+    return {"request_id": task["id"], "done": task["done"].is_set(),
+            "state": task["state"], "worker_alive": task["worker"].is_alive()}
+
+
+@app.get("/api/chat/task/{request_id}")
+def get_chat_task(request_id: str):
+    with CHAT_TASK_GUARD:
+        if CHAT_TASK.get("id") != request_id:
+            raise HTTPException(404, "Unknown chat request")
+        return chat_task_status(CHAT_TASK)
+
+
+@app.post("/api/chat/cancel")
+def cancel_chat(request: ChatCancelRequest):
+    with CHAT_TASK_GUARD:
+        if CHAT_TASK.get("id") != request.request_id:
+            raise HTTPException(404, "Unknown chat request")
+        task = dict(CHAT_TASK)
+    if not task["done"].is_set() and task["control"].cancel():
+        with CHAT_TASK_GUARD:
+            if CHAT_TASK.get("id") == request.request_id and not task["done"].is_set():
+                CHAT_TASK["state"] = "cancelling"
+    return get_chat_task(request.request_id)
+
+
 @app.post("/api/chat/stream")
-def chat_stream(request: ChatRequest):
-    """Expose local processing stages to the browser while retaining one serialized model call."""
+async def chat_stream(request: ChatRequest, http_request: Request):
+    """A bounded preview queue; only the joined worker can release its slot."""
     question = request.question.strip()
     if not question:
         raise HTTPException(400, "请输入问题。")
@@ -2425,34 +2550,102 @@ def chat_stream(request: ChatRequest):
     except Exception:
         MODEL_WORK_IN_PROGRESS.clear()
         raise
-    events: Queue[dict[str, Any]] = Queue()
+    control = data["request_control"]
+    events: Queue[dict[str, Any]] = Queue(maxsize=64)
+    task = {"id": request.request_id or uuid.uuid4().hex, "control": control, "done": threading.Event(),
+            "state": "running", "result": None, "error": None}
+
+    def emit(event):
+        while True:
+            control.check()
+            try:
+                events.put(event, timeout=.05)
+                return
+            except Full:
+                if control.committed:
+                    return
+                continue
 
     def publish(phase: str, text: str, percent: int | None = None) -> None:
-        events.put({"type": "progress", "phase": phase, "text": text, "percent": percent})
+        emit({"type": "progress", "phase": phase, "text": text, "percent": percent})
 
-    def worker() -> None:
+    data["answer_events"] = emit
+
+    def worker():
         try:
             with LOCK:
-                result = call_model(data, question, progress=publish, require_classification=request.require_classification)
-            events.put({"type": "result", "data": result})
+                task["result"] = call_model(data, question, progress=publish,
+                                            require_classification=request.require_classification)
         except Exception as exc:
-            events.put({"type": "error", "message": safe_error(exc)})
-        finally:
+            code = ("cancelled" if isinstance(exc, RequestCancelled) else
+                    "timeout" if isinstance(exc, RequestTimedOut) else
+                    "limit" if isinstance(exc, RequestStopped) else "failed")
+            task["error"] = {"type": "error", "code": code, "message": safe_error(exc)}
+
+    thread = threading.Thread(target=worker, daemon=True)
+    task["worker"] = thread
+    with CHAT_TASK_GUARD:
+        CHAT_TASK.clear()
+        CHAT_TASK.update(task)
+    try:
+        thread.start()
+    except Exception:
+        MODEL_WORK_IN_PROGRESS.clear()
+        raise
+
+    def reap_worker():
+        thread.join()
+        with CHAT_TASK_GUARD:
+            task["state"] = ("completed" if task["result"] is not None else
+                             "cancelled" if task["error"]["code"] == "cancelled" else
+                             "timed_out" if task["error"]["code"] == "timeout" else "failed")
+            if CHAT_TASK.get("id") == task["id"]:
+                CHAT_TASK.update(task)
+            task["done"].set()
             MODEL_WORK_IN_PROGRESS.clear()
-            events.put({"type": "end"})
 
-    threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=reap_worker, daemon=True).start()
 
-    def event_stream():
-        while True:
-            try:
-                event = events.get(timeout=15)
-            except Empty:
-                yield ": keep-alive\n\n"
-                continue
-            yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
-            if event.get("type") == "end":
-                break
+    async def watch_disconnect():
+        # Also cover a connection lost before the body iterator starts.
+        while not task["done"].is_set():
+            if await http_request.is_disconnected():
+                control.cancel("disconnected")
+                return
+            await asyncio.sleep(.05)
+
+    asyncio.create_task(watch_disconnect())
+
+    async def event_stream():
+        last_heartbeat = time.monotonic()
+        try:
+            yield "data: " + json.dumps({"type": "start", "request_id": task["id"]}) + "\n\n"
+            while True:
+                if await http_request.is_disconnected():
+                    control.cancel("disconnected")
+                    break
+                try:
+                    control.check()
+                except RequestStopped:
+                    pass  # Worker still owns the slot until its actual exit.
+                try:
+                    event = events.get_nowait()
+                except Empty:
+                    if task["done"].is_set():
+                        terminal = ({"type": "result", "data": task["result"]}
+                                    if task["result"] is not None else task["error"])
+                        yield "data: " + json.dumps(terminal, ensure_ascii=False) + "\n\n"
+                        yield 'data: {"type":"end"}\n\n'
+                        break
+                    if time.monotonic() - last_heartbeat >= 5:
+                        yield ": keep-alive\n\n"
+                        last_heartbeat = time.monotonic()
+                    await asyncio.sleep(.02)
+                    continue
+                yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+        finally:
+            if not task["done"].is_set():
+                control.cancel("disconnected")
 
     return StreamingResponse(event_stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -2601,7 +2794,7 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 <div class="field"><label>聊天会话</label><div class="row"><select id="session"></select><button class="ghost" onclick="openSession()">切换</button><button class="ghost" onclick="newSession()">新建</button><button class="ghost" onclick="renameSession()">改名</button><button class="ghost" onclick="deleteSession()">删除</button></div><div id="sessionmsg" class="muted"></div></div>
 <hr><b>Codebook</b><div id="codebookstatus" class="muted">尚未锁定 Codebook。</div><div class="field"><label>Codebook 文件（首次准备或更换时选择）</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf / .docx"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><div class="row"><button class="ghost" onclick="prepareCodebook()">准备 Codebook</button><button class="ghost" onclick="viewCodebook()">查看</button><button class="ghost" onclick="changeCodebook()">更换</button></div><hr><b>材料分析</b><div class="muted">文件直接分析；文件夹先显示结构，再明确勾选要用的材料。已锁定 Codebook 会自动用于分类。</div><div class="field"><label>分析目标：文件或文件夹</label><div class="row"><input id="targetpath" placeholder="PDF / Excel / PNG，或 Baugruppe 文件夹" oninput="clearTargetTree()"><button class="ghost" onclick="pick('file','targetpath')">文件</button><button class="ghost" onclick="pickFolderForTree()">文件夹</button></div></div><div class="row"><button class="ghost" onclick="loadTargetTree()">显示文件夹结构</button><button class="ghost" onclick="analyzeTarget()">用选中材料开始分析</button></div><div id="treestatus" class="muted"></div><div id="targettree" class="target-tree muted">选择文件夹后显示可展开的文件树。</div><button class="ghost" onclick="clearBg()">退出分类模式</button><div id="bgstatus" class="muted"></div><div id="scanreport" class="list"></div><div id="coveragestatus" class="muted">首次分类提问会自动读取并理解所选材料；无需预先操作。</div><div id="docs" class="list"></div>
 <hr><b>多模型对比</b><div class="muted">同一条问题、同一份 BG 证据；逐个选择 2–4 个模型后顺序请求。结果不会写进普通聊天会话。</div><div id="comparemodels"></div><div class="row"><button class="ghost" id="addcompare" onclick="addCompareModel()">＋ 添加对比模型</button><button class="ghost" onclick="compareModels()">开始对比</button></div><div id="comparestatus" class="muted"></div></aside><div class="splitter" id="leftsplitter" role="separator" aria-orientation="vertical" aria-label="调整左侧栏宽度"></div>
-<main class="main"><div class="chat-header"><div><div class="chat-title">Baugruppen 分析</div><div class="chat-subtitle">基于当前分类规则与已选材料</div></div><div class="header-spacer"></div><button class="header-icon" title="多模型对比" onclick="openCompareDrawer()">⇄</button><button class="header-icon" title="导出会话" onclick="exportSession()">⇩</button></div><div class="chat" id="chat"><section class="welcome"><div class="eyebrow">Baugruppen Intelligence</div><h1>你想进行什么分析？</h1><p>选择单一文件或一个 BG 文件夹。程序会先在本地读取、提取文字与结构，再将必要信息交给模型。</p><div class="row" style="margin-top:22px"><button onclick="openContextDrawer('materials')">▣&nbsp; 选择 BG 文件夹</button><button class="ghost" onclick="openContextDrawer('rules')">▤&nbsp; 管理分类规则</button></div></section></div><div class="composer-wrap"><div class="composer" id="composer"><input id="question" placeholder="问代码，或根据分类规则判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button></div></div></main>
+<main class="main"><div class="chat-header"><div><div class="chat-title">Baugruppen 分析</div><div class="chat-subtitle">基于当前分类规则与已选材料</div></div><div class="header-spacer"></div><button class="header-icon" title="多模型对比" onclick="openCompareDrawer()">⇄</button><button class="header-icon" title="导出会话" onclick="exportSession()">⇩</button></div><div class="chat" id="chat"><section class="welcome"><div class="eyebrow">Baugruppen Intelligence</div><h1>你想进行什么分析？</h1><p>选择单一文件或一个 BG 文件夹。程序会先在本地读取、提取文字与结构，再将必要信息交给模型。</p><div class="row" style="margin-top:22px"><button onclick="openContextDrawer('materials')">▣&nbsp; 选择 BG 文件夹</button><button class="ghost" onclick="openContextDrawer('rules')">▤&nbsp; 管理分类规则</button></div></section></div><div class="composer-wrap"><div class="composer" id="composer"><input id="question" placeholder="问代码，或根据分类规则判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button><button id="cancelchat" class="ghost" onclick="stopChat()" disabled>停止</button></div></div></main>
 <aside class="side right" id="contextpanel"><div class="context-title">当前上下文</div><button class="context-card" onclick="openContextDrawer('rules')"><strong>分类规则 <em>管理 ›</em></strong><span id="context-rule-summary">尚未选择分类规则文件</span></button><button class="context-card" onclick="openContextDrawer('materials')"><strong>本次材料 <em>管理 ›</em></strong><span id="context-material-summary">尚未选择文件或 BG 文件夹</span></button><button class="context-card" onclick="openContextDrawer('scan')"><strong>扫描状态 <em>查看 ›</em></strong><span id="context-scan-summary">等待选择材料</span></button><button class="context-card" onclick="openContextDrawer('audit')"><strong>材料缓存与审计 <em>查看 ›</em></strong><span id="context-audit-summary">尚无本地读取或模型缓存</span></button><div class="context-store"><div id="status" class="card muted">尚未打开工作区</div><div id="sessionexport" class="card"><button class="ghost" onclick="exportSession()">导出完整会话</button></div><div id="usagedetail" class="card muted">完成一次请求后显示。</div><div id="analysisexport" class="card muted">仅在 Baugruppe 分析完成后可导出。</div><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><div id="changes" class="list">无</div></div></aside></div>
 <script>
 const $=id=>document.getElementById(id);let busy=false,lastQuestion='',compareSlots=[{value:'claude-haiku-5-5',custom:''}],savedTargetSelection=new Set(),treeRestoreNote='',lastScanReport=null,scannedSelection='',uiLanguage='zh',activeContextDrawer=null,lastStatusSnapshot=null,lastUsageSnapshot=null,lastCodebookProfile=null,lastCodebookWorkspaceProfile=null,lastDocumentsSnapshot=null,lastCoverageReport=null,lastCacheAudit=null,lastSessionRows=[],lastTargetTreePayload=null,lastComparison=null;
@@ -2618,6 +2811,7 @@ const UI=Object.fromEntries(['zh','en','de'].map(language=>[
 let initialStaticI18nBound=false;
 const initialStaticText=[],initialStaticAttributes=[];
 const STATIC_ELEMENT_BINDINGS=[
+  ['#cancelchat','stream.stop'],
   ['.chat-title','chat.title'],['.chat-subtitle','chat.subtitle'],
   ['.welcome .eyebrow','welcome.eyebrow'],['.welcome h1','welcome.title'],
   ['.welcome p','welcome.description'],['.welcome .row button','welcome.choose_folder','▣\u00a0 '],
@@ -2996,7 +3190,75 @@ async function compareModels(){if(busy)return;if(lastStatusSnapshot?.context_iss
 function processingCard(){let card=document.createElement('section');card.className='message assistant';card.style.border='1px solid #334155';card.innerHTML='<b>'+rt('model.processing')+'</b><div class="muted" data-process-text>'+rt('model.connecting')+'</div><div style="height:7px;background:#0b1220;border-radius:8px;overflow:hidden;margin-top:9px"><div data-process-bar style="height:100%;width:4%;background:#38bdf8;transition:width .25s ease"></div></div>';$('chat').append(card);return card}
 function updateProcessing(card,event){let text=card.querySelector('[data-process-text]'),bar=card.querySelector('[data-process-bar]');text.textContent=event.text||rt('model.waiting');if(typeof event.percent==='number')bar.style.width=Math.max(4,Math.min(100,event.percent))+'%';if(event.phase==='complete'){card.style.borderColor='#22c55e';bar.style.background='#22c55e'}}
 function showChatResult(x){message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>'+t('model.reasoning')+'</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${esc(c.path)}</b><br>${esc(c.reason)}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button data-plan-id="'+escAttr(x.plan_id||'')+'" onclick="apply(this.dataset.planId,this)">'+t('changes.apply')+'</button>':t('changes.none');if(x.changes?.length){let review=$('changes').cloneNode(true);review.removeAttribute('id');review.className='message assistant change-plan';$('chat').append(review)}$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">'+t('export.assembly')+'</button>':t('export.assembly_unavailable');renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}
-async function chat(){if(busy||!$('question').value.trim())return;if(lastStatusSnapshot?.context_issue){message(t('context.reconfirm'));return;}if(materialDraftDirty){message(t('materials.reconfirm'));return;}busy=true;let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');let wait=processingCard(),buffer='',result=null;try{let response;try{response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,require_classification:$('answermode')?.value!=='explanation'})})}catch(error){throw Error(rt('model.connection_failed')+(error?.message?` ${error.message}`:''))}if(!response.ok){await readApiResponse(response)}let reader=response.body.getReader(),decoder=new TextDecoder();while(true){let part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});let blocks=buffer.split('\n\n');buffer=blocks.pop();for(let block of blocks){let line=block.split('\n').find(item=>item.startsWith('data: '));if(!line)continue;let event=JSON.parse(line.slice(6));if(event.type==='progress')updateProcessing(wait,event);else if(event.type==='result')result=event.data;else if(event.type==='error')throw Error(event.message||rt('model.failed'))}}if(!result)throw Error(t('api.no_result'));updateProcessing(wait,{phase:'complete',text:rt('model.complete'),percent:100});showChatResult(result)}catch(e){wait.querySelector('[data-process-text]').textContent=rt('model.failed')+e.message;wait.classList.add('error')}finally{busy=false;$('chat').scrollTop=1e9}}
+let activeChat=null;
+async function stopChat(){
+  if(!activeChat||activeChat.stopping)return;
+  activeChat.stopping=true;$('cancelchat').disabled=true;
+  activeChat.controller.abort();
+  if(activeChat.id)try{await api('/api/chat/cancel',{method:'POST',body:JSON.stringify({request_id:activeChat.id})})}catch{}
+}
+async function settleChat(task,wait){
+  if(!task.id)return null;
+  let failures=0;
+  while(true){
+    try{
+      let response=await fetch('/api/chat/task/'+encodeURIComponent(task.id));
+      if(response.status===404)return null;
+      let status=await readApiResponse(response);
+      if(status.done)return status;
+      failures=0;
+      wait.querySelector('[data-process-text]').textContent=t('stream.stopping');
+    }catch{if(++failures>=3)return null}
+    await new Promise(resolve=>setTimeout(resolve,100));
+  }
+}
+async function chat(){
+  if(busy||!$('question').value.trim())return;
+  if(lastStatusSnapshot?.context_issue){message(t('context.reconfirm'));return}
+  if(materialDraftDirty){message(t('materials.reconfirm'));return}
+  busy=true;let task={controller:new AbortController(),id:crypto.randomUUID().replaceAll('-',''),stopping:false};activeChat=task;$('cancelchat').disabled=false;
+  let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');
+  let wait=processingCard(),buffer='',result=null,error=null,preview=null,previewText=null,failureText='';
+  function resetPreview(){preview?.remove();preview=null;previewText=null}
+  function appendPreview(text){
+    if(!preview){preview=message('');preview.classList.add('answer-preview');let label=document.createElement('div');label.className='muted';label.textContent=t('stream.preview');let body=document.createElement('div');body.className='preview-text';body.style.whiteSpace='pre-wrap';previewText=document.createTextNode('');body.append(previewText);preview.append(label,body)}
+    previewText.appendData(text);
+  }
+  try{
+    let response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},signal:task.controller.signal,body:JSON.stringify({question:q,request_id:task.id,require_classification:$('answermode')?.value!=='explanation'})});
+    if(!response.ok)await readApiResponse(response);
+    let reader=response.body.getReader(),decoder=new TextDecoder();
+    while(true){
+      let part=await reader.read();if(part.done)break;
+      buffer+=decoder.decode(part.value,{stream:true});
+      let blocks=buffer.split('\n\n');buffer=blocks.pop();
+      for(let block of blocks){
+        let line=block.split('\n').find(item=>item.startsWith('data: '));if(!line)continue;
+        let event=JSON.parse(line.slice(6));
+        if(event.type==='start')task.id=event.request_id;
+        else if(event.type==='progress')updateProcessing(wait,event);
+        else if(event.type==='answer_reset')resetPreview();
+        else if(event.type==='answer_delta')appendPreview(event.text);
+        else if(event.type==='result')result=event.data;
+        else if(event.type==='error'){error=event;throw Error(event.message||t('model.failed'))}
+      }
+    }
+    if(!result)throw Error(t('api.no_result'));
+    resetPreview();updateProcessing(wait,{phase:'complete',text:t('model.complete'),percent:100});showChatResult(result);
+  }catch(e){
+    resetPreview();task.controller.abort();
+    if(task.id)try{await api('/api/chat/cancel',{method:'POST',body:JSON.stringify({request_id:task.id})})}catch{}
+    let code=task.stopping?'cancelled':error?.code;
+    failureText=code==='cancelled'?t('stream.cancelled'):code==='timeout'?t('stream.timeout'):code==='limit'?t('stream.limit'):t('model.failed')+' '+e.message;
+    wait.querySelector('[data-process-text]').textContent=failureText;
+    if(code!=='cancelled')wait.classList.add('error');
+  }finally{
+    resetPreview();let status=await settleChat(task,wait);
+    if(task.stopping)wait.querySelector('[data-process-text]').textContent=status?.state==='completed'?t('stream.completed'):t('stream.cancelled');
+    else if(failureText)wait.querySelector('[data-process-text]').textContent=failureText;
+    activeChat=null;busy=false;$('cancelchat').disabled=true;$('chat').scrollTop=1e9;
+  }
+}
 async function exportSession(){try{let x=await api('/api/export/session',{method:'POST'});$('sessionexport').innerHTML='<span class="ok">'+esc(t('export.complete',{path:x.path}))+'</span>'}catch(e){$('sessionexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 async function exportBgAnalysis(){try{let x=await api('/api/export/bg-analysis',{method:'POST'});$('analysisexport').innerHTML='<span class="ok">'+esc(t('export.complete',{path:x.path}))+'</span>'}catch(e){$('analysisexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
 function esc(s){let e=document.createElement('div');e.textContent=s;return e.innerHTML}function escAttr(s){return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;')}async function apply(planId,button){let review=button?.closest('.change-plan')||$('changes');if(!confirm(t('changes.confirm')))return;try{let x=await api('/api/apply',{method:'POST',body:JSON.stringify({confirmed:true,plan_id:planId})});review.innerHTML='<span class="ok">'+t('apply.complete',{count:x.applied})+'</span>';message(t('apply.message',{count:x.applied}))}catch(e){review.innerHTML='<span class="error">'+esc(e.message)+'</span>'}}

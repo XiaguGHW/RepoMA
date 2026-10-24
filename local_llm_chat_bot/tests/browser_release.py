@@ -332,6 +332,84 @@ class BrowserRelease(unittest.TestCase):
         self.select_bg(self.f.bg_b)
         self.assertEqual(self.page.input_value("#answermode"), "classification")
 
+    def test_answer_preview_stop_keeps_busy_until_worker_exits_then_retry(self):
+        self.language('en')
+        self.page.select_option('#model', 'gemini-2.5-pro')
+        self.page.wait_for_function("lastStatusSnapshot.model==='gemini-2.5-pro'")
+        release = threading.Event()
+        self.addCleanup(release.set)
+        preview = 'VISIBLE_PREVIEW\n```python\nprint("ü 😀")\n```\n| Part | Function |\n|---|---|\n| Motor | Rotation |\n<img onerror="window.previewInjection=1">'
+        raw = json.dumps({'changes': [{'path': 'SECRET_PATH', 'content': 'SECRET_CONTENT'}],
+                          'classification': {'label': 'SECRET_CLASS'}, 'answer': preview})
+        original_history = list(w.ACTIVE['state'].data['history'])
+        def answer(*_args, **kwargs):
+            for index in range(0, len(raw), 13):
+                kwargs['event_handler']('content', raw[index:index+13])
+            release.wait(5)
+            return json.dumps({'answer': 'late final', 'read_files': ['extra.txt'], 'changes': []})
+        with patch.object(w.ACTIVE['llm'], 'ask_about_files', side_effect=answer) as model:
+            self.page.locator('#question').fill('Show a draft answer')
+            self.button('chat()', '#composer').click()
+            self.page.wait_for_function("document.querySelector('.preview-text')?.textContent.includes('<img')")
+            self.assertEqual(self.page.locator('.preview-text').inner_text(), preview)
+            self.assertNotIn('SECRET_', self.page.locator('.answer-preview').inner_text())
+            self.assertEqual(self.page.locator('.answer-preview img').count(), 0)
+            self.assertEqual(self.page.locator('.change-plan').count(), 0)
+            self.assertEqual(self.page.locator('.classification-card').count(), 0)
+            self.assertTrue(self.page.evaluate('busy'))
+            self.page.locator('#cancelchat').click()
+            self.page.wait_for_function("document.querySelector('[data-process-text]')?.textContent.includes('Stopping')")
+            self.assertTrue(w.MODEL_WORK_IN_PROGRESS.is_set())
+            self.assertTrue(self.page.evaluate('busy'))
+            self.assertEqual(self.page.locator('.answer-preview').count(), 0)
+            release.set()
+            self.page.wait_for_function('!busy')
+            self.assertEqual(model.call_count, 1)
+        self.assertEqual(w.ACTIVE['state'].data['history'], original_history)
+        self.assertIn('Stopped', self.page.locator('[data-process-text]').inner_text())
+        self.assertFalse(w.MODEL_WORK_IN_PROGRESS.is_set())
+        self.assertEqual(w.ACTIVE['pending'], [])
+        self.ask('Retry after stop')
+        self.completed('safe preview, explicit stop and retry')
+
+    def test_navigation_disconnect_and_truncated_preview_never_create_results(self):
+        self.language('en')
+        self.page.select_option('#model', 'gemini-2.5-pro')
+        self.page.wait_for_function("lastStatusSnapshot.model==='gemini-2.5-pro'")
+        release = threading.Event()
+        self.addCleanup(release.set)
+        def answer(*_args, **kwargs):
+            kwargs['event_handler']('content', '{"answer":"VISIBLE_PREVIEW","changes":[')
+            release.wait(5)
+            return '{"answer":"VISIBLE_PREVIEW","changes":['
+        old_history = list(w.ACTIVE['state'].data['history'])
+        with patch.object(w.LLMConnector, 'ask_about_files', side_effect=answer):
+            self.page.locator('#question').fill('Navigation disconnect')
+            self.button('chat()', '#composer').click()
+            self.page.locator('.answer-preview').wait_for()
+            control = w.CHAT_TASK['control']
+            self.page.reload()
+            self.assertTrue(control.cancel_event.wait(1))
+            self.assertTrue(w.MODEL_WORK_IN_PROGRESS.is_set())
+            release.set()
+            self.page.wait_for_function("typeof busy!=='undefined'")
+            deadline = time.monotonic() + 3
+            while w.MODEL_WORK_IN_PROGRESS.is_set() and time.monotonic() < deadline:
+                self.page.wait_for_timeout(20)
+            self.assertFalse(w.MODEL_WORK_IN_PROGRESS.is_set())
+            self.open_workspace()
+            self.close_drawer()
+            self.page.locator('#question').fill('Truncated response')
+            with self.page.expect_response(lambda response: response.url.endswith('/api/chat/stream')):
+                self.button('chat()', '#composer').click()
+            self.page.wait_for_function('!busy')
+        self.assertEqual(w.ACTIVE['state'].data['history'], old_history)
+        self.assertEqual(self.page.locator('.answer-preview').count(), 0)
+        self.assertEqual(self.page.locator('.change-plan').count(), 0)
+        self.assertEqual(w.ACTIVE['pending'], [])
+        self.assertGreater(self.page.locator('#chat .message.error').count(), 0)
+        self.completed('navigation disconnect and truncated preview cleanup')
+
     def test_unknown_usage_is_visible_in_chat_status_rules_and_comparison(self):
         self.language('en')
         self.page.select_option('#model', 'gemini-2.5-pro')

@@ -349,6 +349,13 @@
       "rules.save_confirm": "保存此规则草稿并清除旧分类上下文？",
       "usage.unknown": "未知",
       "usage.known_subtotal": "已知部分小计",
+      "stream.stop": "停止",
+      "stream.preview": "临时正文预览 · 完成后校验",
+      "stream.stopping": "正在停止；等待当前模型任务退出…",
+      "stream.cancelled": "已停止；临时预览已清除，未提交本轮回答。",
+      "stream.timeout": "请求超时；临时预览已清除，未提交本轮回答。",
+      "stream.limit": "回答超过大小限制；临时预览已清除，未提交本轮回答。",
+      "stream.completed": "停止前请求已完成；最终回答已保存在会话中。",
       "usage.partial": "另有 {count} 次请求费用未知"
     },
     "en": {
@@ -700,6 +707,13 @@
       "rules.save_confirm": "Save this rule draft and clear the previous classification context?",
       "usage.unknown": "Unknown",
       "usage.known_subtotal": "Known subtotal",
+      "stream.stop": "Stop",
+      "stream.preview": "Temporary answer preview · validated on completion",
+      "stream.stopping": "Stopping; waiting for the current model task to exit…",
+      "stream.cancelled": "Stopped; preview cleared and this answer was not saved.",
+      "stream.timeout": "Request timed out; preview cleared and this answer was not saved.",
+      "stream.limit": "Answer size limit exceeded; preview cleared and this answer was not saved.",
+      "stream.completed": "The request finished before stopping; the final answer is saved in the session.",
       "usage.partial": "Cost unknown for {count} additional requests"
     },
     "de": {
@@ -1051,6 +1065,13 @@
       "rules.save_confirm": "Diesen Regelentwurf speichern und den bisherigen Klassifikationskontext löschen?",
       "usage.unknown": "Unbekannt",
       "usage.known_subtotal": "Bekannte Teilsumme",
+      "stream.stop": "Stoppen",
+      "stream.preview": "Vorläufige Antwortvorschau · Prüfung nach Abschluss",
+      "stream.stopping": "Wird gestoppt; das Ende der aktuellen Modellaufgabe wird abgewartet…",
+      "stream.cancelled": "Gestoppt; die Vorschau wurde entfernt und diese Antwort nicht gespeichert.",
+      "stream.timeout": "Zeitlimit erreicht; die Vorschau wurde entfernt und diese Antwort nicht gespeichert.",
+      "stream.limit": "Antwort zu groß; die Vorschau wurde entfernt und diese Antwort nicht gespeichert.",
+      "stream.completed": "Die Anfrage war vor dem Stoppen abgeschlossen; die endgültige Antwort ist im Verlauf gespeichert.",
       "usage.partial": "Kosten für {count} weitere Anfragen unbekannt"
     }
   },

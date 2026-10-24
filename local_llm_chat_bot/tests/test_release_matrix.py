@@ -29,7 +29,7 @@ class TransportMatrix(unittest.TestCase):
             with self.subTest(status=status):
                 llm = LLMConnector('gemini-test', 'private-fixture-key')
                 response = SimpleNamespace(ok=False, status_code=status, text='private-fixture-key')
-                with patch('requests.post', return_value=response) as post, patch('time.sleep') as sleep:
+                with patch('requests.post', return_value=response) as post, patch('request_runtime.RequestControl.pause') as sleep:
                     answer = llm.ask_about_files([], 'fixture')
                 self.assertEqual(post.call_count, 3 if status in {429, 500, 502, 503, 504} else 1)
                 self.assertEqual(sleep.call_count, post.call_count - 1)
@@ -39,7 +39,7 @@ class TransportMatrix(unittest.TestCase):
     def test_timeout_connection_invalid_json_empty_and_recovery(self):
         for error in (requests.Timeout('timeout'), requests.ConnectionError('connection')):
             llm = LLMConnector('gemini-test', 'fixture')
-            with patch('requests.post', side_effect=error) as post, patch('time.sleep'):
+            with patch('requests.post', side_effect=error) as post, patch('request_runtime.RequestControl.pause'):
                 self.assertIsNotNone(w.connector_failure(llm.ask_about_files([], 'fixture')))
                 self.assertEqual(post.call_count, 3)
         llm = LLMConnector('gemini-test', 'fixture')

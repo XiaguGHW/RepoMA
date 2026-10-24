@@ -61,6 +61,36 @@ because 2.4.0 crashed in this container's process discovery before checking code
 
 ## Current gates
 
+After step 6 (R12), discovery runs 162 tests: 157 pass, 4 fail and the native
+Windows test remains skipped on Linux. The 18 new runtime/lifecycle tests and
+the R12 dropped-content audit regression pass. Run the new tests with:
+`python -m unittest discover -s tests -p test_release_step_six.py -v`.
+The browser suite has 12 methods: 9 pass; 3 retain 8 known R13/R14/R15 failures.
+The two new methods exercise visible answer previews, Stop, worker completion,
+retry, navigation disconnect and truncated-response cleanup using real controls.
+
+Chat SSE now sends start (request_id), answer_reset, answer_delta, progress and
+exactly one final result or error, followed by end for a connected consumer.
+Only decoded root answer text is previewed. Repair/supplemental rounds reset it.
+Preview is text-only and is removed on success, stop, disconnect or failure;
+classification/change cards are created from the final validated result only.
+POST /api/chat/cancel accepts request_id; GET /api/chat/task/{request_id} reports
+state, done and worker_alive. A joining reaper releases the shared slot only
+after the worker has exited. Cancellation is ordered against final publication;
+a request already committed before Stop remains completed in the session.
+
+Request bounds are configured with WORKBENCH_REQUEST_TIMEOUT_SECONDS (180),
+WORKBENCH_CONNECT_TIMEOUT_SECONDS (5), WORKBENCH_READ_TIMEOUT_SECONDS (20),
+WORKBENCH_MAX_ATTEMPTS (3), WORKBENCH_RETRY_BACKOFF_SECONDS (1),
+WORKBENCH_MAX_RESPONSE_CHARS (262144), WORKBENCH_MAX_ANSWER_CHARS (131072).
+The whole-operation deadline covers automatic preparation and subsequent calls.
+Backoff is cancellable. Blocking I/O exits at its configured connect/read bound;
+the slot stays reserved while it unwinds. Raw OpenAI response chunks are checked
+before SSE line decoding, including an unfinished event sent in small pieces.
+Gemini/Claude currently use complete responses and retain processing progress;
+this repair does not claim native streaming from those Farm endpoints.
+See docs/release-reports/Workbench_Repair_Step_06_2026-10-25.md at repository root.
+
 After step 5 (R11), discovery runs 144 tests: 138 pass, 5 fail and the native
 Windows test remains skipped on Linux. The 20 new accounting tests and both
 R11 audit regressions pass. Run the accounting tests with:

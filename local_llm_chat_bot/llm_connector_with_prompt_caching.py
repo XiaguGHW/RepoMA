@@ -7,11 +7,12 @@ import io
 import json
 import logging
 import os
-import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 import requests
+from request_runtime import RequestControl, RequestStopped, ResponseLimitExceeded
 
 try:
     from openai import OpenAI
@@ -61,6 +62,7 @@ class LLMConnector:
         self.last_reasoning = ""
         self.last_response_model = None
         self.usage_attempts: list[dict] = []
+        self.request_control = None
         self._stream_rejected = False
         self._family = self._detect_family(model_name)
         logging.info("LLMConnector ready: model=%s, family=%s, session_id=%s", model_name, self._family, session_id)
@@ -83,6 +85,8 @@ class LLMConnector:
         self.last_reasoning = ""
         self.last_response_model = None
         self.usage_attempts = []
+        self._control = self.request_control or RequestControl()
+        self._control.check()
         if self._family == "openai":
             return self._call_openai(file_paths, user_prompt, system_prompt, generation_config,
                                      stream=stream, event_handler=event_handler, thinking=thinking)
@@ -103,6 +107,7 @@ class LLMConnector:
 
     def _begin_usage_attempt(self):
         """One ledger entry per dispatched request, even without returned usage."""
+        self._control.check()
         self.last_usage = None
         self.last_response_model = None
         self.usage_attempts.append({"usage": {}, "model": self.model_name})
@@ -226,7 +231,35 @@ class LLMConnector:
         config = generation_config or {}
         reasoning = name.startswith(("gpt-5", "gpt-6", "o1", "o3", "deepseek-r1"))
         tokens = int(config.get("maxOutputTokens", 4096))
-        kwargs = {"model": self.model_name, "messages": messages, "timeout": 300,
+        from openai import _base_client
+        transport = getattr(_base_client, "httpx2", None) or _base_client.httpx
+        control = self._control
+
+        def bound_response(response):
+            original = response.stream
+            stream_base: Any = transport.SyncByteStream
+
+            class BoundedStream(stream_base):
+                def __iter__(self):
+                    size = 0
+                    for chunk in original:
+                        control.check()
+                        size += len(chunk)
+                        if size > control.policy.max_response_chars * 4:
+                            control.cancel('limit')
+                            control.check()
+                        yield chunk
+
+                def close(self):
+                    original.close()
+
+            # Bound raw bytes before the SDK's SSE line decoder: a provider
+            # dripping an unfinished event must not bypass the whole deadline.
+            response.stream = BoundedStream()
+
+        client._client.event_hooks.setdefault('response', []).append(bound_response)
+        connect, read = self._control.timeouts()
+        kwargs = {"model": self.model_name, "messages": messages, "timeout": transport.Timeout(read, connect=connect),
                   "extra_query": {"api-version": "2024-08-01-preview"} if "openai" in base_url else {}}
         kwargs["max_completion_tokens" if reasoning else "max_tokens"] = tokens
         if config.get("temperature") is not None and not reasoning:
@@ -248,6 +281,7 @@ class LLMConnector:
             kwargs["stream_options"] = {"include_usage": True}
 
         def emit(kind, text):
+            self._control.check()
             if event_handler and text:
                 event_handler(kind, text)
 
@@ -272,13 +306,15 @@ class LLMConnector:
                 unsupported = getattr(exc, "status_code", None) in {400, 422, 501} and "stream" in error and any(
                     term in error for term in ("not supported", "unsupported", "not allowed", "unknown", "unrecognized", "not implemented", "unexpected", "extra inputs")
                 )
-                if not use_stream or not unsupported:
+                if not use_stream or not unsupported or self._control.policy.attempts < 2:
                     raise
                 self._stream_rejected = True
                 use_stream = False
                 kwargs.pop("stream", None)
                 kwargs.pop("stream_options", None)
                 emit("notice", "Farm 拒绝流式输出，本次连接改用完整响应；仍显示等待耗时。")
+                connect, read = self._control.timeouts()
+                kwargs["timeout"] = transport.Timeout(read, connect=connect)
                 self._begin_usage_attempt()
                 result = client.chat.completions.create(**kwargs)
             if not use_stream:
@@ -289,14 +325,17 @@ class LLMConnector:
                 self.last_reasoning = getattr(message, "reasoning_content", None) or ""
                 emit("reasoning", self.last_reasoning)
                 text = message.content or ""
+                self._control.limit(len(text) + len(self.last_reasoning))
                 if not text.strip():
                     raise ValueError("接口未返回最终正文；可能只返回了思考文本或输出预算耗尽。")
                 emit("content", text)
                 return text.strip()
             response_stream = result
             texts, thoughts = [], []
+            received_chars = 0
             finish_reason = None
             for chunk in result:
+                self._control.check()
                 capture_metadata(chunk)
                 if not chunk.choices:
                     continue
@@ -305,6 +344,8 @@ class LLMConnector:
                 delta = choice.delta
                 thought = getattr(delta, "reasoning_content", None) or ""
                 content_delta = getattr(delta, "content", None) or ""
+                received_chars += len(thought) + len(content_delta)
+                self._control.limit(received_chars)
                 if thought:
                     thoughts.append(thought)
                     emit("reasoning", thought)
@@ -320,9 +361,12 @@ class LLMConnector:
             if not text:
                 raise ValueError(f"接口未返回最终正文（finish_reason={finish_reason}）；可能输出预算耗尽。")
             return text
+        except RequestStopped:
+            raise
         except Exception as exc:
             from release_safety import safe_error
             self._record_error_usage(exc)
+            self._control.check()
             logging.error("OpenAI request failed: %s", type(exc).__name__)
             return "Error: " + safe_error(exc, self.api_key)
         finally:
@@ -413,30 +457,55 @@ class LLMConnector:
 
     def _http_post(self, url: str, headers: dict, payload: dict, extractor) -> str:
         retryable = {429, 500, 502, 503, 504}
-        for attempt in range(1, 4):
+        attempts = self._control.policy.attempts
+        for attempt in range(1, attempts + 1):
+            response = None
             try:
                 self._begin_usage_attempt()
-                response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=300)
+                response = requests.post(url, headers=headers, data=json.dumps(payload),
+                                         timeout=self._control.timeouts(), stream=True)
                 try:
-                    reply = response.json()
+                    if hasattr(response, 'raw') and hasattr(response.raw, 'read1'):
+                        chunks, size = [], 0
+                        while True:
+                            self._control.check()
+                            chunk = response.raw.read1(8192, decode_content=True)
+                            if not chunk:
+                                break
+                            size += len(chunk)
+                            if size > self._control.policy.max_response_chars * 4:
+                                raise ResponseLimitExceeded('Provider response exceeds the configured size limit')
+                            chunks.append(chunk)
+                        reply = json.loads(b''.join(chunks))
+                    else:
+                        reply = response.json()  # Small custom/mock transports.
                 except (ValueError, AttributeError):
                     reply = {}
+                self._control.check()
                 if isinstance(reply, dict):
                     self.last_response_model = reply.get("modelVersion") or reply.get("model")
                     if "usageMetadata" in reply or "usage" in reply:
                         self._record_usage(reply.get("usageMetadata", reply.get("usage")))
                 if response.ok:
-                    return extractor(reply)
-                if response.status_code in retryable and attempt < 3:
-                    time.sleep(2 ** attempt); continue
+                    answer = extractor(reply)
+                    self._control.limit(len(answer))
+                    return answer
+                if response.status_code in retryable and attempt < attempts:
+                    self._control.pause(self._control.policy.backoff * 2 ** (attempt - 1)); continue
                 logging.error("HTTP %s", response.status_code)
                 return f"HTTP error {response.status_code}"
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
-                if attempt == 3: return f"Error after 3 attempts: {type(exc).__name__}"
-                time.sleep(2 ** attempt)
+                self._control.check()
+                if attempt == attempts: return f"Error after {attempts} attempts: {type(exc).__name__}"
+                self._control.pause(self._control.policy.backoff * 2 ** (attempt - 1))
+            except RequestStopped:
+                raise
             except Exception as exc:
                 logging.error("Unexpected request error: %s", type(exc).__name__)
                 return f"Error: invalid provider response ({type(exc).__name__})"
+            finally:
+                if response is not None and hasattr(response, 'close'):
+                    response.close()
         return "Error: retries exhausted"
 
 

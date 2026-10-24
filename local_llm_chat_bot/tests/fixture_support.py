@@ -63,7 +63,11 @@ class FixtureEnvironment:
                           'usageMetadata':{'promptTokenCount':20,'candidatesTokenCount':10,'totalTokenCount':30}}
                 if fixture.response_transform:
                     response=fixture.response_transform(response, prompt, system)
-                encoded=json.dumps(response).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(encoded)));self.end_headers();self.wfile.write(encoded)
+                encoded=json.dumps(response).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(encoded)));self.end_headers()
+                try:
+                    self.wfile.write(encoded)
+                except (BrokenPipeError,ConnectionResetError):
+                    pass  # Expected when a timeout/stop closes the fixture socket.
         self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
         self.old=dict(w.ACTIVE);w.ACTIVE.clear();w.MODEL_WORK_IN_PROGRESS.clear()
