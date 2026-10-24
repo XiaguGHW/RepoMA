@@ -51,6 +51,17 @@ class CatalogTests(unittest.TestCase):
         self.assertNotIn('originalText=', source)
         self.assertNotIn('__legacyTranslationObserver', source)
 
+    def test_language_switch_rebuilds_dynamic_ui_from_data_snapshots(self):
+        source = (ROOT / 'chat_workbench.py').read_text(encoding='utf-8')
+        self.assertIn('function rerenderLanguageSensitiveUI()', source)
+        self.assertIn('rerenderLanguageSensitiveUI();', source)
+        self.assertIn('lastStatusSnapshot', source)
+        self.assertIn('lastCodebookProfile', source)
+        self.assertIn('lastScanReport', source)
+        self.assertIn('lastCacheAudit', source)
+        self.assertIn('renderScanDrawerForLanguage', source)
+        self.assertIn('renderCacheAuditForLanguage', source)
+
     def test_script_serialization(self):
         payload = catalog_script_json()
         self.assertNotIn('<', payload)
