@@ -1,0 +1,3651 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-10-25",
+  "timezone": "Europe/Berlin",
+  "repository": "XiaguGHW/RepoMA",
+  "base_commit": "238f6b881a3a4974356a0f9559fe3f3bfbb2f437",
+  "tested_worktree_changes": [
+    "local_llm_chat_bot/chat_workbench.py",
+    "local_llm_chat_bot/workbench_i18n.json",
+    "local_llm_chat_bot/tests/test_release_step_nine.py"
+  ],
+  "source_sha256": {
+    "local_llm_chat_bot/bosch_chat.py": "5624c818152d6f569d7cb187496d2c1b1ce4d07a3021397f178bb457eef6a1c9",
+    "local_llm_chat_bot/chat_workbench.py": "8b81fd4e7e6e70631f474ceeae7a3a181f6896627f328ec3bb95c868ec542f73",
+    "local_llm_chat_bot/code_chat_agent.py": "2825f754c120a9365bb6cfe9aacc0cdf4247f86e32c500a2eb280a3295d6f56c",
+    "local_llm_chat_bot/excel_agent.py": "7167db1324c271b674da238ec7b0d55ec426e9fde14a5a94db56369c1dcce11a",
+    "local_llm_chat_bot/excel_chat_agent.py": "91499b069a25b96acae81d806410935f7bf64eed2eee232537c80216a10ed658",
+    "local_llm_chat_bot/llm_connector_with_prompt_caching.py": "9cfd50120b95aa75b0915da309397745655e552627d84efa67e22be1e9df48a7",
+    "local_llm_chat_bot/local_document_library.py": "4e251675accc9e89131d8fbd0d188d1af8a42831f98230912250d4a8df6c784f",
+    "local_llm_chat_bot/model_pricing.json": "aa3261a38cf2f16874b862e2da2f022d3af9faa1136fbfc45546b96a236096ec",
+    "local_llm_chat_bot/pyproject.toml": "32e0c25878791da618847242f21dac680ab2fd6ea1a79b529e44a520cfe4e630",
+    "local_llm_chat_bot/release_safety.py": "8b330c13b5cb585027d4c64ef3c856bfdf7d1090298b69eb79396c5c81c00828",
+    "local_llm_chat_bot/request_runtime.py": "19ac0a381085b283c5c2e89ca200904b2b1be606cf1583e243c8db397af7bb97",
+    "local_llm_chat_bot/requirements-dev.txt": "f60a95cfedcb0b0f6d8c2013526d539bdf9c422b76b3a1e26c1c8dc63605ea4d",
+    "local_llm_chat_bot/requirements.txt": "bf46a2845f1242418ce7682b9b95b8832c39b2e67f47f832cc31eec6ea5aa852",
+    "local_llm_chat_bot/tests/browser_release.py": "9ce75768b0a7f697bba6346b35cc9c494d277a83e6e4af9495726d79ad7abcad",
+    "local_llm_chat_bot/tests/fixture_support.py": "cbc76a7cdc60667f5904c57fae4867077d847a2ddb18aff52f2d02f5763f9150",
+    "local_llm_chat_bot/tests/test_excel_formulas.py": "1fa1f6010aa4633b5285fab75b445efcc2109c6c9bf3c5801ac75b6052eae832",
+    "local_llm_chat_bot/tests/test_release_audit_gaps.py": "56639fe931e4e2a784877b5704751f60c97a65623cae341589e090d2330926d9",
+    "local_llm_chat_bot/tests/test_release_e2e.py": "3e093fd7b36ad08c49f55d31d31f4136e29962a8cfc099070029d2cde990335d",
+    "local_llm_chat_bot/tests/test_release_matrix.py": "e2bb5882cb3c95b682d6332e470cbc152459e16014e09bf52a7acf9715e89b9a",
+    "local_llm_chat_bot/tests/test_release_regressions.py": "273e42c1b38dee7ee52d5208c7ca827e4a8eddfa701baae89635bfd73b053076",
+    "local_llm_chat_bot/tests/test_release_step_eight.py": "a1f0714829d90fdbaae7c5c314ea7e43a06101769a74855e29fd02f979b49b8b",
+    "local_llm_chat_bot/tests/test_release_step_five.py": "4dfc750d5c22e2e9da522ab38bccc4a9f9f29331b2e0da16190b944675c5c915",
+    "local_llm_chat_bot/tests/test_release_step_four.py": "a2f9c62b88baa0c2eb469d90f995e72ee1a51304ddb1740eb0b3725fcd6ee1e7",
+    "local_llm_chat_bot/tests/test_release_step_nine.py": "49fe70dc4e9abcca74972961723c914bac52904b49c402a3e61663ce625008f0",
+    "local_llm_chat_bot/tests/test_release_step_seven.py": "cf9aa4c4f2a58e5d30e3313722023eac1096bc6afc83fe4bfba9f0a11a673621",
+    "local_llm_chat_bot/tests/test_release_step_six.py": "beb724dee46e888547316589737b95e20dc6bc818517e063b0793010cec688fa",
+    "local_llm_chat_bot/tests/test_release_step_three.py": "e53173a43e84bec12257bd610ad9b100284b4a6e7fdc05f9859ad8c42f79b77d",
+    "local_llm_chat_bot/tests/test_release_step_two.py": "1c7728f6b615cbf1ae3b1732576c98b01c09f8b6a6d4bd2196faa2e923e8a4b5",
+    "local_llm_chat_bot/tests/test_stream_progress.py": "075c1e2554e78e32ab22e861cfc6a8e66c57b5831a32a5e78d3a8f986322649c",
+    "local_llm_chat_bot/tests/test_workbench_i18n.py": "671c59c11a3066ab446b8f1e53b88cd6a1d47f22dd4a82ccf64e86356340f14a",
+    "local_llm_chat_bot/tests/test_workbench_reliability.py": "7e4710f92c4274507c1d39173f6d8d1af185d51dca4e4c27894ad25934a1aab8",
+    "local_llm_chat_bot/workbench_i18n.json": "fcc2d6cadb6b5573fa20bcda19958e16dddeb5f27d122513a46a46a63573a088",
+    "local_llm_chat_bot/workbench_i18n.py": "8258a89a55d3150bed52a08c154dfcfc4a80e5c628624e14e8f81af4fe3134f5",
+    "local_llm_chat_bot/workbench_startup.py": "b398bee14c3da7758fe81f04f4a29cd31e78a2590b8ed08b764941f4b1636240"
+  },
+  "source_manifest_sha256": "9aa276e2bd28d05de480a94a1d933022a1f868e6b0cb589e774ba5a81e5348a1",
+  "environment": {
+    "requests": "2.34.2",
+    "openai": "3.37.0",
+    "python-dotenv": "1.2.4",
+    "PyMuPDF": "1.26.6",
+    "Pillow": "12.3.0",
+    "pytesseract": "0.3.13",
+    "openpyxl": "3.1.5",
+    "python-docx": "1.2.0",
+    "fastapi": "0.162.0",
+    "uvicorn": "0.54.0",
+    "starlette": "1.10.0",
+    "pydantic": "2.14.1",
+    "httpx": "0.28.1",
+    "httpx2": "2.16.0",
+    "playwright": "1.51.0",
+    "ruff": "0.17.2",
+    "mypy": "1.15.0",
+    "chromium": "134.0.6998.35",
+    "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+    "platform": "Linux-6.18.55-x86_64-with-glibc2.39",
+    "node": "v24.22.1"
+  },
+  "venv_uses_system_site_packages": true,
+  "commands": {
+    "browser-negative": {
+      "command": [
+        "/tmp/workbench-step9-venv/bin/python",
+        "/tmp/workbench-step9/browser_negative_control.py"
+      ],
+      "exit_code": 1,
+      "elapsed_seconds": 0.941,
+      "log": "browser-negative.log"
+    },
+    "browser": {
+      "command": [
+        "/tmp/workbench-step9-venv/bin/python",
+        "tests/browser_release.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 51.624,
+      "log": "browser.log",
+      "environment": {
+        "FONTCONFIG_FILE": "/tmp/workbench-step9/fonts.conf",
+        "WORKBENCH_TEST_OUTPUT": "/tmp/workbench-step9/browser-fonts"
+      }
+    },
+    "compile": {
+      "command": [
+        "/tmp/workbench-step9-venv/bin/python",
+        "-m",
+        "compileall",
+        "-q",
+        "."
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.038,
+      "log": "compile.log"
+    },
+    "fatal-ruff": {
+      "command": [
+        "/tmp/workbench-step9-venv/bin/python",
+        "-m",
+        "ruff",
+        "check",
+        "--select",
+        "E9,F63,F7,F82",
+        "."
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.031,
+      "log": "fatal-ruff.log"
+    },
+    "mypy": {
+      "command": [
+        "/tmp/workbench-step9-venv/bin/python",
+        "-m",
+        "mypy"
+      ],
+      "exit_code": 1,
+      "elapsed_seconds": 1.569,
+      "log": "mypy.log"
+    },
+    "ruff": {
+      "command": [
+        "/tmp/workbench-step9-venv/bin/python",
+        "-m",
+        "ruff",
+        "check",
+        "--output-format",
+        "json",
+        "."
+      ],
+      "exit_code": 1,
+      "elapsed_seconds": 0.036,
+      "log": "ruff.log"
+    },
+    "unit": {
+      "command": [
+        "/tmp/workbench-step9-venv/bin/python",
+        "/tmp/workbench-step9/unit_runner.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 64.015,
+      "log": "unit.log",
+      "equivalent_standard_command": "python -m unittest discover -s tests -v"
+    },
+    "whitespace": {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.006,
+      "log": "whitespace.log"
+    },
+    "staged-whitespace": {
+      "command": [
+        "git",
+        "diff",
+        "--cached",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.006,
+      "log": "staged-whitespace.log"
+    }
+  },
+  "unit": {
+    "tests_run": 184,
+    "success": true,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1,
+    "expected_failures": 0,
+    "unexpected_successes": 0,
+    "passed_subtests": 111,
+    "methods": {
+      "test_excel_formulas.FormulaTests.test_array_member_points_to_owner_instead_of_being_reported_as_empty": {
+        "status": "passed"
+      },
+      "test_excel_formulas.FormulaTests.test_cli_trace_range_and_json_boundary_use_same_converter": {
+        "status": "passed"
+      },
+      "test_excel_formulas.FormulaTests.test_data_table_metadata_is_preserved_without_a_fabricated_formula": {
+        "status": "passed"
+      },
+      "test_excel_formulas.FormulaTests.test_empty_looking_array_or_table_members_cannot_be_written": {
+        "status": "passed"
+      },
+      "test_excel_formulas.FormulaTests.test_formula_fingerprint_detects_special_formula_text_and_range_changes": {
+        "status": "passed"
+      },
+      "test_excel_formulas.FormulaTests.test_ordinary_formula_fingerprint_remains_compatible": {
+        "status": "passed"
+      },
+      "test_excel_formulas.FormulaTests.test_quoted_text_named_and_external_references_are_not_guessed": {
+        "status": "passed"
+      },
+      "test_excel_formulas.FormulaTests.test_read_preview_search_and_prompt_are_json_serializable": {
+        "status": "passed"
+      },
+      "test_excel_formulas.FormulaTests.test_search_and_fingerprint_do_not_expand_formatted_million_row_sheet": {
+        "status": "passed"
+      },
+      "test_excel_formulas.FormulaTests.test_trace_array_preserves_text_range_and_cross_sheet_references": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_codebook_and_comparison_calls_must_be_counted": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_compare_must_reject_changed_sources_before_call": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_corrupt_nested_context_must_require_reconfirmation": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_english_progress_and_notices_must_not_contain_chinese_ui": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_evidence_pages_must_reference_supplied_pages": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_explicit_env_file_must_be_loaded": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_failed_target_change_must_preserve_old_conversation": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_followup_repair_must_revalidate_classification": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_gui_cli_must_honor_explicit_port": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_gui_cli_must_reject_unknown_option": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_model_content_chunks_must_reach_stream_client": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_private_state_symlink_must_not_enter_model_prompt": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_relocked_rules_must_not_silently_disable_bg_classification": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_stale_confirmation_must_not_apply_a_different_pending_plan": {
+        "status": "passed"
+      },
+      "test_release_audit_gaps.AuditGaps.test_unknown_usage_must_not_become_free_price": {
+        "status": "passed"
+      },
+      "test_release_e2e.EndToEndTests.test_full_user_flow_and_invalid_classification_recovery": {
+        "status": "passed"
+      },
+      "test_release_matrix.ApiAndFileMatrix.test_all_declared_file_formats_and_source_immutability": {
+        "status": "passed"
+      },
+      "test_release_matrix.ApiAndFileMatrix.test_atomic_excel_publication_preserves_formulas_and_failure": {
+        "status": "passed"
+      },
+      "test_release_matrix.ApiAndFileMatrix.test_cross_origin_and_host_rejected": {
+        "status": "passed"
+      },
+      "test_release_matrix.ApiAndFileMatrix.test_empty_corrupt_oversize_nested_duplicate_selection": {
+        "status": "passed"
+      },
+      "test_release_matrix.ApiAndFileMatrix.test_invalid_paths_blank_question_long_question_and_missing_key": {
+        "status": "passed"
+      },
+      "test_release_matrix.ApiAndFileMatrix.test_model_slot_rejects_context_mutation_and_recovers": {
+        "status": "passed"
+      },
+      "test_release_matrix.ApiAndFileMatrix.test_model_switch_canonicalization_and_request": {
+        "status": "passed"
+      },
+      "test_release_matrix.ApiAndFileMatrix.test_no_source_scope_means_no_old_documents": {
+        "status": "passed"
+      },
+      "test_release_matrix.ApiAndFileMatrix.test_pending_cancel_confirm_backup_and_rollback": {
+        "status": "passed"
+      },
+      "test_release_matrix.TransportMatrix.test_http_status_retry_matrix": {
+        "status": "passed"
+      },
+      "test_release_matrix.TransportMatrix.test_provider_truncation_and_empty_not_valid": {
+        "status": "passed"
+      },
+      "test_release_matrix.TransportMatrix.test_provider_usage_missing_zero_invalid_and_thoughts": {
+        "status": "passed"
+      },
+      "test_release_matrix.TransportMatrix.test_timeout_connection_invalid_json_empty_and_recovery": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_bad_json_action_field_types_are_rejected": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_classification_requires_exact_member_not_substring": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_claude_thinking_block_does_not_hide_final_text": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_codebook_rejects_duplicates_and_missing_definitions": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_corrupt_document_index_type": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_corrupt_state_types_and_legacy_missing_fields": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_gemini_text_skips_thought_and_joins_parts": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_invalid_image_is_not_indexed_as_valid_evidence": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_invalid_pricing_is_safe": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_partial_usage_is_unknown_not_zero_cost": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_session_name_cannot_escape_project": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_setup_invalid_model_preserves_active_session": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_single_file_without_codebook": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_sparse_excel_preserves_source_row_coordinates": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_state_scan_excludes_private_application_state": {
+        "status": "passed"
+      },
+      "test_release_regressions.ReleaseRegressionTests.test_target_switch_clears_old_prompt_and_export": {
+        "status": "passed"
+      },
+      "test_release_step_eight.Configuration.test_actual_custom_env_is_shared_by_setup_probe_and_diagnostics": {
+        "status": "passed"
+      },
+      "test_release_step_eight.Configuration.test_bad_endpoint_is_redacted_and_failed_probe_cannot_change_active_config": {
+        "status": "passed"
+      },
+      "test_release_step_eight.Configuration.test_failed_config_switch_preserves_active_environment_and_pending_plan": {
+        "status": "passed"
+      },
+      "test_release_step_eight.Configuration.test_file_switch_drops_old_loaded_values_but_external_values_win": {
+        "status": "passed"
+      },
+      "test_release_step_eight.Configuration.test_missing_default_configuration_can_be_fixed_without_restart": {
+        "status": "passed"
+      },
+      "test_release_step_eight.Configuration.test_state_failure_is_actionable_transactional_and_recoverable": {
+        "status": "passed"
+      },
+      "test_release_step_eight.Configuration.test_state_override_is_rejected_and_permission_errors_have_no_raw_trace": {
+        "status": "passed"
+      },
+      "test_release_step_eight.Configuration.test_uvicorn_bind_failure_after_preflight_has_recovery_and_no_secret": {
+        "status": "passed"
+      },
+      "test_release_step_eight.StartupSubprocess.test_explicit_missing_or_bad_encoding_file_fails_cleanly": {
+        "status": "passed"
+      },
+      "test_release_step_eight.StartupSubprocess.test_help_unknown_options_and_port_validation_work_without_dependencies": {
+        "status": "passed"
+      },
+      "test_release_step_eight.StartupSubprocess.test_missing_dependencies_show_exact_install_command": {
+        "status": "passed"
+      },
+      "test_release_step_eight.StartupSubprocess.test_missing_key_and_blocked_state_show_recovery": {
+        "status": "passed"
+      },
+      "test_release_step_eight.StartupSubprocess.test_occupied_port_reports_reuse_or_alternate_port": {
+        "status": "passed"
+      },
+      "test_release_step_eight.StartupSubprocess.test_real_server_different_cwd_custom_env_shutdown_and_restart": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsageLedger.test_actual_response_model_controls_price": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsageLedger.test_classification_repair_and_supplementary_reads_are_counted_once": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsageLedger.test_codebook_syntax_repair_is_counted_once": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsageLedger.test_codebook_two_and_comparison_two_are_exactly_four": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsageLedger.test_exception_records_usage_and_never_reuses_previous_call": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsageLedger.test_failed_codebook_main_and_dossier_do_not_erase_consumed_usage": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsageLedger.test_failed_comparison_keeps_consumed_usage": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsageLedger.test_failed_preread_is_counted_even_when_chat_can_continue": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsageLedger.test_missing_then_known_usage_survives_reload_and_export": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsageLedger.test_openai_fallback_and_stream_metadata_are_counted_per_dispatch": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsageLedger.test_preread_dossier_main_followup_and_cache_reuse": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsageLedger.test_transport_retry_counts_each_attempt_and_partial_usage": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsagePricing.test_accumulated_cost_does_not_round_each_small_call": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsagePricing.test_cache_prices_split_uncached_input_without_double_charging": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsagePricing.test_input_integer_precision_is_not_lost": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsagePricing.test_invalid_cache_count_and_cache_larger_than_prompt_are_unknown": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsagePricing.test_provider_cache_fields_and_normalization_are_idempotent": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsagePricing.test_summary_preserves_partial_counts_and_prices": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsagePricing.test_unknown_invalid_partial_and_true_zero": {
+        "status": "passed"
+      },
+      "test_release_step_five.UsagePricing.test_zero_price_is_real_zero_but_missing_price_is_unknown": {
+        "status": "passed"
+      },
+      "test_release_step_four.ReferenceSchema.test_actual_pages_and_cross_class_boundaries_are_valid": {
+        "status": "passed"
+      },
+      "test_release_step_four.ReferenceSchema.test_codebook_only_or_uncited_bg_references_fail": {
+        "status": "passed"
+      },
+      "test_release_step_four.ReferenceSchema.test_invalid_types_return_readable_reasons_not_runtime_errors": {
+        "status": "passed"
+      },
+      "test_release_step_four.ReferenceSchema.test_nonpaged_rules_need_real_source_refs_instead_of_physical_pages": {
+        "status": "passed"
+      },
+      "test_release_step_four.ReferenceSchema.test_page_must_belong_to_cited_rule_and_actual_document": {
+        "status": "passed"
+      },
+      "test_release_step_four.ReferenceSchema.test_real_sheet_ranges_and_nonpaged_bg_chunks_are_valid": {
+        "status": "passed"
+      },
+      "test_release_step_four.ResponseRounds.test_comparison_validation_failure_isolated_from_next_model": {
+        "status": "passed"
+      },
+      "test_release_step_four.ResponseRounds.test_explanation_can_have_no_classification_and_uses_explicit_prompt": {
+        "status": "passed"
+      },
+      "test_release_step_four.ResponseRounds.test_explicit_classification_requires_object_without_keyword_detection": {
+        "status": "passed"
+      },
+      "test_release_step_four.ResponseRounds.test_keyword_free_followups_revalidate_repair_in_all_languages": {
+        "status": "passed"
+      },
+      "test_release_step_four.ResponseRounds.test_normal_mode_cannot_accept_an_unlocked_classification": {
+        "status": "passed"
+      },
+      "test_release_step_four.ResponseRounds.test_one_repair_budget_is_shared_with_supplementary_round": {
+        "status": "passed"
+      },
+      "test_release_step_four.ResponseRounds.test_real_pdf_rule_pages_use_the_actual_page_inventory": {
+        "status": "passed"
+      },
+      "test_release_step_four.ResponseRounds.test_repair_cannot_drop_classification_in_explanation_mode": {
+        "status": "passed"
+      },
+      "test_release_step_four.ResponseRounds.test_supplementary_round_cannot_fallback_to_invalid_raw_answer": {
+        "status": "passed"
+      },
+      "test_release_step_four.ResponseRounds.test_supplementary_round_cannot_omit_previously_required_classification": {
+        "status": "passed"
+      },
+      "test_release_step_four.ResponseRounds.test_truncated_and_malformed_actions_cannot_commit": {
+        "status": "passed"
+      },
+      "test_release_step_four.ResponseRounds.test_valid_repair_is_accepted_once_and_followup_card_is_not_hidden": {
+        "status": "passed"
+      },
+      "test_release_step_nine.NativePickerLanguage.test_native_picker_uses_language_header_for_both_dialogs": {
+        "status": "passed"
+      },
+      "test_release_step_seven.DraftAndProgress.test_cad_image_groups_expose_localizable_counts_without_changing_names": {
+        "status": "passed"
+      },
+      "test_release_step_seven.DraftAndProgress.test_error_header_selects_language_and_preserves_path": {
+        "status": "passed"
+      },
+      "test_release_step_seven.DraftAndProgress.test_progress_notices_reuse_and_scope_carry_keys": {
+        "status": "passed"
+      },
+      "test_release_step_seven.DraftAndProgress.test_save_changes_only_app_draft_and_rejects_stale_version": {
+        "status": "passed"
+      },
+      "test_release_step_seven.DraftAndProgress.test_structured_errors_keep_existing_secret_redaction": {
+        "status": "passed"
+      },
+      "test_release_step_seven.DraftAndProgress.test_unconfirmed_and_invalid_edits_leave_profile_unchanged": {
+        "status": "passed"
+      },
+      "test_release_step_seven.LocalizedMessages.test_only_explicit_ui_messages_translate": {
+        "status": "passed"
+      },
+      "test_release_step_six.AnswerDecoder.test_every_boundary_preserves_escapes_unicode_code_and_tables": {
+        "status": "passed"
+      },
+      "test_release_step_six.AnswerDecoder.test_invalid_escape_surrogate_and_nonstring_answer_fail_closed": {
+        "status": "passed"
+      },
+      "test_release_step_six.AnswerDecoder.test_json_fences_and_split_encoded_answer_key": {
+        "status": "passed"
+      },
+      "test_release_step_six.AnswerDecoder.test_long_answer_is_linear_and_has_a_real_size_limit": {
+        "status": "passed"
+      },
+      "test_release_step_six.AnswerDecoder.test_nested_keys_changes_and_classification_never_leak": {
+        "status": "passed"
+      },
+      "test_release_step_six.RequestBounds.test_cancel_and_deadline_interrupt_waits_and_prevent_commit": {
+        "status": "passed"
+      },
+      "test_release_step_six.RequestBounds.test_cancelled_backoff_cannot_dispatch_a_retry": {
+        "status": "passed"
+      },
+      "test_release_step_six.RequestBounds.test_completed_commit_wins_a_later_cancel": {
+        "status": "passed"
+      },
+      "test_release_step_six.RequestBounds.test_environment_policy_is_bounded_and_timeouts_use_remaining_budget": {
+        "status": "passed"
+      },
+      "test_release_step_six.RequestBounds.test_single_attempt_policy_disables_openai_stream_replay": {
+        "status": "passed"
+      },
+      "test_release_step_six.RequestBounds.test_unfinished_openai_sse_event_cannot_bypass_deadline_or_byte_limit": {
+        "status": "passed"
+      },
+      "test_release_step_six.StreamLifecycle.test_cancellation_prevents_supplementary_and_classification_repair": {
+        "status": "passed"
+      },
+      "test_release_step_six.StreamLifecycle.test_delta_is_observable_before_result_and_final_result_is_unique": {
+        "status": "passed"
+      },
+      "test_release_step_six.StreamLifecycle.test_real_http_read_is_bounded_and_no_retry_runs_after_deadline": {
+        "status": "passed"
+      },
+      "test_release_step_six.StreamLifecycle.test_real_tcp_disconnect_cancels_without_a_cancel_endpoint": {
+        "status": "passed"
+      },
+      "test_release_step_six.StreamLifecycle.test_stop_holds_slot_until_actual_worker_exit_then_retry_works": {
+        "status": "passed"
+      },
+      "test_release_step_six.StreamLifecycle.test_timeout_cannot_release_a_still_blocked_worker": {
+        "status": "passed"
+      },
+      "test_release_step_six.StreamLifecycle.test_truncated_json_and_oversized_answer_cannot_be_committed": {
+        "status": "passed"
+      },
+      "test_release_step_three.StepThree.test_cancelled_edit_preserves_scope_and_explicit_normal_mode_is_available": {
+        "status": "passed"
+      },
+      "test_release_step_three.StepThree.test_changed_deleted_missing_and_changed_scope_block_every_entry": {
+        "status": "passed"
+      },
+      "test_release_step_three.StepThree.test_changed_rule_rejected_before_any_target_mutation": {
+        "status": "passed"
+      },
+      "test_release_step_three.StepThree.test_corrupt_index_chunks_are_quarantined_and_never_sent": {
+        "status": "passed"
+      },
+      "test_release_step_three.StepThree.test_corrupt_nested_states_preserve_history_usage_and_quarantine": {
+        "status": "passed"
+      },
+      "test_release_step_three.StepThree.test_failed_target_prepare_and_commit_preserve_every_active_record": {
+        "status": "passed"
+      },
+      "test_release_step_three.StepThree.test_legacy_valid_scope_without_version_is_migrated": {
+        "status": "passed"
+      },
+      "test_release_step_three.StepThree.test_relocked_rules_require_same_bg_reconfirmation_for_every_model_entry": {
+        "status": "passed"
+      },
+      "test_release_step_three.StepThree.test_rule_changes_in_another_session_and_cache_revision_are_rejected": {
+        "status": "passed"
+      },
+      "test_release_step_two.StepTwo.test_changed_replacement_is_preserved": {
+        "status": "passed"
+      },
+      "test_release_step_two.StepTwo.test_context_fingerprint_rejects_unannounced_binding_change": {
+        "status": "passed"
+      },
+      "test_release_step_two.StepTwo.test_custom_state_directory_is_private_and_not_indexed": {
+        "status": "passed"
+      },
+      "test_release_step_two.StepTwo.test_file_and_directory_links_are_blocked_for_reads_and_diffs": {
+        "status": "passed"
+      },
+      "test_release_step_two.StepTwo.test_link_inserted_after_review_cannot_redirect_apply": {
+        "status": "passed"
+      },
+      "test_release_step_two.StepTwo.test_model_target_session_and_setup_invalidate_old_plan": {
+        "status": "passed"
+      },
+      "test_release_step_two.StepTwo.test_native_windows_case_and_junction": {
+        "status": "skipped",
+        "reason": "Requires native Windows NTFS junction and case semantics"
+      },
+      "test_release_step_two.StepTwo.test_old_and_missing_ids_cannot_apply_new_plan": {
+        "status": "passed"
+      },
+      "test_release_step_two.StepTwo.test_plan_digest_rejects_content_or_order_change": {
+        "status": "passed"
+      },
+      "test_release_step_two.StepTwo.test_regular_unicode_paths_work_and_unsafe_paths_are_rejected": {
+        "status": "passed"
+      },
+      "test_release_step_two.StepTwo.test_reparse_metadata_is_rejected_before_access": {
+        "status": "passed"
+      },
+      "test_release_step_two.StepTwo.test_rule_source_change_after_review_rejects_confirmation": {
+        "status": "passed"
+      },
+      "test_release_step_two.StepTwo.test_rules_edit_and_relock_invalidate_confirmation": {
+        "status": "passed"
+      },
+      "test_release_step_two.StepTwo.test_source_change_after_review_rejects_before_writing": {
+        "status": "passed"
+      },
+      "test_release_step_two.StepTwo.test_unconfirmed_and_cancelled_plan_never_writes": {
+        "status": "passed"
+      },
+      "test_stream_progress.StreamingTests.test_default_request_keeps_nonstream_contract": {
+        "status": "passed"
+      },
+      "test_stream_progress.StreamingTests.test_full_response_reasoning_and_hidden_planner_body": {
+        "status": "passed"
+      },
+      "test_stream_progress.StreamingTests.test_gemini_does_not_receive_openai_streaming_options": {
+        "status": "passed"
+      },
+      "test_stream_progress.StreamingTests.test_main_runs_discovery_open_and_reply_without_extra_final_request": {
+        "status": "passed"
+      },
+      "test_stream_progress.StreamingTests.test_missing_reasoning_is_reported_not_invented": {
+        "status": "passed"
+      },
+      "test_stream_progress.StreamingTests.test_partial_stream_never_becomes_an_executable_plan": {
+        "status": "passed"
+      },
+      "test_stream_progress.StreamingTests.test_progress_survives_excel_tool_stdout_redirection": {
+        "status": "passed"
+      },
+      "test_stream_progress.StreamingTests.test_stream_keeps_reasoning_out_of_planner_json": {
+        "status": "passed"
+      },
+      "test_stream_progress.StreamingTests.test_stream_rejection_falls_back_once_and_is_remembered": {
+        "status": "passed"
+      },
+      "test_stream_progress.StreamingTests.test_unrelated_error_does_not_retry_or_disable_thinking": {
+        "status": "passed"
+      },
+      "test_workbench_i18n.CatalogTests.test_complete_catalog": {
+        "status": "passed"
+      },
+      "test_workbench_i18n.CatalogTests.test_dynamic_controls_have_explicit_language_refresh": {
+        "status": "passed"
+      },
+      "test_workbench_i18n.CatalogTests.test_empty_or_chinese_foreign_translation_is_rejected": {
+        "status": "passed"
+      },
+      "test_workbench_i18n.CatalogTests.test_javascript_syntax_and_translator": {
+        "status": "passed"
+      },
+      "test_workbench_i18n.CatalogTests.test_language_switch_rebuilds_dynamic_ui_from_data_snapshots": {
+        "status": "passed"
+      },
+      "test_workbench_i18n.CatalogTests.test_literal_translation_calls_have_keys": {
+        "status": "passed"
+      },
+      "test_workbench_i18n.CatalogTests.test_material_confirmation_preserves_current_selection": {
+        "status": "passed"
+      },
+      "test_workbench_i18n.CatalogTests.test_missing_language_key_is_rejected": {
+        "status": "passed"
+      },
+      "test_workbench_i18n.CatalogTests.test_script_serialization": {
+        "status": "passed"
+      },
+      "test_workbench_i18n.CatalogTests.test_translation_does_not_observe_or_reclassify_runtime_text": {
+        "status": "passed"
+      },
+      "test_workbench_i18n.CatalogTests.test_wrong_placeholder_is_rejected": {
+        "status": "passed"
+      },
+      "test_workbench_reliability.CodebookPageSelectionTests.test_chinese_alias_selects_the_greifer_page": {
+        "status": "passed"
+      },
+      "test_workbench_reliability.CodebookPageSelectionTests.test_german_class_name_selects_rotation_page": {
+        "status": "passed"
+      },
+      "test_workbench_reliability.CodebookPageSelectionTests.test_unknown_question_uses_stable_definition_page_fallback": {
+        "status": "passed"
+      },
+      "test_workbench_reliability.DocumentIndexAtomicWriteTests.test_save_replaces_valid_json_and_cleans_temporary_files": {
+        "status": "passed"
+      },
+      "test_workbench_reliability.DossierModelSlotTests.test_begin_model_work_blocks_a_second_model_task": {
+        "status": "passed"
+      },
+      "test_workbench_reliability.DossierModelSlotTests.test_rebuild_releases_slot_after_success_and_exception": {
+        "status": "passed"
+      }
+    }
+  },
+  "browser": {
+    "success": true,
+    "tests_run": 17,
+    "methods": {
+      "browser_release.BrowserRelease.test_answer_preview_stop_keeps_busy_until_worker_exits_then_retry": "passed",
+      "browser_release.BrowserRelease.test_draft_save_confirmation_and_stale_context_preserve_raw_input": "passed",
+      "browser_release.BrowserRelease.test_existing_classification_card_uses_current_language": "passed",
+      "browser_release.BrowserRelease.test_explicit_explanation_mode_and_nonpaged_rule_references": "passed",
+      "browser_release.BrowserRelease.test_german_mobile_drawer_long_error_folder_selection_and_close": "passed",
+      "browser_release.BrowserRelease.test_long_invalid_draft_keeps_selection_scroll_errors_and_cancel_guard": "passed",
+      "browser_release.BrowserRelease.test_material_drawer_geometry_and_real_actions": "passed",
+      "browser_release.BrowserRelease.test_navigation_disconnect_and_truncated_preview_never_create_results": "passed",
+      "browser_release.BrowserRelease.test_paths_and_custom_comparison_model_escape_attributes": "passed",
+      "browser_release.BrowserRelease.test_rule_change_reconfirms_same_bg_and_pending_path_is_explicit": "passed",
+      "browser_release.BrowserRelease.test_rule_draft_survives_language_cycle": "passed",
+      "browser_release.BrowserRelease.test_startup_configuration_errors_are_visible_localized_and_recoverable": "passed",
+      "browser_release.BrowserRelease.test_structured_dynamic_messages_redraw_without_translating_content": "passed",
+      "browser_release.BrowserRelease.test_two_pages_confirm_only_their_displayed_plan": "passed",
+      "browser_release.BrowserRelease.test_unknown_usage_is_visible_in_chat_status_rules_and_comparison": "passed",
+      "browser_release.BrowserRelease.test_user_flow": "passed",
+      "browser_release.BrowserRelease.test_workspace_attribute_input_cannot_create_event_handler": "passed"
+    },
+    "stages": [
+      {
+        "test": "test_answer_preview_stop_keeps_busy_until_worker_exits_then_retry",
+        "stage": "safe preview, explicit stop and retry",
+        "status": "passed"
+      },
+      {
+        "test": "test_material_drawer_geometry_and_real_actions",
+        "stage": "materials drawer geometry and clicks at 1440px",
+        "status": "passed"
+      },
+      {
+        "test": "test_material_drawer_geometry_and_real_actions",
+        "stage": "materials drawer geometry and clicks at 800px",
+        "status": "passed"
+      },
+      {
+        "test": "test_material_drawer_geometry_and_real_actions",
+        "stage": "materials drawer geometry and clicks at 390px",
+        "status": "passed"
+      },
+      {
+        "test": "test_navigation_disconnect_and_truncated_preview_never_create_results",
+        "stage": "navigation disconnect and truncated preview cleanup",
+        "status": "passed"
+      },
+      {
+        "test": "test_unknown_usage_is_visible_in_chat_status_rules_and_comparison",
+        "stage": "unknown usage display",
+        "status": "passed"
+      },
+      {
+        "test": "test_user_flow",
+        "stage": "workspace and custom model",
+        "status": "passed"
+      },
+      {
+        "test": "test_user_flow",
+        "stage": "six language switches preserve model",
+        "status": "passed"
+      },
+      {
+        "test": "test_user_flow",
+        "stage": "prepare lock select classify follow-up",
+        "status": "passed"
+      },
+      {
+        "test": "test_user_flow",
+        "stage": "edit rules and switch BG without old context",
+        "status": "passed"
+      },
+      {
+        "test": "test_user_flow",
+        "stage": "refresh restores workspace model language and BG",
+        "status": "passed"
+      }
+    ]
+  },
+  "browser_negative_control": {
+    "expected_exit_code": 1,
+    "observed_exit_code": 1,
+    "reported_success": false,
+    "recorded_stage": "intentional runner failure control",
+    "method_count": 1,
+    "purpose": "Intentional failing control only; excluded from production suite totals."
+  },
+  "r01_r16_evidence": {
+    "R01": {
+      "unit": [
+        "test_workbench_i18n.CatalogTests.test_material_confirmation_preserves_current_selection"
+      ],
+      "browser": [
+        "browser_release.BrowserRelease.test_user_flow",
+        "browser_release.BrowserRelease.test_material_drawer_geometry_and_real_actions"
+      ],
+      "note": "Runner negative control also verified nonzero exit and a recorded failed stage; full lint/type gates remain non-green.",
+      "unit_outcomes": {
+        "test_workbench_i18n.CatalogTests.test_material_confirmation_preserves_current_selection": "passed"
+      },
+      "browser_outcomes": {
+        "browser_release.BrowserRelease.test_user_flow": "passed",
+        "browser_release.BrowserRelease.test_material_drawer_geometry_and_real_actions": "passed"
+      }
+    },
+    "R02": {
+      "unit": [
+        "test_release_audit_gaps.AuditGaps.test_private_state_symlink_must_not_enter_model_prompt",
+        "test_release_step_two.StepTwo.test_file_and_directory_links_are_blocked_for_reads_and_diffs",
+        "test_release_step_two.StepTwo.test_link_inserted_after_review_cannot_redirect_apply",
+        "test_release_step_two.StepTwo.test_regular_unicode_paths_work_and_unsafe_paths_are_rejected",
+        "test_release_step_two.StepTwo.test_custom_state_directory_is_private_and_not_indexed",
+        "test_release_step_two.StepTwo.test_reparse_metadata_is_rejected_before_access",
+        "test_release_step_two.StepTwo.test_native_windows_case_and_junction"
+      ],
+      "browser": [],
+      "note": "One native Windows test is skipped on Linux; synthetic reparse metadata does not replace native validation.",
+      "unit_outcomes": {
+        "test_release_audit_gaps.AuditGaps.test_private_state_symlink_must_not_enter_model_prompt": "passed",
+        "test_release_step_two.StepTwo.test_file_and_directory_links_are_blocked_for_reads_and_diffs": "passed",
+        "test_release_step_two.StepTwo.test_link_inserted_after_review_cannot_redirect_apply": "passed",
+        "test_release_step_two.StepTwo.test_regular_unicode_paths_work_and_unsafe_paths_are_rejected": "passed",
+        "test_release_step_two.StepTwo.test_custom_state_directory_is_private_and_not_indexed": "passed",
+        "test_release_step_two.StepTwo.test_reparse_metadata_is_rejected_before_access": "passed",
+        "test_release_step_two.StepTwo.test_native_windows_case_and_junction": "skipped"
+      },
+      "browser_outcomes": {}
+    },
+    "R03": {
+      "unit": [],
+      "browser": [
+        "browser_release.BrowserRelease.test_workspace_attribute_input_cannot_create_event_handler",
+        "browser_release.BrowserRelease.test_paths_and_custom_comparison_model_escape_attributes"
+      ],
+      "unit_outcomes": {},
+      "browser_outcomes": {
+        "browser_release.BrowserRelease.test_workspace_attribute_input_cannot_create_event_handler": "passed",
+        "browser_release.BrowserRelease.test_paths_and_custom_comparison_model_escape_attributes": "passed"
+      }
+    },
+    "R04": {
+      "unit": [
+        "test_release_audit_gaps.AuditGaps.test_stale_confirmation_must_not_apply_a_different_pending_plan",
+        "test_release_step_two.StepTwo.test_old_and_missing_ids_cannot_apply_new_plan",
+        "test_release_step_two.StepTwo.test_unconfirmed_and_cancelled_plan_never_writes",
+        "test_release_step_two.StepTwo.test_plan_digest_rejects_content_or_order_change",
+        "test_release_step_two.StepTwo.test_source_change_after_review_rejects_before_writing",
+        "test_release_matrix.ApiAndFileMatrix.test_pending_cancel_confirm_backup_and_rollback"
+      ],
+      "browser": [
+        "browser_release.BrowserRelease.test_two_pages_confirm_only_their_displayed_plan"
+      ],
+      "unit_outcomes": {
+        "test_release_audit_gaps.AuditGaps.test_stale_confirmation_must_not_apply_a_different_pending_plan": "passed",
+        "test_release_step_two.StepTwo.test_old_and_missing_ids_cannot_apply_new_plan": "passed",
+        "test_release_step_two.StepTwo.test_unconfirmed_and_cancelled_plan_never_writes": "passed",
+        "test_release_step_two.StepTwo.test_plan_digest_rejects_content_or_order_change": "passed",
+        "test_release_step_two.StepTwo.test_source_change_after_review_rejects_before_writing": "passed",
+        "test_release_matrix.ApiAndFileMatrix.test_pending_cancel_confirm_backup_and_rollback": "passed"
+      },
+      "browser_outcomes": {
+        "browser_release.BrowserRelease.test_two_pages_confirm_only_their_displayed_plan": "passed"
+      }
+    },
+    "R05": {
+      "unit": [
+        "test_release_audit_gaps.AuditGaps.test_corrupt_nested_context_must_require_reconfirmation",
+        "test_release_step_three.StepThree.test_corrupt_nested_states_preserve_history_usage_and_quarantine",
+        "test_release_step_three.StepThree.test_corrupt_index_chunks_are_quarantined_and_never_sent",
+        "test_release_step_three.StepThree.test_legacy_valid_scope_without_version_is_migrated"
+      ],
+      "browser": [],
+      "unit_outcomes": {
+        "test_release_audit_gaps.AuditGaps.test_corrupt_nested_context_must_require_reconfirmation": "passed",
+        "test_release_step_three.StepThree.test_corrupt_nested_states_preserve_history_usage_and_quarantine": "passed",
+        "test_release_step_three.StepThree.test_corrupt_index_chunks_are_quarantined_and_never_sent": "passed",
+        "test_release_step_three.StepThree.test_legacy_valid_scope_without_version_is_migrated": "passed"
+      },
+      "browser_outcomes": {}
+    },
+    "R06": {
+      "unit": [
+        "test_release_audit_gaps.AuditGaps.test_failed_target_change_must_preserve_old_conversation",
+        "test_release_step_three.StepThree.test_failed_target_prepare_and_commit_preserve_every_active_record",
+        "test_release_step_three.StepThree.test_changed_rule_rejected_before_any_target_mutation"
+      ],
+      "browser": [],
+      "note": "Exception rollback inside one serialized process, not multi-file crash atomicity.",
+      "unit_outcomes": {
+        "test_release_audit_gaps.AuditGaps.test_failed_target_change_must_preserve_old_conversation": "passed",
+        "test_release_step_three.StepThree.test_failed_target_prepare_and_commit_preserve_every_active_record": "passed",
+        "test_release_step_three.StepThree.test_changed_rule_rejected_before_any_target_mutation": "passed"
+      },
+      "browser_outcomes": {}
+    },
+    "R07": {
+      "unit": [
+        "test_release_audit_gaps.AuditGaps.test_relocked_rules_must_not_silently_disable_bg_classification",
+        "test_release_step_three.StepThree.test_relocked_rules_require_same_bg_reconfirmation_for_every_model_entry",
+        "test_release_step_three.StepThree.test_cancelled_edit_preserves_scope_and_explicit_normal_mode_is_available"
+      ],
+      "browser": [
+        "browser_release.BrowserRelease.test_rule_change_reconfirms_same_bg_and_pending_path_is_explicit"
+      ],
+      "unit_outcomes": {
+        "test_release_audit_gaps.AuditGaps.test_relocked_rules_must_not_silently_disable_bg_classification": "passed",
+        "test_release_step_three.StepThree.test_relocked_rules_require_same_bg_reconfirmation_for_every_model_entry": "passed",
+        "test_release_step_three.StepThree.test_cancelled_edit_preserves_scope_and_explicit_normal_mode_is_available": "passed"
+      },
+      "browser_outcomes": {
+        "browser_release.BrowserRelease.test_rule_change_reconfirms_same_bg_and_pending_path_is_explicit": "passed"
+      }
+    },
+    "R08": {
+      "unit": [
+        "test_release_audit_gaps.AuditGaps.test_compare_must_reject_changed_sources_before_call",
+        "test_release_step_three.StepThree.test_changed_deleted_missing_and_changed_scope_block_every_entry",
+        "test_release_step_three.StepThree.test_rule_changes_in_another_session_and_cache_revision_are_rejected"
+      ],
+      "browser": [],
+      "unit_outcomes": {
+        "test_release_audit_gaps.AuditGaps.test_compare_must_reject_changed_sources_before_call": "passed",
+        "test_release_step_three.StepThree.test_changed_deleted_missing_and_changed_scope_block_every_entry": "passed",
+        "test_release_step_three.StepThree.test_rule_changes_in_another_session_and_cache_revision_are_rejected": "passed"
+      },
+      "browser_outcomes": {}
+    },
+    "R09": {
+      "unit": [
+        "test_release_step_four.ResponseRounds.test_comparison_validation_failure_isolated_from_next_model",
+        "test_release_step_four.ResponseRounds.test_explanation_can_have_no_classification_and_uses_explicit_prompt",
+        "test_release_step_four.ResponseRounds.test_explicit_classification_requires_object_without_keyword_detection",
+        "test_release_step_four.ResponseRounds.test_keyword_free_followups_revalidate_repair_in_all_languages",
+        "test_release_step_four.ResponseRounds.test_normal_mode_cannot_accept_an_unlocked_classification",
+        "test_release_step_four.ResponseRounds.test_one_repair_budget_is_shared_with_supplementary_round",
+        "test_release_step_four.ResponseRounds.test_real_pdf_rule_pages_use_the_actual_page_inventory",
+        "test_release_step_four.ResponseRounds.test_repair_cannot_drop_classification_in_explanation_mode",
+        "test_release_step_four.ResponseRounds.test_supplementary_round_cannot_fallback_to_invalid_raw_answer",
+        "test_release_step_four.ResponseRounds.test_supplementary_round_cannot_omit_previously_required_classification",
+        "test_release_step_four.ResponseRounds.test_truncated_and_malformed_actions_cannot_commit",
+        "test_release_step_four.ResponseRounds.test_valid_repair_is_accepted_once_and_followup_card_is_not_hidden",
+        "test_release_audit_gaps.AuditGaps.test_followup_repair_must_revalidate_classification"
+      ],
+      "browser": [
+        "browser_release.BrowserRelease.test_explicit_explanation_mode_and_nonpaged_rule_references"
+      ],
+      "unit_outcomes": {
+        "test_release_step_four.ResponseRounds.test_comparison_validation_failure_isolated_from_next_model": "passed",
+        "test_release_step_four.ResponseRounds.test_explanation_can_have_no_classification_and_uses_explicit_prompt": "passed",
+        "test_release_step_four.ResponseRounds.test_explicit_classification_requires_object_without_keyword_detection": "passed",
+        "test_release_step_four.ResponseRounds.test_keyword_free_followups_revalidate_repair_in_all_languages": "passed",
+        "test_release_step_four.ResponseRounds.test_normal_mode_cannot_accept_an_unlocked_classification": "passed",
+        "test_release_step_four.ResponseRounds.test_one_repair_budget_is_shared_with_supplementary_round": "passed",
+        "test_release_step_four.ResponseRounds.test_real_pdf_rule_pages_use_the_actual_page_inventory": "passed",
+        "test_release_step_four.ResponseRounds.test_repair_cannot_drop_classification_in_explanation_mode": "passed",
+        "test_release_step_four.ResponseRounds.test_supplementary_round_cannot_fallback_to_invalid_raw_answer": "passed",
+        "test_release_step_four.ResponseRounds.test_supplementary_round_cannot_omit_previously_required_classification": "passed",
+        "test_release_step_four.ResponseRounds.test_truncated_and_malformed_actions_cannot_commit": "passed",
+        "test_release_step_four.ResponseRounds.test_valid_repair_is_accepted_once_and_followup_card_is_not_hidden": "passed",
+        "test_release_audit_gaps.AuditGaps.test_followup_repair_must_revalidate_classification": "passed"
+      },
+      "browser_outcomes": {
+        "browser_release.BrowserRelease.test_explicit_explanation_mode_and_nonpaged_rule_references": "passed"
+      }
+    },
+    "R10": {
+      "unit": [
+        "test_release_step_four.ReferenceSchema.test_actual_pages_and_cross_class_boundaries_are_valid",
+        "test_release_step_four.ReferenceSchema.test_codebook_only_or_uncited_bg_references_fail",
+        "test_release_step_four.ReferenceSchema.test_invalid_types_return_readable_reasons_not_runtime_errors",
+        "test_release_step_four.ReferenceSchema.test_nonpaged_rules_need_real_source_refs_instead_of_physical_pages",
+        "test_release_step_four.ReferenceSchema.test_page_must_belong_to_cited_rule_and_actual_document",
+        "test_release_step_four.ReferenceSchema.test_real_sheet_ranges_and_nonpaged_bg_chunks_are_valid",
+        "test_release_audit_gaps.AuditGaps.test_evidence_pages_must_reference_supplied_pages"
+      ],
+      "browser": [
+        "browser_release.BrowserRelease.test_explicit_explanation_mode_and_nonpaged_rule_references"
+      ],
+      "note": "Structure/provenance validation does not prove engineering semantic correctness.",
+      "unit_outcomes": {
+        "test_release_step_four.ReferenceSchema.test_actual_pages_and_cross_class_boundaries_are_valid": "passed",
+        "test_release_step_four.ReferenceSchema.test_codebook_only_or_uncited_bg_references_fail": "passed",
+        "test_release_step_four.ReferenceSchema.test_invalid_types_return_readable_reasons_not_runtime_errors": "passed",
+        "test_release_step_four.ReferenceSchema.test_nonpaged_rules_need_real_source_refs_instead_of_physical_pages": "passed",
+        "test_release_step_four.ReferenceSchema.test_page_must_belong_to_cited_rule_and_actual_document": "passed",
+        "test_release_step_four.ReferenceSchema.test_real_sheet_ranges_and_nonpaged_bg_chunks_are_valid": "passed",
+        "test_release_audit_gaps.AuditGaps.test_evidence_pages_must_reference_supplied_pages": "passed"
+      },
+      "browser_outcomes": {
+        "browser_release.BrowserRelease.test_explicit_explanation_mode_and_nonpaged_rule_references": "passed"
+      }
+    },
+    "R11": {
+      "unit": [
+        "test_release_step_five.UsageLedger.test_actual_response_model_controls_price",
+        "test_release_step_five.UsageLedger.test_classification_repair_and_supplementary_reads_are_counted_once",
+        "test_release_step_five.UsageLedger.test_codebook_syntax_repair_is_counted_once",
+        "test_release_step_five.UsageLedger.test_codebook_two_and_comparison_two_are_exactly_four",
+        "test_release_step_five.UsageLedger.test_exception_records_usage_and_never_reuses_previous_call",
+        "test_release_step_five.UsageLedger.test_failed_codebook_main_and_dossier_do_not_erase_consumed_usage",
+        "test_release_step_five.UsageLedger.test_failed_comparison_keeps_consumed_usage",
+        "test_release_step_five.UsageLedger.test_failed_preread_is_counted_even_when_chat_can_continue",
+        "test_release_step_five.UsageLedger.test_missing_then_known_usage_survives_reload_and_export",
+        "test_release_step_five.UsageLedger.test_openai_fallback_and_stream_metadata_are_counted_per_dispatch",
+        "test_release_step_five.UsageLedger.test_preread_dossier_main_followup_and_cache_reuse",
+        "test_release_step_five.UsageLedger.test_transport_retry_counts_each_attempt_and_partial_usage",
+        "test_release_step_five.UsagePricing.test_accumulated_cost_does_not_round_each_small_call",
+        "test_release_step_five.UsagePricing.test_cache_prices_split_uncached_input_without_double_charging",
+        "test_release_step_five.UsagePricing.test_input_integer_precision_is_not_lost",
+        "test_release_step_five.UsagePricing.test_invalid_cache_count_and_cache_larger_than_prompt_are_unknown",
+        "test_release_step_five.UsagePricing.test_provider_cache_fields_and_normalization_are_idempotent",
+        "test_release_step_five.UsagePricing.test_summary_preserves_partial_counts_and_prices",
+        "test_release_step_five.UsagePricing.test_unknown_invalid_partial_and_true_zero",
+        "test_release_step_five.UsagePricing.test_zero_price_is_real_zero_but_missing_price_is_unknown",
+        "test_release_audit_gaps.AuditGaps.test_codebook_and_comparison_calls_must_be_counted",
+        "test_release_audit_gaps.AuditGaps.test_unknown_usage_must_not_become_free_price"
+      ],
+      "browser": [
+        "browser_release.BrowserRelease.test_unknown_usage_is_visible_in_chat_status_rules_and_comparison"
+      ],
+      "note": "Dispatch counts and configured prices, not an audit of actual provider billing.",
+      "unit_outcomes": {
+        "test_release_step_five.UsageLedger.test_actual_response_model_controls_price": "passed",
+        "test_release_step_five.UsageLedger.test_classification_repair_and_supplementary_reads_are_counted_once": "passed",
+        "test_release_step_five.UsageLedger.test_codebook_syntax_repair_is_counted_once": "passed",
+        "test_release_step_five.UsageLedger.test_codebook_two_and_comparison_two_are_exactly_four": "passed",
+        "test_release_step_five.UsageLedger.test_exception_records_usage_and_never_reuses_previous_call": "passed",
+        "test_release_step_five.UsageLedger.test_failed_codebook_main_and_dossier_do_not_erase_consumed_usage": "passed",
+        "test_release_step_five.UsageLedger.test_failed_comparison_keeps_consumed_usage": "passed",
+        "test_release_step_five.UsageLedger.test_failed_preread_is_counted_even_when_chat_can_continue": "passed",
+        "test_release_step_five.UsageLedger.test_missing_then_known_usage_survives_reload_and_export": "passed",
+        "test_release_step_five.UsageLedger.test_openai_fallback_and_stream_metadata_are_counted_per_dispatch": "passed",
+        "test_release_step_five.UsageLedger.test_preread_dossier_main_followup_and_cache_reuse": "passed",
+        "test_release_step_five.UsageLedger.test_transport_retry_counts_each_attempt_and_partial_usage": "passed",
+        "test_release_step_five.UsagePricing.test_accumulated_cost_does_not_round_each_small_call": "passed",
+        "test_release_step_five.UsagePricing.test_cache_prices_split_uncached_input_without_double_charging": "passed",
+        "test_release_step_five.UsagePricing.test_input_integer_precision_is_not_lost": "passed",
+        "test_release_step_five.UsagePricing.test_invalid_cache_count_and_cache_larger_than_prompt_are_unknown": "passed",
+        "test_release_step_five.UsagePricing.test_provider_cache_fields_and_normalization_are_idempotent": "passed",
+        "test_release_step_five.UsagePricing.test_summary_preserves_partial_counts_and_prices": "passed",
+        "test_release_step_five.UsagePricing.test_unknown_invalid_partial_and_true_zero": "passed",
+        "test_release_step_five.UsagePricing.test_zero_price_is_real_zero_but_missing_price_is_unknown": "passed",
+        "test_release_audit_gaps.AuditGaps.test_codebook_and_comparison_calls_must_be_counted": "passed",
+        "test_release_audit_gaps.AuditGaps.test_unknown_usage_must_not_become_free_price": "passed"
+      },
+      "browser_outcomes": {
+        "browser_release.BrowserRelease.test_unknown_usage_is_visible_in_chat_status_rules_and_comparison": "passed"
+      }
+    },
+    "R12": {
+      "unit": [
+        "test_release_step_six.AnswerDecoder.test_every_boundary_preserves_escapes_unicode_code_and_tables",
+        "test_release_step_six.AnswerDecoder.test_invalid_escape_surrogate_and_nonstring_answer_fail_closed",
+        "test_release_step_six.AnswerDecoder.test_json_fences_and_split_encoded_answer_key",
+        "test_release_step_six.AnswerDecoder.test_long_answer_is_linear_and_has_a_real_size_limit",
+        "test_release_step_six.AnswerDecoder.test_nested_keys_changes_and_classification_never_leak",
+        "test_release_step_six.RequestBounds.test_cancel_and_deadline_interrupt_waits_and_prevent_commit",
+        "test_release_step_six.RequestBounds.test_cancelled_backoff_cannot_dispatch_a_retry",
+        "test_release_step_six.RequestBounds.test_completed_commit_wins_a_later_cancel",
+        "test_release_step_six.RequestBounds.test_environment_policy_is_bounded_and_timeouts_use_remaining_budget",
+        "test_release_step_six.RequestBounds.test_single_attempt_policy_disables_openai_stream_replay",
+        "test_release_step_six.RequestBounds.test_unfinished_openai_sse_event_cannot_bypass_deadline_or_byte_limit",
+        "test_release_step_six.StreamLifecycle.test_cancellation_prevents_supplementary_and_classification_repair",
+        "test_release_step_six.StreamLifecycle.test_delta_is_observable_before_result_and_final_result_is_unique",
+        "test_release_step_six.StreamLifecycle.test_real_http_read_is_bounded_and_no_retry_runs_after_deadline",
+        "test_release_step_six.StreamLifecycle.test_real_tcp_disconnect_cancels_without_a_cancel_endpoint",
+        "test_release_step_six.StreamLifecycle.test_stop_holds_slot_until_actual_worker_exit_then_retry_works",
+        "test_release_step_six.StreamLifecycle.test_timeout_cannot_release_a_still_blocked_worker",
+        "test_release_step_six.StreamLifecycle.test_truncated_json_and_oversized_answer_cannot_be_committed",
+        "test_stream_progress.StreamingTests.test_default_request_keeps_nonstream_contract",
+        "test_stream_progress.StreamingTests.test_full_response_reasoning_and_hidden_planner_body",
+        "test_stream_progress.StreamingTests.test_gemini_does_not_receive_openai_streaming_options",
+        "test_stream_progress.StreamingTests.test_main_runs_discovery_open_and_reply_without_extra_final_request",
+        "test_stream_progress.StreamingTests.test_missing_reasoning_is_reported_not_invented",
+        "test_stream_progress.StreamingTests.test_partial_stream_never_becomes_an_executable_plan",
+        "test_stream_progress.StreamingTests.test_progress_survives_excel_tool_stdout_redirection",
+        "test_stream_progress.StreamingTests.test_stream_keeps_reasoning_out_of_planner_json",
+        "test_stream_progress.StreamingTests.test_stream_rejection_falls_back_once_and_is_remembered",
+        "test_stream_progress.StreamingTests.test_unrelated_error_does_not_retry_or_disable_thinking",
+        "test_release_audit_gaps.AuditGaps.test_model_content_chunks_must_reach_stream_client"
+      ],
+      "browser": [
+        "browser_release.BrowserRelease.test_answer_preview_stop_keeps_busy_until_worker_exits_then_retry",
+        "browser_release.BrowserRelease.test_navigation_disconnect_and_truncated_preview_never_create_results"
+      ],
+      "note": "Cooperative cancellation; blocking I/O unwinds within configured transport bounds. No server-side generation/billing cancellation claim.",
+      "unit_outcomes": {
+        "test_release_step_six.AnswerDecoder.test_every_boundary_preserves_escapes_unicode_code_and_tables": "passed",
+        "test_release_step_six.AnswerDecoder.test_invalid_escape_surrogate_and_nonstring_answer_fail_closed": "passed",
+        "test_release_step_six.AnswerDecoder.test_json_fences_and_split_encoded_answer_key": "passed",
+        "test_release_step_six.AnswerDecoder.test_long_answer_is_linear_and_has_a_real_size_limit": "passed",
+        "test_release_step_six.AnswerDecoder.test_nested_keys_changes_and_classification_never_leak": "passed",
+        "test_release_step_six.RequestBounds.test_cancel_and_deadline_interrupt_waits_and_prevent_commit": "passed",
+        "test_release_step_six.RequestBounds.test_cancelled_backoff_cannot_dispatch_a_retry": "passed",
+        "test_release_step_six.RequestBounds.test_completed_commit_wins_a_later_cancel": "passed",
+        "test_release_step_six.RequestBounds.test_environment_policy_is_bounded_and_timeouts_use_remaining_budget": "passed",
+        "test_release_step_six.RequestBounds.test_single_attempt_policy_disables_openai_stream_replay": "passed",
+        "test_release_step_six.RequestBounds.test_unfinished_openai_sse_event_cannot_bypass_deadline_or_byte_limit": "passed",
+        "test_release_step_six.StreamLifecycle.test_cancellation_prevents_supplementary_and_classification_repair": "passed",
+        "test_release_step_six.StreamLifecycle.test_delta_is_observable_before_result_and_final_result_is_unique": "passed",
+        "test_release_step_six.StreamLifecycle.test_real_http_read_is_bounded_and_no_retry_runs_after_deadline": "passed",
+        "test_release_step_six.StreamLifecycle.test_real_tcp_disconnect_cancels_without_a_cancel_endpoint": "passed",
+        "test_release_step_six.StreamLifecycle.test_stop_holds_slot_until_actual_worker_exit_then_retry_works": "passed",
+        "test_release_step_six.StreamLifecycle.test_timeout_cannot_release_a_still_blocked_worker": "passed",
+        "test_release_step_six.StreamLifecycle.test_truncated_json_and_oversized_answer_cannot_be_committed": "passed",
+        "test_stream_progress.StreamingTests.test_default_request_keeps_nonstream_contract": "passed",
+        "test_stream_progress.StreamingTests.test_full_response_reasoning_and_hidden_planner_body": "passed",
+        "test_stream_progress.StreamingTests.test_gemini_does_not_receive_openai_streaming_options": "passed",
+        "test_stream_progress.StreamingTests.test_main_runs_discovery_open_and_reply_without_extra_final_request": "passed",
+        "test_stream_progress.StreamingTests.test_missing_reasoning_is_reported_not_invented": "passed",
+        "test_stream_progress.StreamingTests.test_partial_stream_never_becomes_an_executable_plan": "passed",
+        "test_stream_progress.StreamingTests.test_progress_survives_excel_tool_stdout_redirection": "passed",
+        "test_stream_progress.StreamingTests.test_stream_keeps_reasoning_out_of_planner_json": "passed",
+        "test_stream_progress.StreamingTests.test_stream_rejection_falls_back_once_and_is_remembered": "passed",
+        "test_stream_progress.StreamingTests.test_unrelated_error_does_not_retry_or_disable_thinking": "passed",
+        "test_release_audit_gaps.AuditGaps.test_model_content_chunks_must_reach_stream_client": "passed"
+      },
+      "browser_outcomes": {
+        "browser_release.BrowserRelease.test_answer_preview_stop_keeps_busy_until_worker_exits_then_retry": "passed",
+        "browser_release.BrowserRelease.test_navigation_disconnect_and_truncated_preview_never_create_results": "passed"
+      }
+    },
+    "R13": {
+      "unit": [
+        "test_release_step_seven.DraftAndProgress.test_save_changes_only_app_draft_and_rejects_stale_version",
+        "test_release_step_seven.DraftAndProgress.test_unconfirmed_and_invalid_edits_leave_profile_unchanged"
+      ],
+      "browser": [
+        "browser_release.BrowserRelease.test_rule_draft_survives_language_cycle",
+        "browser_release.BrowserRelease.test_long_invalid_draft_keeps_selection_scroll_errors_and_cancel_guard",
+        "browser_release.BrowserRelease.test_draft_save_confirmation_and_stale_context_preserve_raw_input"
+      ],
+      "note": "In-memory draft retention with navigation guard; no crash-recovery promise.",
+      "unit_outcomes": {
+        "test_release_step_seven.DraftAndProgress.test_save_changes_only_app_draft_and_rejects_stale_version": "passed",
+        "test_release_step_seven.DraftAndProgress.test_unconfirmed_and_invalid_edits_leave_profile_unchanged": "passed"
+      },
+      "browser_outcomes": {
+        "browser_release.BrowserRelease.test_rule_draft_survives_language_cycle": "passed",
+        "browser_release.BrowserRelease.test_long_invalid_draft_keeps_selection_scroll_errors_and_cancel_guard": "passed",
+        "browser_release.BrowserRelease.test_draft_save_confirmation_and_stale_context_preserve_raw_input": "passed"
+      }
+    },
+    "R14": {
+      "unit": [
+        "test_release_step_seven.DraftAndProgress.test_cad_image_groups_expose_localizable_counts_without_changing_names",
+        "test_release_step_seven.DraftAndProgress.test_error_header_selects_language_and_preserves_path",
+        "test_release_step_seven.DraftAndProgress.test_progress_notices_reuse_and_scope_carry_keys",
+        "test_release_step_seven.DraftAndProgress.test_save_changes_only_app_draft_and_rejects_stale_version",
+        "test_release_step_seven.DraftAndProgress.test_structured_errors_keep_existing_secret_redaction",
+        "test_release_step_seven.DraftAndProgress.test_unconfirmed_and_invalid_edits_leave_profile_unchanged",
+        "test_release_step_seven.LocalizedMessages.test_only_explicit_ui_messages_translate",
+        "test_release_step_nine.NativePickerLanguage.test_native_picker_uses_language_header_for_both_dialogs",
+        "test_workbench_i18n.CatalogTests.test_complete_catalog",
+        "test_workbench_i18n.CatalogTests.test_dynamic_controls_have_explicit_language_refresh",
+        "test_workbench_i18n.CatalogTests.test_empty_or_chinese_foreign_translation_is_rejected",
+        "test_workbench_i18n.CatalogTests.test_javascript_syntax_and_translator",
+        "test_workbench_i18n.CatalogTests.test_language_switch_rebuilds_dynamic_ui_from_data_snapshots",
+        "test_workbench_i18n.CatalogTests.test_literal_translation_calls_have_keys",
+        "test_workbench_i18n.CatalogTests.test_material_confirmation_preserves_current_selection",
+        "test_workbench_i18n.CatalogTests.test_missing_language_key_is_rejected",
+        "test_workbench_i18n.CatalogTests.test_script_serialization",
+        "test_workbench_i18n.CatalogTests.test_translation_does_not_observe_or_reclassify_runtime_text",
+        "test_workbench_i18n.CatalogTests.test_wrong_placeholder_is_rejected",
+        "test_release_audit_gaps.AuditGaps.test_english_progress_and_notices_must_not_contain_chinese_ui"
+      ],
+      "browser": [
+        "browser_release.BrowserRelease.test_existing_classification_card_uses_current_language",
+        "browser_release.BrowserRelease.test_structured_dynamic_messages_redraw_without_translating_content",
+        "browser_release.BrowserRelease.test_startup_configuration_errors_are_visible_localized_and_recoverable"
+      ],
+      "note": "Native picker titles corrected in this stage; six title combinations are mocked at the Tk boundary. Actual native OS dialogs remain unverified.",
+      "unit_outcomes": {
+        "test_release_step_seven.DraftAndProgress.test_cad_image_groups_expose_localizable_counts_without_changing_names": "passed",
+        "test_release_step_seven.DraftAndProgress.test_error_header_selects_language_and_preserves_path": "passed",
+        "test_release_step_seven.DraftAndProgress.test_progress_notices_reuse_and_scope_carry_keys": "passed",
+        "test_release_step_seven.DraftAndProgress.test_save_changes_only_app_draft_and_rejects_stale_version": "passed",
+        "test_release_step_seven.DraftAndProgress.test_structured_errors_keep_existing_secret_redaction": "passed",
+        "test_release_step_seven.DraftAndProgress.test_unconfirmed_and_invalid_edits_leave_profile_unchanged": "passed",
+        "test_release_step_seven.LocalizedMessages.test_only_explicit_ui_messages_translate": "passed",
+        "test_release_step_nine.NativePickerLanguage.test_native_picker_uses_language_header_for_both_dialogs": "passed",
+        "test_workbench_i18n.CatalogTests.test_complete_catalog": "passed",
+        "test_workbench_i18n.CatalogTests.test_dynamic_controls_have_explicit_language_refresh": "passed",
+        "test_workbench_i18n.CatalogTests.test_empty_or_chinese_foreign_translation_is_rejected": "passed",
+        "test_workbench_i18n.CatalogTests.test_javascript_syntax_and_translator": "passed",
+        "test_workbench_i18n.CatalogTests.test_language_switch_rebuilds_dynamic_ui_from_data_snapshots": "passed",
+        "test_workbench_i18n.CatalogTests.test_literal_translation_calls_have_keys": "passed",
+        "test_workbench_i18n.CatalogTests.test_material_confirmation_preserves_current_selection": "passed",
+        "test_workbench_i18n.CatalogTests.test_missing_language_key_is_rejected": "passed",
+        "test_workbench_i18n.CatalogTests.test_script_serialization": "passed",
+        "test_workbench_i18n.CatalogTests.test_translation_does_not_observe_or_reclassify_runtime_text": "passed",
+        "test_workbench_i18n.CatalogTests.test_wrong_placeholder_is_rejected": "passed",
+        "test_release_audit_gaps.AuditGaps.test_english_progress_and_notices_must_not_contain_chinese_ui": "passed"
+      },
+      "browser_outcomes": {
+        "browser_release.BrowserRelease.test_existing_classification_card_uses_current_language": "passed",
+        "browser_release.BrowserRelease.test_structured_dynamic_messages_redraw_without_translating_content": "passed",
+        "browser_release.BrowserRelease.test_startup_configuration_errors_are_visible_localized_and_recoverable": "passed"
+      }
+    },
+    "R15": {
+      "unit": [],
+      "browser": [
+        "browser_release.BrowserRelease.test_material_drawer_geometry_and_real_actions",
+        "browser_release.BrowserRelease.test_german_mobile_drawer_long_error_folder_selection_and_close"
+      ],
+      "note": "Supplemental settled ZH/EN/DE geometry and CJK font QA at 390/800/1440px recorded separately.",
+      "unit_outcomes": {},
+      "browser_outcomes": {
+        "browser_release.BrowserRelease.test_material_drawer_geometry_and_real_actions": "passed",
+        "browser_release.BrowserRelease.test_german_mobile_drawer_long_error_folder_selection_and_close": "passed"
+      }
+    },
+    "R16": {
+      "unit": [
+        "test_release_step_eight.Configuration.test_actual_custom_env_is_shared_by_setup_probe_and_diagnostics",
+        "test_release_step_eight.Configuration.test_bad_endpoint_is_redacted_and_failed_probe_cannot_change_active_config",
+        "test_release_step_eight.Configuration.test_failed_config_switch_preserves_active_environment_and_pending_plan",
+        "test_release_step_eight.Configuration.test_file_switch_drops_old_loaded_values_but_external_values_win",
+        "test_release_step_eight.Configuration.test_missing_default_configuration_can_be_fixed_without_restart",
+        "test_release_step_eight.Configuration.test_state_failure_is_actionable_transactional_and_recoverable",
+        "test_release_step_eight.Configuration.test_state_override_is_rejected_and_permission_errors_have_no_raw_trace",
+        "test_release_step_eight.Configuration.test_uvicorn_bind_failure_after_preflight_has_recovery_and_no_secret",
+        "test_release_step_eight.StartupSubprocess.test_explicit_missing_or_bad_encoding_file_fails_cleanly",
+        "test_release_step_eight.StartupSubprocess.test_help_unknown_options_and_port_validation_work_without_dependencies",
+        "test_release_step_eight.StartupSubprocess.test_missing_dependencies_show_exact_install_command",
+        "test_release_step_eight.StartupSubprocess.test_missing_key_and_blocked_state_show_recovery",
+        "test_release_step_eight.StartupSubprocess.test_occupied_port_reports_reuse_or_alternate_port",
+        "test_release_step_eight.StartupSubprocess.test_real_server_different_cwd_custom_env_shutdown_and_restart",
+        "test_release_audit_gaps.AuditGaps.test_explicit_env_file_must_be_loaded",
+        "test_release_audit_gaps.AuditGaps.test_gui_cli_must_honor_explicit_port",
+        "test_release_audit_gaps.AuditGaps.test_gui_cli_must_reject_unknown_option"
+      ],
+      "browser": [
+        "browser_release.BrowserRelease.test_startup_configuration_errors_are_visible_localized_and_recoverable"
+      ],
+      "note": "Native Windows ACL/file-lock behavior and Python 3.10 runtime execution remain unverified.",
+      "unit_outcomes": {
+        "test_release_step_eight.Configuration.test_actual_custom_env_is_shared_by_setup_probe_and_diagnostics": "passed",
+        "test_release_step_eight.Configuration.test_bad_endpoint_is_redacted_and_failed_probe_cannot_change_active_config": "passed",
+        "test_release_step_eight.Configuration.test_failed_config_switch_preserves_active_environment_and_pending_plan": "passed",
+        "test_release_step_eight.Configuration.test_file_switch_drops_old_loaded_values_but_external_values_win": "passed",
+        "test_release_step_eight.Configuration.test_missing_default_configuration_can_be_fixed_without_restart": "passed",
+        "test_release_step_eight.Configuration.test_state_failure_is_actionable_transactional_and_recoverable": "passed",
+        "test_release_step_eight.Configuration.test_state_override_is_rejected_and_permission_errors_have_no_raw_trace": "passed",
+        "test_release_step_eight.Configuration.test_uvicorn_bind_failure_after_preflight_has_recovery_and_no_secret": "passed",
+        "test_release_step_eight.StartupSubprocess.test_explicit_missing_or_bad_encoding_file_fails_cleanly": "passed",
+        "test_release_step_eight.StartupSubprocess.test_help_unknown_options_and_port_validation_work_without_dependencies": "passed",
+        "test_release_step_eight.StartupSubprocess.test_missing_dependencies_show_exact_install_command": "passed",
+        "test_release_step_eight.StartupSubprocess.test_missing_key_and_blocked_state_show_recovery": "passed",
+        "test_release_step_eight.StartupSubprocess.test_occupied_port_reports_reuse_or_alternate_port": "passed",
+        "test_release_step_eight.StartupSubprocess.test_real_server_different_cwd_custom_env_shutdown_and_restart": "passed",
+        "test_release_audit_gaps.AuditGaps.test_explicit_env_file_must_be_loaded": "passed",
+        "test_release_audit_gaps.AuditGaps.test_gui_cli_must_honor_explicit_port": "passed",
+        "test_release_audit_gaps.AuditGaps.test_gui_cli_must_reject_unknown_option": "passed"
+      },
+      "browser_outcomes": {
+        "browser_release.BrowserRelease.test_startup_configuration_errors_are_visible_localized_and_recoverable": "passed"
+      }
+    }
+  },
+  "static_checks": {
+    "ruff_count": 257,
+    "ruff_codes": {
+      "F401": 6,
+      "E702": 166,
+      "E701": 84,
+      "E402": 1
+    },
+    "ruff_findings": [
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 12,
+        "column": 8,
+        "code": "F401",
+        "message": "`textwrap` imported but unused"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 42,
+        "column": 85,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 47,
+        "column": 30,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 50,
+        "column": 81,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 57,
+        "column": 135,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 60,
+        "column": 20,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 98,
+        "column": 34,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 98,
+        "column": 85,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 98,
+        "column": 98,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 99,
+        "column": 25,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 104,
+        "column": 44,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 106,
+        "column": 25,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 114,
+        "column": 25,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 139,
+        "column": 94,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 144,
+        "column": 12,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 145,
+        "column": 45,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 145,
+        "column": 54,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 146,
+        "column": 20,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 147,
+        "column": 38,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 148,
+        "column": 27,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 148,
+        "column": 41,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 150,
+        "column": 63,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 150,
+        "column": 138,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 150,
+        "column": 171,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 154,
+        "column": 48,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 163,
+        "column": 16,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 164,
+        "column": 36,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 168,
+        "column": 16,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 169,
+        "column": 36,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 172,
+        "column": 59,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 175,
+        "column": 61,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 178,
+        "column": 54,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 178,
+        "column": 69,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 178,
+        "column": 103,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 185,
+        "column": 42,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/bosch_chat.py",
+        "line": 187,
+        "column": 26,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 161,
+        "column": 25,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 163,
+        "column": 25,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 169,
+        "column": 25,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 499,
+        "column": 34,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 617,
+        "column": 39,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 620,
+        "column": 37,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 621,
+        "column": 38,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 623,
+        "column": 42,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 690,
+        "column": 38,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 977,
+        "column": 30,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 1136,
+        "column": 35,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 1205,
+        "column": 49,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 1221,
+        "column": 49,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 1227,
+        "column": 45,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 1579,
+        "column": 31,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 1580,
+        "column": 30,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 1713,
+        "column": 76,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 1726,
+        "column": 41,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 1845,
+        "column": 42,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 1847,
+        "column": 31,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2015,
+        "column": 34,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2091,
+        "column": 29,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2094,
+        "column": 49,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2112,
+        "column": 25,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2133,
+        "column": 21,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2138,
+        "column": 56,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2153,
+        "column": 21,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2274,
+        "column": 21,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2461,
+        "column": 29,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2463,
+        "column": 38,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2471,
+        "column": 29,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2603,
+        "column": 21,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2603,
+        "column": 42,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2605,
+        "column": 25,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2622,
+        "column": 36,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2848,
+        "column": 29,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2849,
+        "column": 21,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2869,
+        "column": 51,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2869,
+        "column": 101,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2874,
+        "column": 46,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2874,
+        "column": 62,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2876,
+        "column": 35,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2878,
+        "column": 30,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2882,
+        "column": 27,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2885,
+        "column": 42,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 2888,
+        "column": 30,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 16,
+        "column": 8,
+        "code": "F401",
+        "message": "`sys` imported but unused"
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 159,
+        "column": 50,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 205,
+        "column": 39,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 214,
+        "column": 72,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 247,
+        "column": 90,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 250,
+        "column": 62,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 402,
+        "column": 113,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 464,
+        "column": 55,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 464,
+        "column": 105,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 466,
+        "column": 55,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 471,
+        "column": 31,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 471,
+        "column": 76,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 474,
+        "column": 33,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 474,
+        "column": 77,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 475,
+        "column": 51,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 475,
+        "column": 105,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 475,
+        "column": 157,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 476,
+        "column": 49,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 476,
+        "column": 105,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 476,
+        "column": 164,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 476,
+        "column": 207,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 451,
+        "column": 20,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 472,
+        "column": 48,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 472,
+        "column": 64,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 472,
+        "column": 108,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 516,
+        "column": 60,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 517,
+        "column": 57,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 518,
+        "column": 52,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 519,
+        "column": 57,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 520,
+        "column": 54,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 521,
+        "column": 50,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 522,
+        "column": 49,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 523,
+        "column": 61,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 524,
+        "column": 33,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 547,
+        "column": 34,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 168,
+        "column": 45,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 395,
+        "column": 46,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 417,
+        "column": 42,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 417,
+        "column": 65,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 419,
+        "column": 51,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 422,
+        "column": 54,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 424,
+        "column": 48,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 424,
+        "column": 61,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 426,
+        "column": 43,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 426,
+        "column": 60,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 435,
+        "column": 39,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 435,
+        "column": 111,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 448,
+        "column": 38,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 450,
+        "column": 30,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 453,
+        "column": 28,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 455,
+        "column": 73,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 495,
+        "column": 91,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 500,
+        "column": 39,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 312,
+        "column": 57,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 360,
+        "column": 72,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 543,
+        "column": 38,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 556,
+        "column": 42,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 623,
+        "column": 38,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 859,
+        "column": 43,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 1003,
+        "column": 37,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 1003,
+        "column": 71,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 1016,
+        "column": 40,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/release_safety.py",
+        "line": 10,
+        "column": 52,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/release_safety.py",
+        "line": 11,
+        "column": 34,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/release_safety.py",
+        "line": 42,
+        "column": 71,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/release_safety.py",
+        "line": 78,
+        "column": 18,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 22,
+        "column": 38,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 22,
+        "column": 81,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 23,
+        "column": 35,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 23,
+        "column": 53,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 23,
+        "column": 80,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 27,
+        "column": 28,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 27,
+        "column": 108,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 27,
+        "column": 144,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 28,
+        "column": 22,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 29,
+        "column": 37,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 37,
+        "column": 56,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 38,
+        "column": 56,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 40,
+        "column": 46,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 41,
+        "column": 51,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 61,
+        "column": 21,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 66,
+        "column": 54,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 66,
+        "column": 78,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 66,
+        "column": 130,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 66,
+        "column": 183,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 72,
+        "column": 83,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 73,
+        "column": 32,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 73,
+        "column": 49,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 77,
+        "column": 30,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 81,
+        "column": 40,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 82,
+        "column": 25,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 82,
+        "column": 51,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 83,
+        "column": 31,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 83,
+        "column": 58,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/fixture_support.py",
+        "line": 83,
+        "column": 86,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_e2e.py",
+        "line": 17,
+        "column": 66,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_e2e.py",
+        "line": 24,
+        "column": 56,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_e2e.py",
+        "line": 34,
+        "column": 40,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_e2e.py",
+        "line": 34,
+        "column": 78,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_e2e.py",
+        "line": 38,
+        "column": 72,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_e2e.py",
+        "line": 45,
+        "column": 47,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_e2e.py",
+        "line": 54,
+        "column": 24,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 8,
+        "column": 8,
+        "code": "F401",
+        "message": "`tempfile` imported but unused"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 9,
+        "column": 8,
+        "code": "F401",
+        "message": "`threading` imported but unused"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 20,
+        "column": 29,
+        "code": "F401",
+        "message": "`code_chat_agent.PricingCatalog` imported but unused"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 56,
+        "column": 37,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 115,
+        "column": 34,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 116,
+        "column": 26,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 116,
+        "column": 79,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 116,
+        "column": 111,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 117,
+        "column": 25,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 117,
+        "column": 60,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 118,
+        "column": 26,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 118,
+        "column": 52,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 118,
+        "column": 78,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 118,
+        "column": 112,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 118,
+        "column": 146,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 119,
+        "column": 47,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 120,
+        "column": 38,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 127,
+        "column": 30,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 131,
+        "column": 24,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 131,
+        "column": 56,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 133,
+        "column": 41,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 135,
+        "column": 48,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 138,
+        "column": 40,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 139,
+        "column": 57,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 142,
+        "column": 35,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 147,
+        "column": 33,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 147,
+        "column": 59,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 147,
+        "column": 78,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 151,
+        "column": 48,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 155,
+        "column": 29,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 159,
+        "column": 44,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 161,
+        "column": 27,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 164,
+        "column": 39,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 165,
+        "column": 24,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 165,
+        "column": 43,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 165,
+        "column": 63,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 165,
+        "column": 81,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 165,
+        "column": 97,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 165,
+        "column": 120,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 165,
+        "column": 136,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 165,
+        "column": 154,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 165,
+        "column": 181,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 165,
+        "column": 199,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 170,
+        "column": 21,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 170,
+        "column": 49,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 172,
+        "column": 55,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 173,
+        "column": 69,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 175,
+        "column": 137,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 176,
+        "column": 42,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_matrix.py",
+        "line": 180,
+        "column": 24,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 21,
+        "column": 43,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 22,
+        "column": 34,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 22,
+        "column": 52,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 26,
+        "column": 30,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 30,
+        "column": 25,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 30,
+        "column": 52,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 31,
+        "column": 40,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 35,
+        "column": 48,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 40,
+        "column": 34,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 42,
+        "column": 40,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 43,
+        "column": 12,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 44,
+        "column": 33,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 55,
+        "column": 34,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 102,
+        "column": 34,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 115,
+        "column": 40,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 116,
+        "column": 42,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 119,
+        "column": 44,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 124,
+        "column": 41,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 124,
+        "column": 60,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 125,
+        "column": 24,
+        "code": "E702",
+        "message": "Multiple statements on one line (semicolon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_release_regressions.py",
+        "line": 132,
+        "column": 26,
+        "code": "E701",
+        "message": "Multiple statements on one line (colon)"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_workbench_i18n.py",
+        "line": 12,
+        "column": 1,
+        "code": "E402",
+        "message": "Module level import not at top of file"
+      },
+      {
+        "file": "local_llm_chat_bot/tests/test_workbench_reliability.py",
+        "line": 5,
+        "column": 8,
+        "code": "F401",
+        "message": "`os` imported but unused"
+      }
+    ],
+    "mypy_count": 44,
+    "mypy_files": {
+      "local_llm_chat_bot/llm_connector_with_prompt_caching.py": 2,
+      "local_llm_chat_bot/local_document_library.py": 23,
+      "local_llm_chat_bot/excel_agent.py": 1,
+      "local_llm_chat_bot/excel_chat_agent.py": 2,
+      "local_llm_chat_bot/code_chat_agent.py": 11,
+      "local_llm_chat_bot/chat_workbench.py": 5
+    },
+    "mypy_findings": [
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 96,
+        "code": "operator",
+        "message": "Cannot call function of unknown type"
+      },
+      {
+        "file": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "line": 158,
+        "code": "assignment",
+        "message": "Incompatible types in assignment (expression has type \"dict[str, list[dict[str, Any]]]\", target has type \"list[dict[str, Sequence[Collection[Any]]]]\")"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 278,
+        "code": "valid-type",
+        "message": "Function \"local_document_library.LocalDocumentLibrary.list\" is not valid as a type"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 293,
+        "code": "valid-type",
+        "message": "Function \"local_document_library.LocalDocumentLibrary.list\" is not valid as a type"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 303,
+        "code": "attr-defined",
+        "message": "\"list?[builtins.dict[Any, Any]]\" has no attribute \"__iter__\" (not iterable)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 322,
+        "code": "attr-defined",
+        "message": "\"list?[builtins.dict[Any, Any]]\" has no attribute \"__iter__\" (not iterable)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 331,
+        "code": "attr-defined",
+        "message": "\"list?[builtins.dict[Any, Any]]\" has no attribute \"__iter__\" (not iterable)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 343,
+        "code": "var-annotated",
+        "message": "Need type annotation for \"record\""
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 371,
+        "code": "valid-type",
+        "message": "Function \"local_document_library.LocalDocumentLibrary.list\" is not valid as a type"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 469,
+        "code": "valid-type",
+        "message": "Function \"local_document_library.LocalDocumentLibrary.list\" is not valid as a type"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 472,
+        "code": "attr-defined",
+        "message": "\"list?[builtins.dict[Any, Any]]\" has no attribute \"__iter__\" (not iterable)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 480,
+        "code": "valid-type",
+        "message": "Function \"local_document_library.LocalDocumentLibrary.list\" is not valid as a type"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 486,
+        "code": "attr-defined",
+        "message": "\"list?[builtins.dict[Any, Any]]\" has no attribute \"__iter__\" (not iterable)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 497,
+        "code": "var-annotated",
+        "message": "Need type annotation for \"segment\""
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 595,
+        "code": "var-annotated",
+        "message": "Need type annotation for \"paths\" (hint: \"paths: list[<type>] = ...\")"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 676,
+        "code": "var-annotated",
+        "message": "Need type annotation for \"groups\" (hint: \"groups: dict[<type>, <type>] = ...\")"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 691,
+        "code": "attr-defined",
+        "message": "\"list?[pathlib.Path]\" has no attribute \"__iter__\" (not iterable)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 707,
+        "code": "assignment",
+        "message": "Incompatible types in assignment (expression has type \"tuple[Any | None, str, Any | None, Any | None, Any | None]\", variable has type \"str\")"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 733,
+        "code": "valid-type",
+        "message": "Function \"local_document_library.LocalDocumentLibrary.list\" is not valid as a type"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 815,
+        "code": "valid-type",
+        "message": "Function \"local_document_library.LocalDocumentLibrary.list\" is not valid as a type"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 819,
+        "code": "var-annotated",
+        "message": "Need type annotation for \"item\""
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 822,
+        "code": "valid-type",
+        "message": "Function \"local_document_library.LocalDocumentLibrary.list\" is not valid as a type"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 824,
+        "code": "attr-defined",
+        "message": "\"list?[pathlib.Path]\" has no attribute \"__iter__\" (not iterable)"
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 834,
+        "code": "var-annotated",
+        "message": "Need type annotation for \"source\""
+      },
+      {
+        "file": "local_llm_chat_bot/local_document_library.py",
+        "line": 870,
+        "code": "var-annotated",
+        "message": "Need type annotation for \"chunks\" (hint: \"chunks: list[<type>] = ...\")"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_agent.py",
+        "line": 371,
+        "code": "return-value",
+        "message": "Incompatible return value type (got \"list[str]\", expected \"tuple[str, str]\")"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 108,
+        "code": "assignment",
+        "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"None\")"
+      },
+      {
+        "file": "local_llm_chat_bot/excel_chat_agent.py",
+        "line": 515,
+        "code": "arg-type",
+        "message": "Argument 1 to \"get\" of \"dict\" has incompatible type \"Any | None\"; expected \"str\""
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 152,
+        "code": "var-annotated",
+        "message": "Need type annotation for \"entries\" (hint: \"entries: list[<type>] = ...\")"
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 251,
+        "code": "attr-defined",
+        "message": "\"object\" has no attribute \"items\""
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 544,
+        "code": "attr-defined",
+        "message": "\"object\" has no attribute \"append\""
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 562,
+        "code": "operator",
+        "message": "Unsupported operand types for > (\"int\" and \"object\")"
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 563,
+        "code": "index",
+        "message": "Invalid index type \"object\" for \"str\"; expected type \"SupportsIndex | slice[Any, Any, Any]\""
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 564,
+        "code": "operator",
+        "message": "Unsupported operand types for + (\"object\" and \"int\")"
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 566,
+        "code": "operator",
+        "message": "Unsupported left operand type for + (\"object\")"
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 567,
+        "code": "arg-type",
+        "message": "Argument 1 to \"len\" has incompatible type \"object\"; expected \"Sized\""
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 569,
+        "code": "call-overload",
+        "message": "No overload variant of \"int\" matches argument types \"object\", \"int\""
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 571,
+        "code": "operator",
+        "message": "Unsupported operand types for + (\"str\" and \"object\")"
+      },
+      {
+        "file": "local_llm_chat_bot/code_chat_agent.py",
+        "line": 780,
+        "code": "var-annotated",
+        "message": "Need type annotation for \"pending\" (hint: \"pending: list[<type>] = ...\")"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 672,
+        "code": "misc",
+        "message": "List comprehension has incompatible type List[int]; expected List[str]"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 693,
+        "code": "misc",
+        "message": "List comprehension has incompatible type List[int]; expected List[str]"
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 694,
+        "code": "dict-item",
+        "message": "Dict entry 3 has incompatible type \"str\": \"Any | None\"; expected \"str\": \"Sequence[str]\""
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 1367,
+        "code": "arg-type",
+        "message": "Argument 1 to \"append\" of \"list\" has incompatible type \"tuple[int, float, list[int], str, str]\"; expected \"tuple[int, int, list[int], str, str]\""
+      },
+      {
+        "file": "local_llm_chat_bot/chat_workbench.py",
+        "line": 1378,
+        "code": "arg-type",
+        "message": "Argument 1 to \"append\" of \"list\" has incompatible type \"tuple[int, float, list[int], str, str]\"; expected \"tuple[int, int, list[int], str, str]\""
+      }
+    ],
+    "mypy_modules_checked": [
+      "bosch_chat.py",
+      "chat_workbench.py",
+      "code_chat_agent.py",
+      "excel_agent.py",
+      "excel_chat_agent.py",
+      "llm_connector_with_prompt_caching.py",
+      "local_document_library.py",
+      "release_safety.py",
+      "request_runtime.py",
+      "workbench_i18n.py",
+      "workbench_startup.py"
+    ],
+    "mypy_python_target": "3.10",
+    "step8_comparison": "Three existing picker compact-statement findings removed; all 44 mypy errors remain. Full static gates are not passed."
+  },
+  "supplemental_font_layout_qa": {
+    "font_family": "Noto Sans CJK SC",
+    "font_sha256": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b",
+    "font_source": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+    "font_shipped_in_repository": false,
+    "cases": [
+      {
+        "language": "zh",
+        "width": 390,
+        "drawer_box": {
+          "x": 0,
+          "y": 58,
+          "width": 390,
+          "height": 842
+        },
+        "body_width": {
+          "scroll": 386,
+          "client": 386
+        },
+        "dom_title": "本次材料",
+        "screenshot": "qa-zh-390.png",
+        "animation_settled": true
+      },
+      {
+        "language": "zh",
+        "width": 800,
+        "drawer_box": {
+          "x": 41.935298919677734,
+          "y": 58,
+          "width": 500.00000381469727,
+          "height": 842
+        },
+        "body_width": {
+          "scroll": 496,
+          "client": 496
+        },
+        "dom_title": "本次材料",
+        "screenshot": "qa-zh-800.png",
+        "animation_settled": true
+      },
+      {
+        "language": "zh",
+        "width": 1440,
+        "drawer_box": {
+          "x": 460,
+          "y": 58,
+          "width": 680,
+          "height": 842
+        },
+        "body_width": {
+          "scroll": 676,
+          "client": 676
+        },
+        "dom_title": "本次材料",
+        "screenshot": "qa-zh-1440.png",
+        "animation_settled": true
+      },
+      {
+        "language": "en",
+        "width": 390,
+        "drawer_box": {
+          "x": 0,
+          "y": 58,
+          "width": 390,
+          "height": 842
+        },
+        "body_width": {
+          "scroll": 386,
+          "client": 386
+        },
+        "dom_title": "Selected materials",
+        "screenshot": "qa-en-390.png",
+        "animation_settled": true
+      },
+      {
+        "language": "en",
+        "width": 800,
+        "drawer_box": {
+          "x": 41.681732177734375,
+          "y": 58,
+          "width": 500.0000305175781,
+          "height": 842
+        },
+        "body_width": {
+          "scroll": 496,
+          "client": 496
+        },
+        "dom_title": "Selected materials",
+        "screenshot": "qa-en-800.png",
+        "animation_settled": true
+      },
+      {
+        "language": "en",
+        "width": 1440,
+        "drawer_box": {
+          "x": 460,
+          "y": 58,
+          "width": 680,
+          "height": 842
+        },
+        "body_width": {
+          "scroll": 676,
+          "client": 676
+        },
+        "dom_title": "Selected materials",
+        "screenshot": "qa-en-1440.png",
+        "animation_settled": true
+      },
+      {
+        "language": "de",
+        "width": 390,
+        "drawer_box": {
+          "x": 0,
+          "y": 58,
+          "width": 390,
+          "height": 842
+        },
+        "body_width": {
+          "scroll": 386,
+          "client": 386
+        },
+        "dom_title": "Ausgewählte Materialien",
+        "screenshot": "qa-de-390.png",
+        "animation_settled": true
+      },
+      {
+        "language": "de",
+        "width": 800,
+        "drawer_box": {
+          "x": 41.941070556640625,
+          "y": 58,
+          "width": 499.9999694824219,
+          "height": 842
+        },
+        "body_width": {
+          "scroll": 496,
+          "client": 496
+        },
+        "dom_title": "Ausgewählte Materialien",
+        "screenshot": "qa-de-800.png",
+        "animation_settled": true
+      },
+      {
+        "language": "de",
+        "width": 1440,
+        "drawer_box": {
+          "x": 460,
+          "y": 58,
+          "width": 680,
+          "height": 842
+        },
+        "body_width": {
+          "scroll": 676,
+          "client": 676
+        },
+        "dom_title": "Ausgewählte Materialien",
+        "screenshot": "qa-de-1440.png",
+        "animation_settled": true
+      }
+    ]
+  },
+  "existing_archive": {
+    "archive_present": true,
+    "archive_modified_during_stage": false,
+    "read_only_comparison": true,
+    "archive_sha256": "1678fd25b81a0cc8dbf5ffa4ae79b43266797bbf8fcd1f8f59252f9fd962a1d9",
+    "last_archive_commit": "c98901e4c5b6208bae4652d9f75130be82ab9ad4",
+    "source_comparison": [
+      {
+        "path": "local_llm_chat_bot/bosch_chat.py",
+        "present": true,
+        "matches_current_source": true
+      },
+      {
+        "path": "local_llm_chat_bot/chat_workbench.py",
+        "present": true,
+        "matches_current_source": false
+      },
+      {
+        "path": "local_llm_chat_bot/code_chat_agent.py",
+        "present": true,
+        "matches_current_source": false
+      },
+      {
+        "path": "local_llm_chat_bot/excel_agent.py",
+        "present": true,
+        "matches_current_source": false
+      },
+      {
+        "path": "local_llm_chat_bot/excel_chat_agent.py",
+        "present": true,
+        "matches_current_source": true
+      },
+      {
+        "path": "local_llm_chat_bot/llm_connector_with_prompt_caching.py",
+        "present": true,
+        "matches_current_source": false
+      },
+      {
+        "path": "local_llm_chat_bot/local_document_library.py",
+        "present": true,
+        "matches_current_source": false
+      },
+      {
+        "path": "local_llm_chat_bot/release_safety.py",
+        "present": false,
+        "matches_current_source": false
+      },
+      {
+        "path": "local_llm_chat_bot/request_runtime.py",
+        "present": false,
+        "matches_current_source": false
+      },
+      {
+        "path": "local_llm_chat_bot/workbench_i18n.py",
+        "present": true,
+        "matches_current_source": false
+      },
+      {
+        "path": "local_llm_chat_bot/workbench_startup.py",
+        "present": false,
+        "matches_current_source": false
+      },
+      {
+        "path": "local_llm_chat_bot/workbench_i18n.json",
+        "present": true,
+        "matches_current_source": false
+      }
+    ]
+  },
+  "release_verdict": "Synthetic functional regressions pass. Full release approval withheld: static checks remain nonzero and target-environment/distribution validation is outstanding.",
+  "restrictions_observed": {
+    "zip_generated": false,
+    "packaging_workflow_dispatched": false,
+    "real_bosch_endpoint_contacted": false,
+    "real_user_bg_codebook_excel_modified": false
+  },
+  "result_recording": {
+    "unit": "Default unittest discovery and a TextTestResult subclass recording actual outcome events; original test bodies unchanged.",
+    "browser": "Existing tests/browser_release.py entry point, unchanged failure/result mechanism.",
+    "temporary_harness_sha256": {
+      "unit_runner.py": "3364f3e12486b60c75b336b150c152d73e9fc636bf1dd66e634922106518052f",
+      "run_check.py": "ce5ed88cf34cacf38396b955c2d801918c8b62383bdff5ec6296d2ab4b46f2d5",
+      "browser_negative_control.py": "09d8015330fa3839605f29f476865ff3fa24c9a432ee3b6e6f8423f589f77892"
+    }
+  }
+}

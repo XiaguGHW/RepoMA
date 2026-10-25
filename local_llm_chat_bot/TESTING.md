@@ -61,6 +61,38 @@ because 2.4.0 crashed in this container's process discovery before checking code
 
 ## Current gates
 
+Step 9 verification is recorded in
+[the final report](../docs/release-reports/Workbench_Repair_Step_09_2026-10-25.md)
+and its [machine-readable evidence](../docs/release-reports/Workbench_Repair_Step_09_Evidence_2026-10-25.json).
+The nine-stage repair sequence has been executed; full release approval is still
+withheld because static checks and target-environment/distribution validation
+remain open.
+
+- Complete discovery: 184 methods, 183 passed, one native Windows skip, no
+  failures/errors/expected failures. All 15 promoted audit assertions pass.
+- Browser: 17 methods pass. An independent intentional failing control confirms
+  that the unchanged runner exits 1 and records its failed stage.
+- Step 9 corrected one remaining R14 branch: native picker window titles now use
+  the current language header. Its new test checks six language/kind combinations,
+  preserved paths, cancel and invalid kind. Actual OS dialogs remain unverified.
+- Fatal Ruff, catalog/JS checks, compileall and diff whitespace pass. Full Ruff
+  still exits 1 with 257 findings; mypy still exits 1 with 44 errors in 6 files
+  while checking 11 modules. No check scope was reduced.
+- CJK font/layout QA additionally covers ZH/EN/DE at 390/800/1440px. The final
+  browser run used Noto Sans CJK SC installed only in the test environment.
+  Run visual checks with a suitable Chinese font installed; DOM text tests alone
+  do not establish that glyphs render correctly.
+- The existing repository ZIP is older than the repaired source and lacks new
+  runtime modules. It was only inspected read-only, not rebuilt or executed.
+  Do not treat that ZIP as the verified application version.
+
+Reproduce the final additional regression with:
+`python -m unittest discover -s tests -p test_release_step_nine.py -v`.
+All current static findings and exact tested source hashes are in the JSON;
+the step-8 static snapshot remains a historical explanation of the prior baseline.
+
+## Historical gate snapshots
+
 After step 8 (R16), discovery runs 183 methods: 182 pass, no failures/errors and
 the existing native Windows test is skipped on Linux. Fourteen new startup/config
 methods and all 15 promoted audit methods pass. The browser suite has 17 passing

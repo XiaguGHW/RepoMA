@@ -2221,14 +2221,18 @@ def run_model_test(request: ModelTestRequest, key: str):
 
 
 @app.get("/api/pick/{kind}")
-def pick(kind: str):
+def pick(kind: str, request: Request):
     """Use the local Python GUI only as a native path chooser, never for files."""
-    if kind not in {"file", "folder"}: raise HTTPException(400, ui_message(ACTIVE, 'error.picker_type'))
+    if kind not in {"file", "folder"}:
+        raise HTTPException(400, ui_message(ACTIVE, 'error.picker_type'))
     try:
         import tkinter as tk
         from tkinter import filedialog
-        root = tk.Tk(); root.withdraw(); root.attributes("-topmost", True)
-        value = filedialog.askopenfilename(title="选择本地文件") if kind == "file" else filedialog.askdirectory(title="选择本地文件夹")
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        language = request.headers.get('X-Workbench-Language') or ACTIVE.get('language', 'zh')
+        value = filedialog.askopenfilename(title=ui_message(language, 'picker.file_title')) if kind == "file" else filedialog.askdirectory(title=ui_message(language, 'picker.folder_title'))
         root.destroy()
     except Exception as exc:
         raise HTTPException(501, ui_message(ACTIVE, 'error.picker_failed', detail=error_copy(exc, ACTIVE))) from exc
