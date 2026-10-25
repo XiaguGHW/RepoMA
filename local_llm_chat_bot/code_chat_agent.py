@@ -235,6 +235,9 @@ class ProjectState:
         self.path = self.root / "state.json"
         self.transcript_path = self.root / "transcript.jsonl"
         self.memory_path = self.root.parent / "memory.json"
+        # Configuration files the application itself reads (e.g. a custom
+        # --env-file). A model may never read, diff or overwrite them.
+        self.protected_paths: set[Path] = set()
         self.data = self._load()
         self.memory = self._load_memory()
 
@@ -350,10 +353,22 @@ class ProjectState:
     def relative(self, path: Path) -> str:
         return path.resolve().relative_to(self.workspace).as_posix()
 
+    def protect(self, *paths) -> None:
+        """Add secret/configuration files that must stay outside the model boundary."""
+        for path in paths:
+            if path:
+                try:
+                    self.protected_paths.add(Path(path).expanduser().resolve())
+                except (OSError, ValueError):
+                    continue
+
     def resolve_relative(self, value: str) -> Path:
         value = ensure_relative(value)
         original = self.workspace / value
         candidate = original.resolve()
+        protected = {os.path.normcase(str(path)) for path in getattr(self, "protected_paths", ())}
+        if os.path.normcase(str(candidate)) in protected:
+            raise ValueError("Application configuration files cannot be read or changed by a model")
         try:
             resolved_parts = candidate.relative_to(self.workspace).parts
         except ValueError as exc:
@@ -361,7 +376,7 @@ class ProjectState:
         ignored = {os.path.normcase(part) for part in IGNORED_DIRS}
         for parts in (Path(value).parts, resolved_parts):
             if any(os.path.normcase(part) in ignored
-                   or part.lower().startswith(".env")
+                   or part.lower().startswith(".env") or part.lower().endswith(".env")
                    or Path(part).suffix.lower() in {".pem", ".key"} for part in parts):
                 raise ValueError("Private application state/configuration cannot be read or changed by a model")
         if candidate == self.private_state_root or self.private_state_root in candidate.parents:
@@ -772,6 +787,7 @@ def main():
     if not key:
         raise SystemExit("Missing BOSCH_FARM_SUBSCRIPTION_KEY in .env or environment.")
     state = ProjectState(Path(args.state_dir), workspace, args.session)
+    state.protect(args.env_file, Path(__file__).resolve().parent / ".env")
     documents = LocalDocumentLibrary(state.root.parent / "documents.json")
     pricing_path = Path(args.pricing_file) if args.pricing_file else Path(__file__).resolve().parent / "model_pricing.json"
     pricing = PricingCatalog(pricing_path)

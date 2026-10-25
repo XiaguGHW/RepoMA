@@ -108,6 +108,12 @@ profile. Generated IDs never collide; edit/lock reject explicit duplicates with
 earlier with duplicates gets 409 before material binding or any model call.
 Regressions: `python -m unittest discover -s tests -p test_release_rule_ids.py -v`.
 
+Post-review fix F-01 (2026-10-25): the configured env file and any `*.env`
+file are outside the model path boundary (read, diff, apply, index); the active
+key is redacted from prompts, previews/reasoning, answers, plans, evidence
+excerpts and history. Regressions:
+`python -m unittest discover -s tests -p test_release_secret_boundary.py -v`.
+
 Reproduce the final additional regression with:
 `python -m unittest discover -s tests -p test_release_step_nine.py -v`.
 All current static findings and exact tested source hashes are in the JSON;

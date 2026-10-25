@@ -72,6 +72,20 @@ def summarize_usage(records):
     return summary
 
 
+def redact_secrets(value, key=None):
+    """Replace the active Farm key values in text without truncating it.
+
+    Only exact secret values are replaced, so ordinary engineering text is
+    never rewritten. Short values are ignored to avoid accidental matches.
+    """
+    if type(value) is not str:  # Keep structured UI messages (str subclasses) intact.
+        return value
+    for secret in (key, os.getenv('BOSCH_FARM_SUBSCRIPTION_KEY'), os.getenv('BOSCH_FARM_API_KEY')):
+        if isinstance(secret, str) and len(secret.strip()) >= 8:
+            value = value.replace(secret.strip(), '[redacted]')
+    return value
+
+
 def safe_error(error, key=None):
     text = str(error)
     for secret in (key, os.getenv('BOSCH_FARM_SUBSCRIPTION_KEY'), os.getenv('BOSCH_FARM_API_KEY')):

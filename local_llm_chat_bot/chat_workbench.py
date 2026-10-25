@@ -39,7 +39,8 @@ try:
     from pydantic import BaseModel, Field
     import uvicorn
 
-    from release_safety import safe_error, normalize_usage, summarize_usage, context_state_error, valid_rule_profile
+    from release_safety import (safe_error, normalize_usage, summarize_usage, context_state_error, valid_rule_profile,
+                                redact_secrets)
     from dotenv import load_dotenv
     from workbench_i18n import catalog_script_json, UIMessage, localize_message
     from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative, classification_manifest,
@@ -468,6 +469,25 @@ async def localized_http_error(request: Request, error: HTTPException):
                         content={'detail': str(detail), **message_payload(detail)}, headers=error.headers)
 
 
+def protect_configuration(state: ProjectState, env_file: Any = None) -> ProjectState:
+    """Keep every configuration file the app reads outside the model's file access."""
+    state.protect(env_file, STARTUP_CONFIG.env_file, Path(__file__).resolve().parent / ".env")
+    return state
+
+
+def redact_value(value: Any, key: Any = None) -> Any:
+    """Recursively redact the active Farm key from model input/output structures."""
+    if isinstance(value, UIMessage):
+        return value  # Structured, application-generated UI copy.
+    if isinstance(value, str):
+        return redact_secrets(value, key)
+    if isinstance(value, list):
+        return [redact_value(item, key) for item in value]
+    if isinstance(value, dict):
+        return {name: redact_value(item, key) for name, item in value.items()}
+    return value
+
+
 def context_token(data: dict[str, Any]) -> str:
     """Opaque binding of one session directory and its material/rule revision."""
     state = data["state"]
@@ -834,8 +854,14 @@ def accounted_model_call(data, connector, *args, usage_records=None, **kwargs):
     connector.usage_attempts = None
     old_control = getattr(connector, "request_control", None)
     connector.request_control = data.get("request_control")
+    # Defense in depth: the Farm key never leaves in a prompt, whatever its source.
+    key = connector.api_key
+    args = tuple(redact_value(item, key) if index else item for index, item in enumerate(args))
+    handler = kwargs.get("event_handler")
+    if handler:  # Streamed previews/reasoning are shown live: redact them too.
+        kwargs["event_handler"] = lambda kind, text: handler(kind, redact_secrets(text, key))
     try:
-        result = connector.ask_about_files(*args, **kwargs)
+        result = redact_secrets(connector.ask_about_files(*args, **kwargs), key)
         check_request(data)
         if data.get("request_control"):
             data["request_control"].limit(len(result))
@@ -1810,7 +1836,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
             notices.insert(0, ui_message(data, 'notice.auto_prepared', files=len(coverage.get("files", [])), calls=coverage.get("model_calls", 0)))
         report("complete", ui_message(data, 'model.complete'), 100)
         return {"answer": answer, "reasoning": "".join(reasoning), "notices": notices, "notice_messages": [message_payload(item) for item in notices],
-                "sources": evidence, "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [], "can_export_bg": False,
+                "sources": redact_value(evidence, llm.api_key), "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [], "can_export_bg": False,
                 "classification": None, "coverage_summary": coverage_summary_for_answer(coverage) if classification_request else None,
                 "turn_usage": summarize_usage(usage_records), "model_response": llm.last_response_model or data["model"],
                 "turn_cost": summarize_usage(usage_records)["cost_usd"],
@@ -1867,7 +1893,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
         notices.insert(0, ui_message(data, 'notice.auto_prepared', files=len(coverage.get("files", [])), calls=coverage.get("model_calls", 0)))
     report("complete", ui_message(data, 'model.complete'), 100)
     return {"answer": action.get("answer", ""), "reasoning": "".join(reasoning), "notices": notices, "notice_messages": [message_payload(item) for item in notices],
-            "sources": evidence, "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [{k: v for k, v in item.items() if k != "content"} for item in changes],
+            "sources": redact_value(evidence, llm.api_key), "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [{k: v for k, v in item.items() if k != "content"} for item in changes],
             "plan_id": plan_id, "can_export_bg": bool(bg_context),
             "turn_usage": turn_token_usage,
             "model_response": llm.last_response_model or data["model"],
@@ -2111,7 +2137,7 @@ def setup(request: Setup):
         with FARM_ENVIRONMENT.use(env_file, load_dotenv, explicit=explicit) as key:
             validate_farm_endpoint(env_file)
             check_state_directory(state_home)
-            state = ProjectState(state_home, workspace, request.session)
+            state = protect_configuration(ProjectState(state_home, workspace, request.session), env_file)
             documents = LocalDocumentLibrary(state.root.parent / "documents.json")
             price_file = Path(__file__).resolve().parent / "model_pricing.json"
             language = normalize_language(request.language)
@@ -2161,7 +2187,8 @@ def switch_model(request: ModelSwitchRequest):
 def activate_local_session(data: dict[str, Any], session_name: str) -> dict:
     with LOCK:
         reject_context_change_while_processing()
-        state = ProjectState(app_state_home(), data["state"].workspace, session_name)
+        state = protect_configuration(ProjectState(app_state_home(), data["state"].workspace, session_name),
+                                      data.get("env_file"))
         data["state"] = state
         data["documents"] = LocalDocumentLibrary(state.root.parent / "documents.json")
         restore_context_binding(data)

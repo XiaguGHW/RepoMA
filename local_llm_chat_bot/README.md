@@ -85,6 +85,12 @@ environment and active session. No key is printed, returned by the GUI or saved
 in session/settings files. Keep keys in the config file or process environment,
 never in command arguments.
 
+The configuration file actually used (default `.env`, or the `--env-file`
+path) and any file named `*.env`/`.env*` are never readable, diffable or
+writable by the model, even when they lie inside the selected workspace. The
+active Farm key is also replaced with `[redacted]` in every prompt, streamed
+preview, answer, change plan and saved conversation, if it appears in any file.
+
 The GUI does not need an env-file picker. Setup, model tests and diagnostics use
 the selected application config. After editing that file, reopen the workspace
 to apply it to the active connector; diagnostics/model probes can inspect the
