@@ -1,4 +1,5 @@
 """Offline catalog and embedded JavaScript checks; no app/model imports."""
+import importlib
 import json
 from pathlib import Path
 import re
@@ -9,7 +10,10 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workbench_i18n import load_catalog, validate_catalog, catalog_script_json
+workbench_i18n = importlib.import_module("workbench_i18n")
+load_catalog = workbench_i18n.load_catalog
+validate_catalog = workbench_i18n.validate_catalog
+catalog_script_json = workbench_i18n.catalog_script_json
 
 
 class CatalogTests(unittest.TestCase):

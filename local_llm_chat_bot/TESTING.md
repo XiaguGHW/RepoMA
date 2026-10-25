@@ -76,11 +76,10 @@ skipped on non-Windows. These limitations do not replace the required real
 PyMuPDF and Python 3.10 verification on the target computer.
 
 The browser suite has 20 passing methods. Fatal Ruff
-(`--select E9,F63,F7,F82`), compileall and `git diff --check` pass. Full Ruff is
-not yet a green gate: it has 256 findings (165 E702, 84 E701, 6 F401 and 1 E402).
-Mypy 1.15.0 targeting Python 3.10 has 44 errors in six files; missing
-`types-requests` can add one environment-specific `import-untyped` message.
-Step 7 will remove these findings without weakening their scope.
+(`--select E9,F63,F7,F82`), compileall and `git diff --check` pass. Full Ruff
+and mypy 1.15.0 (targeting Python 3.10) both exit 0. The former baseline of
+165 E702, 84 E701, 6 F401, 1 E402 and 44 mypy errors was removed without
+weakening either check's scope.
 
 The checked-in `local_llm_chat_bot.zip` was built at `76c6618` and is older than
 the current application code. Do not rebuild or replace it during normal test

@@ -5,8 +5,6 @@ import json
 import os
 from pathlib import Path
 import sys
-import tempfile
-import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -17,7 +15,6 @@ from openpyxl import Workbook
 import requests
 import chat_workbench as w
 import excel_agent as excel
-from code_chat_agent import PricingCatalog
 from llm_connector_with_prompt_caching import LLMConnector
 from release_safety import normalize_usage
 import test_release_regressions as regression

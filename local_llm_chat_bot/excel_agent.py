@@ -368,7 +368,8 @@ def copy_column_presentation(sheet, source_col: int, target_col: int, first_row:
 def split_qualified(address: str) -> tuple[str, str]:
     if "!" not in address:
         die(f"Plan cell must be sheet-qualified: {address}")
-    return address.rsplit("!", 1)
+    sheet, cell = address.rsplit("!", 1)
+    return sheet, cell
 
 
 def command_apply(args) -> None:

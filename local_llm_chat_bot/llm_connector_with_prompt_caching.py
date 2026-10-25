@@ -9,7 +9,7 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import requests
 from request_runtime import RequestControl, RequestStopped, ResponseLimitExceeded
@@ -93,7 +93,12 @@ class LLMConnector:
                                      stream=stream, event_handler=event_handler, thinking=thinking)
         if stream and event_handler:
             event_handler("notice", UIMessage('notice.nonstream'))
-        return {"gemini": self._call_gemini, "claude": self._call_claude, "openai": self._call_openai}[self._family](
+        handlers: dict[str, Callable[..., str]] = {
+            "gemini": self._call_gemini,
+            "claude": self._call_claude,
+            "openai": self._call_openai,
+        }
+        return handlers[self._family](
             file_paths, user_prompt, system_prompt, generation_config
         )
 
@@ -153,7 +158,7 @@ class LLMConnector:
         headers.update({"genaiplatform-farm-subscription-key": self.api_key, "Content-Type": "application/json"})
         parts = [p for fp in file_paths for p in [self._file_to_gemini_part(fp)] if p]
         parts.append({"text": user_prompt})
-        payload = {"contents": [{"role": "user", "parts": parts}]}
+        payload: dict[str, Any] = {"contents": [{"role": "user", "parts": parts}]}
         if system_prompt:
             payload["system_instruction"] = {"parts": [{"text": system_prompt}]}
         if generation_config:
