@@ -633,7 +633,9 @@ class BrowserRelease(unittest.TestCase):
         original = self.f.rules.read_bytes()
         self.button('editCodebookDraft()').click()
         raw = '{\n' + '\n'.join(f'  "line{i}": "原文 Regel {i}",' for i in range(180))
-        self.page.locator('#ruleeditor').fill(raw)
+        # This deliberately large synthetic draft exercises preservation of
+        # editing state, rather than an eight-second text-entry performance SLA.
+        self.page.locator('#ruleeditor').fill(raw, timeout=20_000)
         self.page.eval_on_selector('#ruleeditor', '(node)=>{node.setSelectionRange(1200,1234,"backward");node.scrollTop=800;node.dispatchEvent(new Event("select"));node.dispatchEvent(new Event("scroll"))}')
         state = self.page.eval_on_selector('#ruleeditor', '(n)=>[n.selectionStart,n.selectionEnd,n.selectionDirection,n.scrollTop]')
         self.button('saveCodebookDraft()').click()

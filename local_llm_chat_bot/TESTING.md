@@ -59,35 +59,62 @@ because 2.4.0 crashed in this container's process discovery before checking code
   WORKBENCH_CHROMIUM_EXECUTABLE optionally selects an installed Chromium executable.
   Keep browser screenshots, generated state, environments and logs out of commits.
 
-## Current gates
+## Current gates and environment
 
-Step 9 verification is recorded in
-[the final report](../docs/release-reports/Workbench_Repair_Step_09_2026-10-25.md)
-and its [machine-readable evidence](../docs/release-reports/Workbench_Repair_Step_09_Evidence_2026-10-25.json).
-The nine-stage repair sequence has been executed; full release approval is still
-withheld because static checks and target-environment/distribution validation
-remain open.
+The current code baseline is `main` at `3db6e7f` (post-review steps 1–5). Run
+the commands above from an isolated environment with the versions pinned in
+`requirements-dev.txt`; browser checks require Playwright Chromium. The
+repository test fixture sets `WORKBENCH_ALLOW_TEST_HOST=1` because `testserver`
+is intentionally rejected in production. Do not set it for a production run.
 
-- Complete discovery: 184 methods, 183 passed, one native Windows skip, no
-  failures/errors/expected failures. All 15 promoted audit assertions pass.
-- Browser: 17 methods pass. An independent intentional failing control confirms
-  that the unchanged runner exits 1 and records its failed stage.
-- Step 9 corrected one remaining R14 branch: native picker window titles now use
-  the current language header. Its new test checks six language/kind combinations,
-  preserved paths, cancel and invalid kind. Actual OS dialogs remain unverified.
-- Fatal Ruff, catalog/JS checks, compileall and diff whitespace pass. Full Ruff
-  still exits 1 with 257 findings; mypy still exits 1 with 44 errors in 6 files
-  while checking 11 modules. No check scope was reduced.
-- CJK font/layout QA additionally covers ZH/EN/DE at 390/800/1440px. The final
-  browser run used Noto Sans CJK SC installed only in the test environment.
-  Run visual checks with a suitable Chinese font installed; DOM text tests alone
-  do not establish that glyphs render correctly.
-- The repository ZIP was rebuilt from main at `76c6618` after the post-review
-  fixes. A cold-start check of an unpacked copy from another working directory
-  passed `--help`, page load, workspace setup and local self-check, including
-  a path containing spaces, Chinese and umlauts; no Bosch endpoint was contacted.
-  This is a distribution smoke test, not a replacement for the open static gates
-  or target Windows/Bosch verification.
+At this baseline, complete backend discovery has 242 tests. In this environment,
+eight cannot complete with the real dependency set because PyMuPDF is unavailable:
+two import `fitz` directly and six subprocess checks correctly stop when the
+dependency check fails. The six subprocess checks pass when rerun with a
+minimal substitute that satisfies that import check. One native Windows test is
+skipped on non-Windows. These limitations do not replace the required real
+PyMuPDF and Python 3.10 verification on the target computer.
+
+The browser suite has 20 passing methods. Fatal Ruff
+(`--select E9,F63,F7,F82`), compileall and `git diff --check` pass. Full Ruff is
+not yet a green gate: it has 256 findings (165 E702, 84 E701, 6 F401 and 1 E402).
+Mypy 1.15.0 targeting Python 3.10 has 44 errors in six files; missing
+`types-requests` can add one environment-specific `import-untyped` message.
+Step 7 will remove these findings without weakening their scope.
+
+The checked-in `local_llm_chat_bot.zip` was built at `76c6618` and is older than
+the current application code. Do not rebuild or replace it during normal test
+work. Packaging happens only after the packaging gate is complete and the user
+explicitly authorizes a final ZIP.
+
+## Post-review regression entry points
+
+The following focused suites accompany the completed post-review repairs. They
+are additional diagnostics, not substitutes for complete backend and browser
+runs.
+
+- F-02 request bounds and cancellation:
+  `python -m unittest discover -s tests -p test_release_request_bounds.py -v`
+- F-04 stale-page context protection:
+  `python -m unittest discover -s tests -p test_release_page_context.py -v`
+- F-03 unique rule IDs:
+  `python -m unittest discover -s tests -p test_release_rule_ids.py -v`
+- F-01 env-file boundary and redaction:
+  `python -m unittest discover -s tests -p test_release_secret_boundary.py -v`
+- F-09/F-05 plain mode and rule-removal recovery:
+  `python -m unittest discover -s tests -p test_release_plain_mode_recovery.py -v`
+- F-07/F-11 traceable labels and ignored runtime files:
+  `python -m unittest discover -s tests -p test_release_traceable_labels.py -v`
+- S-1–S-4 robustness fixes:
+  `python -m unittest discover -s tests -p test_release_step_ten.py -v`
+- F-06 local-origin access control:
+  `python -m unittest discover -s tests -p test_release_local_access.py -v`
+- F-08 three-language residual scan:
+  `python -m unittest discover -s tests -p test_release_i18n_residual.py -v`
+- F-10 deterministic Excel plans:
+  `python -m unittest discover -s tests -p test_release_excel_plan.py -v`
+- F-13 dead-code and frontend-cleanup checks:
+  `python -m unittest discover -s tests -p test_release_frontend_cleanup.py -v`
 
 Post-review fix F-02 (2026-10-25) replaces the step-6 request defaults: one
 complete response may take 300 s (`WORKBENCH_RESPONSE_TIMEOUT_SECONDS`), stream

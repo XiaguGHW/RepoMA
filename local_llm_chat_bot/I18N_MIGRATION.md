@@ -36,11 +36,19 @@ Dynamic renderers still need to use semantic keys and rerender from their data
 when the language changes. Do not reintroduce a whole-page text observer as a
 shortcut for those renderers.
 
-## Still to be completed
+## Completed migration work and remaining manual checks
 
-Existing hardcoded strings not yet wired to keys, server progress/errors,
-language persistence races and open-panel rerendering still need subsequent
-steps. Catalog tests do NOT prove browser switching is fixed. Full browser
-tests must check ZH → EN → DE → ZH → EN → DE, asynchronous updates and
-unchanged source content/selections. The translator loop test is only a unit
-test, not a substitute for those browser checks.
+The migrated interface now uses catalog keys and named parameters for server
+progress and error messages. Dynamic panels redraw from their data when the
+language changes, and state messages use `setUIMessage` (or `uiMessageNode`)
+instead of retaining a previously rendered literal. English and German browser
+tests scan the visible full workflow, including diagnostics, rules, materials,
+classification, drawers and scan reports, for Chinese UI residue.
+
+New status messages must use `setUIMessage` or `uiMessageNode`; do not build a
+one-shot status message with `innerHTML` and `t()`. The source checks in
+`tests/test_release_frontend_cleanup.py` enforce this rule.
+
+Catalog and browser tests cannot establish operating-system rendering. The
+remaining manual checks are Windows-provided fonts, the actual system file
+picker's title and text, and browser zoom/layout at the target display sizes.

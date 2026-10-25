@@ -30,11 +30,13 @@ python chat_workbench.py
 ```
 
 Open `http://127.0.0.1:8765` in the browser that opens on the same computer.
-It never listens on the network. Select the code workspace and state directory
-from the left panel (or paste their paths), then choose a local document or
-activate Baugruppe mode with a Codebook and BG folder. The centre is the chat;
-the right panel shows token/cost totals, source evidence and proposed diffs.
-Only the **Apply changes** button writes a proposed code edit.
+It never listens on the network. Select or paste the code workspace in the
+interface, then choose a local document or activate Baugruppe mode with a
+Codebook and BG folder. Workbench state is always kept beside the program in
+`AI_Bot_State/`; it cannot be redirected to the selected workspace or BG folder.
+The centre is the chat; the right panel shows token/cost totals, source evidence
+and proposed diffs. Only the **Apply changes** button writes a proposed code
+edit.
 
 The workbench shows an expandable **模型推理（接口返回）** panel only when
 the Bosch Farm deployment supplies `reasoning_content`. Some models/Farm
@@ -87,7 +89,7 @@ Natural-language memory changes are never applied automatically. The model can o
 
 Use `/file "C:\\path\\to\\file.pdf"` to index a local PDF, Word (`.docx`), Excel (`.xlsx`/`.xlsm`), CSV, TXT, Markdown, or PNG/JPEG/WebP file. Extraction and lexical search occur locally; the source file is not uploaded merely because it was indexed. The default local file limit is 80 MB and PDF text is indexed page by page (up to 900 extracted chunks), so a 100–200-page drawing package is no longer silently cut after the first 160 chunks.
 
-For an answer, the script sends only the matching extracted excerpts. It can also attach up to five visual evidence items to the selected Farm model: an original image, a rendered cited PDF page, or a rendered Excel range. A scanned PDF page is kept as visual evidence even when it has no embedded text; this version does not run local OCR, so the model must inspect that attached page. Excel cell values/formulas are extracted; charts, colours, merged cells and embedded images are preserved only when a relevant range is rendered as a visual table.
+For an answer, the script sends only the matching extracted excerpts. It can also attach up to five visual evidence items to the selected Farm model: an original image, a rendered cited PDF page, or a rendered Excel range. A scanned PDF page is kept as visual evidence even when it has no embedded text. The terminal `code_chat_agent.py` does not run local OCR, so its model must inspect that attached page. The graphical Workbench can perform local OCR for scanned pages when Tesseract is available; see the `Codebook OCR` section in `README.md`. Excel cell values/formulas are extracted; charts, colours, merged cells and embedded images are preserved only when a relevant range is rendered as a visual table.
 
 ## Baugruppe / Codebook mode
 
