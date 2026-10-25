@@ -1792,7 +1792,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
         report("reading", ui_message(data, 'progress.reading_done'), 62)
     elif preparation_request:
         report("reading", ui_message(data, 'progress.reading_reused'), 62)
-    coverage_summaries = coverage.get("files", []) if coverage.get("complete") else []
+    coverage_summaries = coverage.get("files", []) if coverage_matches_current_selection(data, coverage) else []
     dossier = None
     if coverage_summaries:
         try:
@@ -1876,6 +1876,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
         answer = raw.strip() or str(ui_message(data, "model.empty"))
         check_answer_size(data, answer)
         with commit_answer(data):
+            ensure_current_sources(data)
             title_session_from_question(state, question)
             state.add_turn("user", question)
             state.add_turn("assistant", answer)
@@ -1918,6 +1919,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
         if isinstance(change, dict) and state.resolve_relative(change.get("path", "")).exists() and change.get("path") not in complete:
             raise ValueError("A complete current file must be read before proposing its replacement")
     with commit_answer(data):
+        ensure_current_sources(data)
         changes = build_diff(state, action.get("changes", []))
         plan_id = publish_pending(data, changes)
         title_session_from_question(state, question)
@@ -1970,7 +1972,7 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
     coverage = load_coverage(state)
     dossier = load_bg_dossier_cache(coverage, data["model"]) if coverage_matches_current_selection(data, coverage) else None
     prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
-                        coverage_summaries=[] if dossier else (coverage.get("files", []) if coverage.get("complete") else []),
+                        coverage_summaries=[] if dossier else (coverage.get("files", []) if coverage_matches_current_selection(data, coverage) else []),
                         bg_dossier=dossier, response_language=data.get("language", "zh"))
     results = []
     for index, model in enumerate(models, start=1):
@@ -2676,7 +2678,9 @@ def codebook_edit(request: CodebookEditRequest):
     if not request.confirmed: raise HTTPException(400, ui_message(ACTIVE, 'error.confirmation'))
     profile = load_codebook_profile()
     if not profile.get('source_path'): raise HTTPException(400, ui_message(ACTIVE, 'error.rules_first'))
-    if request.profile_version is not None and request.profile_version != profile.get('version'):
+    if not request.profile_version:
+        raise HTTPException(400, ui_message(ACTIVE, 'rules.version_required'))
+    if request.profile_version != profile.get('version'):
         raise HTTPException(409, ui_message(ACTIVE, 'rules.version_changed'))
     try:
         draft = parse_codebook_draft(json.dumps(request.draft))
@@ -2949,14 +2953,24 @@ async def chat_stream(request: ChatRequest, http_request: Request):
         raise
 
     def reap_worker():
-        thread.join()
-        with CHAT_TASK_GUARD:
-            task["state"] = ("completed" if task["result"] is not None else
-                             "cancelled" if task["error"]["code"] == "cancelled" else
-                             "timed_out" if task["error"]["code"] == "timeout" else "failed")
-            if CHAT_TASK.get("id") == task["id"]:
-                CHAT_TASK.update(task)
-            task["done"].set()
+        try:
+            thread.join()
+            with CHAT_TASK_GUARD:
+                if task["result"] is None and not isinstance(task.get("error"), dict):
+                    detail = ui_message(data, "error.worker_failed")
+                    task["error"] = {"type": "error", "code": "failed", "message": safe_error(str(detail)),
+                                     **message_payload(detail)}
+                code = (task.get("error") or {}).get("code", "failed")
+                task["state"] = ("completed" if task["result"] is not None else
+                                 "cancelled" if code == "cancelled" else
+                                 "timed_out" if code == "timeout" else "failed")
+                if CHAT_TASK.get("id") == task["id"]:
+                    CHAT_TASK.update(task)
+        finally:
+            with CHAT_TASK_GUARD:
+                task["done"].set()
+                if CHAT_TASK.get("id") == task["id"]:
+                    CHAT_TASK.update(task)
             MODEL_WORK_IN_PROGRESS.clear()
 
     threading.Thread(target=reap_worker, daemon=True).start()

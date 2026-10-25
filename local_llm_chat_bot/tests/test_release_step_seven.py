@@ -60,7 +60,8 @@ class DraftAndProgress(unittest.TestCase):
     def test_unconfirmed_and_invalid_edits_leave_profile_unchanged(self):
         profile = self.post('/api/codebook/prepare', {'path': str(self.f.rules)})
         for draft, confirmed in [(profile['draft'], False), ({'classes': []}, True)]:
-            response = self.client.post('/api/codebook/edit', json={'draft': draft, 'confirmed': confirmed})
+            response = self.client.post('/api/codebook/edit', json={'draft': draft, 'confirmed': confirmed,
+                                                                     'profile_version': profile['version']})
             self.assertEqual(response.status_code, 400, response.text)
             self.assertTrue(response.json()['message_key'])
             self.assertEqual(self.client.get('/api/codebook').json(), profile)

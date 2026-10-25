@@ -123,7 +123,8 @@ class StepTwo(unittest.TestCase):
         profile = w.load_codebook_profile()
         draft = copy.deepcopy(profile["draft"])
         draft["classes"][0]["definition"] += " Additional fixture definition."
-        self.post("/api/codebook/edit", {"draft": draft, "confirmed": True})
+        self.post("/api/codebook/edit", {"draft": draft, "confirmed": True,
+                                         "profile_version": profile["version"]})
         self.post("/api/codebook/lock", {})
         self.rejected(plan_id)
         self.assertFalse((self.f.workspace / "rule_change.txt").exists())

@@ -147,7 +147,8 @@ class AuditGaps(unittest.TestCase):
         self.bg()
         draft = copy.deepcopy(PROFILE)
         draft["classes"][0]["name"] = "New fixture class"
-        self.post("/api/codebook/edit", {"draft": draft, "confirmed": True})
+        self.post("/api/codebook/edit", {"draft": draft, "confirmed": True,
+                                         "profile_version": w.load_codebook_profile()["version"]})
         self.post("/api/codebook/lock", {})
         response = self.client.post(
             "/api/chat", json={"question": "Classify this Baugruppe"}

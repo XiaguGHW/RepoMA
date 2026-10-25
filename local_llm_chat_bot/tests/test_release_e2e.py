@@ -32,10 +32,10 @@ class EndToEndTests(unittest.TestCase):
             self.assertNotIn('"type": "result"',result.text)
             self.assertFalse(w.MODEL_WORK_IN_PROGRESS.is_set())
             before=f.rules.read_bytes();draft=json.loads(json.dumps(PROFILE));draft['classes'][0]['name']='Fixture Class B'
-            response=client.post('/api/codebook/edit',json={'draft':draft,'confirmed':False})
+            response=client.post('/api/codebook/edit',json={'draft':draft,'confirmed':False,'profile_version':profile['version']})
             self.assertEqual(response.status_code,400)
             self.assertEqual(client.get('/api/codebook').json()['draft']['classes'][0]['name'],'Rotationseinheit')
-            post('/api/codebook/edit',{'draft':draft,'confirmed':True});post('/api/codebook/lock',{})
+            post('/api/codebook/edit',{'draft':draft,'confirmed':True,'profile_version':w.load_codebook_profile()['version']});post('/api/codebook/lock',{})
             post('/api/target',{'target':str(f.bg_b),'selected_paths':['facts.txt']})
             self.assertEqual(client.get('/api/history').json()['history'],[])
             result=post('/api/chat',{'question':'Classify this Baugruppe again'})

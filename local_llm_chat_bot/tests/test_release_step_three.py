@@ -280,7 +280,8 @@ class StepThree(unittest.TestCase):
         target = copy.deepcopy(w.ACTIVE["state"].data["selected_target"])
         draft = copy.deepcopy(PROFILE)
         draft["classes"][0]["name"] = "Reconfirmed fixture class"
-        self.post("/api/codebook/edit", {"draft": draft, "confirmed": True})
+        self.post("/api/codebook/edit", {"draft": draft, "confirmed": True,
+                                         "profile_version": w.load_codebook_profile()["version"]})
         self.post("/api/codebook/lock", {})
         self.assertEqual(w.ACTIVE["state"].data["selected_target"], target)
         self.assertEqual(
@@ -303,11 +304,13 @@ class StepThree(unittest.TestCase):
         self.bg()
         before = self.snapshot()
         response = self.client.post(
-            "/api/codebook/edit", json={"draft": PROFILE, "confirmed": False}
+            "/api/codebook/edit", json={"draft": PROFILE, "confirmed": False,
+                                          "profile_version": w.load_codebook_profile()["version"]}
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.snapshot(), before)
-        self.post("/api/codebook/edit", {"draft": PROFILE, "confirmed": True})
+        self.post("/api/codebook/edit", {"draft": PROFILE, "confirmed": True,
+                                         "profile_version": w.load_codebook_profile()["version"]})
         self.assertEqual(self.client.delete("/api/bg").status_code, 200)
         self.post("/api/chat", {"question": "Explain the motor"})
 

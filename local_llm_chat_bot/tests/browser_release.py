@@ -587,7 +587,10 @@ class BrowserRelease(unittest.TestCase):
         self.button('editCodebookDraft()').click()
         raw += '  '
         self.page.locator('#ruleeditor').fill(raw)
-        response = self.page.request.post(self.page.url + 'api/codebook/edit', data={'draft': draft, 'confirmed': True})
+        response = self.page.request.post(self.page.url + 'api/codebook/edit', data={
+            'draft': draft, 'confirmed': True,
+            'profile_version': self.page.evaluate('lastCodebookWorkspaceProfile.version'),
+        })
         self.assertEqual(response.status, 200)
         self.page.once('dialog', lambda dialog: dialog.accept())
         self.button('saveCodebookDraft()').click()
