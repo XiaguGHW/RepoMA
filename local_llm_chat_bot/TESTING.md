@@ -132,6 +132,14 @@ runtime state, terminal chat folders, `*.env`/`.env.*` (templates excepted) and
 `*_ai_updated*` workbooks. Regressions:
 `python -m unittest discover -s tests -p test_release_traceable_labels.py -v`.
 
+Post-review step 4 / F-10 (2026-10-25): `excel_chat_agent.py` prints a
+deterministic local plan summary (sheet, target column, header, cell count,
+first ten edits, plan path, SHA-256) after the model's reply; `确认执行` applies
+a private copy of exactly the shown bytes and refuses a changed plan or a plan
+without a stored summary hash. excel_agent safety refusals (`die()`) are
+reported instead of exiting the agent. Regressions:
+`python -m unittest discover -s tests -p test_release_excel_plan.py -v`.
+
 Reproduce the final additional regression with:
 `python -m unittest discover -s tests -p test_release_step_nine.py -v`.
 All current static findings and exact tested source hashes are in the JSON;

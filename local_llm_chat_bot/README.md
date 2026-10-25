@@ -328,7 +328,13 @@ for example:
 The model can call only the controlled local tools for exact ranges, cell
 searches and direct formula references. It replies in Chinese and must cite
 `Sheet!A1` for workbook facts. It can create a JSON plan but cannot write the
-workbook until you type exactly `确认执行`. It then creates a separately named
+workbook until you type exactly `确认执行`. After a plan is created the program
+itself prints a local summary read from the plan file (sheet, target column,
+new header, number of written cells, the first ten "cell → value" edits, plan
+path and SHA-256); this summary, not the model's wording, is what you confirm.
+If the plan file changes after that summary was shown, `确认执行` is refused
+and a new plan must be created. Safety refusals are reported as "未执行写入"
+without ending the conversation. It then creates a separately named
 `*_ai_updated.xlsx` and verifies each planned cell plus all original formula
 text. The original file remains unchanged.
 

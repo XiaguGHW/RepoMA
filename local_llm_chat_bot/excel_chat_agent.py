@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -55,6 +56,53 @@ TOOL_LABELS = {
 QUOTED_RE = re.compile(r'["“]([^"”\n]+)["”]')
 WINDOWS_PATH_RE = re.compile(r'([A-Za-z]:\\[^"“”\r\n]+)')
 NAME_HINT_RE = re.compile(r'(?:名字叫|名为|叫)\s*["“]?([^"“”\s]+?)(?:的)?(?:excel|xlsx|xlsm|工作簿|表格|文件)', re.IGNORECASE)
+
+
+PLAN_SUMMARY_EDITS = 10
+
+
+def run_exact(command, args) -> str:
+    """Run an excel_agent command; turn its die() exit into an ordinary refusal.
+
+    excel_agent.die() raises SystemExit for every safety refusal. Inside the
+    interactive agent that must become a reported "not written" error, never
+    an exit of the whole conversation.
+    """
+    output, errors = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            command(args)
+    except SystemExit as exc:
+        if exc.code not in (None, 0):
+            message = errors.getvalue().strip()
+            raise ValueError(message[len("ERROR: "):] if message.startswith("ERROR: ") else message or f"exit {exc.code}") from None
+    return output.getvalue()
+
+
+def plan_digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def plan_summary(plan: dict[str, Any], plan_path: Path, digest: str) -> str:
+    """Deterministic review text built from the plan file itself, never by the model."""
+    edits = plan.get("edits", [])
+    header = next((edit for edit in edits if edit.get("kind") == "header"), None)
+    values = [edit for edit in edits if edit.get("kind") != "header"]
+
+    def shown(value: Any) -> str:
+        return json.dumps(excel_json_value(value), ensure_ascii=False)
+    lines = ["【本地计划摘要｜由程序直接读取计划文件生成，以此为准；模型的描述仅供参考】",
+             f"工作表：{plan.get('sheet', '—')}",
+             f"目标列：{plan.get('target_column', '—')}",
+             f"新表头：{shown(header['value']) if header else '—'}（{header['cell'] if header else '—'}）",
+             f"写入单元格总数：{len(edits)}（表头 {1 if header else 0} 个，判断值 {len(values)} 个）",
+             f"前 {min(PLAN_SUMMARY_EDITS, len(values))} 条（单元格 → 值）："]
+    lines += [f"  {edit['cell']} → {shown(edit['value'])}" for edit in values[:PLAN_SUMMARY_EDITS]]
+    if len(values) > PLAN_SUMMARY_EDITS:
+        lines.append(f"  …其余 {len(values) - PLAN_SUMMARY_EDITS} 条见计划文件")
+    lines += [f"计划文件：{plan_path}", f"SHA-256：{digest}",
+              "核对无误后输入“确认执行”生成新副本；输入 /cancel 取消。原文件不会被修改。"]
+    return "\n".join(lines)
 
 
 def compact(value: Any, length: int = 220) -> str:
@@ -186,6 +234,12 @@ class WorkbookTools:
     def __init__(self, session: Session):
         self.session = session
         self.allowed_roots: list[Path] = []
+        # Set when a plan is created; the main loop prints it after the model's reply.
+        self.last_plan_summary: str | None = None
+
+    def clear_pending(self) -> None:
+        self.session.data["pending_plan"] = None
+        self.session.data["pending_plan_sha256"] = None
 
     @property
     def path(self) -> Path:
@@ -236,7 +290,7 @@ class WorkbookTools:
             raise ValueError("工作簿必须是 .xlsx 或 .xlsm 文件。")
         book = load_book(candidate, data_only=False)
         self.session.data["workbook"] = str(candidate)
-        self.session.data["pending_plan"] = None
+        self.clear_pending()
         self.session.save()
         return {"opened_workbook": candidate.name, "path": str(candidate), "overview": worksheet_overview(book)}
 
@@ -306,28 +360,44 @@ class WorkbookTools:
             template_header=str(payload["template_header"]), target_column=str(payload["target_column"]), new_header=str(payload["new_header"]),
             results_id_column=str(payload["results_id_column"]), results_value_column=str(payload["results_value_column"]),
         )
-        with contextlib.redirect_stdout(io.StringIO()):
-            command_plan_participants(args)
-        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        run_exact(command_plan_participants, args)
+        data = plan_path.read_bytes()
+        plan = json.loads(data.decode("utf-8"))
+        digest = plan_digest(data)
+        # The reviewed version is the exact bytes shown in the local summary.
         self.session.data["pending_plan"] = str(plan_path)
+        self.session.data["pending_plan_sha256"] = digest
         self.session.save()
-        return {"plan_created": True, "plan": str(plan_path), "operation": plan["operation"], "sheet": plan["sheet"], "target_column": plan["target_column"], "new_header": payload["new_header"], "edit_count": len(plan["edits"]), "preflight": plan["preflight"], "confirmation_required": "确认执行"}
+        self.last_plan_summary = plan_summary(plan, plan_path, digest)
+        return {"plan_created": True, "plan": str(plan_path), "plan_sha256": digest, "operation": plan["operation"], "sheet": plan["sheet"], "target_column": plan["target_column"], "new_header": payload["new_header"], "edit_count": len(plan["edits"]), "preflight": plan["preflight"], "confirmation_required": "确认执行", "local_summary_printed": True}
 
     def apply_pending(self) -> dict[str, Any]:
         raw = self.session.data.get("pending_plan")
         if not raw or not Path(raw).is_file():
             raise ValueError("没有待执行计划。请先让助手生成计划。")
-        plan_path = Path(raw)
+        expected = self.session.data.get("pending_plan_sha256")
+        if not expected:
+            raise ValueError("该计划没有经过本地摘要核对（可能来自旧版本会话）。请重新生成计划，核对摘要后再确认。")
+        data = Path(raw).read_bytes()
+        if plan_digest(data) != expected:
+            self.clear_pending()
+            self.session.save()
+            raise ValueError("计划文件在展示摘要后被修改（SHA-256 不一致），已拒绝写入。请重新生成计划并核对新的摘要。")
+        plan = json.loads(data.decode("utf-8"))
+        # Apply a private copy of exactly the verified bytes, so the file cannot
+        # be swapped between this check and the writer reading it.
+        reviewed = self.session.root / f".reviewed_plan_{uuid.uuid4().hex}.json"
+        reviewed.write_bytes(data)
         suffix = self.path.suffix
         output = self.path.with_name(f"{self.path.stem}_ai_updated_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}")
-        args = SimpleNamespace(workbook=str(self.path), plan=str(plan_path), output=str(output), force=False)
-        with contextlib.redirect_stdout(io.StringIO()):
-            command_apply(args)
-        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        try:
+            run_exact(command_apply, SimpleNamespace(workbook=str(self.path), plan=str(reviewed), output=str(output), force=False))
+        finally:
+            reviewed.unlink(missing_ok=True)
         verification = verify_plan(output, plan)
-        self.session.data["pending_plan"] = None
+        self.clear_pending()
         self.session.save()
-        return {"output": str(output), "verification": verification, "source_unchanged": True}
+        return {"output": str(output), "verification": verification, "source_unchanged": True, "plan_sha256": expected}
 
 
 def controller_prompt(question: str, context: dict[str, Any], tool_results: list[dict[str, Any]]) -> str:
@@ -469,7 +539,7 @@ def main() -> None:
             print("assistant> " + json.dumps({"workbook": session.data.get("workbook"), "results": session.data.get("results"), "pending_plan": session.data.get("pending_plan")}, ensure_ascii=False))
             continue
         if line == "/cancel":
-            session.data["pending_plan"] = None; session.save(); print("assistant> 已取消待执行计划，原 Excel 未被修改。"); continue
+            tools.clear_pending(); session.save(); print("assistant> 已取消待执行计划，原 Excel 未被修改。"); continue
         if line in {"确认执行", "/confirm"}:
             try:
                 with progress.phase("执行已确认计划并校验新文件"):
@@ -543,6 +613,10 @@ def main() -> None:
             answer = f"无法完成本轮分析：{exc}"
         if not rendered_answer:
             print("assistant> " + answer, flush=True)
+        if tools.last_plan_summary:
+            # Always last before the confirmation prompt, after any model wording.
+            print(tools.last_plan_summary, flush=True)
+            tools.last_plan_summary = None
         progress.note(f"本轮共用 {time.monotonic() - turn_started:.1f} 秒；模型请求 {llm_calls} 次；工具结果 {len(tool_results)} 个")
         session.add("user", line); session.add("assistant", answer)
 
