@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 import uuid
+from contextvars import ContextVar
 from functools import wraps
 from queue import Empty, Full, Queue
 from contextlib import contextmanager
@@ -70,6 +71,15 @@ CHAT_TASK: dict[str, Any] = {}
 OPERATION_GUARD = threading.Lock()
 OPERATIONS: dict[str, RequestControl] = {}
 REQUEST_ID = r"^(?:[a-f0-9]{32})?$"
+# The session/context a browser page displays (X-Workbench-Context). Requests
+# that act on the current context are rejected when it no longer matches, so a
+# stale tab can never run in, or change, another tab's session or material scope.
+PAGE_CONTEXT: ContextVar[str] = ContextVar("PAGE_CONTEXT", default="")
+CONTEXT_HEADER = "X-Workbench-Context"
+# Navigation that (re)binds a page, and controls that must work from any page.
+# /api/codebook/edit has its own stricter guard: the edited profile_version.
+UNCHECKED_PAGE_PATHS = {"/api/setup", "/api/session/open", "/api/session/new", "/api/language",
+                        "/api/chat/cancel", "/api/operation/cancel", "/api/model-test", "/api/codebook/edit"}
 
 # Retain existing local settings/sessions made by early workbench releases,
 # while never sending their obsolete dotted Farm IDs to the endpoint again.
@@ -458,6 +468,20 @@ async def localized_http_error(request: Request, error: HTTPException):
                         content={'detail': str(detail), **message_payload(detail)}, headers=error.headers)
 
 
+def context_token(data: dict[str, Any]) -> str:
+    """Opaque binding of one session directory and its material/rule revision."""
+    state = data["state"]
+    identity = f"{state.root}\0{state.data.get('context_revision', '')}"
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+
+
+def ensure_current_page() -> None:
+    """Reject a request made from a page that shows an older session/context."""
+    expected = PAGE_CONTEXT.get()
+    if expected and ACTIVE and expected != context_token(ACTIVE):
+        raise HTTPException(409, ui_message(ACTIVE, 'context.stale_page'), headers={"X-Workbench-Stale": "1"})
+
+
 def reject_context_change_while_processing() -> None:
     """Keep the selected session, model and material scope stable per request."""
     if MODEL_WORK_IN_PROGRESS.is_set():
@@ -475,6 +499,7 @@ def begin_model_work(request_id: str = "") -> dict[str, Any]:
     try:
         if MODEL_WORK_IN_PROGRESS.is_set():
             raise HTTPException(409, ui_message(ACTIVE, 'error.busy'))
+        ensure_current_page()
         data = dict(session())
         data["request_control"] = RequestControl()
         data["cancel_event"] = data["request_control"].cancel_event
@@ -1863,6 +1888,7 @@ def context_mutation(function):
             raise HTTPException(409, ui_message(ACTIVE, 'error.busy'))
         try:
             reject_context_change_while_processing()
+            ensure_current_page()
             return function(*args, **kwargs)
         finally:
             LOCK.release()
@@ -1961,7 +1987,15 @@ async def local_origin_only(request: Request, call_next):
     host = request.headers.get('host', '').split(':')[0]
     if host not in {'127.0.0.1', 'localhost', 'testserver'} or (origin and urlsplit(origin).netloc != request.headers.get('host')):
         return JSONResponse(status_code=403, content={"detail": "Local same-origin access only"})
-    return await call_next(request)
+    checked = request.method not in {"GET", "HEAD", "OPTIONS"} and request.url.path not in UNCHECKED_PAGE_PATHS
+    marker = PAGE_CONTEXT.set(request.headers.get(CONTEXT_HEADER, "").strip() if checked else "")
+    try:
+        response = await call_next(request)
+    finally:
+        PAGE_CONTEXT.reset(marker)
+    if ACTIVE.get("state") is not None:
+        response.headers[CONTEXT_HEADER] = context_token(ACTIVE)
+    return response
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -2638,12 +2672,14 @@ def clear_bg():
 
 @app.post("/api/export/session")
 def export_session():
+    ensure_current_page()
     target = write_session_export(session())
     return {"path": str(target)}
 
 
 @app.post("/api/export/bg-analysis")
 def export_bg_analysis():
+    ensure_current_page()
     target = write_bg_analysis_export(session()["state"])
     return {"path": str(target)}
 
@@ -3107,7 +3143,21 @@ function rerenderLanguageSensitiveUI(){
 function responseTextSummary(raw){let text=String(raw||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();return text.length>360?text.slice(0,357)+'…':text}
 function apiErrorMessage(response,body){let detail=body?.message_key?uiCopy(body):'';if(!detail&&body&&typeof body==='object')detail=typeof body.detail==='string'?body.detail:(typeof body.message==='string'?body.message:'');let summary=detail||responseTextSummary(typeof body==='string'?body:'');return `HTTP ${response.status}${response.statusText?` ${response.statusText}`:''}${summary?`：${summary}`:`：${t('api.failed')}`}`}
 async function readApiResponse(response){let raw=await response.text(),body=null;if(raw.trim()){try{body=JSON.parse(raw)}catch{body=raw}}if(!response.ok){let error=Error(apiErrorMessage(response,body));if(body?.message_key)error.uiMessage=body;throw error}if(body===null||typeof body==='string')throw Error(`HTTP ${response.status}：${t('api.invalid_json')}${responseTextSummary(raw)?' '+responseTextSummary(raw):''}`);return body}
-async function api(url,opt={}){let response;try{response=await fetch(url,{headers:{'Content-Type':'application/json','X-Workbench-Language':uiLanguage},...opt})}catch(error){throw Error(t('model.connection_failed')+(error?.message?` ${error.message}`:''))}return readApiResponse(response)}
+// The session/context this page displays. Every request carries it; the server
+// rejects context actions from a page that another tab has made stale.
+let workbenchContext='',pageContextStale=false;
+const PAGE_BINDING_URLS=['/api/setup','/api/session/open','/api/session/new'];
+function contextHeaders(){return workbenchContext?{'X-Workbench-Context':workbenchContext}:{}}
+function learnPageContext(url,method,response){
+  if(response.headers.get('X-Workbench-Stale')){pageContextStale=true;return}
+  let token=response.headers.get('X-Workbench-Context');if(!token||!response.ok)return;
+  let path=String(url).split('?')[0];
+  if(PAGE_BINDING_URLS.includes(path)){pageContextStale=false;workbenchContext=token;return}
+  // A GET must not silently re-bind a stale page whose view was not refreshed.
+  if(pageContextStale||(method==='GET'&&workbenchContext))return;
+  workbenchContext=token;
+}
+async function api(url,opt={}){let response,method=String(opt.method||'GET').toUpperCase();try{response=await fetch(url,{...opt,headers:{'Content-Type':'application/json','X-Workbench-Language':uiLanguage,...contextHeaders(),...(opt.headers||{})}})}catch(error){throw Error(t('model.connection_failed')+(error?.message?` ${error.message}`:''))}learnPageContext(url,method,response);return readApiResponse(response)}
 async function pick(kind,target){try{$(target).value=(await api('/api/pick/'+kind)).path||''}catch(e){alert(e.message)}}
 async function pickWorkspace(){try{let path=(await api('/api/pick/folder')).path||'';if(!path)return;$('workspace').value=path;await setup()}catch(e){setUIMessage($('setupmsg'),e.uiMessage||{text:e.message},'error')}}
 function refreshAppChrome(){let path=$('workspace')?.value.trim();let short=path?path.replace(/\\/g,'/').split('/').filter(Boolean).slice(-2).join(' / '):tr('选择工作区文件夹');if($('workspaceshortcut'))$('workspaceshortcut').textContent=short;if($('topbarstatus'))$('topbarstatus').textContent=path?tr('本地运行 · 工作区已打开'):tr('本地运行')}
@@ -3469,7 +3519,8 @@ async function chat(){
     previewText.appendData(text);
   }
   try{
-    let response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},signal:task.controller.signal,body:JSON.stringify({question:q,request_id:task.id,require_classification:$('answermode')?.value!=='explanation'})});
+    let response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','X-Workbench-Language':uiLanguage,...contextHeaders()},signal:task.controller.signal,body:JSON.stringify({question:q,request_id:task.id,require_classification:$('answermode')?.value!=='explanation'})});
+    learnPageContext('/api/chat/stream','POST',response);
     if(!response.ok)await readApiResponse(response);
     let reader=response.body.getReader(),decoder=new TextDecoder();
     while(true){

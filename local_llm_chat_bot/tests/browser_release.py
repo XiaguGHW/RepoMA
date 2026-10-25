@@ -796,6 +796,56 @@ class BrowserRelease(unittest.TestCase):
         self.assertEqual(response.value.status, 200)
         self.assertEqual((self.f.workspace / "page_B.txt").read_text(), "page_B")
 
+    def test_stale_tab_cannot_classify_another_tabs_session_or_bg(self):
+        self.language("en")
+        self.page.select_option("#model", "gemini-2.5-pro")
+        self.page.wait_for_function('lastStatusSnapshot.model === "gemini-2.5-pro"')
+        self.prepare_rules()
+        self.lock_rules()
+        self.button("leaveCodebookWorkspace()").click()
+        self.select_bg(self.f.bg_a)
+        session_a = self.page.evaluate("lastStatusSnapshot.session_name")
+        other = self.browser.new_page(viewport={"width": 1440, "height": 1000})
+        self.addCleanup(other.close)
+        other.on("dialog", self.handle_dialog)
+        other.on("pageerror", lambda error: self.errors.append(str(error)))
+        other.goto(self.page.url)
+        other.wait_for_function(
+            "lastStatusSnapshot?.workspace && document.getElementById('setupmsg').textContent === t('workspace.opened')"
+        )
+        first_page = self.page
+        self.page = other
+        try:
+            other.evaluate("newSession()")
+            other.wait_for_function("(s)=>lastStatusSnapshot?.session_name && lastStatusSnapshot.session_name!==s",
+                                    arg=session_a)
+            self.select_bg(self.f.bg_b)
+        finally:
+            self.page = first_page
+        session_b = w.ACTIVE["state"].root.name
+        calls = len(self.f.calls)
+        self.page.locator("#question").fill("Classify this Baugruppe")
+        self.button("chat()", "#composer").click()
+        self.page.wait_for_function("!busy")
+        # The stale tab gets a visible, localized refusal and no result card.
+        self.assertEqual(self.page.locator(".classification-card").count(), 0)
+        error = self.page.locator("#chat .message.error").inner_text()
+        self.assertIn(self.page.evaluate("t('context.stale_page')"), error)
+        self.assertEqual(len(self.f.calls), calls)
+        self.assertEqual(w.ACTIVE["state"].root.name, session_b)
+        self.assertEqual(w.ACTIVE["state"].data["history"], [])
+        # The current tab still classifies its own BG_B.
+        self.page = other
+        try:
+            self.ask("Classify this Baugruppe")
+        finally:
+            self.page = first_page
+        self.assertIn("FIXTURE_BG_B", json.dumps(self.f.calls[-1]))
+        self.assertNotIn("FIXTURE_BG_A", json.dumps(self.f.calls[-1]))
+        # Reloading re-binds the stale tab to the current session instead of the old view.
+        self.page.reload()
+        self.page.wait_for_function("(s)=>lastStatusSnapshot?.session_name===s", arg=session_b)
+
 
 class RecordedResult(unittest.TextTestResult):
     def addFailure(self, test, err):

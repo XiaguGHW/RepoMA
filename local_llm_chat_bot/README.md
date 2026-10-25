@@ -128,6 +128,14 @@ button also stops Codebook preparation, material pre-reading, model comparison
 and dossier rebuilding. Stopped work saves no profile, report or answer.
 Usage that was already consumed is still counted.
 
+### Several tabs or windows
+
+The workbench has one active session. Every page sends the session/context it
+displays; if another tab has since switched the session, materials, rules or
+model, actions from the older page are refused with "This page is out of date"
+and nothing is run or changed. Reload that page (F5) to continue with the
+current state. Stop still works from any page.
+
 Startup checks are local and never contact Farm. Dependency/configuration/state
 or port failures exit nonzero with instructions. The port check is advisory;
 a later Uvicorn bind failure also prints recovery instructions. Native Windows

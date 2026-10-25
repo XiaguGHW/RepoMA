@@ -94,6 +94,13 @@ Codebook preparation, coverage, comparison and dossier rebuild are stoppable
 via `POST /api/operation/cancel`. Run its regressions with
 `python -m unittest discover -s tests -p test_release_request_bounds.py -v`.
 
+Post-review fix F-04 (2026-10-25): pages send `X-Workbench-Context` (session
+directory + context revision); context and model actions from a stale page get
+409 `context.stale_page` without a model call or state change. Requests without
+the header (API callers, older tests) are not checked. Regressions:
+`python -m unittest discover -s tests -p test_release_page_context.py -v` and
+the browser method `test_stale_tab_cannot_classify_another_tabs_session_or_bg`.
+
 Reproduce the final additional regression with:
 `python -m unittest discover -s tests -p test_release_step_nine.py -v`.
 All current static findings and exact tested source hashes are in the JSON;
