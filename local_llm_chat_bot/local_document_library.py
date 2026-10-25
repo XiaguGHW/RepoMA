@@ -72,6 +72,80 @@ MATERIAL_ROLE_PRIORITY = {
 }
 
 
+class TextDecodingError(ValueError):
+    """A local text file is empty, binary or in an unrecognised encoding.
+
+    ``reason`` is a stable code ("empty", "binary" or "encoding") that callers
+    map to user-facing copy; the message itself is technical detail only.
+    """
+
+    def __init__(self, reason: str, message: str):
+        super().__init__(message)
+        self.reason = reason
+
+
+# Bytes 0x00-0x1F other than TAB/LF/CR/FF rarely occur in real text.  A legacy
+# 8-bit fallback must not "decode" an arbitrary binary file into garbage.
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x08\x0b\x0e-\x1f\x7f]")
+
+
+def decode_text_bytes(raw: bytes) -> tuple[str, str]:
+    """Decode local plain text, returning ``(text, encoding)``.
+
+    Order: BOM (UTF-8, UTF-32, UTF-16), strict UTF-8, BOM-less UTF-16 when
+    the NUL pattern of 16-bit text is unmistakable, then Windows-1252 if the
+    result is plausibly text.  Anything else raises TextDecodingError instead
+    of silently replacing characters.
+    """
+    if not raw.strip(b"\x00 \t\r\n\x0c\xef\xbb\xbf\xff\xfe"):
+        raise TextDecodingError("empty", "The file contains no text")
+    candidates: list[str] = []
+    if raw.startswith(b"\xef\xbb\xbf"):
+        candidates.append("utf-8-sig")
+    elif raw.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+        candidates.append("utf-32")
+    elif raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        candidates.append("utf-16")
+    else:
+        candidates.append("utf-8")
+        sample = raw[:4096]
+        if len(sample) >= 4:
+            even, odd = sample[0::2].count(0), sample[1::2].count(0)
+            half = len(sample) / 2
+            if odd > half * 0.3 and even < half * 0.05:
+                candidates.append("utf-16-le")
+            elif even > half * 0.3 and odd < half * 0.05:
+                candidates.append("utf-16-be")
+        candidates.append("cp1252")
+    for encoding in candidates:
+        try:
+            text = raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        controls = len(_CONTROL_CHARACTERS.findall(text))
+        if controls and controls > max(2, len(text) // 200):
+            continue  # Binary data that happened to decode.
+        if not text.strip():
+            raise TextDecodingError("empty", "The file contains no text")
+        return text.replace("\r\n", "\n").replace("\r", "\n"), encoding
+    if b"\x00" in raw[:4096]:
+        raise TextDecodingError("binary", "The file looks like binary data, not plain text")
+    raise TextDecodingError("encoding", "The text encoding is not UTF-8, UTF-16 or Windows-1252")
+
+
+def read_local_text(path: Path) -> str:
+    """Material reading: decode correctly where possible, never fail on bytes.
+
+    Ordinary materials keep the historical lenient behaviour (replacement
+    characters) when no encoding fits; Codebook preparation decodes strictly.
+    """
+    raw = path.read_bytes()
+    try:
+        return decode_text_bytes(raw)[0]
+    except TextDecodingError:
+        return raw.decode("utf-8", errors="replace")
+
+
 def _path_text(path: Path) -> tuple[str, str]:
     text = " ".join(part.casefold() for part in path.parts)
     return text, re.sub(r"[^a-z0-9]+", "", text)
@@ -762,7 +836,7 @@ class LocalDocumentLibrary:
         }
         return paths
 
-    def codebook_page_records(self, value: str | Path, cache_dir: Path) -> builtins.list[dict]:
+    def codebook_page_records(self, value: str | Path, cache_dir: Path, progress=None) -> builtins.list[dict]:
         """Build a durable, page-by-page evidence record for a PDF Codebook.
 
         Native PDF text is retained even when OCR is available.  OCR is a
@@ -780,7 +854,10 @@ class LocalDocumentLibrary:
         cache_dir.mkdir(parents=True, exist_ok=True)
         records: builtins.list[dict] = []
         with fitz.open(path) as document:
+            total = document.page_count
             for number, page in enumerate(document, start=1):
+                if progress:
+                    progress(number, total)  # May raise to stop a cancelled preparation.
                 native_text = page.get_text("text").strip()
                 image_count = len(page.get_images(full=True))
                 if len(native_text) < 40:
@@ -893,7 +970,7 @@ class LocalDocumentLibrary:
             kind = self.image_type(path)
             label_type = "DFC structure screenshot" if kind == "dfc_structure_screenshot" else "image"
             return [{"label": f"{path.name} — {label_type}", "text": f"Visual evidence: {path.name}", "visual": {"kind": kind, "path": str(path)}}]
-        return _sectioned(path.name, _chunks(path.name, path.read_text(encoding="utf-8", errors="replace")))
+        return _sectioned(path.name, _chunks(path.name, read_local_text(path)))
 
     def _pdf(self, path: Path):
         try:

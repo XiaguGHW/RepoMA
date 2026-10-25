@@ -328,7 +328,8 @@ class LLMConnector:
             if not use_stream:
                 capture_metadata(result)
                 if not result.choices or result.choices[0].finish_reason not in {None, "stop"}:
-                    raise ValueError("Incomplete or blocked model response")
+                    reason = result.choices[0].finish_reason if result.choices else "no choices"
+                    raise ValueError(f"Incomplete or blocked model response ({reason})")
                 message = result.choices[0].message
                 self.last_reasoning = getattr(message, "reasoning_content", None) or ""
                 emit("reasoning", self.last_reasoning)

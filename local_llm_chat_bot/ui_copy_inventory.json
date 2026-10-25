@@ -188,6 +188,22 @@
       "variables": ["path", "file name", "model ID", "underlying safe error detail"],
       "current_coverage": "missing",
       "migration_note": "Replace user-facing backend detail strings with stable error codes or a language-neutral reason field; the client selects the localized sentence."
+    },
+    {
+      "id": "rules.preparation_job",
+      "source": "renderRuleJobPanel, codebookCardSummary, renderRuleModelHint, appConfirm; /api/codebook/task records (rulejob.* keys)",
+      "visible_when": "rules drawer and the right-hand rules card",
+      "items": ["live stage (reading, PDF/DOCX/TXT extraction, page or text-block parsing, merge and validation, saving)", "page X of Y / text-block group X of Y", "final state (prepared, failed, cancelled)", "failure stage, page/text block and actionable reason", "rule-parsing model field, recommendation and validation", "stop, retry, copy path, copy diagnostics", "processing log and raw technical details", "rules in effect after a failed attempt", "in-page confirmation for lock and replace"],
+      "variables": ["rule file name and full path", "file type", "model ID", "page/block numbers", "attempt counts and token limits", "timestamps", "raw technical error text (diagnostics only)"],
+      "current_coverage": "complete"
+    },
+    {
+      "id": "composer.answer_mode",
+      "source": "renderAnswerMode",
+      "visible_when": "composer toolbar",
+      "items": ["fixed-rule classification / explanation follow-up switch", "static current-mode label without locked rules and confirmed materials", "mode explanation"],
+      "variables": [],
+      "current_coverage": "complete"
     }
   ],
   "completion_criteria_for_next_step": [
