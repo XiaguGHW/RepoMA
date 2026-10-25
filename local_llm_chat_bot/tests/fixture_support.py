@@ -73,6 +73,7 @@ class FixtureEnvironment:
         self.old=dict(w.ACTIVE);w.ACTIVE.clear();w.MODEL_WORK_IN_PROGRESS.clear()
         self.patches=[patch.object(w,'app_state_home',return_value=self.workspace/'AI_Bot_State'),patch.object(w,'load_dotenv'),
                       patch.dict(os.environ,{'BOSCH_FARM_SUBSCRIPTION_KEY':'offline-fixture-only',
+                          'WORKBENCH_ALLOW_TEST_HOST':'1',
                           'BOSCH_FARM_BASE_URL':f'http://127.0.0.1:{self.server.server_port}/api'})]
         for p in self.patches:p.start()
         return self

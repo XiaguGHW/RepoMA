@@ -37,7 +37,8 @@ class Configuration(unittest.TestCase):
         self.env = self.f.root / 'Konfiguration 中文 ü.env'
         self.write_env(self.env)
         for context in [patch.object(w, 'FARM_ENVIRONMENT', FarmEnvironment()),
-                        patch.object(w, 'load_dotenv', load_dotenv), patch.dict(os.environ, {}, clear=True),
+                        patch.object(w, 'load_dotenv', load_dotenv),
+                        patch.dict(os.environ, {'WORKBENCH_ALLOW_TEST_HOST': '1'}, clear=True),
                         patch.object(w, 'STARTUP_CONFIG', StartupConfig(env_file=self.f.root / '.env'))]:
             context.start()
             self.addCleanup(context.stop)

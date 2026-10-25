@@ -22,7 +22,8 @@ class ReleaseRegressionTests(unittest.TestCase):
         self.old = dict(w.ACTIVE); w.ACTIVE.clear(); w.MODEL_WORK_IN_PROGRESS.clear()
         self.patches = [patch.object(w, 'app_state_home', return_value=self.workspace / 'AI_Bot_State'),
                         patch.object(w, 'load_dotenv'),
-                        patch.dict(os.environ, {'BOSCH_FARM_SUBSCRIPTION_KEY': 'fixture-only'})]
+                        patch.dict(os.environ, {'BOSCH_FARM_SUBSCRIPTION_KEY': 'fixture-only',
+                                                'WORKBENCH_ALLOW_TEST_HOST': '1'})]
         for p in self.patches: p.start()
         w.setup(w.Setup(workspace=str(self.workspace), state_dir='', model='gemini-test'))
 

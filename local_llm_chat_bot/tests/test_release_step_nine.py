@@ -1,4 +1,5 @@
 """R14 final verification: the native picker receives the current UI title."""
+import os
 from pathlib import Path
 import sys
 from types import ModuleType
@@ -26,7 +27,8 @@ class NativePickerLanguage(unittest.TestCase):
         self.addCleanup(w.ACTIVE.clear)
         w.ACTIVE.clear()
         w.ACTIVE['language'] = 'zh'  # Header wins even before language-save finishes.
-        with patch.dict(sys.modules, {'tkinter': tk, 'tkinter.filedialog': dialogs}), TestClient(w.app) as client:
+        with patch.dict(os.environ, {'WORKBENCH_ALLOW_TEST_HOST': '1'}), \
+                patch.dict(sys.modules, {'tkinter': tk, 'tkinter.filedialog': dialogs}), TestClient(w.app) as client:
             for language in ['zh', 'en', 'de']:
                 for kind in ['file', 'folder']:
                     with self.subTest(language=language, kind=kind):

@@ -84,7 +84,7 @@ class ApiAndFileMatrix(unittest.TestCase):
                 self.assertEqual(client.post('/api/target', json=payload).status_code, 400)
             self.assertEqual(client.post('/api/chat', json={'question': ' '}).status_code, 400)
             self.assertEqual(client.post('/api/chat', json={'question': 'x'*50001}).status_code, 422)
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, {'WORKBENCH_ALLOW_TEST_HOST': '1'}, clear=True):
                 result = client.post('/api/setup', json={'workspace': str(self.workspace), 'model': 'gemini-test'})
                 self.assertEqual(result.status_code, 400)
                 self.assertIn('BOSCH_FARM_SUBSCRIPTION_KEY', result.json()['detail'])

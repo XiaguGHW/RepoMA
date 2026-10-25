@@ -2135,7 +2135,12 @@ async def local_origin_only(request: Request, call_next):
     from urllib.parse import urlsplit
     origin = request.headers.get('origin')
     host = request.headers.get('host', '').split(':')[0]
-    if host not in {'127.0.0.1', 'localhost', 'testserver'} or (origin and urlsplit(origin).netloc != request.headers.get('host')):
+    allowed_hosts = {'127.0.0.1', 'localhost'}
+    if os.getenv('WORKBENCH_ALLOW_TEST_HOST') == '1':
+        allowed_hosts.add('testserver')
+    if request.headers.get('sec-fetch-site', '').strip().lower() == 'cross-site':
+        return JSONResponse(status_code=403, content={"detail": "Local same-origin access only"})
+    if host not in allowed_hosts or (origin and urlsplit(origin).netloc != request.headers.get('host')):
         return JSONResponse(status_code=403, content={"detail": "Local same-origin access only"})
     checked = request.method not in {"GET", "HEAD", "OPTIONS"} and request.url.path not in UNCHECKED_PAGE_PATHS
     marker = PAGE_CONTEXT.set(request.headers.get(CONTEXT_HEADER, "").strip() if checked else "")
