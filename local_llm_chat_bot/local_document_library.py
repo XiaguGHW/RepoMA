@@ -19,6 +19,9 @@ SUPPORTED_DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".xlsm", ".csv", ".tx
 MAX_DOCUMENT_BYTES = 80 * 1024 * 1024
 MAX_CHUNK_CHARS = 3500
 MAX_CHUNKS_PER_DOCUMENT = 900
+# Version 2: nonpaged text/DOCX chunks carry "section i/n", CSV chunks their row
+# range. Older index records are re-extracted locally (no model call) on reuse.
+LABEL_VERSION = 2
 MAX_EXCEL_ROWS_PER_SHEET = 2000
 MAX_VISUALS_PER_REQUEST = 5
 # Bosch Farm sends file attachments base64-encoded.  Keep the binary total
@@ -127,6 +130,23 @@ def _expanded_tokens(question: str) -> set[str]:
     return result
 
 
+def _sectioned(label, chunks):
+    """Give every chunk of a nonpaged source its own traceable section label."""
+    if len(chunks) > 1:
+        for number, chunk in enumerate(chunks, start=1):
+            chunk["label"] = f"{label} — section {number}/{len(chunks)}"
+    return chunks
+
+
+def _row_ranges(label, chunks):
+    """Label CSV chunks with the actual first/last data row they contain."""
+    for chunk in chunks:
+        rows = re.findall(r"(?m)^Row (\d+):", chunk["text"])
+        if rows:
+            chunk["label"] = f"{label} — rows {rows[0]}-{rows[-1]}"
+    return chunks
+
+
 def _chunks(label, text):
     paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
     result, current = [], ""
@@ -224,7 +244,7 @@ class LocalDocumentLibrary:
         # Re-opening the same unchanged BG selection must not repeat local PDF
         # extraction, OCR or DFC preparation.  The document record already
         # carries those local artefacts and is safe to reuse by content hash.
-        if previous and previous.get("sha256") == digest:
+        if previous and previous.get("sha256") == digest and previous.get("label_version") == LABEL_VERSION:
             previous["material_role"] = material_role(path)
             previous["index_cache_status"] = "reused"
             self._save()
@@ -242,6 +262,7 @@ class LocalDocumentLibrary:
             "chunks": chunks[:MAX_CHUNKS_PER_DOCUMENT],
             "material_role": material_role(path),
             "index_cache_status": "new" if previous is None else "changed",
+            "label_version": LABEL_VERSION,
         }
         if path.suffix.lower() == ".pdf":
             document["page_inventory"] = self.pdf_page_inventory(path)
@@ -860,7 +881,7 @@ class LocalDocumentLibrary:
             kind = self.image_type(path)
             label_type = "DFC structure screenshot" if kind == "dfc_structure_screenshot" else "image"
             return [{"label": f"{path.name} — {label_type}", "text": f"Visual evidence: {path.name}", "visual": {"kind": kind, "path": str(path)}}]
-        return _chunks(f"{path.name}", path.read_text(encoding="utf-8", errors="replace"))
+        return _sectioned(path.name, _chunks(path.name, path.read_text(encoding="utf-8", errors="replace")))
 
     def _pdf(self, path: Path):
         try:
@@ -889,7 +910,7 @@ class LocalDocumentLibrary:
             rows = [" | ".join(str(cell.text).strip().replace("\n", " ") for cell in row.cells) for row in table.rows]
             if rows:
                 parts.append(f"Table {number}:\n" + "\n".join(rows))
-        return _chunks(path.name, "\n\n".join(parts))
+        return _sectioned(path.name, _chunks(path.name, "\n\n".join(parts)))
 
     def _excel(self, path: Path):
         try:
@@ -930,7 +951,7 @@ class LocalDocumentLibrary:
                 rows.append(f"[Stopped after {MAX_EXCEL_ROWS_PER_SHEET} rows]")
                 break
             rows.append(f"Row {number}: " + " | ".join(cell[:500] for cell in row))
-        return _chunks(path.name, "\n".join(rows))
+        return _row_ranges(path.name, _chunks(path.name, "\n".join(rows)))
 
     @staticmethod
     def _pdf_page_count(path: Path) -> int:

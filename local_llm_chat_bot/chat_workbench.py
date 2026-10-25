@@ -1279,10 +1279,50 @@ def selected_reading_chunks(document: dict, full: bool = False) -> tuple[list[di
     return chunks, "完整文本预读", all_pages, []
 
 
-def summary_groups(document: dict, chunks: list[dict], limit: int = 24_000) -> list[str]:
+def material_folder(data: dict[str, Any]) -> Path | None:
+    """The confirmed BG/material folder that evidence labels are relative to."""
+    state = data["state"].data
+    folder = (state.get("bg_context") or {}).get("folder")
+    target = state.get("selected_target") or {}
+    if not folder and target.get("kind") == "文件夹":
+        folder = target.get("path")
+    return Path(folder) if folder else None
+
+
+def traceable_label(document: dict, label: str, folder: Path | None) -> str:
+    """Prefix a file-name label with its path inside the material folder.
+
+    Same-named files in different subfolders (e.g. two notes.txt) otherwise
+    produce identical, untraceable citations.
+    """
+    name = str(document.get("name", ""))
+    if not folder or not name or not isinstance(label, str) or not label.startswith(name):
+        return label
+    try:
+        relative = Path(str(document.get("path", ""))).relative_to(folder).as_posix()
+    except ValueError:
+        return label
+    return relative + label[len(name):] if relative != name else label
+
+
+def traceable_evidence(data: dict[str, Any], evidence: list[dict]) -> list[dict]:
+    folder = material_folder(data)
+    if not folder:
+        return evidence
+    documents = {item.get("id"): item for item in data["documents"].list()}
+    result = []
+    for item in evidence:
+        document = documents.get(item.get("id"))
+        label = traceable_label(document, item.get("label", ""), folder) if document else item.get("label")
+        result.append(dict(item, label=label) if label != item.get("label") else item)
+    return result
+
+
+def summary_groups(document: dict, chunks: list[dict], limit: int = 24_000, folder: Path | None = None) -> list[str]:
     groups, current = [], ""
     for chunk in chunks:
-        part = f"--- {chunk.get('label', document.get('name', 'file'))} ---\n{chunk.get('text', '')}\n"
+        label = traceable_label(document, chunk.get('label', document.get('name', 'file')), folder)
+        part = f"--- {label} ---\n{chunk.get('text', '')}\n"
         if current and len(current) + len(part) > limit:
             groups.append(current); current = part
         else:
@@ -1340,7 +1380,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                 progress("reading", ui_message(data, "reading.reused", index=file_index, total=total_documents, name=document["name"]),
                          12 + int(file_index / max(total_documents, 1) * 48))
             continue
-        groups = summary_groups(document, read_chunks)
+        groups = summary_groups(document, read_chunks, folder=material_folder(data))
         notes, failures = [], []
         for number, group in enumerate(groups, start=1):
             try:
@@ -1710,7 +1750,8 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     preferred = ([bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))) if bg_context else active_source_ids
     allowed = list(bg_context.get("source_ids", [])) + [bg_context.get("codebook_id")] if bg_context else active_source_ids
     report("search", ui_message(data, 'progress.search'), 10)
-    evidence = documents.search(question, preferred_ids=preferred, classification=bool(bg_context), allowed_ids=allowed)
+    evidence = traceable_evidence(data, documents.search(question, preferred_ids=preferred,
+                                                         classification=bool(bg_context), allowed_ids=allowed))
     if bg_context:
         existing = {(item.get("visual") or {}).get("page") for item in evidence if item.get("name") == bg_context.get("codebook_name")}
         evidence.extend(item for item in relevant_codebook_page_evidence(question, bg_context) if (item.get("visual") or {}).get("page") not in existing)
@@ -1919,7 +1960,8 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
     matches = state.search(question)
     snippets = {item: excerpt(state, item, question) for item in matches}
     preferred = [bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))
-    evidence = documents.search(question, preferred_ids=preferred, classification=True, allowed_ids=preferred)
+    evidence = traceable_evidence(data, documents.search(question, preferred_ids=preferred, classification=True,
+                                                         allowed_ids=preferred))
     evidence.extend(relevant_codebook_page_evidence(question, bg_context))
     evidence = documents.ensure_ocr_for_snippets(evidence, question, classification=True)
     visuals = documents.visual_paths(evidence, state.root / "visual_cache",

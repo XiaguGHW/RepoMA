@@ -134,6 +134,19 @@ button also stops Codebook preparation, material pre-reading, model comparison
 and dossier rebuilding. Stopped work saves no profile, report or answer.
 Usage that was already consumed is still counted.
 
+### Evidence labels
+
+Citations name the exact source. A file inside a subfolder of the selected
+material folder is cited with its relative path (`sub1/notes.txt`), so
+same-named files stay distinguishable. Text, Markdown and Word files longer
+than one chunk are cited per section (`notes.txt — section 2/5`), CSV files
+by row range, PDFs by page and Excel by sheet and rows. Indexes created by
+older versions are re-read locally once to get these labels (no model call).
+
+`AI_Bot_State/`, the terminal chat folders, any `*.env` file and
+`*_ai_updated*` Excel copies are listed in `.gitignore`; keep them out of
+commits even if you work inside a git checkout.
+
 ### Several tabs or windows
 
 The workbench has one active session. Every page sends the session/context it

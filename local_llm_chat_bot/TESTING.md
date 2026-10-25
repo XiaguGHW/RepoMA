@@ -121,6 +121,14 @@ the scope `rules_removed`, so materials can be reconfirmed directly for ordinary
 questions, while a changed-but-unlocked profile still requires locking.
 Regressions: `python -m unittest discover -s tests -p test_release_plain_mode_recovery.py -v`.
 
+Post-review fixes F-07/F-11 (2026-10-25): nonpaged text/DOCX chunks are
+labelled `section i/n`, CSV chunks by row range (index `label_version` 2; older
+records are re-extracted locally on reuse); evidence and pre-reading summaries
+use the path relative to the confirmed material folder. `.gitignore` covers
+runtime state, terminal chat folders, `*.env`/`.env.*` (templates excepted) and
+`*_ai_updated*` workbooks. Regressions:
+`python -m unittest discover -s tests -p test_release_traceable_labels.py -v`.
+
 Reproduce the final additional regression with:
 `python -m unittest discover -s tests -p test_release_step_nine.py -v`.
 All current static findings and exact tested source hashes are in the JSON;

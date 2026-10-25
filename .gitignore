@@ -221,3 +221,17 @@ __marimo__/
 input/
 output/
 outputs/
+
+# Local LLM workbench: runtime state, conversations, caches and secrets.
+# These are created beside the program inside a git checkout; never commit them.
+**/AI_Bot_State/
+local_llm_chat_bot/.bosch_chat/
+local_llm_chat_bot/.excel_chat_agent/
+*.env
+.env.*
+# Templates without secrets stay versioned.
+!.env.example
+!*.env.example
+# Reviewed Excel copies written by excel_agent / excel_chat_agent.
+*_ai_updated*.xlsx
+*_ai_updated*.xlsm
