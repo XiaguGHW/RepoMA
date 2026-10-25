@@ -709,6 +709,21 @@ def parse_codebook_draft(raw: str) -> dict:
     draft = json.loads(text[start:end + 1])
     if not isinstance(draft, dict) or not isinstance(draft.get("classes"), list):
         raise UIValidationError(ui_message(ACTIVE, 'rules.classes_required'))
+    # Generated IDs must never collide with each other or with an explicit ID;
+    # explicit duplicates are reported by rule_id_conflicts() instead.
+    explicit_ids = {str(rule["id"]) for group in [draft.get("global_rules"), draft.get("table_rules")]
+                    + [item.get(key) for item in draft["classes"] if isinstance(item, dict)
+                       for key in ("decision_rules", "boundaries")]
+                    for rule in (group if isinstance(group, list) else [])
+                    if isinstance(rule, dict) and rule.get("id")}
+    generated: set[str] = set()
+
+    def generated_id(base: str) -> str:
+        candidate, number = base, 2
+        while candidate in explicit_ids or candidate in generated:
+            candidate, number = f"{base}-{number}", number + 1
+        generated.add(candidate)
+        return candidate
     classes = []
     seen_names = set()
     for item in draft["classes"]:
@@ -718,9 +733,9 @@ def parse_codebook_draft(raw: str) -> dict:
             result = []
             for index, value in enumerate(values if isinstance(values, list) else [], start=1):
                 if isinstance(value, str):
-                    result.append({"id": f"{prefix}-{index}", "text": value, "pages": []})
+                    result.append({"id": generated_id(f"{prefix}-{index}"), "text": value, "pages": []})
                 elif isinstance(value, dict) and str(value.get("text", "")).strip():
-                    result.append({"id": str(value.get("id") or f"{prefix}-{index}"),
+                    result.append({"id": str(value.get("id") or generated_id(f"{prefix}-{index}")),
                                    "text": str(value["text"]).strip(),
                                    "pages": [int(page) for page in (value.get("pages") or []) if str(page).isdigit()]})
             return result
@@ -740,14 +755,70 @@ def parse_codebook_draft(raw: str) -> dict:
     def profile_rules(values, prefix):
         result = []
         for index, value in enumerate(values if isinstance(values, list) else [], start=1):
-            if isinstance(value, str): result.append({"id": f"{prefix}-{index}", "text": value, "pages": []})
+            if isinstance(value, str): result.append({"id": generated_id(f"{prefix}-{index}"), "text": value, "pages": []})
             elif isinstance(value, dict) and str(value.get("text", "")).strip():
-                result.append({"id": str(value.get("id") or f"{prefix}-{index}"), "text": str(value["text"]).strip(),
+                result.append({"id": str(value.get("id") or generated_id(f"{prefix}-{index}")), "text": str(value["text"]).strip(),
                                "pages": [int(page) for page in (value.get("pages") or []) if str(page).isdigit()],
                                "table": value.get("table") if isinstance(value.get("table"), dict) else None})
         return result
     return {"classes": classes, "global_rules": profile_rules(draft.get("global_rules", []), "global"),
             "table_rules": profile_rules(draft.get("table_rules", []), "table"), "uncertainties": draft.get("uncertainties", [])}
+
+
+def profile_rules_in_order(draft: dict):
+    """Yield (owner, rule) for every rule; owner is a class key or '' for global/table rules."""
+    for key in ("global_rules", "table_rules"):
+        for rule in draft.get(key, []) if isinstance(draft.get(key), list) else []:
+            if isinstance(rule, dict):
+                yield "", rule
+    for item in draft.get("classes", []) if isinstance(draft.get("classes"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        owner = re.sub(r"[^a-z0-9]+", "-", str(item.get("name", "")).casefold()).strip("-") or "class"
+        for key in ("decision_rules", "boundaries"):
+            for rule in item.get(key, []) if isinstance(item.get(key), list) else []:
+                if isinstance(rule, dict):
+                    yield owner, rule
+
+
+def rule_id_conflicts(draft: dict | None) -> list[str]:
+    """Rule IDs used more than once anywhere in the profile, in first-seen order."""
+    counts: dict[str, int] = {}
+    for _owner, rule in profile_rules_in_order(draft or {}):
+        if isinstance(rule.get("id"), str):
+            counts[rule["id"]] = counts.get(rule["id"], 0) + 1
+    return [rule_id for rule_id, count in counts.items() if count > 1]
+
+
+def require_unique_rule_ids(draft: dict | None, status: int = 400) -> None:
+    conflicts = rule_id_conflicts(draft)
+    if conflicts:
+        raise HTTPException(status, ui_message(ACTIVE, 'rules.duplicate_ids', ids=", ".join(conflicts[:20])))
+
+
+def namespace_duplicate_rule_ids(draft: dict) -> list[dict]:
+    """Deterministically rename model-generated duplicate IDs; the first use keeps its ID."""
+    conflicts = set(rule_id_conflicts(draft))
+    if not conflicts:
+        return []
+    used = {rule["id"] for _owner, rule in profile_rules_in_order(draft) if isinstance(rule.get("id"), str)}
+    seen: set[str] = set()
+    renames = []
+    for owner, rule in profile_rules_in_order(draft):
+        rule_id = rule.get("id")
+        if rule_id not in conflicts:
+            continue
+        if rule_id not in seen:
+            seen.add(rule_id)
+            continue
+        base = f"{owner or 'global'}:{rule_id}"
+        candidate, number = base, 2
+        while candidate in used:
+            candidate, number = f"{base}-{number}", number + 1
+        used.add(candidate)
+        rule["id"] = candidate
+        renames.append({"from": rule_id, "to": candidate})
+    return renames
 
 
 CODEBOOK_PAGE_SYSTEM = """You transcribe exactly one technical classification Codebook page using supplied native text, OCR text and the full-page image. Return ONLY JSON: {\"page\":number,\"official_names\":[\"exact wording\"],\"definitions\":[\"...\"],\"decision_rules\":[\"...\"],\"boundaries\":[\"...\"],\"tables\":[{\"title\":\"...\",\"columns\":[\"...\"],\"rows\":[[\"cell\"]]}],\"uncertainties\":[\"...\"]}. Preserve table row/column meaning, do not invent text, and use the page number supplied in the prompt."""
@@ -857,6 +928,7 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str) -> di
     merged = accounted_model_call(data, connector, [], merge_prompt, CODEBOOK_MERGE_SYSTEM, {"maxOutputTokens": 3500, "temperature": 0}, stream=True, usage_records=usages)
     merged = require_model_success(merged, ui_message(data, 'model.context_codebook_merge'))
     draft, _ = parse_codebook_draft_with_repair(connector, merged, data=data, usage_records=usages)
+    rule_id_renames = namespace_duplicate_rule_ids(draft)
     usage = summarize_usage(usages)
     page_numbers = {((item.get("visual") or {}).get("page")) for group in groups for item in group}
     page_count = len([number for number in page_numbers if isinstance(number, int)]) or len(document.get("chunks", []))
@@ -865,7 +937,7 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str) -> di
             "page_count": len(records) or page_count,
             "page_groups": len(records) or len(groups), "usage": usage, "draft": draft, "document_id": document["id"],
             "page_records": [{key: record[key] for key in ("page", "page_type", "ocr_status", "embedded_image_count")} for record in records],
-            "page_transcriptions": notes, "ocr_runtime": ocr_runtime}
+            "page_transcriptions": notes, "ocr_runtime": ocr_runtime, "rule_id_renames": rule_id_renames}
 
 
 def write_session_export(data: dict[str, Any]) -> Path:
@@ -1959,6 +2031,8 @@ def ensure_current_sources(data):
             or profile.get("sha256") != context.get("codebook_sha256")
             or not path.is_file() or file_digest(path) != profile.get('sha256')):
             raise HTTPException(409, ui_message(ACTIVE, 'error.rules_changed'))
+        # A profile locked before IDs were enforced could never validate a classification.
+        require_unique_rule_ids(context.get('locked_profile'), 409)
     ids = set(state.data.get('active_source_ids') or [])
     bound = state.data.get("source_binding")
     if bound is not None and bound != source_binding(data["documents"], ids):
@@ -2372,6 +2446,7 @@ def analyze_target(request: TargetRequest):
         if (not valid_rule_profile(profile.get("draft")) or not codebook_path.is_file()
                 or file_digest(codebook_path) != profile.get("sha256")):
             raise HTTPException(409, ui_message(ACTIVE, 'error.rules_changed'))
+        require_unique_rule_ids(profile.get("draft"), 409)
     elif data["state"].data.get("context_issue") == "rules_changed":
         raise HTTPException(409, ui_message(ACTIVE, 'error.rules_lock'))
 
@@ -2532,6 +2607,7 @@ def codebook_edit(request: CodebookEditRequest):
         draft = parse_codebook_draft(json.dumps(request.draft))
     except ValueError as exc:
         raise HTTPException(400, ui_message(ACTIVE, 'error.rules_invalid', detail=error_copy(exc, ACTIVE))) from exc
+    require_unique_rule_ids(draft)
     previous = dict(profile)
     profile['draft'] = draft; profile['status'] = 'draft'
     profile['previous_draft'] = previous.get('draft', {})
@@ -2552,6 +2628,7 @@ def codebook_lock():
     if not path.is_file() or file_digest(path) != profile.get("sha256"):
         raise HTTPException(409, ui_message(ACTIVE, 'error.rules_changed'))
     profile["draft"] = parse_codebook_draft(json.dumps(profile["draft"]))
+    require_unique_rule_ids(profile["draft"])
     profile["status"] = "locked"
     profile["locked_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
     save_codebook_profile(profile)

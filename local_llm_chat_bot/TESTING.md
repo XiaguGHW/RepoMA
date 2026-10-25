@@ -101,6 +101,13 @@ the header (API callers, older tests) are not checked. Regressions:
 `python -m unittest discover -s tests -p test_release_page_context.py -v` and
 the browser method `test_stale_tab_cannot_classify_another_tabs_session_or_bg`.
 
+Post-review fix F-03 (2026-10-25): rule IDs are unique across the whole
+profile. Generated IDs never collide; edit/lock reject explicit duplicates with
+400 `rules.duplicate_ids`; model-merged duplicates are renamed deterministically
+(`<class-key>:<id>`, recorded in `rule_id_renames`); a profile or session locked
+earlier with duplicates gets 409 before material binding or any model call.
+Regressions: `python -m unittest discover -s tests -p test_release_rule_ids.py -v`.
+
 Reproduce the final additional regression with:
 `python -m unittest discover -s tests -p test_release_step_nine.py -v`.
 All current static findings and exact tested source hashes are in the JSON;
