@@ -67,6 +67,8 @@ ACTIVE: dict[str, Any] = {}
 # request is queued for the lock or is using a captured session context.
 MODEL_WORK_IN_PROGRESS = threading.Event()
 CHAT_TASK_GUARD = threading.Lock()
+# Serializes small settings writes that may run while LOCK is held by model work.
+SETTINGS_GUARD = threading.Lock()
 CHAT_TASK: dict[str, Any] = {}
 # Synchronous long model operations (Codebook preparation, coverage, comparison,
 # dossier rebuild) that a browser Stop can cancel by request_id.
@@ -2908,15 +2910,24 @@ def settings():
 @app.post("/api/language")
 def set_language(request: LanguageRequest):
     language = normalize_language(request.language)
-    with LOCK:
-        if ACTIVE:
-            data = session()
-            data['language'] = language
-            save_workbench_settings(data['state'].workspace, data['state'].root.name, data['model'], language)
-        else:
-            settings = load_workbench_settings()
-            settings['language'] = language
-            write_json_atomically(workbench_settings_path(), settings)
+    # A rule preparation or answer holds LOCK for minutes.  Saving the GUI
+    # language must not wait for it: while model work runs, setup and session
+    # switches are refused, so ACTIVE cannot be replaced underneath us, and the
+    # running job uses its own captured copy of the session.
+    acquired = LOCK.acquire(blocking=not MODEL_WORK_IN_PROGRESS.is_set())
+    try:
+        with SETTINGS_GUARD:
+            if ACTIVE:
+                data = ACTIVE
+                data['language'] = language
+                save_workbench_settings(data['state'].workspace, data['state'].root.name, data['model'], language)
+            else:
+                settings = load_workbench_settings()
+                settings['language'] = language
+                write_json_atomically(workbench_settings_path(), settings)
+    finally:
+        if acquired:
+            LOCK.release()
     return {"language": language}
 
 

@@ -1007,6 +1007,14 @@ class BrowserRelease(unittest.TestCase):
         for text in ["Preparing", "gemini-2.5-pro", "Codebook 3 pages.pdf", "PDF", " of 3"]:
             self.assertIn(text, panel)
         self.assertNotIn("%", panel)  # no invented percentage
+        # Switching the GUI language during the job is immediate (the language
+        # save must not wait for the job's lock) and redraws the live panel.
+        for language, fragment in [("de", "Seite"), ("zh", "页"), ("en", "Parsing page")]:
+            started = time.monotonic()
+            self.language(language)
+            self.assertLess(time.monotonic() - started, 3, language)
+            self.page.wait_for_function("(f)=>document.getElementById('rulejobpanel').innerText.includes(f)", arg=fragment)
+            self.assertEqual(self.page.evaluate("lastCodebookTask.state"), "running")
         for selector in ["#ruleprepare", "#rulefilepick", "#contextcodebookpath", "#rulemodel", "#ruleview", "#rulereplace"]:
             self.assertTrue(self.page.locator(selector).is_disabled(), selector)
         self.close_drawer()
