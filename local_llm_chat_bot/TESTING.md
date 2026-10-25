@@ -114,6 +114,13 @@ key is redacted from prompts, previews/reasoning, answers, plans, evidence
 excerpts and history. Regressions:
 `python -m unittest discover -s tests -p test_release_secret_boundary.py -v`.
 
+Post-review fixes F-09/F-05 (2026-10-25): outside BG mode an empty or
+non-object `classification` is ignored with notice `notice.classification_ignored`
+(a real classification object is still rejected); deleting the Codebook marks
+the scope `rules_removed`, so materials can be reconfirmed directly for ordinary
+questions, while a changed-but-unlocked profile still requires locking.
+Regressions: `python -m unittest discover -s tests -p test_release_plain_mode_recovery.py -v`.
+
 Reproduce the final additional regression with:
 `python -m unittest discover -s tests -p test_release_step_nine.py -v`.
 All current static findings and exact tested source hashes are in the JSON;

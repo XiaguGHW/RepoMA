@@ -485,7 +485,8 @@
       "stream.completed": "停止前请求已完成；最终回答已保存在会话中。",
       "usage.partial": "另有 {count} 次请求费用未知",
       "context.stale_page": "页面已过期：其他标签页或窗口已切换会话、材料或规则。请刷新本页（F5）后再继续；本次操作未执行。",
-      "rules.duplicate_ids": "规则 ID 必须在整套规则中唯一。以下 ID 重复：{ids}。请在规则编辑中改名后再保存或锁定；本次操作未执行。"
+      "rules.duplicate_ids": "规则 ID 必须在整套规则中唯一。以下 ID 重复：{ids}。请在规则编辑中改名后再保存或锁定；本次操作未执行。",
+      "notice.classification_ignored": "普通问答模式下模型返回了空的分类字段，已忽略；回答照常显示。"
     },
     "en": {
       "workspace.title": "Workspace",
@@ -972,7 +973,8 @@
       "stream.completed": "The request finished before stopping; the final answer is saved in the session.",
       "usage.partial": "Cost unknown for {count} additional requests",
       "context.stale_page": "This page is out of date: another tab or window changed the session, materials or rules. Reload this page (F5) before continuing; nothing was done.",
-      "rules.duplicate_ids": "Rule IDs must be unique across all rules. Duplicated IDs: {ids}. Rename them in the rule editor before saving or locking; nothing was done."
+      "rules.duplicate_ids": "Rule IDs must be unique across all rules. Duplicated IDs: {ids}. Rename them in the rule editor before saving or locking; nothing was done.",
+      "notice.classification_ignored": "The model returned an empty classification field for an ordinary question; it was ignored and the answer is shown as usual."
     },
     "de": {
       "workspace.title": "Arbeitsbereich",
@@ -1459,7 +1461,8 @@
       "stream.completed": "Die Anfrage war vor dem Stoppen abgeschlossen; die endgültige Antwort ist im Verlauf gespeichert.",
       "usage.partial": "Kosten für {count} weitere Anfragen unbekannt",
       "context.stale_page": "Diese Seite ist veraltet: Ein anderer Tab oder ein anderes Fenster hat Sitzung, Unterlagen oder Regeln geändert. Bitte die Seite neu laden (F5); es wurde nichts ausgeführt.",
-      "rules.duplicate_ids": "Regel-IDs müssen in allen Regeln eindeutig sein. Doppelte IDs: {ids}. Bitte im Regeleditor umbenennen, bevor gespeichert oder gesperrt wird; es wurde nichts ausgeführt."
+      "rules.duplicate_ids": "Regel-IDs müssen in allen Regeln eindeutig sein. Doppelte IDs: {ids}. Bitte im Regeleditor umbenennen, bevor gespeichert oder gesperrt wird; es wurde nichts ausgeführt.",
+      "notice.classification_ignored": "Das Modell lieferte bei einer normalen Frage ein leeres Klassifikationsfeld; es wurde ignoriert, die Antwort wird normal angezeigt."
     }
   },
   "legacy_keys": {

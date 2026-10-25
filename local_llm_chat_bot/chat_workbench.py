@@ -1662,6 +1662,12 @@ def validated_model_action(raw, prompt, *, evidence, scope, validation, repair, 
         action = None
         try:
             action = complete_model_action(raw)
+            stray = action.get("classification")
+            if not scope and stray is not None and (not isinstance(stray, dict) or not stray):
+                # An empty/non-object value outside BG mode is not a classification:
+                # keep the ordinary answer. A real object is still rejected below.
+                action["classification"] = None
+                notices.append(UIMessage('notice.classification_ignored', language))
             if action.get("classification") is not None:
                 validation["required"] = True
             problem = validate_classification(
@@ -2614,11 +2620,11 @@ class CodebookEditRequest(BaseModel):
     profile_version: str | None = None
 
 
-def rules_changed(data):
+def rules_changed(data, issue="rules_changed"):
     reset_context(data)
     state = data["state"]
     state.data.pop("bg_context", None)
-    state.data["context_issue"] = "rules_changed" if state.data.get("selected_target") or state.data.get("active_source_ids") else ""
+    state.data["context_issue"] = issue if state.data.get("selected_target") or state.data.get("active_source_ids") else ""
     state.save()
 
 
@@ -2677,8 +2683,10 @@ def codebook_clear():
     # A changed Codebook must not keep classifying with an old profile in the
     # currently open session.  Other sessions are likewise harmless until they
     # explicitly analyse a target again, at which time the global lock is read.
+    # With no rules left, reconfirming the materials for ordinary questions is
+    # allowed; only a changed-but-unlocked profile requires locking first.
     if ACTIVE:
-        rules_changed(ACTIVE)
+        rules_changed(ACTIVE, "rules_removed")
     return {"status": "none"}
 
 
