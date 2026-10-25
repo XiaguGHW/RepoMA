@@ -595,6 +595,7 @@ class LocalDocumentLibrary:
         paths, seen, used_bytes, skipped = [], set(), 0, []
         grouped_image_sources = {Path(item) for item in (bilder_images or []) if Path(item).is_file()}
         image_group_reports, title_blocks, dfc_reports = [], [], []
+        image_group_details = []
         short_pdfs: list[Path] = []
         for snippet in snippets:
             visual = snippet.get("visual") or {}
@@ -681,6 +682,7 @@ class LocalDocumentLibrary:
                 for source in sources:
                     attach(self._prepare_image(source, cache_dir), source.name)
                 image_group_reports.append(f"{folder.name}: {len(sources)} 张原图")
+                image_group_details.append({"name": folder.name, "count": len(sources), "overview": False})
                 continue
             sheet = self._render_contact_sheet(sources, cache_dir)
             attached_sheet = attach(sheet, f"{folder.name} 图片总览")
@@ -691,6 +693,7 @@ class LocalDocumentLibrary:
                     details_attached += 1
             if attached_sheet:
                 image_group_reports.append(f"{folder.name}: {len(sources)} 张，缩略总览 + {details_attached} 张细节")
+                image_group_details.append({"name": folder.name, "count": len(sources), "overview": True, "details": details_attached})
 
         # A title block is useful but less important than an explicitly chosen
         # screenshot group; attach it only after that group has a chance.
@@ -722,6 +725,7 @@ class LocalDocumentLibrary:
         self.last_visual_report = {
             "attachments": len(paths), "bytes": used_bytes, "budget": MAX_VISUAL_BYTES_PER_REQUEST,
             "short_drawings": [item.name for item in short_pdfs], "image_groups": image_group_reports,
+            "image_group_details": image_group_details,
             "dfc": dfc_reports, "skipped": skipped,
         }
         return paths

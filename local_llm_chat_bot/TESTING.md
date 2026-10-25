@@ -25,7 +25,7 @@ Run each command even if an earlier command fails when collecting the baseline;
 do not treat the last command's exit code as the result of all checks.
 Python requirements retain the application's existing lower bounds; they are not
 a complete lockfile. The testing tools are pinned in requirements-dev.txt.
-The repository's mypy configuration explicitly checks all nine application
+The repository's mypy configuration explicitly checks all ten application
 modules, including function bodies. Third-party missing stubs and followed
 imports are excluded, not the application's source files. Mypy 1.15.0 is used
 because 2.4.0 crashed in this container's process discovery before checking code.
@@ -60,6 +60,24 @@ because 2.4.0 crashed in this container's process discovery before checking code
   Keep browser screenshots, generated state, environments and logs out of commits.
 
 ## Current gates
+
+After step 7 (R13–R15), discovery runs 169 tests: 165 pass, 3 fail and the native
+Windows test remains skipped on Linux. Seven new draft/message/image-group
+methods pass, as does the promoted English progress/notices audit assertion.
+Run the new methods with:
+`python -m unittest discover -s tests -p test_release_step_seven.py -v`.
+The browser suite has 16 methods, all passing. Four new methods cover editor
+text/dirty/caret/scroll/error preservation across six language changes, rejected
+context discards, cancel/save/stale-version behavior, structured dynamic message
+redraw, unchanged source/model text, and German long paths/errors with actual
+file/folder/cancel/selection/close clicks at 390/800/1440px. Native path-picker
+results and long server errors are synthetic; UI controls are clicked normally.
+
+The remaining failures are R16's explicit env-file loading, GUI CLI port selection
+and rejection of unknown CLI options. Full Ruff still reports 264 findings;
+mypy still reports 44 errors in 6 files across 10 checked modules. These checks
+remain active and nonzero. Step 8 has not been started.
+See docs/release-reports/Workbench_Repair_Step_07_2026-10-25.md at repository root.
 
 After step 6 (R12), discovery runs 162 tests: 157 pass, 4 fail and the native
 Windows test remains skipped on Linux. The 18 new runtime/lifecycle tests and

@@ -31,7 +31,7 @@ import uvicorn
 
 from release_safety import safe_error, normalize_usage, summarize_usage, context_state_error, valid_rule_profile
 from dotenv import load_dotenv
-from workbench_i18n import catalog_script_json
+from workbench_i18n import catalog_script_json, UIMessage, localize_message
 from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative, classification_manifest,
                              excerpt, parse_json, prompt_for, safe_name, sha256)
 from local_document_library import (LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS,
@@ -369,23 +369,69 @@ class CacheConfirmRequest(BaseModel):
 
 def session() -> dict[str, Any]:
     if not ACTIVE:
-        raise HTTPException(400, "请先设置工作区。")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.workspace_required'))
     return ACTIVE
+
+
+def ui_message(data, key, **params):
+    language = data.get('language', 'zh') if isinstance(data, dict) else data
+    return UIMessage(key, language, **params)
+
+
+def message_payload(value):
+    return value.payload() if isinstance(value, UIMessage) else {'text': str(value)}
+
+
+class UIRequestError(RuntimeError):
+    def __init__(self, message):
+        super().__init__(message)
+        self.ui_message = message
+
+
+class UIValidationError(ValueError):
+    def __init__(self, message):
+        super().__init__(message)
+        self.ui_message = message
+
+
+def error_copy(error, data):
+    value = error.detail if isinstance(error, HTTPException) else getattr(error, 'ui_message', str(error))
+    def redact(item):
+        if isinstance(item, UIMessage):
+            return UIMessage(item.message_key, item.language, **{key: redact(part) for key, part in item.params.items()})
+        return safe_error(item) if isinstance(item, str) else item
+    return localize_message(redact(value), data.get('language', 'zh'))
+
+
+def ui_state(data, value):
+    keys = {'ok': 'state.ok', 'not_needed': 'state.not_needed', 'partial': 'state.partial', 'not_requested': 'state.not_requested', 'unknown': 'state.unknown',
+            'not_applicable': 'state.not_applicable', 'not applicable': 'state.not_applicable',
+            '已完成': 'state.complete', '部分完成': 'state.partial', '不需要（原生文字页）': 'state.native_text',
+            '不适用（无页码文档）': 'state.not_applicable', 'not applicable to DOCX': 'state.not_applicable'}
+    return ui_message(data, keys[value]) if value in keys else str(value or '—')
+
+
+@app.exception_handler(HTTPException)
+async def localized_http_error(request: Request, error: HTTPException):
+    language = request.headers.get('X-Workbench-Language') or ACTIVE.get('language', 'zh')
+    detail = error_copy(error, {'language': language})
+    return JSONResponse(status_code=error.status_code,
+                        content={'detail': str(detail), **message_payload(detail)}, headers=error.headers)
 
 
 def reject_context_change_while_processing() -> None:
     """Keep the selected session, model and material scope stable per request."""
     if MODEL_WORK_IN_PROGRESS.is_set():
-        raise HTTPException(409, "当前模型请求仍在处理中；请等待回答完成后再切换会话、模型或材料。")
+        raise HTTPException(409, ui_message(ACTIVE, 'error.busy'))
 
 
 def begin_model_work() -> dict[str, Any]:
     """Reserve the single model slot and capture its complete request context."""
     if not LOCK.acquire(blocking=False):
-        raise HTTPException(409, "A request is already in progress. Please wait.")
+        raise HTTPException(409, ui_message(ACTIVE, 'error.busy'))
     try:
         if MODEL_WORK_IN_PROGRESS.is_set():
-            raise HTTPException(409, "已有模型请求正在处理中，请等待其完成。")
+            raise HTTPException(409, ui_message(ACTIVE, 'error.busy'))
         data = dict(session())
         data["request_control"] = RequestControl()
         data["cancel_event"] = data["request_control"].cancel_event
@@ -456,7 +502,7 @@ def title_session_from_question(state: ProjectState, question: str) -> None:
 def safe_file(value: str) -> Path:
     path = Path(value.strip().strip('"')).expanduser().resolve()
     if not path.is_file():
-        raise HTTPException(400, f"文件不存在：{path}")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.file_missing', path=path))
     return path
 
 
@@ -469,21 +515,24 @@ def connector_failure(raw: Any) -> str | None:
     """
     text = str(raw or "").strip()
     if not text:
-        return "模型没有返回可显示的文字。"
+        return UIMessage("model.empty")
     normalized = text.casefold()
     if normalized.startswith(("error:", "http error", "error after ")):
         return text
     if normalized.startswith("(no text content"):
-        return f"接口未返回最终正文：{text}"
+        return UIMessage("model.empty_endpoint", detail=text)
     return None
 
 
-def require_model_success(raw: Any, context: str = "模型请求") -> str:
+def require_model_success(raw: Any, context=None) -> str:
     """Return a non-empty model answer or raise a user-visible failure."""
     text = str(raw or "").strip()
     failure = connector_failure(text)
     if failure:
-        raise RuntimeError(f"{context}失败：{failure}")
+        context = context or UIMessage('model.context_main')
+        language = getattr(context, 'language', 'zh')
+        raise UIRequestError(UIMessage('model.request_failed', language, context=context,
+                                        detail=localize_message(failure, language)))
     return text
 
 
@@ -577,10 +626,10 @@ def parse_codebook_draft(raw: str) -> dict:
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I)
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end < start:
-        raise ValueError("模型没有返回 Codebook JSON")
+        raise UIValidationError(ui_message(ACTIVE, 'rules.model_json'))
     draft = json.loads(text[start:end + 1])
     if not isinstance(draft, dict) or not isinstance(draft.get("classes"), list):
-        raise ValueError("Codebook JSON 缺少 classes 列表")
+        raise UIValidationError(ui_message(ACTIVE, 'rules.classes_required'))
     classes = []
     seen_names = set()
     for item in draft["classes"]:
@@ -598,7 +647,7 @@ def parse_codebook_draft(raw: str) -> dict:
             return result
         name = item["name"].strip()
         if name.casefold() in seen_names or not isinstance(item.get("definition"), str) or not item["definition"].strip():
-            raise ValueError("Codebook requires unique class names and non-empty definitions")
+            raise UIValidationError(ui_message(ACTIVE, 'rules.class_definitions'))
         seen_names.add(name.casefold())
         key = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-") or "class"
         classes.append({
@@ -608,7 +657,7 @@ def parse_codebook_draft(raw: str) -> dict:
             "evidence_pages": [int(page) for page in (item.get("evidence_pages") or []) if str(page).isdigit()],
         })
     if not classes:
-        raise ValueError("Codebook JSON 未包含有效类别")
+        raise UIValidationError(ui_message(ACTIVE, 'rules.classes_empty'))
     def profile_rules(values, prefix):
         result = []
         for index, value in enumerate(values if isinstance(values, list) else [], start=1):
@@ -695,12 +744,12 @@ def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data,
         repaired = accounted_model_call(data, connector, [], repair_prompt, CODEBOOK_JSON_REPAIR_SYSTEM,
                                         {"maxOutputTokens": 4096, "temperature": 0}, stream=True,
                                         usage_records=usage_records)
-        repaired = require_model_success(repaired, "Codebook JSON 自动修复请求")
+        repaired = require_model_success(repaired, ui_message(data, 'model.context_codebook_repair'))
         repair_usage = connector.get_last_token_usage() or {}
         try:
             return parse_codebook_draft(repaired), repair_usage
         except (ValueError, json.JSONDecodeError) as repair_error:
-            raise ValueError(f"Codebook JSON 自动修复后仍无效：{repair_error}") from initial_error
+            raise UIValidationError(ui_message(data, 'rules.repair_invalid', detail=error_copy(repair_error, data))) from initial_error
 
 
 def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str) -> dict:
@@ -711,23 +760,23 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str) -> di
     groups, notes = codebook_page_groups(document), []
     usages: list[dict] = []
     if not records and not groups:
-        raise HTTPException(400, "Codebook 没有可读取的页面。")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.rules_empty'))
     if records:
         for record in records:
             prompt = f"Codebook page {record['page']} of {len(records)}. Page type: {record['page_type']}.\n--- NATIVE TEXT ---\n{record['native_text'] or '[none]'}\n--- OCR TEXT ({record['ocr_status']}) ---\n{record['ocr_text'] or '[none]'}"
             raw = accounted_model_call(data, connector, [record["image_path"]], prompt, CODEBOOK_PAGE_SYSTEM, {"maxOutputTokens": 2200, "temperature": 0}, stream=True, usage_records=usages)
-            raw = require_model_success(raw, f"Codebook 第 {record['page']} 页读取")
+            raw = require_model_success(raw, ui_message(data, 'model.context_codebook_page', page=record["page"]))
             notes.append(raw)
     else:
         for index, group in enumerate(groups, start=1):
             prompt = f"Codebook DOCX section {index}/{len(groups)}.\n" + "\n\n".join(f"--- {item['label']} ---\n{item['text']}" for item in group)
             raw = accounted_model_call(data, connector, [], prompt, CODEBOOK_PAGE_SYSTEM, {"maxOutputTokens": 2200, "temperature": 0}, stream=True, usage_records=usages)
-            raw = require_model_success(raw, f"Codebook DOCX 第 {index} 段读取")
+            raw = require_model_success(raw, ui_message(data, 'model.context_codebook_section', page=index))
             notes.append(raw)
     merge_prompt = "Consolidate every Codebook page note below. All classes, tables and boundary rules must be retained.\n\n" + "\n\n".join(
         f"--- PAGE GROUP {index} ---\n{note}" for index, note in enumerate(notes, start=1))
     merged = accounted_model_call(data, connector, [], merge_prompt, CODEBOOK_MERGE_SYSTEM, {"maxOutputTokens": 3500, "temperature": 0}, stream=True, usage_records=usages)
-    merged = require_model_success(merged, "Codebook 规则汇总")
+    merged = require_model_success(merged, ui_message(data, 'model.context_codebook_merge'))
     draft, _ = parse_codebook_draft_with_repair(connector, merged, data=data, usage_records=usages)
     usage = summarize_usage(usages)
     page_numbers = {((item.get("visual") or {}).get("page")) for group in groups for item in group}
@@ -769,7 +818,7 @@ def write_session_export(data: dict[str, Any]) -> Path:
 def write_bg_analysis_export(state: ProjectState) -> Path:
     record = state.data.get("last_bg_analysis")
     if not isinstance(record, dict):
-        raise HTTPException(400, "当前会话还没有可导出的 Baugruppe 分析结果。")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.export_missing'))
     exports = state.root / "exports"
     exports.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -896,7 +945,7 @@ def prepare_bg_dossier(data: dict[str, Any], coverage: dict, *, force: bool = Fa
     """Consolidate reusable per-file facts once; raw evidence remains query-specific."""
     ensure_current_sources(data)
     if not coverage_matches_current_selection(data, coverage):
-        raise HTTPException(409, "Material evidence is stale. Confirm materials and prepare evidence again.")
+        raise HTTPException(409, ui_message(ACTIVE, 'context.reconfirm'))
     cached = None if force else load_bg_dossier_cache(coverage, data["model"])
     if cached:
         cached = dict(cached); cached["cache_status"] = "reused"
@@ -911,7 +960,7 @@ def prepare_bg_dossier(data: dict[str, Any], coverage: dict, *, force: bool = Fa
     request = "Create one reusable BG comprehensive evidence dossier with sections: composition/BOM; motion and main functional chain; actuators/transmission; relevant geometry/interfaces; DFC hierarchy; conflicts or limitations; source evidence. Every factual bullet must retain its source file and page/section label.\n\n" + sources
     records_used: list[dict] = []
     try:
-        raw = require_model_success(accounted_model_call(data, data["llm"], [], request, system_prompt, {"maxOutputTokens": 2400, "temperature": 0}, stream=True, usage_records=records_used), "装配体综合证据汇总")
+        raw = require_model_success(accounted_model_call(data, data["llm"], [], request, system_prompt, {"maxOutputTokens": 2400, "temperature": 0}, stream=True, usage_records=records_used), ui_message(data, 'model.context_dossier'))
     finally:
         if usage_records is not None:
             usage_records.extend(records_used)
@@ -1073,7 +1122,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
     active_ids = state.data.get("active_source_ids") or []
     selected = [item for item in documents.list() if item.get("id") in active_ids]
     if not selected:
-        raise HTTPException(400, "请先选择一个要分析的文件或文件夹。")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.target_required'))
     records, total_calls, reused_files, created_files = [], 0, 0, 0
     previous_report = load_coverage(state)
     previous_records = {(item.get("id"), item.get("sha256")): item for item in previous_report.get("files", [])
@@ -1082,7 +1131,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
     total_documents = len(selected)
     for file_index, document in enumerate(selected, start=1):
         if progress:
-            progress("reading", f"正在读取并理解文件 {file_index}/{total_documents}：{document['name']}",
+            progress("reading", ui_message(data, "reading.file", index=file_index, total=total_documents, name=document["name"]),
                      12 + int((file_index - 1) / max(total_documents, 1) * 48))
         # Complete analysis prepares OCR locally for visual pages. It adds no
         # Farm token cost and lets a scanned page participate in the same
@@ -1106,12 +1155,12 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
             record.update({"id": document["id"], "name": document["name"], "path": document["path"],
                            "sha256": document.get("sha256"), "pages_total": len(document_pages(document)),
                            "pages_read": read_pages, "pages_unread": unread_pages,
-                           "full_coverage": not unread_pages, "reading_scope": reading_scope,
+                           "full_coverage": not unread_pages, "reading_scope": reading_scope, "reading_scope_message": UIMessage("material.scope_full" if reading_scope == "完整文本预读" else "material.scope_datasheet", pages=15).payload(),
                            "dfc_structure": documents.dfc_audit(document), "cache_status": "reused"})
             records.append(record)
             reused_files += 1
             if progress:
-                progress("reading", f"已复用 {file_index}/{total_documents}：{document['name']} 的本地理解结果",
+                progress("reading", ui_message(data, "reading.reused", index=file_index, total=total_documents, name=document["name"]),
                          12 + int(file_index / max(total_documents, 1) * 48))
             continue
         groups = summary_groups(document, read_chunks)
@@ -1119,7 +1168,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
         for number, group in enumerate(groups, start=1):
             try:
                 if progress:
-                    progress("reading", f"正在理解 {document['name']}（文本组 {number}/{len(groups)}）",
+                    progress("reading", ui_message(data, "reading.group", name=document["name"], index=number, total=len(groups)),
                              12 + int((file_index - 1 + number / max(len(groups), 1)) / max(total_documents, 1) * 48))
                 attempts: list[dict] = []
                 try:
@@ -1128,12 +1177,12 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                 finally:
                     total_calls += len(attempts)
                     if usage_records is not None: usage_records.extend(attempts)
-                raw = require_model_success(raw, f"文件 {document['name']} 的文本片段读取")
+                raw = require_model_success(raw, ui_message(data, 'model.context_group', name=document["name"]))
                 notes.append(raw.strip())
             except RequestStopped:
                 raise
             except Exception as exc:
-                failures.append(f"组 {number}: {exc}")
+                failures.append(ui_message(data, "reading.group_failed", index=number, detail=error_copy(exc, data)))
         if notes and len(notes) > 1:
             try:
                 merged = "\n\n".join(f"[片段组 {i}]\n{note}" for i, note in enumerate(notes, start=1))
@@ -1144,12 +1193,12 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                 finally:
                     total_calls += len(attempts)
                     if usage_records is not None: usage_records.extend(attempts)
-                raw = require_model_success(raw, f"文件 {document['name']} 的摘要汇总")
+                raw = require_model_success(raw, ui_message(data, 'model.context_merge', name=document["name"]))
                 summary = raw.strip()
             except RequestStopped:
                 raise
             except Exception as exc:
-                summary = "\n\n".join(notes); failures.append(f"汇总: {exc}")
+                summary = "\n\n".join(notes); failures.append(ui_message(data, "reading.merge_failed", detail=error_copy(exc, data)))
         else:
             summary = notes[0] if notes else ""
         record = {"id": document["id"], "name": document["name"], "path": document["path"],
@@ -1157,16 +1206,16 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                   "pages_read": read_pages, "pages_unread": unread_pages,
                   "full_coverage": not unread_pages,
                   "text_chunks_total": len(document.get("chunks", [])), "text_chunks_selected": len(read_chunks),
-                  "reading_scope": reading_scope, "text_groups_total": len(groups),
+                  "reading_scope": reading_scope, "reading_scope_message": UIMessage("material.scope_full" if reading_scope == "完整文本预读" else "material.scope_datasheet", pages=15).payload(), "text_groups_total": len(groups),
                   "text_groups_processed": len(notes), "complete": bool(notes) and not failures,
-                  "failures": failures, "dfc_structure": documents.dfc_audit(document), "summary": summary,
+                  "failures": failures, "failure_messages": [message_payload(item) for item in failures], "dfc_structure": documents.dfc_audit(document), "summary": summary,
                   "cache_status": "created"}
         records.append(record)
         if record["complete"]:
             save_material_summary_cache(document, data["model"], full, read_pages, record)
             created_files += 1
         if progress:
-            progress("reading", f"已完成 {file_index}/{total_documents}：{document['name']}",
+            progress("reading", ui_message(data, "reading.complete", index=file_index, total=total_documents, name=document["name"]),
                      12 + int(file_index / max(total_documents, 1) * 48))
     report = {"context_revision": state.data.get("context_revision"), "created_at": datetime.now().astimezone().isoformat(timespec="seconds"), "model": data["model"], "requested_full_coverage": full,
               "files": records, "complete": all(item["complete"] for item in records), "model_calls": total_calls,
@@ -1186,6 +1235,7 @@ def coverage_summary_for_answer(coverage: dict | None) -> dict | None:
         files.append({
             "name": item.get("name", "未知文件"),
             "scope": item.get("reading_scope", "已读取"),
+            "scope_message": item.get("reading_scope_message"),
             "pages_total": item.get("pages_total", 0),
             "pages_read": item.get("pages_read", []),
             "pages_unread": item.get("pages_unread", []),
@@ -1429,7 +1479,7 @@ def complete_model_action(raw):
     return parse_json(text)
 
 
-def validated_model_action(raw, prompt, *, evidence, scope, validation, repair, notices):
+def validated_model_action(raw, prompt, *, evidence, scope, validation, repair, notices, language="zh"):
     """One validator for every round; one repair budget for the entire answer."""
     while True:
         action = None
@@ -1449,14 +1499,15 @@ def validated_model_action(raw, prompt, *, evidence, scope, validation, repair, 
         if validation["repairs"] >= 1 or not scope:
             raise ClassificationValidationError("Classification/action validation failed: " + problem)
         validation["repairs"] += 1
-        notices.append(f"分类 JSON 校验未通过（{problem}），已自动重试一次。")
+        notices.append(UIMessage('notice.repair', language, detail=problem))
         raw = repair(classification_repair_prompt(prompt, problem, required=validation["required"]))
         # No success notice until this same validator accepts the repaired action.
 
 
-def progress_copy(data: dict[str, Any], zh: str, en: str, de: str) -> str:
-    """Return transient processing text in the UI language without changing API fields."""
-    return {"en": en, "de": de}.get(normalize_language(data.get("language", "zh")), zh)
+def image_group_notices(data, report):
+    return [ui_message(data, 'notice.image_group_overview' if item['overview'] else 'notice.image_group_full',
+                       name=item['name'], count=item['count'], details=item.get('details', 0))
+            for item in report.get('image_group_details', [])]
 
 
 def call_model(data: dict[str, Any], question: str, progress=None, *, require_classification: bool = True) -> dict[str, Any]:
@@ -1468,19 +1519,19 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
         if progress:
             progress(phase, text, percent)
 
-    report("search", progress_copy(data, "正在检查当前材料与已有理解结果…", "Checking current materials and existing understanding…", "Aktuelle Materialien und vorhandenes Verständnis werden geprüft…"), 5)
+    report("search", ui_message(data, 'progress.check'), 5)
     bg_context = state.data.get("bg_context")
     active_source_ids = state.data.get("active_source_ids", [])
     matches = state.search(question)
     snippets = {item: excerpt(state, item, question) for item in matches}
     preferred = ([bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))) if bg_context else active_source_ids
     allowed = list(bg_context.get("source_ids", [])) + [bg_context.get("codebook_id")] if bg_context else active_source_ids
-    report("search", progress_copy(data, "正在检索与当前问题相关的本地证据…", "Retrieving local evidence relevant to this question…", "Lokale Evidenz zur aktuellen Frage wird abgerufen…"), 10)
+    report("search", ui_message(data, 'progress.search'), 10)
     evidence = documents.search(question, preferred_ids=preferred, classification=bool(bg_context), allowed_ids=allowed)
     if bg_context:
         existing = {(item.get("visual") or {}).get("page") for item in evidence if item.get("name") == bg_context.get("codebook_name")}
         evidence.extend(item for item in relevant_codebook_page_evidence(question, bg_context) if (item.get("visual") or {}).get("page") not in existing)
-    report("search", progress_copy(data, "正在核对文字、OCR 与视觉证据…", "Checking text, OCR and visual evidence…", "Text-, OCR- und visuelle Evidenz werden abgeglichen…"), 12)
+    report("search", ui_message(data, 'progress.visual'), 12)
     evidence = documents.ensure_ocr_for_snippets(evidence, question, classification=bool(bg_context))
     visuals = documents.visual_paths(evidence, state.root / "visual_cache",
                                      bilder_images=documents.bilder_image_paths(allowed))
@@ -1488,19 +1539,19 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     visual_report = documents.last_visual_report
     if visual_report.get("short_drawings"):
         names = "、".join(str(name) for name in visual_report["short_drawings"])
-        notices.append(f"图纸视觉证据：已将短图纸 {names} 的全部页转为压缩 JPEG；本轮附件 {visual_report.get('attachments', 0)} 个，约 {int(visual_report.get('bytes', 0)) // 1024} KB。")
+        notices.append(ui_message(data, 'notice.short_drawings', names=names, count=visual_report.get("attachments", 0), kb=int(visual_report.get("bytes", 0)) // 1024))
     if visual_report.get("image_groups"):
-        notices.append("Bilder 图片组：" + "；".join(str(item) for item in visual_report["image_groups"]) + "。")
+        notices.extend(image_group_notices(data, visual_report))
     if visual_report.get("dfc"):
         for item in visual_report["dfc"]:
-            parts = "、".join(str(part) for part in item.get("segments_used", [])) or "无"
-            notices.append(f"DFC Struktur：{item.get('name')} · OCR {item.get('ocr_status')} · 已发送第 {parts} 段（共 {item.get('segments_total', 0)} 段）。")
+            parts = "、".join(str(part) for part in item.get("segments_used", [])) or "—"
+            notices.append(ui_message(data, 'notice.dfc', name=item.get("name"), status=ui_state(data, item.get("ocr_status")), segments=parts))
     if visual_report.get("skipped"):
-        notices.append("部分视觉附件因本轮总大小预算未发送；文字证据仍已保留。")
+        notices.append(ui_message(data, 'notice.visual_skipped'))
 
     def events(kind: str, text: str):
         if kind == "reasoning": reasoning.append(text)
-        elif kind == "notice": notices.append(text)
+        elif kind == "notice": notices.append(localize_message(text, data.get("language", "zh")))
 
     usage_records: list[dict] = []
     coverage = load_coverage(state)
@@ -1511,32 +1562,32 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     # phrases it as a natural question rather than using a classification word.
     preparation_request = bool(bg_context)
     if not coverage_matches_current_selection(data, coverage) and preparation_request:
-        report("reading", progress_copy(data, "正在进行文件的读取与理解…", "Reading and understanding the files…", "Dateien werden gelesen und inhaltlich erschlossen…"), 12)
+        report("reading", ui_message(data, 'progress.reading_start'), 12)
         coverage = prepare_coverage(data, progress=report, usage_records=usage_records)
         auto_prepared = True
-        report("reading", progress_copy(data, "文件读取与理解完成。", "File reading and understanding complete.", "Dateien wurden gelesen und erschlossen."), 62)
+        report("reading", ui_message(data, 'progress.reading_done'), 62)
     elif preparation_request:
-        report("reading", progress_copy(data, "已复用当前材料的读取与理解结果。", "Reusing the current material-reading results.", "Die vorhandenen Lese- und Verständnisresultate werden wiederverwendet."), 62)
+        report("reading", ui_message(data, 'progress.reading_reused'), 62)
     coverage_summaries = coverage.get("files", []) if coverage.get("complete") else []
     dossier = None
     if coverage_summaries:
         try:
-            report("dossier", progress_copy(data, "正在整理 Baugruppe 综合证据档案…", "Consolidating the Baugruppe comprehensive evidence dossier…", "Das umfassende Evidenzdossier der Baugruppe wird konsolidiert…"), 70)
+            report("dossier", ui_message(data, 'progress.dossier'), 70)
             dossier, _, dossier_created = prepare_bg_dossier(data, coverage, usage_records=usage_records)
             if dossier_created:
-                notices.append("已生成并保存 BG 综合证据档案；后续追问将复用该档案，仅补充本问题命中的原始证据。")
+                notices.append(ui_message(data, 'notice.dossier_created'))
             elif dossier:
-                notices.append("已复用 BG 综合证据档案；本轮未重复发送全部逐文件摘要。")
-            report("dossier", progress_copy(data, "BG 综合证据档案已准备完成。", "BG comprehensive evidence dossier ready.", "Das BG-Gesamtevidenzdossier ist bereit."), 80)
+                notices.append(ui_message(data, 'notice.dossier_reused'))
+            report("dossier", ui_message(data, 'progress.dossier_ready'), 80)
         except RequestStopped:
             raise
         except Exception as exc:
-            notices.append(f"BG 综合证据档案未能生成，已回退为逐文件摘要：{exc}")
+            notices.append(ui_message(data, 'notice.dossier_failed', detail=error_copy(exc, data)))
             dossier = None
     model_prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
                               coverage_summaries=[] if dossier else coverage_summaries, bg_dossier=dossier,
                               response_language=data.get("language", "zh"), require_classification=classification_request)
-    report("model", progress_copy(data, f"正在连接 {data['model']} 并提交问题…", f"Connecting to {data['model']} and submitting the question…", f"Verbindung zu {data['model']} wird hergestellt und die Frage übermittelt…"), 86)
+    report("model", ui_message(data, 'progress.connect', model=data["model"]), 86)
     model_started = False
     preview = AnswerPreview()
     def model_events(kind: str, text: str):
@@ -1549,7 +1600,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
                 data["answer_events"]({"type": "answer_delta", "text": delta})
         if not model_started:
             model_started = True
-            report("model", progress_copy(data, "模型正在生成回答…", "The model is generating its answer…", "Das Modell erstellt die Antwort…"), 92)
+            report("model", ui_message(data, 'progress.generating'), 92)
 
     def answer_call(prompt, tokens):
         nonlocal preview
@@ -1567,27 +1618,26 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
             model_events("content", raw_response)
         return raw_response
 
-    report("model", progress_copy(data, "正在等待模型输出…", "Waiting for model output…", "Warte auf die Modellausgabe…"), 90)
+    report("model", ui_message(data, 'progress.waiting'), 90)
     raw = answer_call(model_prompt, 4096)
-    raw = require_model_success(raw, "模型回答请求")
+    raw = require_model_success(raw, ui_message(data, 'model.context_main'))
     validation = {"required": classification_request, "repairs": 0}
     scope = classification_scope(documents, bg_context)
 
     def repair_classification(repair_prompt):
-        report("validation", progress_copy(data, "正在修复分类结构或引用…", "Repairing classification structure or references…",
-                                           "Klassifikationsstruktur oder Quellenverweise werden korrigiert…"), 96)
+        report("validation", ui_message(data, 'progress.repair'), 96)
         repaired = answer_call(repair_prompt, 4096)
-        repaired = require_model_success(repaired, "分类输出修复请求")
+        repaired = require_model_success(repaired, ui_message(data, 'model.context_repair'))
         return repaired
 
     def validated_action(raw_response: str, request_prompt: str) -> dict:
         result = validated_model_action(raw_response, request_prompt, evidence=evidence, scope=scope,
-                                        validation=validation, repair=repair_classification, notices=notices)
+                                        validation=validation, repair=repair_classification, notices=notices, language=data.get("language", "zh"))
         check_answer_size(data, result["answer"])
         return result
 
     try:
-        report("validation", progress_copy(data, "正在核验模型分类输出…", "Validating the model classification output…", "Die Klassifikationsausgabe des Modells wird geprüft…"), 96)
+        report("validation", ui_message(data, 'progress.validation'), 96)
         action = validated_action(raw, model_prompt)
     except RequestStopped:
         raise
@@ -1599,16 +1649,16 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
         # Some Bosch Farm models return a normal natural-language answer despite
         # the code-action schema. A read-only question must remain useful:
         # show that answer and never treat it as a file modification.
-        answer = raw.strip() or "模型没有返回可显示的文字。"
+        answer = raw.strip() or str(ui_message(data, "model.empty"))
         check_answer_size(data, answer)
         with commit_answer(data):
             title_session_from_question(state, question)
             state.add_turn("user", question)
             state.add_turn("assistant", answer)
         if auto_prepared:
-            notices.insert(0, f"已在回答前自动准备 {len(coverage.get('files', []))} 个文件的分类证据（{coverage.get('model_calls', 0)} 次预读调用）。")
-        report("complete", progress_copy(data, "处理完成。", "Processing complete.", "Verarbeitung abgeschlossen."), 100)
-        return {"answer": answer, "reasoning": "".join(reasoning), "notices": notices,
+            notices.insert(0, ui_message(data, 'notice.auto_prepared', files=len(coverage.get("files", [])), calls=coverage.get("model_calls", 0)))
+        report("complete", ui_message(data, 'model.complete'), 100)
+        return {"answer": answer, "reasoning": "".join(reasoning), "notices": notices, "notice_messages": [message_payload(item) for item in notices],
                 "sources": evidence, "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [], "can_export_bg": False,
                 "classification": None, "coverage_summary": coverage_summary_for_answer(coverage) if classification_request else None,
                 "turn_usage": summarize_usage(usage_records), "model_response": llm.last_response_model or data["model"],
@@ -1626,9 +1676,9 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
         model_prompt = prompt_for(state, question, snippets, complete, evidence, bg_context,
                                   [] if dossier else coverage_summaries, dossier, data.get("language", "zh"),
                                   require_classification=classification_request)
-        report("model", progress_copy(data, "正在补充读取模型请求的本地文件并生成回答…", "Reading requested local files and generating the answer…", "Vom Modell angeforderte lokale Dateien werden ergänzt gelesen und die Antwort wird erstellt…"), 93)
+        report("model", ui_message(data, 'progress.supplementary'), 93)
         raw = answer_call(model_prompt, 3000)
-        raw = require_model_success(raw, "补充材料后的模型回答请求")
+        raw = require_model_success(raw, ui_message(data, 'model.context_supplementary'))
         try:
             action = validated_action(raw, model_prompt)
         except RequestStopped:
@@ -1638,8 +1688,8 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
             if looks_like_action(raw):
                 raise ValueError("Incomplete or invalid action JSON; no answer committed") from exc
             check_answer_size(data, raw)
-            notices.append(f"补充读取后的分类输出未通过校验：{exc}；未显示分类结论卡。")
-            action = {"answer": raw.strip() or "模型没有返回可显示的文字。", "changes": [], "classification": None}
+            notices.append(ui_message(data, 'notice.supplementary_failed', detail=error_copy(exc, data)))
+            action = {"answer": raw.strip() or str(ui_message(data, "model.empty")), "changes": [], "classification": None}
     for change in action.get("changes", []):
         if isinstance(change, dict) and state.resolve_relative(change.get("path", "")).exists() and change.get("path") not in complete:
             raise ValueError("A complete current file must be read before proposing its replacement")
@@ -1663,9 +1713,9 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
             }
             state.save()
     if auto_prepared:
-        notices.insert(0, f"已在回答前自动准备 {len(coverage.get('files', []))} 个文件的分类证据（{coverage.get('model_calls', 0)} 次预读调用）。")
-    report("complete", progress_copy(data, "处理完成。", "Processing complete.", "Verarbeitung abgeschlossen."), 100)
-    return {"answer": action.get("answer", ""), "reasoning": "".join(reasoning), "notices": notices,
+        notices.insert(0, ui_message(data, 'notice.auto_prepared', files=len(coverage.get("files", [])), calls=coverage.get("model_calls", 0)))
+    report("complete", ui_message(data, 'model.complete'), 100)
+    return {"answer": action.get("answer", ""), "reasoning": "".join(reasoning), "notices": notices, "notice_messages": [message_payload(item) for item in notices],
             "sources": evidence, "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [{k: v for k, v in item.items() if k != "content"} for item in changes],
             "plan_id": plan_id, "can_export_bg": bool(bg_context),
             "turn_usage": turn_token_usage,
@@ -1682,7 +1732,7 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
     state, documents = data["state"], data["documents"]
     bg_context = state.data.get("bg_context")
     if not bg_context:
-        raise HTTPException(400, "请先开始 Baugruppe 文件夹分析，再运行多模型对比。")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.bg_required'))
     matches = state.search(question)
     snippets = {item: excerpt(state, item, question) for item in matches}
     preferred = [bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))
@@ -1701,19 +1751,19 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
     for index, model in enumerate(models, start=1):
         notices: list[str] = []
         if visual_report.get("short_drawings"):
-            notices.append(f"短图纸已按全页压缩附件发送（{visual_report.get('attachments', 0)} 个附件，约 {int(visual_report.get('bytes', 0)) // 1024} KB）。")
+            notices.append(ui_message(data, 'notice.short_drawings', names=", ".join(visual_report["short_drawings"]), count=visual_report.get("attachments", 0), kb=int(visual_report.get("bytes", 0)) // 1024))
         if visual_report.get("image_groups"):
-            notices.append("Bilder 图片组：" + "；".join(str(item) for item in visual_report["image_groups"]) + "。")
+            notices.extend(image_group_notices(data, visual_report))
         if visual_report.get("dfc"):
             for item in visual_report["dfc"]:
-                parts = "、".join(str(part) for part in item.get("segments_used", [])) or "无"
-                notices.append(f"DFC Struktur：{item.get('name')} · OCR {item.get('ocr_status')} · 已发送第 {parts} 段。")
+                parts = "、".join(str(part) for part in item.get("segments_used", [])) or "—"
+                notices.append(ui_message(data, 'notice.dfc', name=item.get("name"), status=ui_state(data, item.get("ocr_status")), segments=parts))
         if visual_report.get("skipped"):
-            notices.append("部分视觉附件超出总大小预算，未发送；文字证据仍已保留。")
+            notices.append(ui_message(data, 'notice.visual_skipped'))
 
         def events(kind: str, text: str):
             if kind == "notice":
-                notices.append(text)
+                notices.append(localize_message(text, data.get("language", "zh")))
 
         usage_records: list[dict] = []
         try:
@@ -1723,7 +1773,7 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
                 visuals, prompt, SYSTEM, {"maxOutputTokens": 4096, "temperature": 0},
                 stream=True, event_handler=events, usage_records=usage_records,
             )
-            raw = require_model_success(raw, f"对比模型 {model} 的回答请求")
+            raw = require_model_success(raw, ui_message(data, 'model.context_compare', model=model))
             actual_model = connector.last_response_model or model
             validation = {"required": True, "repairs": 0}
 
@@ -1731,20 +1781,20 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
                 repaired = accounted_model_call(data, connector, visuals, repair_prompt, SYSTEM,
                                                       {"maxOutputTokens": 4096, "temperature": 0},
                                                       stream=True, event_handler=events, usage_records=usage_records)
-                repaired = require_model_success(repaired, f"对比模型 {model} 的分类输出修复请求")
+                repaired = require_model_success(repaired, ui_message(data, 'model.context_compare_repair', model=model))
                 return repaired
 
             action = validated_model_action(raw, prompt, evidence=evidence,
                                             scope=classification_scope(documents, bg_context),
-                                            validation=validation, repair=repair_comparison, notices=notices)
+                                            validation=validation, repair=repair_comparison, notices=notices, language=data.get("language", "zh"))
             answer = action["answer"]
             classification = action["classification"]
             token_usage = summarize_usage(usage_records)
             results.append({"requested_model": model, "model_response": actual_model, "ok": True,
-                            "answer": answer, "classification": classification, "usage": token_usage, "notices": notices})
+                            "answer": answer, "classification": classification, "usage": token_usage, "notices": notices, "notice_messages": [message_payload(item) for item in notices]})
         except Exception as exc:
             results.append({"requested_model": model, "model_response": model, "ok": False,
-                            "answer": "", "error": str(exc), "usage": summarize_usage(usage_records), "notices": notices})
+                            "answer": "", "error": str(error_copy(exc, data)), "error_message": message_payload(error_copy(exc, data)), "usage": summarize_usage(usage_records), "notices": notices, "notice_messages": [message_payload(item) for item in notices]})
     return {"question": question, "results": results,
             "usage": status_data(data),
             "sources": [str(item.get("label", item.get("name", "未知来源"))) for item in evidence]}
@@ -1754,7 +1804,7 @@ def context_mutation(function):
     @wraps(function)
     def guarded(*args, **kwargs):
         if not LOCK.acquire(blocking=False):
-            raise HTTPException(409, "A request is in progress. Wait before changing context.")
+            raise HTTPException(409, ui_message(ACTIVE, 'error.busy'))
         try:
             reject_context_change_while_processing()
             return function(*args, **kwargs)
@@ -1816,7 +1866,7 @@ def restore_context_binding(data):
 def ensure_current_sources(data):
     state = data["state"]
     if context_issue(data):
-        raise HTTPException(409, "Materials/rules need confirmation. Reconfirm the selected materials and locked rules.")
+        raise HTTPException(409, ui_message(ACTIVE, 'context.reconfirm'))
     context = state.data.get('bg_context')
     if context:
         profile = load_codebook_profile()
@@ -1826,16 +1876,16 @@ def ensure_current_sources(data):
             or profile.get("version") != context.get("rule_profile_version")
             or profile.get("sha256") != context.get("codebook_sha256")
             or not path.is_file() or file_digest(path) != profile.get('sha256')):
-            raise HTTPException(409, 'Codebook changed or is not locked. Confirm the current rules and materials again.')
+            raise HTTPException(409, ui_message(ACTIVE, 'error.rules_changed'))
     ids = set(state.data.get('active_source_ids') or [])
     bound = state.data.get("source_binding")
     if bound is not None and bound != source_binding(data["documents"], ids):
-        raise HTTPException(409, "Material scope/version changed. Confirm materials again.")
+        raise HTTPException(409, ui_message(ACTIVE, 'context.reconfirm'))
     for item in data['documents'].list():
         if item.get('id') in ids:
             path = Path(item['path'])
             if not path.is_file() or file_digest(path) != item.get('sha256'):
-                raise HTTPException(409, f"Source changed or disappeared: {path.name}. Confirm materials again.")
+                raise HTTPException(409, ui_message(ACTIVE, 'error.source_changed', path=path.name))
 
 
 @app.exception_handler(Exception)
@@ -1843,7 +1893,8 @@ def ensure_current_sources(data):
 @app.exception_handler(OSError)
 @app.exception_handler(RuntimeError)
 async def readable_error(request: Request, exc: Exception):
-    return JSONResponse(status_code=400, content={"detail": safe_error(exc)})
+    detail = error_copy(exc, {'language': request.headers.get('X-Workbench-Language') or ACTIVE.get('language', 'zh')})
+    return JSONResponse(status_code=400, content={"detail": str(detail), **message_payload(detail)})
 
 
 @app.middleware("http")
@@ -1865,13 +1916,13 @@ def index():
 @context_mutation
 def setup(request: Setup):
     reject_context_change_while_processing()
-    if not request.workspace.strip(): raise HTTPException(400, "Select the application workspace first")
+    if not request.workspace.strip(): raise HTTPException(400, ui_message(ACTIVE, 'error.workspace_required'))
     workspace = Path(request.workspace.strip().strip('"')).expanduser().resolve()
-    if not workspace.is_dir(): raise HTTPException(400, f"工作区不存在：{workspace}")
+    if not workspace.is_dir(): raise HTTPException(400, ui_message(ACTIVE, 'error.workspace_missing', path=workspace))
     env_file = Path(__file__).resolve().parent / ".env"
     load_dotenv(env_file)
     key = os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY") or os.getenv("BOSCH_FARM_API_KEY")
-    if not key: raise HTTPException(400, f"未在 {env_file} 找到 BOSCH_FARM_SUBSCRIPTION_KEY。")
+    if not key: raise HTTPException(400, ui_message(ACTIVE, 'error.key_missing', path=env_file))
     state_home = app_state_home()
     state = ProjectState(state_home, workspace, request.session)
     documents = LocalDocumentLibrary(state.root.parent / "documents.json")
@@ -1903,7 +1954,7 @@ def switch_model(request: ModelSwitchRequest):
     reject_context_change_while_processing()
     model = canonical_model_id(request.model)
     if not model:
-        raise HTTPException(400, "请输入 Bosch Farm 的准确 Model ID。")
+        raise HTTPException(400, ui_message(ACTIVE, 'model.id_required'))
     with LOCK:
         reject_context_change_while_processing()
         data = session()
@@ -1942,16 +1993,16 @@ def rename_session(request: SessionRenameRequest):
         name = safe_name(request.name.strip())
         state = data["state"] if not request.source.strip() else ProjectState(app_state_home(), data["state"].workspace, safe_name(request.source.strip()))
         if not state.root.is_dir():
-            raise HTTPException(404, "会话不存在。")
+            raise HTTPException(404, ui_message(ACTIVE, 'error.session_missing'))
         target = state.root.parent / name
         if target == state.root:
             return status_data(data)
         if target.exists():
-            raise HTTPException(409, "已存在同名会话。")
+            raise HTTPException(409, ui_message(ACTIVE, 'error.session_exists'))
         try:
             state.root.rename(target)
         except OSError as exc:
-            raise HTTPException(500, f"无法重命名会话：{exc}") from exc
+            raise HTTPException(500, ui_message(ACTIVE, 'error.session_rename', detail=error_copy(exc, ACTIVE))) from exc
         return activate_local_session(data, name) if state.root == data["state"].root else status_data(data)
 
 
@@ -1961,17 +2012,17 @@ def delete_session(request: SessionDeleteRequest):
     with LOCK:
         reject_context_change_while_processing()
         if not request.confirmed:
-            raise HTTPException(400, "必须确认后才可删除会话。")
+            raise HTTPException(400, ui_message(ACTIVE, 'error.confirmation'))
         data = session()
         state = data["state"] if not request.name.strip() else ProjectState(app_state_home(), data["state"].workspace, safe_name(request.name.strip()))
         if not state.root.is_dir():
-            raise HTTPException(404, "会话不存在。")
+            raise HTTPException(404, ui_message(ACTIVE, 'error.session_missing'))
         current = state.root
         parent = current.parent
         try:
             shutil.rmtree(current)
         except OSError as exc:
-            raise HTTPException(500, f"无法删除会话：{exc}") from exc
+            raise HTTPException(500, ui_message(ACTIVE, 'error.session_delete', detail=error_copy(exc, ACTIVE))) from exc
         remaining = available_sessions(ProjectState(app_state_home(), data["state"].workspace, "default")) if parent.is_dir() else []
         return activate_local_session(data, str(remaining[0]["name"]) if remaining else "default") if current == data["state"].root else status_data(data)
 
@@ -2011,7 +2062,7 @@ def open_saved_session(request: SessionOpenRequest):
         data = session(); name = safe_name(request.name.strip())
         target = data["state"].root.parent / name
         if not target.is_dir():
-            raise HTTPException(404, "会话不存在。")
+            raise HTTPException(404, ui_message(ACTIVE, 'error.session_missing'))
         return activate_local_session(data, name)
 
 
@@ -2032,7 +2083,7 @@ def pin_session(request: SessionPinRequest):
     data = session(); name = safe_name(request.name.strip())
     target = data["state"].root.parent / name
     if not target.is_dir():
-        raise HTTPException(404, "会话不存在。")
+        raise HTTPException(404, ui_message(ACTIVE, 'error.session_missing'))
     saved = ProjectState(app_state_home(), data["state"].workspace, name)
     saved.data["sidebar_pinned"] = bool(request.pinned); saved.save()
     return {"name": name, "pinned": bool(request.pinned)}
@@ -2070,14 +2121,14 @@ def diagnostics():
 def model_test(request: ModelTestRequest):
     model = request.model.strip()
     if not model:
-        raise HTTPException(400, "请输入 Bosch Farm 的准确 Model ID。")
+        raise HTTPException(400, ui_message(ACTIVE, 'model.id_required'))
     load_dotenv(Path(__file__).resolve().parent / ".env")
     key = os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY") or os.getenv("BOSCH_FARM_API_KEY")
     if not key:
-        raise HTTPException(400, "未找到 BOSCH_FARM_SUBSCRIPTION_KEY。")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.key_missing', path=".env"))
     def record(ok: bool, message: str, **extra):
         result = {
-            "requested_model": model, "ok": ok, "message": message,
+            "requested_model": model, "ok": ok, "message": str(message), **message_payload(message),
             "tested_at": datetime.now().astimezone().isoformat(timespec="seconds"), **extra,
         }
         save_model_test(result)
@@ -2090,32 +2141,33 @@ def model_test(request: ModelTestRequest):
             {"maxOutputTokens": 32, "temperature": 0}, stream=True,
             event_handler=lambda kind, text: notices.append(text) if kind == "notice" else None,
         )
-        answer = require_model_success(answer, "模型测试")
+        answer = require_model_success(answer, ui_message(ACTIVE, 'model.test'))
         usage = probe.get_last_token_usage() or {}
-        if any("拒绝流式" in item for item in notices):
-            streaming = "自动回退为完整响应"
+        if any(getattr(item, 'message_key', '') == 'notice.stream_fallback' for item in notices):
+            streaming = ui_message(ACTIVE, 'model.stream_fallback')
         elif notices:
-            streaming = "连接器使用非流式输出"
+            streaming = ui_message(ACTIVE, 'model.stream_full')
         else:
-            streaming = "原生流式输出"
+            streaming = ui_message(ACTIVE, 'model.stream_native')
         usage_available = bool(usage) and (
             "input_tokens" in usage or "output_tokens" in usage or "total_tokens" in usage
         )
-        message = "连接和回答已验证；token usage 已返回。" if usage_available else "连接和回答已验证；网关未返回 token usage。"
+        message = ui_message(ACTIVE, 'model.test_ok' if usage_available else 'model.test_no_usage')
         return record(
             True, message,
-            model=probe.last_response_model or model, answer=answer[:120], streaming=streaming,
+            model=probe.last_response_model or model, answer=answer[:120], streaming=str(streaming),
+            streaming_message=message_payload(streaming),
             usage_available=usage_available,
             input_tokens=usage.get("input_tokens", 0), output_tokens=usage.get("output_tokens", 0),
         )
     except Exception as exc:
-        return record(False, str(exc), model=model)
+        return record(False, error_copy(exc, ACTIVE), model=model)
 
 
 @app.get("/api/pick/{kind}")
 def pick(kind: str):
     """Use the local Python GUI only as a native path chooser, never for files."""
-    if kind not in {"file", "folder"}: raise HTTPException(400, "Unknown picker type")
+    if kind not in {"file", "folder"}: raise HTTPException(400, ui_message(ACTIVE, 'error.picker_type'))
     try:
         import tkinter as tk
         from tkinter import filedialog
@@ -2123,7 +2175,7 @@ def pick(kind: str):
         value = filedialog.askopenfilename(title="选择本地文件") if kind == "file" else filedialog.askdirectory(title="选择本地文件夹")
         root.destroy()
     except Exception as exc:
-        raise HTTPException(501, f"无法打开系统选择器；请直接粘贴路径。{exc}") from exc
+        raise HTTPException(501, ui_message(ACTIVE, 'error.picker_failed', detail=error_copy(exc, ACTIVE))) from exc
     return {"path": value}
 
 
@@ -2140,7 +2192,7 @@ def documents():
 def add_document(request: PathRequest):
     reject_context_change_while_processing()
     if session()["state"].data.get("bg_context") or context_issue(session()):
-        raise HTTPException(409, "Confirm the complete material selection before adding documents.")
+        raise HTTPException(409, ui_message(ACTIVE, 'context.reconfirm'))
     item = session()["documents"].add(str(safe_file(request.path)))
     state = session()["state"]
     state.data.setdefault("active_source_ids", []).append(item["id"])
@@ -2187,7 +2239,7 @@ def analyze_target(request: TargetRequest):
     reject_context_change_while_processing()
     data = session()
     if not request.target.strip():
-        raise HTTPException(400, "Select a file or folder")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.target_required'))
     target = Path(request.target.strip().strip('"')).expanduser().resolve()
     profile = load_codebook_profile()
     codebook_path = None
@@ -2195,9 +2247,9 @@ def analyze_target(request: TargetRequest):
         codebook_path = Path(str(profile.get("source_path", "")))
         if (not valid_rule_profile(profile.get("draft")) or not codebook_path.is_file()
                 or file_digest(codebook_path) != profile.get("sha256")):
-            raise HTTPException(409, "Codebook changed or is invalid. Prepare and lock the rules again.")
+            raise HTTPException(409, ui_message(ACTIVE, 'error.rules_changed'))
     elif data["state"].data.get("context_issue") == "rules_changed":
-        raise HTTPException(409, "Lock the current rules before confirming classification materials.")
+        raise HTTPException(409, ui_message(ACTIVE, 'error.rules_lock'))
 
     # Defer index writes while preserving content-addressed parser/OCR caches.
     documents = data["documents"]
@@ -2211,7 +2263,7 @@ def analyze_target(request: TargetRequest):
     elif target.is_dir():
         selected = selected_target_files(target, request.selected_paths)
         if not selected:
-            raise HTTPException(400, "Select at least one supported material.")
+            raise HTTPException(400, ui_message(ACTIVE, 'materials.selection_required'))
         for path in selected:
             try:
                 sources.append(staged.add(str(path)))
@@ -2220,16 +2272,16 @@ def analyze_target(request: TargetRequest):
             except Exception as exc:
                 skipped.append(f"{path.name}: {exc}")
         if not sources:
-            raise HTTPException(400, "No selected file could be read: " + "; ".join(skipped[:10]))
+            raise HTTPException(400, ui_message(ACTIVE, "error.material_unreadable", detail="; ".join(skipped[:10])))
         target_kind = "文件夹"
     else:
-        raise HTTPException(400, f"File or folder does not exist: {target}")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.file_missing', path=target))
     codebook = staged.add(str(codebook_path)) if codebook_path else None
     if profile != load_codebook_profile():
-        raise HTTPException(409, "Rules changed during material preparation. Confirm again.")
+        raise HTTPException(409, ui_message(ACTIVE, 'error.rules_changed'))
     for item in sources + ([codebook] if codebook else []):
         if file_digest(Path(item["path"])) != item["sha256"]:
-            raise HTTPException(409, "A source changed during preparation. Confirm materials again.")
+            raise HTTPException(409, ui_message(ACTIVE, 'context.reconfirm'))
 
     state = data["state"]
     old_state, old_index = state.data, documents.data
@@ -2257,7 +2309,7 @@ def analyze_target(request: TargetRequest):
     candidate["source_binding"] = source_binding(staged, candidate["active_source_ids"])
     problem = context_state_error(candidate)
     if problem:
-        raise HTTPException(409, "Invalid material binding: " + problem)
+        raise HTTPException(409, ui_message(ACTIVE, "error.binding", detail=problem))
 
     paths = [state.path, documents.path, material_selections_path(), state.transcript_path, coverage_path(state)]
     originals = {path: path.read_bytes() if path.exists() else None for path in paths}
@@ -2294,7 +2346,7 @@ def analyze_target(request: TargetRequest):
 def get_target_tree(target: str):
     folder = Path(target.strip().strip('"')).expanduser().resolve()
     if not folder.is_dir():
-        raise HTTPException(400, "请选择一个存在的文件夹后再显示文件树。")
+        raise HTTPException(400, ui_message(ACTIVE, 'tree.path_required'))
     tree, truncated = target_tree(folder)
     saved_paths, missing, changed = load_material_selection(folder)
     return {"tree": tree, "truncated": truncated,
@@ -2312,7 +2364,7 @@ def codebook_status():
 def codebook_prepare(request: CodebookPrepareRequest):
     path = safe_file(request.path)
     if path.suffix.lower() not in {".pdf", ".docx"}:
-        raise HTTPException(400, "Codebook 目前仅支持 PDF 或 DOCX。")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.rules_format'))
     data = begin_model_work()
     model = request.model.strip() or data["model"]
     try:
@@ -2324,7 +2376,7 @@ def codebook_prepare(request: CodebookPrepareRequest):
             data["state"].save()
         return profile
     except Exception as exc:
-        raise HTTPException(400, f"Codebook 准备失败：{exc}") from exc
+        raise HTTPException(400, ui_message(ACTIVE, 'error.rules_prepare', detail=error_copy(exc, ACTIVE))) from exc
     finally:
         MODEL_WORK_IN_PROGRESS.clear()
 
@@ -2332,6 +2384,7 @@ def codebook_prepare(request: CodebookPrepareRequest):
 class CodebookEditRequest(BaseModel):
     draft: dict
     confirmed: bool = False
+    profile_version: str | None = None
 
 
 def rules_changed(data):
@@ -2345,10 +2398,15 @@ def rules_changed(data):
 @app.post("/api/codebook/edit")
 @context_mutation
 def codebook_edit(request: CodebookEditRequest):
-    if not request.confirmed: raise HTTPException(400, "Explicit confirmation required")
+    if not request.confirmed: raise HTTPException(400, ui_message(ACTIVE, 'error.confirmation'))
     profile = load_codebook_profile()
-    if not profile.get('source_path'): raise HTTPException(400, "Prepare a Codebook first")
-    draft = parse_codebook_draft(json.dumps(request.draft))
+    if not profile.get('source_path'): raise HTTPException(400, ui_message(ACTIVE, 'error.rules_first'))
+    if request.profile_version is not None and request.profile_version != profile.get('version'):
+        raise HTTPException(409, ui_message(ACTIVE, 'rules.version_changed'))
+    try:
+        draft = parse_codebook_draft(json.dumps(request.draft))
+    except ValueError as exc:
+        raise HTTPException(400, ui_message(ACTIVE, 'error.rules_invalid', detail=error_copy(exc, ACTIVE))) from exc
     previous = dict(profile)
     profile['draft'] = draft; profile['status'] = 'draft'
     profile['previous_draft'] = previous.get('draft', {})
@@ -2364,10 +2422,10 @@ def codebook_lock():
     reject_context_change_while_processing()
     profile = load_codebook_profile()
     if profile.get("status") != "draft" or not (profile.get("draft") or {}).get("classes"):
-        raise HTTPException(400, "请先成功准备 Codebook 草稿。")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.rules_first'))
     path = Path(str(profile.get("source_path", "")))
     if not path.is_file() or file_digest(path) != profile.get("sha256"):
-        raise HTTPException(409, "Codebook 文件已变化；请重新准备。")
+        raise HTTPException(409, ui_message(ACTIVE, 'error.rules_changed'))
     profile["draft"] = parse_codebook_draft(json.dumps(profile["draft"]))
     profile["status"] = "locked"
     profile["locked_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
@@ -2420,24 +2478,25 @@ def cache_audit_status():
 def rebuild_cached_file(request: CacheFileRequest):
     reject_context_change_while_processing()
     if not request.confirmed:
-        raise HTTPException(400, "必须确认后才会清除该文件的摘要缓存。")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.confirmation'))
     data = session()
     ensure_current_sources(data)
     document = next((item for item in data["documents"].list() if item.get("id") == request.document_id
                      and item["id"] in data["state"].data.get("active_source_ids", [])), None)
     if not document:
-        raise HTTPException(404, "当前材料范围中找不到该文件。")
+        raise HTTPException(404, ui_message(ACTIVE, 'error.material_missing'))
     target = app_state_home() / "material_cache" / str(document.get("sha256") or "")
     if target.is_dir():
         shutil.rmtree(target)
     invalidate_current_coverage(data["state"], str(document["id"]))
-    return {"message": f"已清除 {document['name']} 的本地摘要；下次分类会只重读该文件。", "audit": cache_audit(data)}
+    message = ui_message(data, 'cache.file_cleared', name=document['name'])
+    return {"message": str(message), **message_payload(message), "audit": cache_audit(data)}
 
 
 @app.post("/api/cache/dossier/rebuild")
 def rebuild_bg_dossier(request: CacheConfirmRequest):
     if not request.confirmed:
-        raise HTTPException(400, "必须确认后才会重新生成 BG 综合证据档案。")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.confirmation'))
     # Reserve the shared model slot before inspecting the session.  Until the
     # finally block runs, every context-changing route and every other model
     # task sees this rebuild as active.
@@ -2446,14 +2505,15 @@ def rebuild_bg_dossier(request: CacheConfirmRequest):
         ensure_current_sources(data)
         coverage = load_coverage(data["state"])
         if not coverage_matches_current_selection(data, coverage):
-            raise HTTPException(409, "当前材料尚未完成预读；请先准备分类证据。")
+            raise HTTPException(409, ui_message(ACTIVE, 'error.coverage_missing'))
         with LOCK:
             # Do not unlink an existing dossier first.  The replacement is
             # written atomically only after the new model response succeeded,
             # so a failed rebuild cannot masquerade as a completed cache or
             # discard a previously valid audit record.
             dossier, usage, _created = prepare_bg_dossier(data, coverage, force=True)
-        return {"message": "BG 综合证据档案已重新生成。", "dossier": dossier,
+        message = ui_message(data, 'cache.dossier_rebuilt')
+        return {"message": str(message), **message_payload(message), "dossier": dossier,
                 "usage": usage or summarize_usage([]), "audit": cache_audit(data)}
     finally:
         MODEL_WORK_IN_PROGRESS.clear()
@@ -2464,7 +2524,7 @@ def rebuild_bg_dossier(request: CacheConfirmRequest):
 def clear_summary_caches(request: CacheConfirmRequest):
     reject_context_change_while_processing()
     if not request.confirmed:
-        raise HTTPException(400, "必须确认后才会清除本地摘要缓存。")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.confirmation'))
     for name in ("material_cache", "bg_dossier_cache"):
         target = app_state_home() / name
         if target.is_dir():
@@ -2472,7 +2532,8 @@ def clear_summary_caches(request: CacheConfirmRequest):
     # Keep local source indexes/OCR derivatives intact; only model-generated
     # summaries and dossiers are cleared.  The current report is marked stale.
     invalidate_current_coverage(session()["state"])
-    return {"message": "已清除本地材料摘要和 BG 综合档案；索引与 OCR 缓存保留。", "audit": cache_audit(session())}
+    message = ui_message(ACTIVE, 'cache.cleared')
+    return {"message": str(message), **message_payload(message), "audit": cache_audit(session())}
 
 
 @app.delete("/api/bg")
@@ -2498,7 +2559,7 @@ def export_bg_analysis():
 
 @app.post("/api/chat")
 def chat(request: ChatRequest):
-    if not request.question.strip(): raise HTTPException(400, "请输入问题。")
+    if not request.question.strip(): raise HTTPException(400, ui_message(ACTIVE, 'error.question'))
     data = begin_model_work()
     try:
         with LOCK:
@@ -2520,7 +2581,7 @@ def chat_task_status(task):
 def get_chat_task(request_id: str):
     with CHAT_TASK_GUARD:
         if CHAT_TASK.get("id") != request_id:
-            raise HTTPException(404, "Unknown chat request")
+            raise HTTPException(404, ui_message(ACTIVE, 'error.unknown_task'))
         return chat_task_status(CHAT_TASK)
 
 
@@ -2528,7 +2589,7 @@ def get_chat_task(request_id: str):
 def cancel_chat(request: ChatCancelRequest):
     with CHAT_TASK_GUARD:
         if CHAT_TASK.get("id") != request.request_id:
-            raise HTTPException(404, "Unknown chat request")
+            raise HTTPException(404, ui_message(ACTIVE, 'error.unknown_task'))
         task = dict(CHAT_TASK)
     if not task["done"].is_set() and task["control"].cancel():
         with CHAT_TASK_GUARD:
@@ -2542,7 +2603,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
     """A bounded preview queue; only the joined worker can release its slot."""
     question = request.question.strip()
     if not question:
-        raise HTTPException(400, "请输入问题。")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.question'))
     data = begin_model_work()
     try:
         with LOCK:
@@ -2567,7 +2628,8 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                 continue
 
     def publish(phase: str, text: str, percent: int | None = None) -> None:
-        emit({"type": "progress", "phase": phase, "text": text, "percent": percent})
+        emit({"type": "progress", "phase": phase, "text": str(text), "percent": percent,
+              **message_payload(text)})
 
     data["answer_events"] = emit
 
@@ -2580,7 +2642,9 @@ async def chat_stream(request: ChatRequest, http_request: Request):
             code = ("cancelled" if isinstance(exc, RequestCancelled) else
                     "timeout" if isinstance(exc, RequestTimedOut) else
                     "limit" if isinstance(exc, RequestStopped) else "failed")
-            task["error"] = {"type": "error", "code": code, "message": safe_error(exc)}
+            detail = error_copy(exc, data)
+            task["error"] = {"type": "error", "code": code, "message": safe_error(str(detail)),
+                             **message_payload(detail)}
 
     thread = threading.Thread(target=worker, daemon=True)
     task["worker"] = thread
@@ -2656,9 +2720,9 @@ def compare(request: CompareRequest):
     question = request.question.strip()
     models = list(dict.fromkeys(model.strip() for model in request.models if model and model.strip()))
     if not question:
-        raise HTTPException(400, "请输入同一条要对比的问题。")
+        raise HTTPException(400, ui_message(ACTIVE, 'error.question'))
     if not 2 <= len(models) <= 4:
-        raise HTTPException(400, "请勾选 2 到 4 个模型。")
+        raise HTTPException(400, ui_message(ACTIVE, 'compare.models_required'))
     data = begin_model_work()
     try:
         with LOCK:
@@ -2721,13 +2785,13 @@ def publish_pending(data, changes):
 @app.post("/api/apply")
 @context_mutation
 def apply(request: ApplyRequest):
-    if not request.confirmed: raise HTTPException(400, "Explicit confirmation is required")
+    if not request.confirmed: raise HTTPException(400, ui_message(ACTIVE, 'error.confirmation'))
     data = session(); pending = data.get("pending", [])
     plan = data.get("pending_plan") or {}
     if not request.plan_id or request.plan_id != plan.get("id") or not pending:
-        raise HTTPException(409, "This change plan is no longer current. Review the current plan again.")
+        raise HTTPException(409, ui_message(ACTIVE, 'error.plan_expired'))
     if plan.get("context") != plan_context(data) or plan.get("changes") != plan_digest(pending):
-        raise HTTPException(409, "The reviewed plan or context changed. Request and review a new plan.")
+        raise HTTPException(409, ui_message(ACTIVE, 'error.plan_changed'))
     ensure_current_sources(data)
     state = data["state"]
     backup_dir = state.root / "backups" / uuid.uuid4().hex
@@ -2739,7 +2803,7 @@ def apply(request: ApplyRequest):
                 raise ValueError("Binary documents and Excel must use the dedicated copy-based editor")
             old = path.read_bytes() if path.exists() else None
             if (sha256(old) if old is not None else None) != item["before"]:
-                raise HTTPException(409, f"{item['path']} changed after review")
+                raise HTTPException(409, ui_message(ACTIVE, 'error.source_changed', path=item['path']))
             originals[path] = old
             if old is not None:
                 backup = backup_dir / item["path"]; backup.parent.mkdir(parents=True, exist_ok=True); backup.write_bytes(old)
@@ -2823,6 +2887,39 @@ function t(key,variables={}){
   if(template===undefined){console.warn('Unknown UI translation key:',key);return key}
   return template.replace(/\{(\w+)\}/g,(_,name)=>Object.prototype.hasOwnProperty.call(variables,name)?String(variables[name]):'{'+name+'}');
 }
+function uiCopy(value){
+  if(value==null)return '';
+  if(Array.isArray(value))return value.map(uiCopy).join('');
+  if(typeof value==='string')return value;
+  if(value.message_key){let params=Object.fromEntries(Object.entries(value.params||{}).map(([key,item])=>[key,item&&typeof item==='object'&&(item.message_key||typeof item.text==='string')?uiCopy(item):item]));return t(value.message_key,params)}
+  return String(value.text??value.message??'');
+}
+function registerUI(node,kind,data){node.dataset.uiComponent=kind;node.uiData=data;return node}
+function setUIMessage(host,data,kind=''){if(!host)return;let node=document.createElement('span');node.className=kind;node.textContent=uiCopy(data);registerUI(node,'message',data);host.replaceChildren(node);return node}
+function uiMessageNode(data,kind='assistant'){return registerUI(message(uiCopy(data),kind),'message',data)}
+function scopeCopy(record){
+  if(record.scope_message)return uiCopy(record.scope_message);
+  if(record.reading_scope_message)return uiCopy(record.reading_scope_message);
+  let scope=record.scope??record.reading_scope??'';
+  return scope==='完整文本预读'?t('material.scope_full'):scope==='Datasheet 前 15 页预读（其余页尚未覆盖）'?t('material.scope_datasheet',{pages:15}):scope==='已读取'?t('coverage.default_scope'):scope;
+}
+function stateCopy(value){let keys={'ok':'state.ok','not_needed':'state.not_needed','partial':'state.partial','unknown':'state.unknown','not_requested':'state.not_requested','not_applicable':'state.not_applicable','not applicable':'state.not_applicable','已完成':'state.complete','部分完成':'state.partial','不需要（原生文字页）':'state.native_text','不适用（无页码文档）':'state.not_applicable'};return keys[value]?t(keys[value]):String(value??'—')}
+function roleCopy(value){let keys={'技术图纸':'material.role_drawing','BOM / 装配表':'material.role_bom','数据表 / 目录':'material.role_datasheet','DFC 结构图':'material.role_dfc','CAD 截图':'material.role_cad','派生重复资料':'material.role_derived','Inventor 源图（暂不支持）':'material.role_unsupported','其他资料':'material.role_other'};return keys[value]?t(keys[value]):String(value||t('material.role_other'))}
+function rerenderUIComponents(){
+  for(let node of document.querySelectorAll('[data-ui-component]')){
+    let data=node.uiData;
+    if(node.dataset.uiComponent==='classification')node.innerHTML=classificationCard(data).innerHTML;
+    else if(node.dataset.uiComponent==='coverage')node.innerHTML=coverageSummaryCard(data).innerHTML;
+    else if(node.dataset.uiComponent==='message')node.textContent=uiCopy(data);
+    else if(node.dataset.uiComponent==='notices')node.textContent=data.map(uiCopy).join('\n');
+    else if(node.dataset.uiComponent==='processing'){
+      node.querySelector('[data-process-title]').textContent=t('model.processing');
+      node.querySelector('[data-process-text]').textContent=uiCopy(data)||t('model.connecting');
+    }
+    else if(node.dataset.uiComponent==='preview')node.querySelector('.muted').textContent=t('stream.preview');
+    else if(node.dataset.uiComponent==='reasoning')node.querySelector('summary').textContent=t('model.reasoning');
+  }
+}
 function setI18nText(element,key,variables){if(element)element.textContent=t(key,variables)}
 function tr(source){return LEGACY_KEYS[source]?t(LEGACY_KEYS[source]):source}
 function rt(key,values={}){return t(key,values)}
@@ -2858,10 +2955,10 @@ async function restoreLastWorkspace(){
     $('workspace').value=s.workspace;
     setSelectedModel(s.model||'claude-haiku-5-5');
     $('session').innerHTML='<option>'+ esc(s.session||'default') +'</option>';
-    $('setupmsg').textContent=t('workspace.restoring');
+    setUIMessage($('setupmsg'),{message_key:'workspace.restoring'});
     await setup();
   }catch{
-    $('setupmsg').textContent=t('workspace.restore_failed');
+    setUIMessage($('setupmsg'),{message_key:'workspace.restore_failed'});
   }
 }
 function setLeftPanelWidth(width){let available=Math.max(240,window.innerWidth-420-300-8);let bounded=Math.max(235,Math.min(Number(width)||270,Math.min(600,available)));document.documentElement.style.setProperty('--left-panel-width',bounded+'px');let drawerStyle=$('scan-drawer-position')||Object.assign(document.createElement('style'),{id:'scan-drawer-position'});drawerStyle.textContent='#scanbackdrop .scan-drawer{left:'+bounded+'px!important}';if(!drawerStyle.parentNode)document.head.append(drawerStyle);localStorage.setItem('bosch-workbench-left-panel-width',String(bounded))}
@@ -2872,6 +2969,7 @@ function rerenderLanguageSensitiveUI(){
   refreshAppChrome();
   localizeComposerControls();
   localizeSessionChrome();
+  for(let kind of ['materials','rules']){let node=$('contextshortcut-'+kind);if(node){node.title=t(kind==='materials'?'context.materials':'rules.title');node.setAttribute('aria-label',node.title)}}
   if(lastStatusSnapshot)renderStatus(lastStatusSnapshot);
   if(lastUsageSnapshot)renderUsageDetail(lastUsageSnapshot.usage,lastUsageSnapshot.model);
   if(lastCodebookProfile)renderCodebookStatus(lastCodebookProfile);
@@ -2881,34 +2979,39 @@ function rerenderLanguageSensitiveUI(){
   if(lastCoverageReport)renderCoverageReport(lastCoverageReport);
   if(lastScanReport){setScanReportAvailable(lastScanReport);if($('scanbackdrop')?.classList.contains('open'))renderScanDrawer(lastScanReport)}
   if(lastCacheAudit)renderCacheAudit(lastCacheAudit);
+  if(lastSourcesSnapshot)renderEvidenceSources(lastSourcesSnapshot.sources,lastSourcesSnapshot.dfc);
   if(lastSessionRows.length)renderSessionRowsForLanguage(lastSessionRows,false);
   renderCompareSlots();
   if(lastComparison)renderComparisonForLanguage(lastComparison);
-  if(lastCodebookWorkspaceProfile&&$('chat')?.classList.contains('codebook-workspace'))showCodebookWorkspace(lastCodebookWorkspaceProfile);
-  if(activeContextDrawer)openContextDrawer(activeContextDrawer);
+  if(ruleEditState)renderRuleEditor();
+  else if(lastCodebookWorkspaceProfile&&$('chat')?.classList.contains('codebook-workspace'))showCodebookWorkspace(lastCodebookWorkspaceProfile);
+  rerenderUIComponents();
+  for(let node of document.querySelectorAll('button[data-plan-id]'))node.textContent=t('changes.apply');
+  for(let node of document.querySelectorAll('button[onclick="exportBgAnalysis()"]'))node.textContent=t('export.assembly');
+  if(activeContextDrawer){let kind=activeContextDrawer,values=[...$('contextdrawerbody').querySelectorAll('input[id],textarea[id]')].filter(node=>!node.classList.contains('tree-file')&&!node.classList.contains('tree-folder')).map(node=>[node.id,node.value,node.selectionStart,node.selectionEnd]);openContextDrawer(kind);for(let [id,value,start,end] of values){let node=$(id);if(node){node.value=value;if(node.setSelectionRange&&start!=null)node.setSelectionRange(start,end)}}}
   refreshContextPanel();
 }
 function responseTextSummary(raw){let text=String(raw||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();return text.length>360?text.slice(0,357)+'…':text}
-function apiErrorMessage(response,body){let detail='';if(body&&typeof body==='object')detail=typeof body.detail==='string'?body.detail:(typeof body.message==='string'?body.message:'');let summary=detail||responseTextSummary(typeof body==='string'?body:'');return `HTTP ${response.status}${response.statusText?` ${response.statusText}`:''}${summary?`：${summary}`:`：${t('api.failed')}`}`}
-async function readApiResponse(response){let raw=await response.text(),body=null;if(raw.trim()){try{body=JSON.parse(raw)}catch{body=raw}}if(!response.ok)throw Error(apiErrorMessage(response,body));if(body===null||typeof body==='string')throw Error(`HTTP ${response.status}：${t('api.invalid_json')}${responseTextSummary(raw)?' '+responseTextSummary(raw):''}`);return body}
-async function api(url,opt={}){let response;try{response=await fetch(url,{headers:{'Content-Type':'application/json'},...opt})}catch(error){throw Error(t('model.connection_failed')+(error?.message?` ${error.message}`:''))}return readApiResponse(response)}
+function apiErrorMessage(response,body){let detail=body?.message_key?uiCopy(body):'';if(!detail&&body&&typeof body==='object')detail=typeof body.detail==='string'?body.detail:(typeof body.message==='string'?body.message:'');let summary=detail||responseTextSummary(typeof body==='string'?body:'');return `HTTP ${response.status}${response.statusText?` ${response.statusText}`:''}${summary?`：${summary}`:`：${t('api.failed')}`}`}
+async function readApiResponse(response){let raw=await response.text(),body=null;if(raw.trim()){try{body=JSON.parse(raw)}catch{body=raw}}if(!response.ok){let error=Error(apiErrorMessage(response,body));if(body?.message_key)error.uiMessage=body;throw error}if(body===null||typeof body==='string')throw Error(`HTTP ${response.status}：${t('api.invalid_json')}${responseTextSummary(raw)?' '+responseTextSummary(raw):''}`);return body}
+async function api(url,opt={}){let response;try{response=await fetch(url,{headers:{'Content-Type':'application/json','X-Workbench-Language':uiLanguage},...opt})}catch(error){throw Error(t('model.connection_failed')+(error?.message?` ${error.message}`:''))}return readApiResponse(response)}
 async function pick(kind,target){try{$(target).value=(await api('/api/pick/'+kind)).path||''}catch(e){alert(e.message)}}
-async function pickWorkspace(){try{let path=(await api('/api/pick/folder')).path||'';if(!path)return;$('workspace').value=path;await setup()}catch(e){$('setupmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function pickWorkspace(){try{let path=(await api('/api/pick/folder')).path||'';if(!path)return;$('workspace').value=path;await setup()}catch(e){setUIMessage($('setupmsg'),e.uiMessage||{text:e.message},'error')}}
 function refreshAppChrome(){let path=$('workspace')?.value.trim();let short=path?path.replace(/\\/g,'/').split('/').filter(Boolean).slice(-2).join(' / '):tr('选择工作区文件夹');if($('workspaceshortcut'))$('workspaceshortcut').textContent=short;if($('topbarstatus'))$('topbarstatus').textContent=path?tr('本地运行 · 工作区已打开'):tr('本地运行')}
 function initVisualAdjustments(){if($('visual-adjustments'))return;let style=document.createElement('style');style.id='visual-adjustments';style.textContent='.composer-tools select{border-radius:8px!important}';document.head.append(style)}
-function initLanguageLayout(){if($('language-layout'))return;let style=document.createElement('style');style.id='language-layout';style.textContent=`html[lang="zh"] body,html[lang="zh"] button,html[lang="zh"] input,html[lang="zh"] select{font-family:"Microsoft YaHei UI","Microsoft YaHei","Noto Sans SC","Segoe UI",sans-serif;letter-spacing:0}html[lang="en"] body,html[lang="en"] button,html[lang="en"] input,html[lang="en"] select,html[lang="de"] body,html[lang="de"] button,html[lang="de"] input,html[lang="de"] select{font-family:Inter,"Segoe UI",Arial,sans-serif}html[lang="zh"] .chat-subtitle,html[lang="zh"] .muted{line-height:1.55}html[lang="de"] .context-card strong,html[lang="de"] .context-drawer-head h2{letter-spacing:0}html[lang="de"] .context-card strong{padding-right:42px}.row{flex-wrap:wrap;align-items:center}.row input{min-width:min(100%,185px)}.row button{white-space:normal;line-height:1.25;min-height:34px}.context-card{min-height:78px}.context-card strong{position:relative;line-height:1.3;padding-right:50px;overflow-wrap:anywhere}.context-card em{position:absolute;right:0;top:0;float:none;white-space:nowrap}.context-card span{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.context-drawer-head h2,.context-drawer-body label,.classification-card h3{overflow-wrap:anywhere}.context-drawer-body button,.workspace-actions button{max-width:100%;overflow-wrap:anywhere}.composer-tools{flex-wrap:wrap;row-gap:5px}.composer-tools .spacer{min-width:0}.composer-tools select{min-width:170px;max-width:min(330px,100%)}html[lang="de"] .composer-tools select{max-width:285px}@media(max-width:1180px){.shell{grid-template-columns:minmax(220px,var(--left-panel-width)) 8px minmax(360px,1fr) 260px}.right{padding:13px 10px}.context-drawer{right:260px;width:min(640px,calc(100vw - 300px))}.chat-header{padding:0 20px}.composer-wrap{padding-left:20px;padding-right:20px}}@media(max-width:760px){.topbar{gap:8px;padding:0 10px}.app-brand{font-size:13px}.topbar-workspace{max-width:145px}.shell{grid-template-columns:minmax(180px,42vw) 7px minmax(0,1fr)}.chat{padding:20px 14px}.chat-header{padding:0 14px}.composer-wrap{padding:0 14px 14px}.welcome h1{font-size:26px}.composer-tools .spacer{display:none}.composer-tools select{width:100%;max-width:none}.composer-tools #custommodelrow{width:100%;flex-wrap:wrap}.composer-tools #custommodelrow input{width:100%}.context-drawer{width:100%;border-radius:0}.context-card{min-height:0}}`;document.head.append(style)}
+function initLanguageLayout(){if($('language-layout'))return;let style=document.createElement('style');style.id='language-layout';style.textContent=`.context-shortcut{display:none}@media(max-width:1180px){.context-shortcut{display:inline-grid}}html[lang="zh"] body,html[lang="zh"] button,html[lang="zh"] input,html[lang="zh"] select{font-family:"Microsoft YaHei UI","Microsoft YaHei","Noto Sans SC","Segoe UI",sans-serif;letter-spacing:0}html[lang="en"] body,html[lang="en"] button,html[lang="en"] input,html[lang="en"] select,html[lang="de"] body,html[lang="de"] button,html[lang="de"] input,html[lang="de"] select{font-family:Inter,"Segoe UI",Arial,sans-serif}html[lang="zh"] .chat-subtitle,html[lang="zh"] .muted{line-height:1.55}html[lang="de"] .context-card strong,html[lang="de"] .context-drawer-head h2{letter-spacing:0}html[lang="de"] .context-card strong{padding-right:42px}.row{flex-wrap:wrap;align-items:center}.row input{min-width:min(100%,185px)}.row button{white-space:normal;line-height:1.25;min-height:34px}.context-card{min-height:78px}.context-card strong{position:relative;line-height:1.3;padding-right:50px;overflow-wrap:anywhere}.context-card em{position:absolute;right:0;top:0;float:none;white-space:nowrap}.context-card span{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.context-drawer-head h2,.context-drawer-body label,.classification-card h3{overflow-wrap:anywhere}.context-drawer-body button,.workspace-actions button{max-width:100%;overflow-wrap:anywhere}.composer-tools{flex-wrap:wrap;row-gap:5px}.composer-tools .spacer{min-width:0}.composer-tools select{min-width:170px;max-width:min(330px,100%)}html[lang="de"] .composer-tools select{max-width:285px}@media(max-width:1180px){.shell{grid-template-columns:minmax(220px,var(--left-panel-width)) 8px minmax(360px,1fr) 260px}.right{padding:13px 10px}.context-drawer{right:260px;width:min(640px,calc(100vw - 300px))}.chat-header{padding:0 20px}.composer-wrap{padding-left:20px;padding-right:20px}}@media(max-width:760px){.topbar{gap:8px;padding:0 10px}.app-brand{font-size:13px}.topbar-workspace{max-width:145px}.shell{grid-template-columns:minmax(180px,42vw) 7px minmax(0,1fr)}.chat{padding:20px 14px}.chat-header{padding:0 14px}.composer-wrap{padding:0 14px 14px}.welcome h1{font-size:26px}.composer-tools .spacer{display:none}.composer-tools select{width:100%;max-width:none}.composer-tools #custommodelrow{width:100%;flex-wrap:wrap}.composer-tools #custommodelrow input{width:100%}.context-drawer{left:0;right:0;width:auto;max-width:100vw;border-radius:0;transform:none!important;transition:opacity .18s}.context-drawer-body{min-width:0;overflow-x:hidden}.context-drawer-body input{min-width:0;max-width:100%}#scanbackdrop.open .scan-drawer{left:0!important;right:0;width:auto;max-width:100vw;transform:none}.main{min-width:0}.composer{grid-template-columns:minmax(0,1fr) auto}.composer #cancelchat{grid-column:2}.composer input{min-width:0}.composer-tools{grid-column:1/-1}.context-card{min-height:0}}@media(max-width:900px){.shell{grid-template-columns:minmax(220px,var(--left-panel-width)) 8px minmax(0,1fr)}}@media(max-width:650px){.shell{grid-template-columns:minmax(0,1fr)}.chat-header{gap:6px}.chat-subtitle{display:none}.chat-title{font-size:13px}}`;document.head.append(style)}
 function initComposerControls(){if($('composertools'))return;let composer=$('composer');if(!composer)return;let tools=document.createElement('div');tools.id='composertools';tools.className='composer-tools';let note=document.createElement('span');note.id='composermodelnote';note.className='muted';let spacer=document.createElement('span');spacer.className='spacer';let model=$('model'),custom=$('custommodelrow'),modelmsg=$('modelmsg'),test=document.querySelector('button[onclick="testModel()"]');if(model)tools.append(note,model);if(custom)tools.append(custom);if(test){test.id='modeltestbutton';test.className='model-test';tools.append(test)}if(modelmsg)tools.append(modelmsg);tools.append(spacer);let mode=document.createElement('select');mode.id='answermode';for(let value of ['classification','explanation']){let option=document.createElement('option');option.value=value;option.textContent=(value==='classification'?t('answer.classification'):t('answer.explanation'));mode.append(option)}tools.append(mode);composer.append(tools);mode.setAttribute('aria-label',t('answer.mode'));localizeComposerControls()}
 function localizeComposerControls(){setI18nText($('composermodelnote'),'model.current');setI18nText($('modeltestbutton'),'model.test')}
-async function contextPickWorkspace(){try{let path=(await api('/api/pick/folder')).path||'';if(!path)return;$('workspace').value=path;$('contextworkspacepath').value=path;await setup();refreshAppChrome();closeContextDrawer()}catch(e){$('contextworkspacemsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function contextPickWorkspace(){try{let path=(await api('/api/pick/folder')).path||'';if(!path)return;$('workspace').value=path;$('contextworkspacepath').value=path;await setup();refreshAppChrome();closeContextDrawer()}catch(e){setUIMessage($('contextworkspacemsg'),e.uiMessage||{text:e.message},'error')}}
 async function contextOpenWorkspace(){let path=$('contextworkspacepath').value.trim();if(!path){$('contextworkspacemsg').innerHTML='<span class="error">'+t('workspace.path_required')+'</span>';return}$('workspace').value=path;await setup();refreshAppChrome();closeContextDrawer()}
 let contextMoved=[];
 function contextText(id,fallback){let el=$(id);let text=(el?.innerText||el?.textContent||'').replace(/\s+/g,' ').trim();return text||fallback}
 function refreshContextPanel(){
-  let rule=contextText('codebookstatus','尚未选择分类规则文件');
+  let rule=contextText('codebookstatus',t('rules.no_file'));
   let path=$('targetpath')?.value.trim();let selected=treeFileCount?.()||0;
-  let material=path?(selected?`${selected} 个已选材料 · ${path}`:path):'尚未选择文件或 BG 文件夹';
-  let scan=contextText('coveragestatus',path?'材料范围待确认':'等待选择材料');
-  let audit=contextText('usagedetail','尚无本地读取或模型缓存');
+  let material=path?(selected?t('material.selected_path',{count:selected,path}):path):t('materials.no_selection');
+  let scan=contextText('coveragestatus',path?t('coverage.selection_changed'):t('materials.waiting'));
+  let audit=contextText('usagedetail',t('audit.no_cache'));
   if($('context-rule-summary'))$('context-rule-summary').textContent=rule;
   if($('context-material-summary'))$('context-material-summary').textContent=material;
   if($('context-scan-summary'))$('context-scan-summary').textContent=scan;
@@ -2928,6 +3031,11 @@ function renderContextGuard(){
 }
 function initContextPanel(){
   if($('contextbackdrop'))return;
+  for(let [kind,label] of [['materials','▣'],['rules','▤']]){
+    let button=document.createElement('button');button.className='header-icon context-shortcut';button.id='contextshortcut-'+kind;
+    button.textContent=label;button.title=t(kind==='materials'?'context.materials':'rules.title');button.setAttribute('aria-label',button.title);
+    button.setAttribute('onclick',"openContextDrawer('"+kind+"')");document.querySelector('.chat-header').append(button);
+  }
   let backdrop=document.createElement('div');backdrop.id='contextbackdrop';backdrop.className='context-backdrop';
   backdrop.innerHTML='<section class="context-drawer" role="dialog" aria-modal="true" aria-label="上下文详情"><div class="context-drawer-head"><h2 id="contextdrawertitle">当前上下文</h2><button class="ghost" onclick="closeContextDrawer()">×</button></div><div id="contextdrawerbody" class="context-drawer-body"></div></section>';
   backdrop.addEventListener('click',e=>{if(e.target===backdrop)closeContextDrawer()});document.body.append(backdrop);
@@ -2936,17 +3044,16 @@ function initContextPanel(){
   $('targetpath')?.addEventListener('input',refreshContextPanel);refreshContextPanel();
 }
 function moveContextElements(ids,host){
-  contextMoved=[];
   ids.forEach(id=>{let el=$(id);if(!el)return;let marker=document.createComment('context:'+id);el.parentNode.insertBefore(marker,el);contextMoved.push({el,marker});host.append(el)});
 }
 function closeContextDrawer(){
   for(let item of contextMoved){if(item.marker.parentNode)item.marker.parentNode.replaceChild(item.el,item.marker)}
   contextMoved=[];activeContextDrawer=null;$('contextbackdrop')?.classList.remove('open');refreshContextPanel();
 }
-async function contextPickTarget(kind){try{let path=(await api('/api/pick/'+kind)).path||'';if(!path)return;materialDraftDirty=true;$('targetpath').value=path;$('contexttargetpath').value=path;if(kind==='folder')await loadTargetTree();else clearTargetTree();refreshContextPanel()}catch(e){$('contexttargetmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function contextPickTarget(kind){try{let path=(await api('/api/pick/'+kind)).path||'';if(!path)return;materialDraftDirty=true;$('targetpath').value=path;$('contexttargetpath').value=path;if(kind==='folder')await loadTargetTree();else clearTargetTree();refreshContextPanel()}catch(e){setUIMessage($('contexttargetmsg'),e.uiMessage||{text:e.message},'error')}}
 function contextSyncTarget(){let value=$('contexttargetpath').value.trim();if(value!==$('targetpath').value.trim()){materialDraftDirty=true;$('targetpath').value=value;clearTargetTree()}refreshContextPanel()}
 function contextSyncRule(){let value=$('contextcodebookpath').value.trim();$('codebook').value=value;refreshContextPanel()}
-async function contextPickRule(){try{let path=(await api('/api/pick/file')).path||'';if(!path)return;$('codebook').value=path;$('contextcodebookpath').value=path;refreshContextPanel()}catch(e){$('contextrulemsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function contextPickRule(){try{let path=(await api('/api/pick/file')).path||'';if(!path)return;$('codebook').value=path;$('contextcodebookpath').value=path;refreshContextPanel()}catch(e){setUIMessage($('contextrulemsg'),e.uiMessage||{text:e.message},'error')}}
 function renderDiagnostics(report){
   let host=$('diagnosticsresult');if(!host)return;
   let ready=report.overall==='ready';
@@ -2970,7 +3077,7 @@ async function runDiagnostics(){
 function openContextDrawer(kind){
   closeContextDrawer();activeContextDrawer=kind;let title=$('contextdrawertitle'),body=$('contextdrawerbody');
   if(kind==='workspace'){
-    title.textContent=t('workspace.title');body.innerHTML='<div class="muted">'+t('workspace.description')+'</div><div class="field"><label>'+t('workspace.path_label')+'</label><div class="row"><input id="contextworkspacepath" placeholder="C:\\\\...\\\\项目文件夹" value="'+escAttr($('workspace').value)+'"><button class="ghost" onclick="contextPickWorkspace()">'+t('workspace.choose')+'</button></div></div><div class="row"><button onclick="contextOpenWorkspace()">'+t('workspace.open')+'</button></div><div id="contextworkspacemsg" class="muted" style="margin-top:10px"></div>';
+    title.textContent=t('workspace.title');body.innerHTML='<div class="muted">'+t('workspace.description')+'</div><div class="field"><label>'+t('workspace.path_label')+'</label><div class="row"><input id="contextworkspacepath" placeholder="'+t('workspace.path_label')+'" value="'+escAttr($('workspace').value)+'"><button class="ghost" onclick="contextPickWorkspace()">'+t('workspace.choose')+'</button></div></div><div class="row"><button onclick="contextOpenWorkspace()">'+t('workspace.open')+'</button></div><div id="contextworkspacemsg" class="muted" style="margin-top:10px"></div>';
   }else if(kind==='rules'){
     title.textContent=t('rules.title');body.innerHTML='<div class="muted">'+t('rules.description')+'</div><div class="field"><label>'+t('rules.file_label')+'</label><div class="row"><input id="contextcodebookpath" placeholder="'+t('rules.choose')+'" value="'+escAttr($('codebook').value)+'" oninput="contextSyncRule()"><button class="ghost" onclick="contextPickRule()">'+t('workspace.choose')+'</button></div></div><div class="row"><button onclick="contextSyncRule();prepareCodebook()">'+t('rules.prepare')+'</button><button class="ghost" onclick="viewCodebook()">'+t('rules.view')+'</button><button class="ghost" onclick="changeCodebook()">'+t('rules.replace')+'</button></div><div id="contextrulemsg" class="muted" style="margin-top:10px"></div><div class="card">'+$('codebookstatus').innerHTML+'</div>';
   }else if(kind==='materials'){
@@ -2988,8 +3095,8 @@ function openContextDrawer(kind){
 }
 function openCompareDrawer(){openContextDrawer('compare')}
 function message(text,kind='assistant'){let e=document.createElement('div');e.className='message '+kind;e.textContent=text;$('chat').append(e);$('chat').scrollTop=1e9;return e}
-function classificationCard(c){let card=document.createElement('section');card.className='classification-card';let alternative=c.alternative_label?'<br>'+t('classification.alternative')+'：'+esc(c.alternative_label):'';let evidence=(c.evidence_labels||[]).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>'+t('classification.none')+'</li>';let uncertainty=(c.uncertainties||[]).filter(Boolean).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>'+t('classification.not_reported')+'</li>';let rules=(c.codebook_rule_ids||[]).map(esc).join('、')||t('classification.not_returned');let rulePages=(c.codebook_rule_pages||[]).length?t('classification.rule_pages')+' '+c.codebook_rule_pages.map(esc).join('、'):t('classification.rule_refs')+' '+((c.codebook_rule_refs||[]).map(esc).join('、')||t('classification.not_returned'));let bgPages=(c.bg_evidence_pages||[]).map(esc).join('、')||t('classification.not_returned');card.innerHTML='<h3>'+t('classification.title')+'</h3><div class="result">'+t('classification.label')+'：<b>'+esc(c.label||'—')+'</b></div><div>'+t('classification.confidence')+'：'+esc(c.confidence||'—')+alternative+'</div><div><b>'+t('classification.rules')+'</b>：'+rules+'（'+rulePages+'）</div><div><b>'+t('classification.evidence_pages')+'</b>：'+bgPages+'</div><div><b>'+t('classification.evidence')+'</b><ul>'+evidence+'</ul></div><div><b>'+t('classification.uncertainty')+'</b><ul>'+uncertainty+'</ul></div>';return card}
-function coverageSummaryCard(summary){if(!summary?.files?.length)return null;let card=document.createElement('section');card.className='classification-card';card.style.borderColor='#475569';let rows=summary.files.map(f=>{let read=Array.isArray(f.pages_read)?f.pages_read.length:0,unread=Array.isArray(f.pages_unread)?f.pages_unread.length:0;let pages=f.pages_total?(' · '+t('coverage.read')+' '+read+'/'+f.pages_total+' '+(uiLanguage==='en'?'pages':'页')+(unread?'；'+t('coverage.unread')+' '+unread+' '+(uiLanguage==='en'?'pages':'页'):'')):'';let cache=f.cache_status==='reused'?t('coverage.reused'):t('coverage.created');return '<li><b>'+esc(f.name)+'</b>：'+esc(f.scope||t('coverage.default_scope'))+pages+' · '+cache+'</li>'}).join('');card.innerHTML='<h3>'+t('coverage.title')+'</h3><div class="muted">'+t('coverage.summary',{files:summary.files.length,reused:summary.reused_files||0,created:summary.created_files||0,calls:summary.model_calls||0})+'</div><ul>'+rows+'</ul>';return card}
+function classificationCard(c){let card=document.createElement('section');card.className='classification-card';let alternative=c.alternative_label?'<br>'+t('classification.alternative')+'：'+esc(c.alternative_label):'';let evidence=(c.evidence_labels||[]).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>'+t('classification.none')+'</li>';let uncertainty=(c.uncertainties||[]).filter(Boolean).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>'+t('classification.not_reported')+'</li>';let rules=(c.codebook_rule_ids||[]).map(esc).join('、')||t('classification.not_returned');let rulePages=(c.codebook_rule_pages||[]).length?t('classification.rule_pages')+' '+c.codebook_rule_pages.map(esc).join('、'):t('classification.rule_refs')+' '+((c.codebook_rule_refs||[]).map(esc).join('、')||t('classification.not_returned'));let bgPages=(c.bg_evidence_pages||[]).map(esc).join('、')||t('classification.not_returned');card.innerHTML='<h3>'+t('classification.title')+'</h3><div class="result">'+t('classification.label')+'：<b>'+esc(c.label||'—')+'</b></div><div>'+t('classification.confidence')+'：'+esc(c.confidence||'—')+alternative+'</div><div><b>'+t('classification.rules')+'</b>：'+rules+'（'+rulePages+'）</div><div><b>'+t('classification.evidence_pages')+'</b>：'+bgPages+'</div><div><b>'+t('classification.evidence')+'</b><ul>'+evidence+'</ul></div><div><b>'+t('classification.uncertainty')+'</b><ul>'+uncertainty+'</ul></div>';return registerUI(card,'classification',c)}
+function coverageSummaryCard(summary){if(!summary?.files?.length)return null;let card=document.createElement('section');card.className='classification-card';card.style.borderColor='#475569';let rows=summary.files.map(f=>{let read=Array.isArray(f.pages_read)?f.pages_read.length:0,unread=Array.isArray(f.pages_unread)?f.pages_unread.length:0;let pages=f.pages_total?(' · '+t('coverage.read')+' '+read+'/'+f.pages_total+' '+t('coverage.pages')+(unread?'；'+t('coverage.unread')+' '+unread+' '+t('coverage.pages'):'')):'';let cache=f.cache_status==='reused'?t('coverage.reused'):t('coverage.created');return '<li><b>'+esc(f.name)+'</b>：'+esc(scopeCopy(f)||t('coverage.default_scope'))+pages+' · '+cache+'</li>'}).join('');card.innerHTML='<h3>'+t('coverage.title')+'</h3><div class="muted">'+t('coverage.summary',{files:summary.files.length,reused:summary.reused_files||0,created:summary.created_files||0,calls:summary.model_calls||0})+'</div><ul>'+rows+'</ul>';return registerUI(card,'coverage',summary)}
 function renderStatus(s){lastStatusSnapshot=s;$('status').innerHTML=`${t('status.model')}：<b>${s.model}</b><br>${t('status.session')}：${s.session_name||'default'}<br>${t('status.code')}：${s.code_files} ${uiLanguage==='en'?'files':'文件'}<br>${t('status.documents')}：${s.documents} ${uiLanguage==='en'?'items':'个'}<br>${t('status.requests')}：${s.requests}<br>${t('status.tokens')}：${s.input_tokens} / ${s.output_tokens}<br>${t('status.cost')}：${s.cost}<br>${s.bg_context?'<span class="ok">'+t('status.assembly_mode')+'：'+s.bg_context.codebook_name+'</span>':t('status.normal_mode')}`;refreshAppChrome();refreshContextPanel()}
 function usageNumber(value){return value==null?t('usage.unknown'):esc(value)}
 function usageCost(u){return u.cost_usd==null?t('usage.unknown')+(u.known_cost_usd!=null?' · '+t('usage.known_subtotal')+': $'+Number(u.known_cost_usd).toFixed(6):''):'$'+Number(u.cost_usd).toFixed(6)}
@@ -2999,16 +3106,16 @@ function toggleCustomModel(){let custom=$('model').value==='__custom__';$('custo
 function setSelectedModel(model){let known=[...$('model').options].some(option=>option.value===model);$('model').value=known?model:'__custom__';$('custommodel').value=known?'':model;toggleCustomModel();loadModelStatus()}
 function selectedModel(){let selected=$('model').value;return selected==='__custom__' ? $('custommodel').value.trim() : selected}
 async function modelChanged(){toggleCustomModel();loadModelStatus();if($('model').value!=='__custom__'&&$('workspace').value.trim())await switchModel()}
-async function confirmCustomModel(){if(!selectedModel()){ $('modelmsg').innerHTML='<span class="error">'+t('model.id_required')+'</span>';return}if($('workspace').value.trim())await switchModel();else $('modelmsg').textContent=t('model.custom_saved')}
+async function confirmCustomModel(){if(!selectedModel()){ $('modelmsg').innerHTML='<span class="error">'+t('model.id_required')+'</span>';return}if($('workspace').value.trim())await switchModel();else setUIMessage($('modelmsg'),{message_key:'model.custom_saved'})}
 function codebookList(items){let values=Array.isArray(items)?items.filter(Boolean):[];return values.length?'<ul>'+values.map(item=>{if(item&&typeof item==='object'){let text=esc(item.text||item.title||JSON.stringify(item));let id=item.id?' <span class="muted">['+esc(item.id)+']</span>':'';let pages=Array.isArray(item.pages)&&item.pages.length?' <span class="muted">('+t('rulews.evidence_pages')+' '+esc(item.pages.join('、'))+')</span>':'';return '<li>'+text+id+pages+'</li>'}return '<li>'+esc(String(item))+'</li>'}).join('')+'</ul>':'<div class="muted">'+t('classification.none')+'</div>'}
 function renderCodebookStatus(profile){lastCodebookProfile=profile;let host=$('codebookstatus');if(!profile||profile.status==='none'||!profile.status){host.textContent=t('rulews.not_prepared');return}let lock=profile.status==='locked';host.innerHTML=(lock?'<span class="ok">'+t('rulews.locked')+'</span>':'<span class="error">'+t('rulews.draft')+'</span>')+'：<b>'+esc(profile.source_path||profile.source_name||'—')+'</b><br>'+esc(profile.page_count||0)+' '+t('rulews.pages')+' · '+esc(profile.parser_model||'—')+(lock?'<br>'+t('rulews.reused'):'<br>'+t('rulews.confirm'))}
-async function loadCodebookStatus(){try{renderCodebookStatus(await api('/api/codebook'))}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-function leaveCodebookWorkspace(){lastCodebookWorkspaceProfile=null;let composer=$('composer');composer.style.display='flex';$('chat').classList.remove('codebook-workspace');loadHistory()}
-function showCodebookWorkspace(profile){lastCodebookWorkspaceProfile=profile;let draft=profile.draft||{};$('composer').style.display='none';let classes=(draft.classes||[]).map(item=>'<article class="card codebook-class"><h3>'+esc(item.name||t('rulews.untitled'))+'</h3><div>'+esc(item.definition||t('rulews.no_definition'))+'</div><b>'+t('rulews.decision_rules')+'</b>'+codebookList(item.decision_rules)+'<b>'+t('rulews.boundaries')+'</b>'+codebookList(item.boundaries)+'<div class="muted">'+t('rulews.evidence_pages')+'：'+esc((item.evidence_pages||[]).join('、')||'—')+'</div></article>').join('')||'<div class="card error">'+t('rulews.no_class')+'</div>';let usage=profile.usage||{},ocr=profile.ocr_runtime||{},locked=profile.status==='locked';let ocrText=ocr.status==='not applicable to DOCX'?t('rulews.ocr_docx'):(ocr.available?(t('rulews.ocr_enabled')+' · '+esc(ocr.command||'Tesseract')+(ocr.german_available?' · deu':' · eng')):(t('rulews.ocr_disabled')+' · '+esc(ocr.status||'Tesseract')));$('chat').className='chat codebook-workspace';$('chat').innerHTML='<section class="workspace-inner"><h1>'+t('rulews.title')+'</h1><div class="muted">'+(locked?t('rulews.locked_intro'):t('rulews.draft_intro'))+'</div><div class="card"><b>'+t('rulews.source')+'：</b>'+esc(profile.source_name||'—')+'<br><span class="muted">'+t('rulews.parser_model')+'：'+esc(profile.parser_model||'—')+' · '+t('rulews.pages')+'：'+esc(profile.page_count||0)+' · '+t('rulews.groups')+'：'+esc(profile.page_groups||0)+' · Token：'+usageNumber(usage.input)+' / '+usageNumber(usage.output)+(' · '+usageCost(usage))+'<br>'+ocrText+'</span></div><h2>'+t('rulews.classes')+'</h2>'+classes+'<h2>'+t('rulews.global_rules')+'</h2><div class="card">'+codebookList(draft.global_rules)+'</div><h2>'+t('rulews.table_rules')+'</h2><div class="card">'+codebookList(draft.table_rules)+'</div><h2>'+t('rulews.uncertainties')+'</h2><div class="card">'+codebookList(draft.uncertainties)+'</div><div class="workspace-actions"><button class="ghost" onclick="editCodebookDraft()">'+t('rules.edit')+'</button>'+ (locked?'<button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.back')+'</button>':'<button onclick="lockCodebook()">'+t('rulews.lock_action')+'</button><button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.defer')+'</button>')+'</div></section>';$('chat').scrollTop=0}
-async function prepareCodebook(){let path=$('codebook').value.trim();if(!path){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.choose_file')+'</span>';return}let model=prompt(t('rulews.model_prompt'),selectedModel());if(model===null)return;model=model.trim();if(!model){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.model_required')+'</span>';return}try{$('codebookstatus').textContent=t('rulews.preparing');let profile=await api('/api/codebook/prepare',{method:'POST',body:JSON.stringify({path,model})});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile)}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-async function viewCodebook(){try{let profile=await api('/api/codebook');if(!profile||!profile.status)throw Error(t('rulews.not_prepared'));renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-async function lockCodebook(){if(!confirm(t('rulews.lock_confirm')))return;try{let profile=await api('/api/codebook/lock',{method:'POST'});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile);$('setupmsg').innerHTML='<span class="ok">'+t('rulews.lock_success')+'</span>'}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-async function changeCodebook(){if(!confirm(t('rulews.replace_confirm')))return;try{await api('/api/codebook',{method:'DELETE'});$('codebook').value='';renderCodebookStatus({status:'none'});leaveCodebookWorkspace();$('setupmsg').textContent=t('rulews.replace_success')}catch(e){$('codebookstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function loadCodebookStatus(){try{renderCodebookStatus(await api('/api/codebook'))}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
+function leaveCodebookWorkspace(){if(!allowRuleDraftTransition())return;lastCodebookWorkspaceProfile=null;let composer=$('composer');composer.style.display='flex';$('chat').classList.remove('codebook-workspace');loadHistory()}
+function showCodebookWorkspace(profile){if(ruleEditState){captureRuleEditor();if(ruleEditState.binding===ruleEditorBinding(profile)){renderRuleEditor();return}if(!allowRuleDraftTransition())return}lastCodebookWorkspaceProfile=profile;let draft=profile.draft||{};$('composer').style.display='none';let classes=(draft.classes||[]).map(item=>'<article class="card codebook-class"><h3>'+esc(item.name||t('rulews.untitled'))+'</h3><div>'+esc(item.definition||t('rulews.no_definition'))+'</div><b>'+t('rulews.decision_rules')+'</b>'+codebookList(item.decision_rules)+'<b>'+t('rulews.boundaries')+'</b>'+codebookList(item.boundaries)+'<div class="muted">'+t('rulews.evidence_pages')+'：'+esc((item.evidence_pages||[]).join('、')||'—')+'</div></article>').join('')||'<div class="card error">'+t('rulews.no_class')+'</div>';let usage=profile.usage||{},ocr=profile.ocr_runtime||{},locked=profile.status==='locked';let ocrText=ocr.status==='not applicable to DOCX'?t('rulews.ocr_docx'):(ocr.available?(t('rulews.ocr_enabled')+' · '+esc(ocr.command||'Tesseract')+(ocr.german_available?' · deu':' · eng')):(t('rulews.ocr_disabled')+' · '+esc(ocr.status||'Tesseract')));$('chat').className='chat codebook-workspace';$('chat').innerHTML='<section class="workspace-inner"><h1>'+t('rulews.title')+'</h1><div class="muted">'+(locked?t('rulews.locked_intro'):t('rulews.draft_intro'))+'</div><div class="card"><b>'+t('rulews.source')+'：</b>'+esc(profile.source_name||'—')+'<br><span class="muted">'+t('rulews.parser_model')+'：'+esc(profile.parser_model||'—')+' · '+t('rulews.pages')+'：'+esc(profile.page_count||0)+' · '+t('rulews.groups')+'：'+esc(profile.page_groups||0)+' · Token：'+usageNumber(usage.input)+' / '+usageNumber(usage.output)+(' · '+usageCost(usage))+'<br>'+ocrText+'</span></div><h2>'+t('rulews.classes')+'</h2>'+classes+'<h2>'+t('rulews.global_rules')+'</h2><div class="card">'+codebookList(draft.global_rules)+'</div><h2>'+t('rulews.table_rules')+'</h2><div class="card">'+codebookList(draft.table_rules)+'</div><h2>'+t('rulews.uncertainties')+'</h2><div class="card">'+codebookList(draft.uncertainties)+'</div><div class="workspace-actions"><button class="ghost" onclick="editCodebookDraft()">'+t('rules.edit')+'</button>'+ (locked?'<button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.back')+'</button>':'<button onclick="lockCodebook()">'+t('rulews.lock_action')+'</button><button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.defer')+'</button>')+'</div></section>';$('chat').scrollTop=0}
+async function prepareCodebook(){if(!allowRuleDraftTransition())return;let path=$('codebook').value.trim();if(!path){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.choose_file')+'</span>';return}let model=prompt(t('rulews.model_prompt'),selectedModel());if(model===null)return;model=model.trim();if(!model){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.model_required')+'</span>';return}try{setUIMessage($('codebookstatus'),{message_key:'rulews.preparing'});let profile=await api('/api/codebook/prepare',{method:'POST',body:JSON.stringify({path,model})});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile)}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
+async function viewCodebook(){if(!allowRuleDraftTransition())return;try{let profile=await api('/api/codebook');if(!profile||!profile.status)throw Error(t('rulews.not_prepared'));renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
+async function lockCodebook(){if(!allowRuleDraftTransition())return;if(!confirm(t('rulews.lock_confirm')))return;try{let profile=await api('/api/codebook/lock',{method:'POST'});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile);$('setupmsg').innerHTML='<span class="ok">'+t('rulews.lock_success')+'</span>'}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
+async function changeCodebook(){if(!allowRuleDraftTransition())return;if(!confirm(t('rulews.replace_confirm')))return;try{await api('/api/codebook',{method:'DELETE'});$('codebook').value='';renderCodebookStatus({status:'none'});leaveCodebookWorkspace();setUIMessage($('setupmsg'),{message_key:'rulews.replace_success'})}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
 let sessionOffset=0,sessionHasMore=false,sessionLoading=false,currentSessionName='';
 function initSessionSidebar(){if($('sessionpanel'))return;let left=document.querySelector('.shell > .side');if(!left)return;let style=document.createElement('style');style.textContent='.side.left{display:flex;flex-direction:column;overflow:hidden;padding-bottom:10px}.left-content{overflow:auto;min-height:0;padding-right:2px}.session-panel{border-top:1px solid #334155;margin-top:10px;padding-top:10px;display:flex;flex-direction:column;min-height:155px;max-height:42vh}.session-new{width:100%;margin-bottom:8px;text-align:left}.session-list{overflow:auto;min-height:0}.session-row{display:flex;align-items:center;gap:4px;border-radius:7px;margin:2px 0;padding:6px 5px;cursor:pointer;color:#dbeafe}.session-row:hover,.session-row.active{background:#263244}.session-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.session-more{visibility:hidden;width:25px;padding:2px 3px;background:transparent;color:#cbd5e1}.session-row:hover .session-more,.session-row.active .session-more{visibility:visible}.session-pin{font-size:10px;color:#7dd3fc}.session-loading{text-align:center;padding:8px;color:#94a3b8}.session-menu{position:fixed;z-index:100;min-width:130px;padding:5px;background:#1e293b;border:1px solid #475569;border-radius:8px;box-shadow:0 12px 30px rgba(0,0,0,.4)}.session-menu button{display:block;width:100%;text-align:left;background:transparent;color:#e5e7eb;padding:7px 9px}.session-menu button:hover{background:#334155}.session-menu button.delete{color:#fca5a5}';document.head.append(style);left.classList.add('left');let content=document.createElement('div');content.className='left-content';while(left.firstChild)content.append(left.firstChild);left.append(content);let old=$('session')?.closest('.field');if(old)old.style.display='none';let panel=document.createElement('section');panel.id='sessionpanel';panel.className='session-panel';panel.innerHTML='<button id="newsessionbutton" class="ghost session-new" onclick="newSession()"></button><div id="sessionlist" class="session-list"></div>';left.append(panel);localizeSessionChrome();$('sessionlist').addEventListener('scroll',()=>{let el=$('sessionlist');if(sessionHasMore&&!sessionLoading&&el.scrollTop+el.clientHeight>=el.scrollHeight-18)loadSessions(false)});document.addEventListener('click',event=>{if(!event.target.closest('.session-more')&&!event.target.closest('#sessionmenu'))closeSessionMenu()})}
 function localizeSessionChrome(){setI18nText($('newsessionbutton'),'session.new')}
@@ -3017,21 +3124,36 @@ function renderSessionRows(items,append){let list=$('sessionlist');if(!append)li
 async function loadSessions(reset=true){if(sessionLoading)return;if(reset){sessionOffset=0;sessionHasMore=false;renderSessionRows([],true)}sessionLoading=true;try{let x=await api('/api/sessions?offset='+sessionOffset+'&limit=10');currentSessionName=x.current;let existingCount=$('sessionlist').querySelectorAll('.session-row').length,items=x.sessions;renderSessionRows(items,!reset);let rows=[...$('sessionlist').querySelectorAll('.session-row')];items.forEach((item,index)=>rows[existingCount+index].dataset.name=item.name);sessionOffset+=items.length;sessionHasMore=!!x.has_more}catch(e){$('sessionmsg').textContent=e.message}finally{sessionLoading=false;$('sessionloading')?.remove()}}
 async function restoreSessionTree(target,paths){$('treestatus').textContent=rt('session.restoring');let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(paths||[]);treeRestoreNote=rt('session.restored');let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates()}
 async function restoreSessionContext(){try{let x=await api('/api/session/context');setSelectedModel(x.model);let target=x.target||{};$('targetpath').value=target.path||'';$('codebook').value=x.codebook_path||'';if(target.path&&target.kind==='文件夹'){await restoreSessionTree(target.path,target.selected_paths)}else{clearTargetTree()}materialDraftDirty=false;await loadCodebookStatus();loadDocs();loadCoverage()}catch(e){console.warn('Could not restore session context',e);$('treestatus').innerHTML='<span class="error">'+esc(rt('session.restore_failed')+e.message)+'</span>'}}
-async function openSessionByName(name){try{closeSessionMenu();let s=await api('/api/session/open',{method:'POST',body:JSON.stringify({name})});renderStatus(s);await restoreSessionContext();await loadHistory();await loadSessions(true)}catch(e){$('sessionmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-async function newSession(){try{let s=await api('/api/session/new',{method:'POST'});renderStatus(s);$('targetpath').value='';$('codebook').value='';clearTargetTree();await loadHistory();await loadSessions(true);loadDocs();loadCodebookStatus()}catch(e){$('sessionmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function openSessionByName(name){if(!allowRuleDraftTransition())return;try{closeSessionMenu();let s=await api('/api/session/open',{method:'POST',body:JSON.stringify({name})});renderStatus(s);await restoreSessionContext();await loadHistory();await loadSessions(true)}catch(e){setUIMessage($('sessionmsg'),e.uiMessage||{text:e.message},'error')}}
+async function newSession(){if(!allowRuleDraftTransition())return;try{let s=await api('/api/session/new',{method:'POST'});renderStatus(s);$('targetpath').value='';$('codebook').value='';clearTargetTree();await loadHistory();await loadSessions(true);loadDocs();loadCodebookStatus()}catch(e){setUIMessage($('sessionmsg'),e.uiMessage||{text:e.message},'error')}}
 function openSessionMenu(event,item){closeSessionMenu();let menu=document.createElement('div');menu.id='sessionmenu';menu.className='session-menu';let rect=event.currentTarget.getBoundingClientRect();menu.style.left=Math.min(window.innerWidth-145,rect.right+6)+'px';menu.style.top=rect.top+'px';menu.innerHTML='<button data-action="rename">重命名</button><button data-action="pin">'+(item.pinned?'取消置顶':'置顶')+'</button><button class="delete" data-action="delete">删除</button>';menu.onclick=async e=>{let action=e.target.dataset.action;if(!action)return;if(action==='rename')await renameSession(item.name);if(action==='pin')await pinSession(item);if(action==='delete')await deleteSession(item.name);closeSessionMenu()};document.body.append(menu)}
 async function renameSession(name){let value=prompt(t('session.rename_prompt'),name);if(!value?.trim())return;try{let s=await api('/api/session/rename',{method:'POST',body:JSON.stringify({name:value.trim(),source:name})});renderStatus(s);await loadSessions(true)}catch(e){alert(e.message)}}
 async function pinSession(item){try{await api('/api/session/pin',{method:'POST',body:JSON.stringify({name:item.name,pinned:!item.pinned})});await loadSessions(true)}catch(e){alert(e.message)}}
-async function deleteSession(name){if(!confirm(t('session.delete_confirm')))return;try{let wasCurrent=name===currentSessionName;let s=await api('/api/session/delete',{method:'POST',body:JSON.stringify({confirmed:true,name})});renderStatus(s);if(wasCurrent){await restoreSessionContext();await loadHistory()}await loadSessions(true)}catch(e){alert(e.message)}}
-async function loadHistory(){try{let x=await api('/api/history');$('chat').innerHTML='';if(!x.history.length){message(t('session.new_hint'));return}for(let item of x.history)message(item.content,item.role==='user'?'user':'assistant')}catch{}}
-async function setup(){try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default',language:uiLanguage})});renderStatus(s);await restoreSessionContext();$('setupmsg').textContent=t('workspace.opened');refreshAppChrome();loadDocs();loadSessions();loadHistory();loadCodebookStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function deleteSession(name){if(name===currentSessionName&&!allowRuleDraftTransition())return;if(!confirm(t('session.delete_confirm')))return;try{let wasCurrent=name===currentSessionName;let s=await api('/api/session/delete',{method:'POST',body:JSON.stringify({confirmed:true,name})});renderStatus(s);if(wasCurrent){await restoreSessionContext();await loadHistory()}await loadSessions(true)}catch(e){alert(e.message)}}
+async function loadHistory(){if(ruleEditState)return;try{let x=await api('/api/history');if(ruleEditState)return;$('chat').innerHTML='';if(!x.history.length){uiMessageNode({message_key:'session.new_hint'});return}for(let item of x.history)message(item.content,item.role==='user'?'user':'assistant')}catch{}}
+async function setup(){if(!allowRuleDraftTransition())return;try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default',language:uiLanguage})});renderStatus(s);await restoreSessionContext();await Promise.all([loadDocs(),loadSessions(),loadHistory(),loadCodebookStatus()]);setUIMessage($('setupmsg'),{message_key:'workspace.opened'});refreshAppChrome()}catch(e){setUIMessage($('setupmsg'),e.uiMessage||{text:e.message},'error')}}
 async function openLegacySession(){if(!$('session').value)return;await setup()}
-async function switchModel(){try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));let s=await api('/api/model',{method:'POST',body:JSON.stringify({model})});renderStatus(s);clearResultPanels();await loadHistory();$('modelmsg').innerHTML='<span class="ok">'+t('model.switched_prefix')+esc(model)+t('model.context_unchanged')+'</span>'}catch(e){$('modelmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-async function loadModelStatus(){try{let x=await api('/api/model-tests');let r=x.tests[selectedModel()];if(!r){$('modelstatus').textContent=t('model.untested');return}if(!r.ok){$('modelstatus').innerHTML='<span class="error">'+t('model.last_failed')+esc(r.tested_at)+'</span>';return}$('modelstatus').innerHTML='<span class="ok">'+t('model.last_available')+esc(r.tested_at)+'；'+esc(r.streaming||t('model.stream_status_unknown'))+'；'+t('model.usage_label')+' '+t(r.usage_available===false?'model.usage_missing':'model.usage_returned')+'</span>'}catch{}}
-async function testModel(){try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));$('setupmsg').textContent=t('model.testing');let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});$('setupmsg').innerHTML=x.ok?'<span class="ok">'+t('model.available')+esc(x.model)+'；'+esc(x.streaming||'')+t('usage.input_fragment')+esc(x.input_tokens)+t('usage.output_fragment')+esc(x.output_tokens)+t('usage.token_suffix')+' '+(x.usage_available===false?t('usage.unavailable'):'')+'</span>':'<span class="error">'+t('model.test_failed')+esc(x.message)+'</span>';loadModelStatus()}catch(e){$('setupmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-function renderDocuments(documents){lastDocumentsSnapshot=documents;$('docs').innerHTML=documents.map(d=>`<div class="card">${esc(d.name)}<br><span class="muted">${esc(d.material_role_label||t('material.role_other'))} · ${d.chunks} chunks</span></div>`).join('')||t('materials.empty')}
+async function switchModel(){if(!allowRuleDraftTransition())return;try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));let s=await api('/api/model',{method:'POST',body:JSON.stringify({model})});renderStatus(s);clearResultPanels();await loadHistory();$('modelmsg').innerHTML='<span class="ok">'+t('model.switched_prefix')+esc(model)+t('model.context_unchanged')+'</span>'}catch(e){setUIMessage($('modelmsg'),e.uiMessage||{text:e.message},'error')}}
+async function loadModelStatus(){try{
+  let x=await api('/api/model-tests'),r=x.tests[selectedModel()];
+  if(!r){setUIMessage($('modelstatus'),{message_key:'model.untested'});return}
+  setUIMessage($('modelstatus'),[{message_key:r.ok?'model.last_available':'model.last_failed'},r.tested_at,
+    ...(r.ok?['; ',r.streaming_message||{text:r.streaming||''},'; ',{message_key:'model.usage_label'},' ',
+      {message_key:r.usage_available===false?'model.usage_missing':'model.usage_returned'}]:[])],r.ok?'ok':'error');
+}catch{}}
+async function testModel(){try{
+  let model=selectedModel();if(!model)throw Error(t('model.id_required'));
+  setUIMessage($('setupmsg'),{message_key:'model.testing'});
+  let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});
+  setUIMessage($('setupmsg'),x.ok?[{message_key:'model.available'},x.model,'; ',x.streaming_message||{text:x.streaming||''},
+    {message_key:'usage.input_fragment'},String(x.input_tokens),{message_key:'usage.output_fragment'},String(x.output_tokens),
+    {message_key:'usage.token_suffix'},' ',...(x.usage_available===false?[{message_key:'usage.unavailable'}]:[])]:
+    [{message_key:'model.test_failed'},x.message_key?x:{text:x.message}],x.ok?'ok':'error');
+  loadModelStatus();
+}catch(e){setUIMessage($('setupmsg'),e.uiMessage||{text:e.message},'error')}}
+function renderDocuments(documents){lastDocumentsSnapshot=documents;$('docs').innerHTML=documents.map(d=>`<div class="card">${esc(d.name)}<br><span class="muted">${esc(roleCopy(d.material_role_label))} · ${t('scan.report.chunks',{count:d.chunks})}</span></div>`).join('')||t('materials.empty')}
 async function loadDocs(){try{renderDocuments(await api('/api/documents'))}catch{}}
-async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:JSON.stringify({path:$('docpath').value})});$('docpath').value='';loadDocs();$('setupmsg').textContent=`已索引 ${d.name}（${d.chunks} chunks）`}catch(e){$('setupmsg').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:JSON.stringify({path:$('docpath').value})});$('docpath').value='';loadDocs();$('setupmsg').textContent=`已索引 ${d.name}（${d.chunks} chunks）`}catch(e){setUIMessage($('setupmsg'),e.uiMessage||{text:e.message},'error')}}
 function renderScanReport(x){setScanReportAvailable(x);renderScanDrawer(x)}
 function renderCoverageReport(x){if(!x||!x.files){$('coveragestatus').textContent='分类/Codebook 问题会自动准备证据；也可在提问前手动准备。';return}if(x.current_selection===false){$('coveragestatus').innerHTML='<span class="muted">材料选择或模型已更新；下次分类准备时会复用未变文件的本地摘要，仅预读新增/变更文件。</span>';return}let done=x.files.filter(f=>f.complete).length;let details=x.files.map(f=>{let pages=f.pages_total?`页：已读 ${(f.pages_read||[]).join('、')||'—'}${(f.pages_unread||[]).length?'；未读 '+f.pages_unread.join('、'):''}`:'无页码';let dfc=f.dfc_structure?` · <span class="chip">DFC Struktur：${esc(f.dfc_structure.ocr_status||'—')}，${esc(f.dfc_structure.segments_total||0)} 段</span>`:'';let cache=f.cache_status==='reused'?' · <span class="chip">本地摘要已复用</span>':f.cache_status==='created'?' · <span class="chip">本轮新预读</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${f.text_groups_processed}/${f.text_groups_total} 个文本组 · ${esc(f.reading_scope||'')} · ${esc(pages)}${cache}${dfc}${f.failures?.length?'（'+esc(f.failures.join('；'))+'）':''}`}).join('');let dossier=x.bg_dossier?.ready?' · <span class="chip">BG 综合证据档案已缓存</span>':' · <span class="chip">首次分类后生成 BG 综合证据档案</span>';$('coveragestatus').innerHTML=(x.complete?'<span class="ok">分类证据已准备：</span>':'<span class="error">分类证据不完整：</span>')+` ${done}/${x.files.length} 个文件；复用 ${x.reused_files||0} 个，新预读 ${x.created_files||0} 个；本次 ${x.model_calls||0} 次模型调用。`+dossier+details}
 async function loadCoverage(){try{renderCoverageReport(await api('/api/coverage'))}catch{}}
@@ -3042,29 +3164,29 @@ function openScanReport(){if(!lastScanReport)return;renderScanDrawer(lastScanRep
 function closeScanReport(){$('scanbackdrop')?.classList.remove('open')}
 function renderScanDrawer(x){let files=(x.files||[]).map(f=>{let index=f.index_cache_status==='reused'?rt('scan.index.reused'):f.index_cache_status==='changed'?rt('scan.index.changed'):f.index_cache_status==='new'?rt('scan.index.created'):'—';return `<article class="file-card"><b>${esc(f.name)}</b><br><span class="muted">${esc(f.material_role_label||'其他资料')} · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB<br>本地文本片段：${f.chunks} · ${index}</span></article>`}).join('')||'<div class="muted">'+rt('scan.report.none')+'</div>';let skipped=x.skipped_count?`<article class="file-card error"><b>跳过 / 失败 ${x.skipped_count} 个</b><br><span class="muted">${x.skipped.map(esc).join('<br>')}${x.skipped_count>x.skipped.length?'<br>其余失败项未展开。':''}</span></article>`:'';let audit='<details id="cacheauditpanel" class="file-card" ontoggle="if(this.open)loadCacheAudit()"><summary><b>'+rt('scan.report.cache')+'</b></summary><div class="muted" style="margin:7px 0">'+rt('scan.report.cache_detail')+'</div><div id="cacheaudit" class="list muted">'+rt('scan.report.cache_loading')+'</div></details>';$('scanreportbody').innerHTML='<div class="muted">'+rt('scan.report.added',{count:x.sources||0})+'</div>'+files+skipped+audit}
 function renderCacheAudit(x){let host=$('cacheaudit');if(!host)return;if(!x.files?.length){host.textContent=rt('material.none');return}let hasSummary=x.files.some(f=>(f.summary_entries||[]).length);if(!hasSummary){host.innerHTML='<div class="muted">'+rt('material.cache_empty')+'</div>';return}let dossier=x.dossier?.ready?`BG 综合档案：已缓存（${esc(x.dossier.model||'—')}）`:'BG 综合档案：尚未生成或材料范围已变化';let files=x.files.map(f=>{let summaries=(f.summary_entries||[]).map(s=>`${esc(s.model||'—')} · ${s.full?'全部页':'默认范围'} · ${s.complete?'完成':'未完成'}`).join('<br>')||'无摘要缓存';let read=(f.summary_entries||[]).length?'<br><button class="ghost" data-document-id="'+escAttr(f.id)+'" onclick="rebuildCachedFile(this.dataset.documentId)">仅重读此文件</button>':'';return `<div class="card"><b>${esc(f.name)}</b><br><span class="muted">索引：${esc(f.index_status)} · OCR：${esc(f.ocr_status)}<br>摘要：${summaries}</span>${read}</div>`}).join('');host.innerHTML='<div class="muted">'+dossier+(x.selection_current?'':'；当前材料范围待更新')+'</div><div class="row"><button class="ghost" onclick="rebuildDossier()">重建 BG 档案</button><button class="ghost" onclick="clearSummaryCaches()">清除摘要缓存</button></div>'+files}
-async function loadCacheAudit(){let host=$('cacheaudit');if(!host)return;try{renderCacheAudit(await api('/api/cache/audit'))}catch(e){host.innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-async function rebuildCachedFile(id){if(!confirm('仅清除这份文件的本地摘要？下次分类会重新读取该文件；其他文件摘要保持不变。'))return;try{let x=await api('/api/cache/file/rebuild',{method:'POST',body:JSON.stringify({document_id:id,confirmed:true})});$('coveragestatus').textContent=x.message;renderCacheAudit(x.audit)}catch(e){$('cacheaudit').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-async function rebuildDossier(){if(!confirm(rt('dossier.confirm')))return;let host=$('cacheaudit');let button=host?.querySelector('button[onclick="rebuildDossier()"]');if(button)button.disabled=true;$('coveragestatus').textContent=rt('dossier.working');try{let x=await api('/api/cache/dossier/rebuild',{method:'POST',body:JSON.stringify({confirmed:true})});$('coveragestatus').textContent=x.message;renderCacheAudit(x.audit);renderStatus(await api('/api/status'))}catch(e){$('coveragestatus').innerHTML='<span class="error">'+esc(rt('dossier.failed')+e.message)+'</span>';if(host)host.innerHTML='<span class="error">'+esc(rt('dossier.failed')+e.message)+'</span>'}finally{if(button)button.disabled=false}}
-async function clearSummaryCaches(){if(!confirm('清除所有本地材料摘要和 BG 综合档案？不会删除原始文件、本地索引或 OCR，但之后需要重新预读。'))return;try{let x=await api('/api/cache/clear',{method:'POST',body:JSON.stringify({confirmed:true})});$('coveragestatus').textContent=x.message;renderCacheAudit(x.audit)}catch(e){$('cacheaudit').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function loadCacheAudit(){let host=$('cacheaudit');if(!host)return;try{renderCacheAudit(await api('/api/cache/audit'))}catch(e){setUIMessage(host,e.uiMessage||{text:e.message},'error')}}
+async function rebuildCachedFile(id){if(!confirm(t('cache.rebuild_file_confirm')))return;try{let x=await api('/api/cache/file/rebuild',{method:'POST',body:JSON.stringify({document_id:id,confirmed:true})});setUIMessage($('coveragestatus'),x);renderCacheAudit(x.audit)}catch(e){setUIMessage($('cacheaudit'),e.uiMessage||{text:e.message},'error')}}
+async function rebuildDossier(){if(!confirm(rt('dossier.confirm')))return;let host=$('cacheaudit');let button=host?.querySelector('button[onclick="rebuildDossier()"]');if(button)button.disabled=true;$('coveragestatus').textContent=rt('dossier.working');try{let x=await api('/api/cache/dossier/rebuild',{method:'POST',body:JSON.stringify({confirmed:true})});setUIMessage($('coveragestatus'),x);renderCacheAudit(x.audit);renderStatus(await api('/api/status'))}catch(e){$('coveragestatus').innerHTML='<span class="error">'+esc(rt('dossier.failed')+e.message)+'</span>';if(host)host.innerHTML='<span class="error">'+esc(rt('dossier.failed')+e.message)+'</span>'}finally{if(button)button.disabled=false}}
+async function clearSummaryCaches(){if(!confirm(t('cache.clear_confirm')))return;try{let x=await api('/api/cache/clear',{method:'POST',body:JSON.stringify({confirmed:true})});setUIMessage($('coveragestatus'),x);renderCacheAudit(x.audit)}catch(e){setUIMessage($('cacheaudit'),e.uiMessage||{text:e.message},'error')}}
 function clearTargetTree(){savedTargetSelection=new Set();treeRestoreNote='';scannedSelection='';setScanReportAvailable(null);$('targettree').textContent='选择文件夹后显示可展开的文件树。';$('targettree').classList.add('muted');$('treestatus').textContent='';updateMaterialFlowButtons()}
 // These renderers deliberately receive data, never pre-rendered text.  This
 // makes a language switch deterministic even after a scan or cache view is open.
 function renderStatusForLanguage(s){let tokens=usageNumber(s.input_tokens)+' / '+usageNumber(s.output_tokens);if(s.usage_complete===false)tokens+=' · '+t('usage.known_subtotal')+': '+usageNumber(s.known_input_tokens)+' / '+usageNumber(s.known_output_tokens);let cost=usageCost({cost_usd:s.cost,known_cost_usd:s.known_cost_usd});$('status').innerHTML=`${t('status.model')}：<b>${esc(s.model)}</b><br>${t('status.session')}：${esc(s.session_name||'default')}<br>${t('status.code')}：${t('status.files',{count:s.code_files})}<br>${t('status.documents')}：${t('status.items',{count:s.documents})}<br>${t('status.requests')}：${esc(s.requests)}<br>${t('status.tokens')}：${tokens}<br>${t('status.cost')}：${cost}${s.unpriced_requests?' · '+t('usage.partial',{count:s.unpriced_requests}):''}<br>${s.bg_context?'<span class="ok">'+t('status.assembly_mode')+'：'+esc(s.bg_context.codebook_name)+'</span>':t('status.normal_mode')}`;refreshAppChrome();refreshContextPanel()}
 function renderUsageDetailForLanguage(u,model){if(!u)return;$('usagedetail').innerHTML=`${t('usage.actual_model')}：<b>${esc(model||'—')}</b><br>${t('usage.input_output_total')}：${usageNumber(u.input)} / ${usageNumber(u.output)} / ${usageNumber(u.total)}${u.usage_complete===false?' · '+t('usage.known_subtotal')+': '+usageNumber(u.known_input)+' / '+usageNumber(u.known_output):''}<br>${t('usage.reasoning')}：${usageNumber(u.reasoning)} ｜ ${t('usage.gemini_thinking')}：${usageNumber(u.gemini_thinking)}<br>${t('usage.claude_cache')}：${usageNumber(u.cache_read)} / ${usageNumber(u.cache_write)}<br>${t('usage.estimate')}：${usageCost(u)}`}
-function renderEvidenceSourcesForLanguage(sources,dfcEvidence){let normal=(sources||[]).map(s=>`<div class="card"><b>${esc(s.label||s.name||t('model.unknown_source'))}</b><br>${s.visual?'<span class="chip">'+t('evidence.visual')+'</span>':''}</div>`).join('');let dfc=(dfcEvidence||[]).map(d=>{let parts=(d.segments_used||[]).join('、')||'—';return `<div class="card"><b>DFC Struktur</b><br>${esc(d.name||'—')}<br><span class="chip">OCR：${esc(d.ocr_status||'—')}</span><span class="chip">${t('dfc.segment_info',{segments:esc(parts),total:esc(d.segments_total||0)})}</span></div>`}).join('');$('sources').innerHTML=(dfc+normal)||t('evidence.none')}
-function renderCompareSlotsForLanguage(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">'+t('compare.select_model')+'</option>'+compareOptions.map(([value,label])=>'<option value="'+escAttr(value)+'" '+(slot.value===value?'selected':'')+'>'+esc(label)+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>'+t('model.other')+'</option>';return '<div class="field"><label>'+t('compare.model_number',{index:index+1})+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+escAttr(slot.custom||'')+'" placeholder="'+t('model.id_placeholder')+'" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?t('compare.maximum'):t('compare.add');if(compareSlots.length>=4)$('comparestatus').textContent=t('compare.maximum')}
+function renderEvidenceSourcesForLanguage(sources,dfcEvidence){let normal=(sources||[]).map(s=>`<div class="card"><b>${esc(s.label||s.name||t('model.unknown_source'))}</b><br>${s.visual?'<span class="chip">'+t('evidence.visual')+'</span>':''}</div>`).join('');let dfc=(dfcEvidence||[]).map(d=>{let parts=(d.segments_used||[]).join('、')||'—';return `<div class="card"><b>DFC Struktur</b><br>${esc(d.name||'—')}<br><span class="chip">OCR：${esc(stateCopy(d.ocr_status))}</span><span class="chip">${t('dfc.segment_info',{segments:esc(parts),total:esc(d.segments_total||0)})}</span></div>`}).join('');$('sources').innerHTML=(dfc+normal)||t('evidence.none')}
+function renderCompareSlotsForLanguage(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">'+t('compare.select_model')+'</option>'+compareOptions.map(([value,label])=>'<option value="'+escAttr(value)+'" '+(slot.value===value?'selected':'')+'>'+esc(label)+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>'+t('model.other')+'</option>';return '<div class="field"><label>'+t('compare.model_number',{index:index+1})+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+escAttr(slot.custom||'')+'" placeholder="'+t('model.id_placeholder')+'" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?t('compare.maximum'):t('compare.add');if(compareSlots.length>=4)setUIMessage($('comparestatus'),{message_key:'compare.maximum'})}
 function renderSessionRowsForLanguage(items,append){let list=$('sessionlist');if(!list)return;if(!append)list.innerHTML='';for(let item of items){let row=document.createElement('div');row.className='session-row'+(item.name===currentSessionName?' active':'');row.onclick=()=>openSessionByName(item.name);let title=document.createElement('span');title.className='session-title';title.textContent=item.title;row.append(title);if(item.pinned){let pin=document.createElement('span');pin.className='session-pin';pin.textContent='●';pin.title=t('session.pin_title');row.append(pin)}let more=document.createElement('button');more.className='session-more';more.textContent='•••';more.title=t('session.more_title');more.onclick=e=>{e.stopPropagation();openSessionMenu(e,item)};row.append(more);list.append(row)}if(sessionLoading){let loading=document.createElement('div');loading.id='sessionloading';loading.className='session-loading';loading.textContent=t('session.loading');list.append(loading)}}
 function openSessionMenuForLanguage(event,item){closeSessionMenu();let menu=document.createElement('div');menu.id='sessionmenu';menu.className='session-menu';let rect=event.currentTarget.getBoundingClientRect();menu.style.left=Math.min(window.innerWidth-145,rect.right+6)+'px';menu.style.top=rect.top+'px';menu.innerHTML='<button data-action="rename">'+t('actions.rename_full')+'</button><button data-action="pin">'+t(item.pinned?'session.unpin':'session.pin')+'</button><button class="delete" data-action="delete">'+t('actions.delete')+'</button>';menu.onclick=async e=>{let action=e.target.dataset.action;if(!action)return;if(action==='rename')await renameSession(item.name);if(action==='pin')await pinSession(item);if(action==='delete')await deleteSession(item.name);closeSessionMenu()};document.body.append(menu)}
 function renderCoverageReportForLanguage(x){
-  if(!x||!x.files){$('coveragestatus').textContent=t('coverage.auto_prepare');return}
+  if(!x||!x.files){setUIMessage($('coveragestatus'),{message_key:'coverage.auto_prepare'});return}
   if(x.current_selection===false){$('coveragestatus').innerHTML='<span class="muted">'+t('coverage.selection_changed')+'</span>';return}
   let done=x.files.filter(f=>f.complete).length;
-  let details=x.files.map(f=>{let pages=f.pages_total?t('coverage.pages')+'：'+t('coverage.read_pages',{pages:(f.pages_read||[]).join('、')||'—'})+((f.pages_unread||[]).length?'；'+t('coverage.unread_pages',{pages:f.pages_unread.join('、')}):''):t('coverage.no_pages');let dfc=f.dfc_structure?' · <span class="chip">'+t('coverage.dfc',{status:esc(f.dfc_structure.ocr_status||'—'),count:esc(f.dfc_structure.segments_total||0)})+'</span>':'';let cache=f.cache_status==='reused'?' · <span class="chip">'+t('coverage.reused_summary')+'</span>':f.cache_status==='created'?' · <span class="chip">'+t('coverage.new_pre_read')+'</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${t('coverage.text_groups',{done:f.text_groups_processed,total:f.text_groups_total})} · ${esc(f.reading_scope||'')} · ${esc(pages)}${cache}${dfc}${f.failures?.length?'（'+esc(f.failures.join('；'))+'）':''}`}).join('');
+  let details=x.files.map(f=>{let pages=f.pages_total?t('coverage.pages')+'：'+t('coverage.read_pages',{pages:(f.pages_read||[]).join('、')||'—'})+((f.pages_unread||[]).length?'；'+t('coverage.unread_pages',{pages:f.pages_unread.join('、')}):''):t('coverage.no_pages');let dfc=f.dfc_structure?' · <span class="chip">'+t('coverage.dfc',{status:esc(stateCopy(f.dfc_structure.ocr_status)),count:esc(f.dfc_structure.segments_total||0)})+'</span>':'';let cache=f.cache_status==='reused'?' · <span class="chip">'+t('coverage.reused_summary')+'</span>':f.cache_status==='created'?' · <span class="chip">'+t('coverage.new_pre_read')+'</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${t('coverage.text_groups',{done:f.text_groups_processed,total:f.text_groups_total})} · ${esc(scopeCopy(f))} · ${esc(pages)}${cache}${dfc}${f.failures?.length?'（'+esc((f.failure_messages||f.failures).map(uiCopy).join('; '))+'）':''}`}).join('');
   let dossier=x.bg_dossier?.ready?' · <span class="chip">'+t('coverage.dossier_ready')+'</span>':' · <span class="chip">'+t('coverage.dossier_pending')+'</span>';
   $('coveragestatus').innerHTML=(x.complete?'<span class="ok">'+t('coverage.ready')+'：</span>':'<span class="error">'+t('coverage.incomplete')+'：</span>')+' '+t('coverage.overview',{done,total:x.files.length,reused:x.reused_files||0,created:x.created_files||0,calls:x.model_calls||0})+dossier+details;
 }
 function renderScanDrawerForLanguage(x){
-  let files=(x.files||[]).map(f=>{let index=f.index_cache_status==='reused'?t('scan.index.reused'):f.index_cache_status==='changed'?t('scan.index.changed'):f.index_cache_status==='new'?t('scan.index.created'):'—';return `<article class="file-card"><b>${esc(f.name)}</b><br><span class="muted">${esc(f.material_role_label||t('material.role_other'))} · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB<br>${t('scan.report.chunks',{count:f.chunks})} · ${index}</span></article>`}).join('')||'<div class="muted">'+t('scan.report.none')+'</div>';
+  let files=(x.files||[]).map(f=>{let index=f.index_cache_status==='reused'?t('scan.index.reused'):f.index_cache_status==='changed'?t('scan.index.changed'):f.index_cache_status==='new'?t('scan.index.created'):'—';return `<article class="file-card"><b>${esc(f.name)}</b><br><span class="muted">${esc(roleCopy(f.material_role_label))} · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB<br>${t('scan.report.chunks',{count:f.chunks})} · ${index}</span></article>`}).join('')||'<div class="muted">'+t('scan.report.none')+'</div>';
   let skipped=x.skipped_count?`<article class="file-card error"><b>${t('scan.report.skipped',{count:x.skipped_count})}</b><br><span class="muted">${x.skipped.map(esc).join('<br>')}${x.skipped_count>x.skipped.length?'<br>'+t('scan.report.more_failures'):''}</span></article>`:'';
   let audit='<details id="cacheauditpanel" class="file-card" ontoggle="if(this.open)loadCacheAudit()"><summary><b>'+t('scan.report.cache')+'</b></summary><div class="muted" style="margin:7px 0">'+t('scan.report.cache_detail')+'</div><div id="cacheaudit" class="list muted">'+t('scan.report.cache_loading')+'</div></details>';
   $('scanreportbody').innerHTML='<div class="muted">'+t('scan.report.added',{count:x.sources||0})+'</div>'+files+skipped+audit;
@@ -3074,7 +3196,7 @@ function renderCacheAuditForLanguage(x){
   if(!x.files?.length){host.textContent=t('material.none');return}
   if(!x.files.some(f=>(f.summary_entries||[]).length)){host.innerHTML='<div class="muted">'+t('material.cache_empty')+'</div>';return}
   let dossier=x.dossier?.ready?t('cache.dossier_ready',{model:esc(x.dossier.model||'—')}):t('cache.dossier_missing');
-  let files=x.files.map(f=>{let summaries=(f.summary_entries||[]).map(s=>`${esc(s.model||'—')} · ${t(s.full?'cache.full':'cache.default_scope')} · ${t(s.complete?'cache.complete':'cache.incomplete')}`).join('<br>')||t('cache.no_summary');let read=(f.summary_entries||[]).length?'<br><button class="ghost" data-document-id="'+escAttr(f.id)+'" onclick="rebuildCachedFile(this.dataset.documentId)">'+t('cache.rebuild_file')+'</button>':'';return `<div class="card"><b>${esc(f.name)}</b><br><span class="muted">${t('cache.index')}：${esc(f.index_status)} · OCR：${esc(f.ocr_status)}<br>${t('cache.summary')}：${summaries}</span>${read}</div>`}).join('');
+  let files=x.files.map(f=>{let summaries=(f.summary_entries||[]).map(s=>`${esc(s.model||'—')} · ${t(s.full?'cache.full':'cache.default_scope')} · ${t(s.complete?'cache.complete':'cache.incomplete')}`).join('<br>')||t('cache.no_summary');let read=(f.summary_entries||[]).length?'<br><button class="ghost" data-document-id="'+escAttr(f.id)+'" onclick="rebuildCachedFile(this.dataset.documentId)">'+t('cache.rebuild_file')+'</button>':'';return `<div class="card"><b>${esc(f.name)}</b><br><span class="muted">${t('cache.index')}：${esc(({reused:t('scan.index.reused'),changed:t('scan.index.changed'),new:t('scan.index.created')})[f.index_status]||stateCopy(f.index_status))} · OCR：${esc(stateCopy(f.ocr_status))}<br>${t('cache.summary')}：${summaries}</span>${read}</div>`}).join('');
   host.innerHTML='<div class="muted">'+dossier+(x.selection_current?'':'；'+t('cache.scope_changed'))+'</div><div class="row"><button class="ghost" onclick="rebuildDossier()">'+t('cache.rebuild_dossier')+'</button><button class="ghost" onclick="clearSummaryCaches()">'+t('cache.clear')+'</button></div>'+files;
 }
 // Keep the last data payload, then redraw it with the active language.  The
@@ -3086,7 +3208,8 @@ renderScanDrawer=function(x){return renderScanDrawerForLanguage(x)};
 renderCacheAudit=function(x){lastCacheAudit=x;return renderCacheAuditForLanguage(x)};
 renderStatus=function(s){lastStatusSnapshot=s;return renderStatusForLanguage(s)};
 renderUsageDetail=function(u,model){if(u)lastUsageSnapshot={usage:u,model};return renderUsageDetailForLanguage(u,model)};
-renderEvidenceSources=function(sources,dfcEvidence){return renderEvidenceSourcesForLanguage(sources,dfcEvidence)};
+let lastSourcesSnapshot=null;
+renderEvidenceSources=function(sources,dfcEvidence){lastSourcesSnapshot={sources,dfc:dfcEvidence};return renderEvidenceSourcesForLanguage(sources,dfcEvidence)};
 renderCompareSlots=function(){return renderCompareSlotsForLanguage()};
 renderSessionRows=function(items,append){if(!append)lastSessionRows=[];lastSessionRows.push(...items);return renderSessionRowsForLanguage(items,append)};
 openSessionMenu=function(event,item){return openSessionMenuForLanguage(event,item)};
@@ -3097,7 +3220,7 @@ function refreshFolderState(folder){let files=[...folder.querySelectorAll('input
 function refreshAllFolderStates(){[...$('targettree').querySelectorAll('details')].reverse().forEach(refreshFolderState);updateTreeStatus()}
 function recommendedTreePaths(node,paths=[]){if(node.type==='file'){if(node.recommended)paths.push(node.relative);return paths}(node.children||[]).forEach(child=>recommendedTreePaths(child,paths));return paths}
 function makeTreeNode(node,depth=0){if(node.type==='folder'){let details=document.createElement('details');details.open=depth<1;let summary=document.createElement('summary');let box=document.createElement('input');box.type='checkbox';box.className='tree-folder';box.addEventListener('click',e=>e.stopPropagation());box.addEventListener('change',()=>{materialDraftDirty=true;details.querySelectorAll('input.tree-file:not(:disabled)').forEach(x=>x.checked=box.checked);refreshAllFolderStates()});let label=document.createElement('label');label.textContent='📁 '+node.name;summary.append(box,label);details.append(summary);let children=document.createElement('div');children.className='tree-children';node.children.forEach(child=>children.append(makeTreeNode(child,depth+1)));details.append(children);return details}let row=document.createElement('div');row.className='tree-file'+(node.supported?'':' unsupported');let box=document.createElement('input');box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.checked=!!node.supported&&savedTargetSelection.has(node.relative);box.disabled=!node.supported;box.addEventListener('change',()=>{materialDraftDirty=true;refreshAllFolderStates()});let label=document.createElement('label');let role=node.material_role_label?` · ${tr(node.material_role_label)}`:'';let hint=node.supported&&!node.recommended?' · 默认不选':'';label.textContent='📄 '+node.name+(node.supported?` · ${(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1)} MB${role}${hint}`:` · 不支持${role}`);row.append(box,label);return row}
-async function loadTargetTree(){let target=$('targetpath').value.trim();if(!target){$('treestatus').innerHTML='<span class="error">请先选择或粘贴一个 BG 文件夹路径。</span>';return}try{$('treestatus').textContent='正在仅读取文件夹结构…';let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(x.saved_selection||[]);let notes=[];if(savedTargetSelection.size)notes.push(`已恢复上次的 ${savedTargetSelection.size} 项选择。`);else{savedTargetSelection=new Set(recommendedTreePaths(x.tree));notes.push(`已按资料类型默认选择 ${savedTargetSelection.size} 项原始资料；派生重复资料默认未选。`)}if(x.changed_saved_files)notes.push(`${x.changed_saved_files} 个已选文件内容已变化。`);if(x.missing_saved_files)notes.push(`${x.missing_saved_files} 个原选文件不存在，未恢复。`);treeRestoreNote=notes.join(' ');let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates();if(x.truncated)$('treestatus').innerHTML='<span class="error">文件树超过 5000 项，已截断；请进入更具体的 BG 文件夹。</span>'}catch(e){$('treestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function loadTargetTree(){let target=$('targetpath').value.trim();if(!target){$('treestatus').innerHTML='<span class="error">请先选择或粘贴一个 BG 文件夹路径。</span>';return}try{$('treestatus').textContent='正在仅读取文件夹结构…';let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(x.saved_selection||[]);let notes=[];if(savedTargetSelection.size)notes.push(`已恢复上次的 ${savedTargetSelection.size} 项选择。`);else{savedTargetSelection=new Set(recommendedTreePaths(x.tree));notes.push(`已按资料类型默认选择 ${savedTargetSelection.size} 项原始资料；派生重复资料默认未选。`)}if(x.changed_saved_files)notes.push(`${x.changed_saved_files} 个已选文件内容已变化。`);if(x.missing_saved_files)notes.push(`${x.missing_saved_files} 个原选文件不存在，未恢复。`);treeRestoreNote=notes.join(' ');let host=$('targettree');host.classList.remove('muted');host.innerHTML='';host.append(makeTreeNode(x.tree));refreshAllFolderStates();if(x.truncated)$('treestatus').innerHTML='<span class="error">文件树超过 5000 项，已截断；请进入更具体的 BG 文件夹。</span>'}catch(e){setUIMessage($('treestatus'),e.uiMessage||{text:e.message},'error')}}
 // The server returns data and stable identifiers; the browser owns localized
 // presentation.  Keeping the payload lets a language switch redraw the same
 // selection without another folder read or a change to selection semantics.
@@ -3120,7 +3243,7 @@ function updateMaterialFlowButtonsForLanguage(){
 function setScanReportAvailableForLanguage(report){lastScanReport=report||null;updateMaterialFlowButtonsForLanguage()}
 function clearTargetTreeForLanguage(){
   savedTargetSelection=new Set();treeRestoreNote='';scannedSelection='';lastTargetTreePayload=null;setScanReportAvailableForLanguage(null);
-  $('targettree').textContent=t('tree.placeholder');$('targettree').classList.add('muted');$('treestatus').textContent='';updateMaterialFlowButtonsForLanguage();
+  setUIMessage($('targettree'),{message_key:'tree.placeholder'});$('targettree').classList.add('muted');$('treestatus').textContent='';updateMaterialFlowButtonsForLanguage();
 }
 function updateTreeStatusForLanguage(){
   let count=treeFileCount(),signature=selectedTargetPaths().sort().join('|');
@@ -3154,14 +3277,14 @@ async function loadTargetTreeForLanguage(){
   let target=$('targetpath').value.trim();
   if(!target){$('treestatus').innerHTML='<span class="error">'+t('tree.path_required')+'</span>';return}
   try{
-    $('treestatus').textContent=t('tree.loading');let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(x.saved_selection||[]);
+    setUIMessage($('treestatus'),{message_key:'tree.loading'});let x=await api('/api/target-tree?target='+encodeURIComponent(target));savedTargetSelection=new Set(x.saved_selection||[]);
     let notes=[];
     if(savedTargetSelection.size)notes.push(t('tree.restored',{count:savedTargetSelection.size}));
     else{savedTargetSelection=new Set(recommendedTreePaths(x.tree));notes.push(t('tree.default_selection',{count:savedTargetSelection.size}));}
     if(x.changed_saved_files)notes.push(t('tree.changed',{count:x.changed_saved_files}));
     if(x.missing_saved_files)notes.push(t('tree.missing',{count:x.missing_saved_files}));
     treeRestoreNote=notes.join(' ');renderTargetTreeForLanguage(x);
-  }catch(e){$('treestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}
+  }catch(e){setUIMessage($('treestatus'),e.uiMessage||{text:e.message},'error')}
 }
 // Compatibility assignments ensure every old event handler uses the localized
 // renderers while preserving the original public function names.
@@ -3172,9 +3295,9 @@ updateTreeStatus=updateTreeStatusForLanguage;
 makeTreeNode=makeTreeNodeForLanguage;
 loadTargetTree=loadTargetTreeForLanguage;
 function selectedTargetPaths(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].map(x=>x.dataset.path)}
-async function analyzeTarget(){let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent=rt('scan.reading')}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error(t('materials.selection_required'));let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');materialDraftDirty=false;clearResultPanels();await loadHistory();renderStatus(x.status);$('bgstatus').textContent=t(x.classification?'materials.confirmed_bg':'materials.confirmed_normal',{kind:tr(x.target_kind),count:x.sources});renderScanReport(x);$('coveragestatus').textContent=rt('material.updated');loadDocs();loadCacheAudit()}catch(e){$('bgstatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{if(confirm)confirm.textContent=t('materials.confirm_selected');updateMaterialFlowButtons()}}
-async function prepareCoverage(full=false){if(busy)return;busy=true;$('coveragestatus').textContent=rt(full?'coverage.preparing_full':'coverage.preparing');try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full})});renderCoverageReport(x);renderStatus(await api('/api/status'))}catch(e){$('coveragestatus').innerHTML='<span class="error">'+esc(rt('coverage.failed')+e.message)+'</span>'}finally{busy=false}}
-async function clearBg(){try{renderStatus(await api('/api/bg',{method:'DELETE'}));$('bgstatus').textContent=t('bg.exited')}catch(e){$('bgstatus').textContent=e.message}}
+async function analyzeTarget(){if(!allowRuleDraftTransition())return;let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent=rt('scan.reading')}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error(t('materials.selection_required'));let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');materialDraftDirty=false;clearResultPanels();await loadHistory();renderStatus(x.status);$('bgstatus').textContent=t(x.classification?'materials.confirmed_bg':'materials.confirmed_normal',{kind:tr(x.target_kind),count:x.sources});renderScanReport(x);$('coveragestatus').textContent=rt('material.updated');loadDocs();loadCacheAudit()}catch(e){setUIMessage($('bgstatus'),e.uiMessage||{text:e.message},'error')}finally{if(confirm)confirm.textContent=t('materials.confirm_selected');updateMaterialFlowButtons()}}
+async function prepareCoverage(full=false){if(busy)return;busy=true;setUIMessage($('coveragestatus'),{message_key:full?'coverage.preparing_full':'coverage.preparing'});try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full})});renderCoverageReport(x);renderStatus(await api('/api/status'))}catch(e){setUIMessage($('coveragestatus'),{message_key:'error.operation_failed',params:{detail:e.uiMessage||{text:e.message}}},'error')}finally{busy=false}}
+async function clearBg(){if(!allowRuleDraftTransition())return;try{renderStatus(await api('/api/bg',{method:'DELETE'}));setUIMessage($('bgstatus'),{message_key:'bg.exited'})}catch(e){$('bgstatus').textContent=e.message}}
 const compareOptions=[['claude-haiku-5-5','Claude Haiku 5.5'],['claude-sonnet-5-5','Claude Sonnet 5.5'],['claude-opus-5','Claude Opus 5'],['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite'],['gemini-2.5-pro','Gemini 2.5 Pro'],['gemini-2.5-flash','Gemini 2.5 Flash'],['deepseek-r1-0528-maas','DeepSeek R1 (0528)'],['llama-3.3-70b-instruct-maas','Llama 3.3 70B'],['glm-5-maas','GLM-5']];
 function renderCompareSlots(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">选择模型…</option>'+compareOptions.map(([value,label])=>'<option value="'+escAttr(value)+'" '+(slot.value===value?'selected':'')+'>'+label+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>其他：手动输入 Model ID…</option>';return '<div class="field"><label>对比模型 '+(index+1)+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+escAttr(slot.custom||'')+'" placeholder="输入准确的 Bosch Farm Model ID" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?'最多 4 个模型':'＋ 添加对比模型';if(compareSlots.length>=4)$('comparestatus').textContent='已达到最多 4 个对比模型。'}
 function changeCompareModel(index){let select=$('cmpsel'+index);compareSlots[index].value=select.value;if(select.value!=='__custom__')compareSlots[index].custom='';renderCompareSlots();if(select.value==='__custom__')setTimeout(()=>$('cmpcustom'+index).focus(),0)}
@@ -3184,12 +3307,12 @@ function selectedCompareModels(){return compareSlots.map((slot,index)=>slot.valu
 function renderComparisonForLanguage(record){
   $('comparison-result')?.remove();let x=record.data,box=document.createElement('section');box.id='comparison-result';box.className='comparison';
   box.innerHTML='<div class="message assistant"><b>'+t('compare.title')+'</b><br>'+t('compare.question')+'：'+esc(record.question)+'<br><span class="muted">'+t('compare.same_evidence')+'：'+(x.sources||[]).map(esc).join(' · ')+'</span></div><div class="comparison-grid"></div>';
-  let grid=box.querySelector('.comparison-grid');for(let r of x.results||[]){let card=document.createElement('article');card.className='card';if(!r.ok){card.innerHTML='<b>'+esc(r.requested_model)+'</b><p class="error">'+t('compare.request_failed')+'</p><div class="muted">'+esc(r.error||t('compare.unknown_error'))+'</div>';grid.append(card);continue}let u=r.usage||{},cost=usageCost(u),classification=r.classification?'<div class="chip">'+t('classification.verified')+'：'+esc(r.classification.label)+' · '+esc(r.classification.confidence)+'</div>':'';card.innerHTML='<b>'+esc(r.model_response)+'</b>'+(r.model_response!==r.requested_model?'<div class="muted">'+t('compare.requested_model')+'：'+esc(r.requested_model)+'</div>':'')+'<div class="muted ok">'+t('compare.success')+' · Token '+usageNumber(u.input)+' / '+usageNumber(u.output)+' · '+cost+'</div>'+classification+'<hr><div class="answer"></div>'+(r.notices?.length?'<div class="muted">'+r.notices.map(esc).join('<br>')+'</div>':'');card.querySelector('.answer').textContent=r.answer;grid.append(card)}$('chat').append(box);
+  let grid=box.querySelector('.comparison-grid');for(let r of x.results||[]){let card=document.createElement('article');card.className='card';if(!r.ok){card.innerHTML='<b>'+esc(r.requested_model)+'</b><p class="error">'+t('compare.request_failed')+'</p><div class="muted">'+esc(r.error_message?uiCopy(r.error_message):r.error||t('compare.unknown_error'))+'</div>';grid.append(card);continue}let u=r.usage||{},cost=usageCost(u),classification=r.classification?'<div class="chip">'+t('classification.verified')+'：'+esc(r.classification.label)+' · '+esc(r.classification.confidence)+'</div>':'';card.innerHTML='<b>'+esc(r.model_response)+'</b>'+(r.model_response!==r.requested_model?'<div class="muted">'+t('compare.requested_model')+'：'+esc(r.requested_model)+'</div>':'')+'<div class="muted ok">'+t('compare.success')+' · Token '+usageNumber(u.input)+' / '+usageNumber(u.output)+' · '+cost+'</div>'+classification+'<hr><div class="answer"></div>'+(r.notices?.length?'<div class="muted">'+(r.notice_messages||r.notices).map(value=>esc(uiCopy(value))).join('<br>')+'</div>':'');card.querySelector('.answer').textContent=r.answer;grid.append(card)}$('chat').append(box);
 }
-async function compareModels(){if(busy)return;if(lastStatusSnapshot?.context_issue){message(t('context.reconfirm'));return;}if(materialDraftDirty){message(t('materials.reconfirm'));return;}let q=$('question').value.trim()||lastQuestion;if(!q){$('comparestatus').innerHTML='<span class="error">'+t('compare.question_required')+'</span>';return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){$('comparestatus').innerHTML='<span class="error">'+t('compare.models_required')+'</span>';return}busy=true;lastQuestion=q;$('comparestatus').textContent=t('compare.running',{count:models.length});let wait=message(t('compare.in_progress',{models:models.join(' · ')}));try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models})});wait.remove();lastComparison={question:q,data:x};renderComparisonForLanguage(lastComparison);renderStatus(x.usage);$('comparestatus').innerHTML='<span class="ok">'+t('compare.complete')+'</span>'}catch(e){wait.textContent=t('model.failed')+e.message;wait.classList.add('error');$('comparestatus').innerHTML='<span class="error">'+esc(e.message)+'</span>'}finally{busy=false;$('chat').scrollTop=1e9}}
-function processingCard(){let card=document.createElement('section');card.className='message assistant';card.style.border='1px solid #334155';card.innerHTML='<b>'+rt('model.processing')+'</b><div class="muted" data-process-text>'+rt('model.connecting')+'</div><div style="height:7px;background:#0b1220;border-radius:8px;overflow:hidden;margin-top:9px"><div data-process-bar style="height:100%;width:4%;background:#38bdf8;transition:width .25s ease"></div></div>';$('chat').append(card);return card}
-function updateProcessing(card,event){let text=card.querySelector('[data-process-text]'),bar=card.querySelector('[data-process-bar]');text.textContent=event.text||rt('model.waiting');if(typeof event.percent==='number')bar.style.width=Math.max(4,Math.min(100,event.percent))+'%';if(event.phase==='complete'){card.style.borderColor='#22c55e';bar.style.background='#22c55e'}}
-function showChatResult(x){message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>'+t('model.reasoning')+'</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;$('chat').append(d)}if(x.notices?.length)message(x.notices.join('\n'),'assistant');renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${esc(c.path)}</b><br>${esc(c.reason)}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button data-plan-id="'+escAttr(x.plan_id||'')+'" onclick="apply(this.dataset.planId,this)">'+t('changes.apply')+'</button>':t('changes.none');if(x.changes?.length){let review=$('changes').cloneNode(true);review.removeAttribute('id');review.className='message assistant change-plan';$('chat').append(review)}$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">'+t('export.assembly')+'</button>':t('export.assembly_unavailable');renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}
+async function compareModels(){if(busy)return;if(lastStatusSnapshot?.context_issue){uiMessageNode({message_key:'context.reconfirm'});return;}if(materialDraftDirty){uiMessageNode({message_key:'materials.reconfirm'});return;}let q=$('question').value.trim()||lastQuestion;if(!q){setUIMessage($('comparestatus'),{message_key:'compare.question_required'},'error');return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){setUIMessage($('comparestatus'),{message_key:'compare.models_required'},'error');return}busy=true;lastQuestion=q;setUIMessage($('comparestatus'),{message_key:'compare.running',params:{count:models.length}});let wait=uiMessageNode({message_key:'compare.in_progress',params:{models:models.join(' · ')}});try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models})});wait.remove();lastComparison={question:q,data:x};renderComparisonForLanguage(lastComparison);renderStatus(x.usage);setUIMessage($('comparestatus'),{message_key:'compare.complete'},'ok')}catch(e){wait.uiData={message_key:'error.operation_failed',params:{detail:e.uiMessage||{text:e.message}}};wait.textContent=uiCopy(wait.uiData);wait.classList.add('error');setUIMessage($('comparestatus'),e.uiMessage||{text:e.message},'error')}finally{busy=false;$('chat').scrollTop=1e9}}
+function processingCard(){let card=document.createElement('section');card.className='message assistant';card.style.border='1px solid #334155';card.innerHTML='<b data-process-title>'+rt('model.processing')+'</b><div class="muted" data-process-text>'+rt('model.connecting')+'</div><div style="height:7px;background:#0b1220;border-radius:8px;overflow:hidden;margin-top:9px"><div data-process-bar style="height:100%;width:4%;background:#38bdf8;transition:width .25s ease"></div></div>';$('chat').append(card);return registerUI(card,'processing',null)}
+function updateProcessing(card,event){let text=card.querySelector('[data-process-text]'),bar=card.querySelector('[data-process-bar]');card.uiData=event;text.textContent=uiCopy(event)||rt('model.waiting');if(typeof event.percent==='number')bar.style.width=Math.max(4,Math.min(100,event.percent))+'%';if(event.phase==='complete'){card.style.borderColor='#22c55e';bar.style.background='#22c55e'}}
+function showChatResult(x){message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>'+t('model.reasoning')+'</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;registerUI(d,'reasoning',x.reasoning);$('chat').append(d)}if(x.notices?.length){let data=x.notice_messages||x.notices;registerUI(message(data.map(uiCopy).join('\n'),'assistant'),'notices',data)}renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${esc(c.path)}</b><br>${esc(c.reason)}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button data-plan-id="'+escAttr(x.plan_id||'')+'" onclick="apply(this.dataset.planId,this)">'+t('changes.apply')+'</button>':t('changes.none');if(!x.changes?.length)setUIMessage($('changes'),{message_key:'changes.none'});if(x.changes?.length){let review=$('changes').cloneNode(true);review.removeAttribute('id');review.className='message assistant change-plan';$('chat').append(review)}$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">'+t('export.assembly')+'</button>':t('export.assembly_unavailable');if(!x.can_export_bg)setUIMessage($('analysisexport'),{message_key:'export.assembly_unavailable'});renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}
 let activeChat=null;
 async function stopChat(){
   if(!activeChat||activeChat.stopping)return;
@@ -3207,7 +3330,7 @@ async function settleChat(task,wait){
       let status=await readApiResponse(response);
       if(status.done)return status;
       failures=0;
-      wait.querySelector('[data-process-text]').textContent=t('stream.stopping');
+      updateProcessing(wait,{message_key:'stream.stopping'});
     }catch{if(++failures>=3)return null}
     await new Promise(resolve=>setTimeout(resolve,100));
   }
@@ -3221,7 +3344,7 @@ async function chat(){
   let wait=processingCard(),buffer='',result=null,error=null,preview=null,previewText=null,failureText='';
   function resetPreview(){preview?.remove();preview=null;previewText=null}
   function appendPreview(text){
-    if(!preview){preview=message('');preview.classList.add('answer-preview');let label=document.createElement('div');label.className='muted';label.textContent=t('stream.preview');let body=document.createElement('div');body.className='preview-text';body.style.whiteSpace='pre-wrap';previewText=document.createTextNode('');body.append(previewText);preview.append(label,body)}
+    if(!preview){preview=message('');preview.classList.add('answer-preview');registerUI(preview,'preview',null);let label=document.createElement('div');label.className='muted';label.textContent=t('stream.preview');let body=document.createElement('div');body.className='preview-text';body.style.whiteSpace='pre-wrap';previewText=document.createTextNode('');body.append(previewText);preview.append(label,body)}
     previewText.appendData(text);
   }
   try{
@@ -3240,33 +3363,93 @@ async function chat(){
         else if(event.type==='answer_reset')resetPreview();
         else if(event.type==='answer_delta')appendPreview(event.text);
         else if(event.type==='result')result=event.data;
-        else if(event.type==='error'){error=event;throw Error(event.message||t('model.failed'))}
+        else if(event.type==='error'){error=event;throw Error(uiCopy(event)||event.message||t('model.failed'))}
       }
     }
     if(!result)throw Error(t('api.no_result'));
-    resetPreview();updateProcessing(wait,{phase:'complete',text:t('model.complete'),percent:100});showChatResult(result);
+    resetPreview();updateProcessing(wait,{phase:'complete',message_key:'model.complete',percent:100});showChatResult(result);
   }catch(e){
     resetPreview();task.controller.abort();
     if(task.id)try{await api('/api/chat/cancel',{method:'POST',body:JSON.stringify({request_id:task.id})})}catch{}
     let code=task.stopping?'cancelled':error?.code;
-    failureText=code==='cancelled'?t('stream.cancelled'):code==='timeout'?t('stream.timeout'):code==='limit'?t('stream.limit'):t('model.failed')+' '+e.message;
+    wait.uiData={message_key:code==='cancelled'?'stream.cancelled':code==='timeout'?'stream.timeout':code==='limit'?'stream.limit':'error.operation_failed',params:{detail:error?.message_key?error:e.uiMessage||{text:e.message}}};
+    failureText=uiCopy(wait.uiData);
     wait.querySelector('[data-process-text]').textContent=failureText;
     if(code!=='cancelled')wait.classList.add('error');
   }finally{
     resetPreview();let status=await settleChat(task,wait);
-    if(task.stopping)wait.querySelector('[data-process-text]').textContent=status?.state==='completed'?t('stream.completed'):t('stream.cancelled');
+    if(task.stopping)updateProcessing(wait,{message_key:status?.state==='completed'?'stream.completed':'stream.cancelled'});
     else if(failureText)wait.querySelector('[data-process-text]').textContent=failureText;
     activeChat=null;busy=false;$('cancelchat').disabled=true;$('chat').scrollTop=1e9;
   }
 }
-async function exportSession(){try{let x=await api('/api/export/session',{method:'POST'});$('sessionexport').innerHTML='<span class="ok">'+esc(t('export.complete',{path:x.path}))+'</span>'}catch(e){$('sessionexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-async function exportBgAnalysis(){try{let x=await api('/api/export/bg-analysis',{method:'POST'});$('analysisexport').innerHTML='<span class="ok">'+esc(t('export.complete',{path:x.path}))+'</span>'}catch(e){$('analysisexport').innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
-function esc(s){let e=document.createElement('div');e.textContent=s;return e.innerHTML}function escAttr(s){return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;')}async function apply(planId,button){let review=button?.closest('.change-plan')||$('changes');if(!confirm(t('changes.confirm')))return;try{let x=await api('/api/apply',{method:'POST',body:JSON.stringify({confirmed:true,plan_id:planId})});review.innerHTML='<span class="ok">'+t('apply.complete',{count:x.applied})+'</span>';message(t('apply.message',{count:x.applied}))}catch(e){review.innerHTML='<span class="error">'+esc(e.message)+'</span>'}}
+async function exportSession(){try{let x=await api('/api/export/session',{method:'POST'});setUIMessage($('sessionexport'),{message_key:'export.complete',params:{path:x.path}},'ok')}catch(e){setUIMessage($('sessionexport'),e.uiMessage||{text:e.message},'error')}}
+async function exportBgAnalysis(){try{let x=await api('/api/export/bg-analysis',{method:'POST'});setUIMessage($('analysisexport'),{message_key:'export.complete',params:{path:x.path}},'ok')}catch(e){setUIMessage($('analysisexport'),e.uiMessage||{text:e.message},'error')}}
+function esc(s){let e=document.createElement('div');e.textContent=s;return e.innerHTML}function escAttr(s){return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;')}async function apply(planId,button){let review=button?.closest('.change-plan')||$('changes');if(!confirm(t('changes.confirm')))return;try{let x=await api('/api/apply',{method:'POST',body:JSON.stringify({confirmed:true,plan_id:planId})});review.innerHTML='<span class="ok">'+t('apply.complete',{count:x.applied})+'</span>';message(t('apply.message',{count:x.applied}))}catch(e){setUIMessage(review,e.uiMessage||{text:e.message},'error')}}
 
 let materialDraftDirty=false;
-function clearResultPanels(){lastUsageSnapshot=null;lastComparison=null;lastCoverageReport=null;lastCacheAudit=null;$('sources').textContent=t('evidence.none');$('changes').textContent=t('changes.none');$('analysisexport').textContent=t('export.assembly_unavailable');$('usagedetail').textContent=t('usage.unavailable');$('coveragestatus').textContent=t('material.updated');}
-function editCodebookDraft(){let profile=lastCodebookWorkspaceProfile;if(!profile)return;let host=$('chat');host.innerHTML='<section class="workspace-inner"><h1>'+t('rules.edit')+'</h1><p>'+t('rules.edit_help')+'</p><textarea id="ruleeditor" style="width:100%;min-height:380px"></textarea><div class="row"><button onclick="saveCodebookDraft()">'+t('rules.save_draft')+'</button><button class="ghost" onclick="showCodebookWorkspace(lastCodebookWorkspaceProfile)">'+t('rules.cancel')+'</button></div><div id="ruleediterror" class="error"></div></section>';$('ruleeditor').value=JSON.stringify(profile.draft,null,2);}
-async function saveCodebookDraft(){try{let draft=JSON.parse($('ruleeditor').value);if(!confirm(t('rules.save_confirm')))return;let profile=await api('/api/codebook/edit',{method:'POST',body:JSON.stringify({draft,confirmed:true})});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile)}catch(e){$('ruleediterror').textContent=e.message}}
+function clearResultPanels(){lastSourcesSnapshot=null;lastUsageSnapshot=null;lastComparison=null;lastCoverageReport=null;lastCacheAudit=null;setUIMessage($('sources'),{message_key:'evidence.none'});setUIMessage($('changes'),{message_key:'changes.none'});setUIMessage($('analysisexport'),{message_key:'export.assembly_unavailable'});setUIMessage($('usagedetail'),{message_key:'usage.unavailable'});setUIMessage($('coveragestatus'),{message_key:'material.updated'});}
+let ruleEditState=null;
+function ruleEditorBinding(profile=lastCodebookWorkspaceProfile){
+  return JSON.stringify([lastStatusSnapshot?.workspace,lastStatusSnapshot?.session_name,profile?.source_path,profile?.sha256,profile?.version]);
+}
+function captureRuleEditor(){
+  let field=$('ruleeditor');if(!ruleEditState||!field)return;
+  Object.assign(ruleEditState,{text:field.value,dirty:field.value!==ruleEditState.initialText,start:field.selectionStart,end:field.selectionEnd,direction:field.selectionDirection,scroll:field.scrollTop});
+}
+function allowRuleDraftTransition(){
+  captureRuleEditor();
+  if(!ruleEditState)return true;
+  if(ruleEditState.saving)return false;
+  if(ruleEditState.dirty&&!confirm(t('rules.discard_confirm')))return false;
+  ruleEditState=null;return true;
+}
+function renderRuleEditor(){
+  if(!ruleEditState)return;
+  captureRuleEditor();
+  if(!$('ruleeditor')){
+    $('chat').className='chat codebook-workspace';$('composer').style.display='none';
+    $('chat').innerHTML='<section class="workspace-inner"><h1 data-rule-copy="rules.edit"></h1><p data-rule-copy="rules.edit_help"></p><textarea id="ruleeditor" style="width:100%;min-height:380px"></textarea><div class="row"><button id="rulesave" onclick="saveCodebookDraft()" data-rule-copy="rules.save_draft"></button><button class="ghost" onclick="cancelRuleDraft()" data-rule-copy="rules.cancel"></button></div><div id="ruledirty" class="muted"></div><div id="ruleediterror" class="error"></div></section>';
+    let field=$('ruleeditor');field.value=ruleEditState.text;field.setSelectionRange(ruleEditState.start,ruleEditState.end,ruleEditState.direction);field.scrollTop=ruleEditState.scroll;
+    for(let event of ['input','select','keyup','click','blur','scroll'])field.addEventListener(event,()=>{captureRuleEditor();updateRuleEditorCopy()});
+  }
+  updateRuleEditorCopy();
+}
+function updateRuleEditorCopy(){
+  if(!ruleEditState||!$('ruleeditor'))return;
+  for(let node of $('chat').querySelectorAll('[data-rule-copy]'))node.textContent=t(node.dataset.ruleCopy);
+  $('ruleeditor').setAttribute('aria-label',t('rules.edit'));
+  $('ruledirty').textContent=t(ruleEditState.saving?'rules.saving':ruleEditState.dirty?'rules.unsaved':'rules.saved_copy');
+  $('rulesave').disabled=!!ruleEditState.saving;
+  $('ruleeditor').readOnly=!!ruleEditState.saving;
+  $('ruleediterror').textContent=ruleEditState.error?uiCopy(ruleEditState.error):'';
+}
+function editCodebookDraft(){
+  if(ruleEditState){renderRuleEditor();return}
+  let profile=lastCodebookWorkspaceProfile;if(!profile)return;
+  let text=JSON.stringify(profile.draft,null,2);
+  ruleEditState={text,initialText:text,dirty:false,binding:ruleEditorBinding(profile),start:0,end:0,direction:'none',scroll:0,error:null,saving:false};
+  renderRuleEditor();
+}
+function cancelRuleDraft(){
+  if(ruleEditState?.saving)return;
+  if(!allowRuleDraftTransition())return;
+  showCodebookWorkspace(lastCodebookWorkspaceProfile);
+}
+async function saveCodebookDraft(){
+  captureRuleEditor();let editing=ruleEditState;if(!editing||editing.saving)return;
+  if(editing.binding!==ruleEditorBinding()){editing.error={message_key:'rules.context_changed'};updateRuleEditorCopy();return}
+  let draft;try{draft=JSON.parse(editing.text)}catch(e){editing.error={message_key:'rules.invalid_json',params:{detail:e.message}};updateRuleEditorCopy();return}
+  if(!confirm(t('rules.save_confirm')))return;
+  editing.saving=true;editing.error=null;updateRuleEditorCopy();
+  try{
+    let profile=await api('/api/codebook/edit',{method:'POST',body:JSON.stringify({draft,confirmed:true,profile_version:lastCodebookWorkspaceProfile?.version})});
+    ruleEditState=null;renderCodebookStatus(profile);showCodebookWorkspace(profile);renderStatus(await api('/api/status'));
+  }catch(e){editing.error=e.uiMessage||{message_key:'rules.save_failed',params:{detail:e.message}}}
+  finally{editing.saving=false;updateRuleEditorCopy()}
+}
+window.addEventListener('beforeunload',event=>{captureRuleEditor();if(ruleEditState?.dirty){event.preventDefault();event.returnValue=''}});
+
 </script></body></html>'''
 
 # Embed the packaged catalog without introducing an HTTP endpoint or network call.

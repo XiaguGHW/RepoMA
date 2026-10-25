@@ -61,14 +61,12 @@ class BrowserRelease(unittest.TestCase):
                 self.warnings.append(msg.text) if msg.type == "warning" else None
             ),
         )
-        self.page.on(
-            "dialog",
-            lambda dialog: (
+        self.handle_dialog = lambda dialog: (
                 dialog.accept("gemini-2.5-pro")
                 if dialog.type == "prompt"
                 else dialog.accept()
-            ),
-        )
+            )
+        self.page.on('dialog', self.handle_dialog)
         self.page.goto(f"http://127.0.0.1:{port}")
         self.page.wait_for_function('typeof materialDraftDirty !== "undefined"')
         self.open_workspace()
@@ -97,6 +95,8 @@ class BrowserRelease(unittest.TestCase):
     def open_drawer(self, kind):
         if kind == "workspace":
             self.page.locator("#workspaceshortcut").click()
+        elif self.page.viewport_size['width'] < 1180 and kind in {'materials', 'rules'}:
+            self.page.locator('#contextshortcut-' + kind).click()
         else:
             self.page.locator(
                 f".context-card[onclick=\"openContextDrawer('{kind}')\"]"
@@ -185,7 +185,9 @@ class BrowserRelease(unittest.TestCase):
                 exact=True,
             )
         )
-        self.assertEqual(card.count(), 1)
+        self.assertEqual(self.page.locator('.classification-card').filter(
+            has=self.page.get_by_role('heading', name=self.page.evaluate("t('classification.title')"), exact=True)
+        ).count(), 1)
         self.assertIn("Rotationseinheit", card.inner_text())
         coverage = self.page.locator(".classification-card").filter(
             has=self.page.get_by_role(
@@ -324,7 +326,9 @@ class BrowserRelease(unittest.TestCase):
         self.assertFalse(
             response.value.request.post_data_json["require_classification"]
         )
-        self.assertEqual(card.count(), 1)
+        self.assertEqual(self.page.locator('.classification-card').filter(
+            has=self.page.get_by_role('heading', name=self.page.evaluate("t('classification.title')"), exact=True)
+        ).count(), 1)
         self.assertNotIn(
             "classification",
             self.page.locator("#chat .message.error").all_text_contents(),
@@ -398,7 +402,6 @@ class BrowserRelease(unittest.TestCase):
                 self.page.wait_for_timeout(20)
             self.assertFalse(w.MODEL_WORK_IN_PROGRESS.is_set())
             self.open_workspace()
-            self.close_drawer()
             self.page.locator('#question').fill('Truncated response')
             with self.page.expect_response(lambda response: response.url.endswith('/api/chat/stream')):
                 self.button('chat()', '#composer').click()
@@ -454,11 +457,8 @@ class BrowserRelease(unittest.TestCase):
             with self.subTest(width=width):
                 self.stage = f"materials drawer geometry and clicks at {width}px"
                 self.page.set_viewport_size({"width": width, "height": 900})
-                # Narrow layouts hide the context sidebar: exercise the visible welcome action.
-                if width < 1180:
-                    self.button("openContextDrawer('materials')", "#chat").click()
-                else:
-                    self.open_drawer("materials")
+                # Use the permanent visible shortcut when the context sidebar is hidden.
+                self.open_drawer("materials")
                 drawer = self.page.locator(".context-drawer")
                 box = drawer.bounding_box()
                 self.page.screenshot(path=str(OUTPUT / f"width-{width}.png"))
@@ -495,7 +495,7 @@ class BrowserRelease(unittest.TestCase):
                 self.completed(self.stage)
             # Return to a known welcome screen before testing the next viewport.
             self.page.reload()
-            self.page.wait_for_function("typeof openContextDrawer === 'function'")
+            self.page.wait_for_function("document.getElementById('setupmsg').textContent===t('workspace.opened') && activeContextDrawer===null")
 
     def test_rule_draft_survives_language_cycle(self):
         self.prepare_rules()
@@ -522,6 +522,149 @@ class BrowserRelease(unittest.TestCase):
         self.language("en")
         headings = self.page.locator(".classification-card h3").all_text_contents()
         self.assertIn(self.page.evaluate("t('classification.title')"), headings)
+
+    def test_long_invalid_draft_keeps_selection_scroll_errors_and_cancel_guard(self):
+        self.prepare_rules()
+        original = self.f.rules.read_bytes()
+        self.button('editCodebookDraft()').click()
+        raw = '{\n' + '\n'.join(f'  "line{i}": "原文 Regel {i}",' for i in range(180))
+        self.page.locator('#ruleeditor').fill(raw)
+        self.page.eval_on_selector('#ruleeditor', '(node)=>{node.setSelectionRange(1200,1234,"backward");node.scrollTop=800;node.dispatchEvent(new Event("select"));node.dispatchEvent(new Event("scroll"))}')
+        state = self.page.eval_on_selector('#ruleeditor', '(n)=>[n.selectionStart,n.selectionEnd,n.selectionDirection,n.scrollTop]')
+        self.button('saveCodebookDraft()').click()
+        self.assertTrue(self.page.locator('#ruleediterror').inner_text())
+        for language in ['zh', 'en', 'de', 'zh', 'en', 'de']:
+            self.language(language)
+            self.assertEqual(self.page.input_value('#ruleeditor'), raw)
+            self.assertEqual(self.page.eval_on_selector('#ruleeditor', '(n)=>[n.selectionStart,n.selectionEnd,n.selectionDirection,n.scrollTop]'), state)
+            self.assertIn(self.page.evaluate("t('rules.invalid_json',{detail:''})").strip(), self.page.locator('#ruleediterror').inner_text())
+            self.assertEqual(self.page.locator('#ruledirty').inner_text(), self.page.evaluate("t('rules.unsaved')"))
+        # A rejected discard leaves the same editing context intact.
+        self.page.remove_listener('dialog', self.handle_dialog)
+        session = self.page.evaluate('lastStatusSnapshot.session_name')
+        self.page.once('dialog', lambda dialog: dialog.dismiss())
+        self.page.locator('#newsessionbutton').click()
+        self.assertEqual(self.page.evaluate('lastStatusSnapshot.session_name'), session)
+        self.assertEqual(self.page.input_value('#ruleeditor'), raw)
+        self.open_drawer('workspace')
+        self.page.locator('#contextworkspacepath').fill(str(self.f.root))
+        self.page.once('dialog', lambda dialog: dialog.dismiss())
+        self.button('contextOpenWorkspace()').click()
+        self.assertEqual(self.page.evaluate('lastStatusSnapshot.workspace'), str(self.f.workspace))
+        self.assertEqual(self.page.input_value('#ruleeditor'), raw)
+        self.open_drawer('rules')
+        self.page.once('dialog', lambda dialog: dialog.dismiss())
+        self.button('contextSyncRule();prepareCodebook()').click()
+        self.close_drawer()
+        self.assertEqual(self.page.input_value('#ruleeditor'), raw)
+        self.page.once('dialog', lambda dialog: dialog.dismiss())
+        self.button('cancelRuleDraft()').click()
+        self.assertEqual(self.page.input_value('#ruleeditor'), raw)
+        self.page.once('dialog', lambda dialog: dialog.accept())
+        self.button('cancelRuleDraft()').click()
+        self.assertEqual(self.page.locator('#ruleeditor').count(), 0)
+        self.assertEqual(self.f.rules.read_bytes(), original)
+
+    def test_draft_save_confirmation_and_stale_context_preserve_raw_input(self):
+        self.prepare_rules()
+        source = self.f.rules.read_bytes()
+        self.button('editCodebookDraft()').click()
+        draft = json.loads(self.page.input_value('#ruleeditor'))
+        draft['classes'][0]['definition'] = 'USER 中文 Definition {count}'
+        raw = json.dumps(draft, ensure_ascii=False, indent=3)
+        self.page.locator('#ruleeditor').fill(raw)
+        self.page.remove_listener('dialog', self.handle_dialog)
+        self.page.once('dialog', lambda dialog: dialog.dismiss())
+        self.button('saveCodebookDraft()').click()
+        self.assertEqual(self.page.input_value('#ruleeditor'), raw)
+        self.page.once('dialog', lambda dialog: dialog.accept())
+        self.button('saveCodebookDraft()').click()
+        self.page.wait_for_function('ruleEditState===null')
+        self.assertEqual(self.page.evaluate('lastCodebookWorkspaceProfile.draft.classes[0].definition'), draft['classes'][0]['definition'])
+        self.assertEqual(self.f.rules.read_bytes(), source)
+        # A second tab changes the app draft after this editor opened.
+        self.button('editCodebookDraft()').click()
+        raw += '  '
+        self.page.locator('#ruleeditor').fill(raw)
+        response = self.page.request.post(self.page.url + 'api/codebook/edit', data={'draft': draft, 'confirmed': True})
+        self.assertEqual(response.status, 200)
+        self.page.once('dialog', lambda dialog: dialog.accept())
+        self.button('saveCodebookDraft()').click()
+        self.page.wait_for_function('ruleEditState?.error?.message_key === "rules.version_changed"')
+        self.language('de')
+        self.assertEqual(self.page.input_value('#ruleeditor'), raw)
+        self.assertEqual(self.page.locator('#ruleediterror').inner_text(), self.page.evaluate("t('rules.version_changed')"))
+        self.assertEqual(self.f.rules.read_bytes(), source)
+
+    def test_structured_dynamic_messages_redraw_without_translating_content(self):
+        self.page.evaluate("""() => {
+            let raw='MODEL 原文 <b>Regel</b> {count}';
+            $('chat').innerHTML='';message(raw);showChatResult({answer:raw,reasoning:raw,notices:[raw],
+                notice_messages:[{message_key:'notice.dossier_failed',params:{detail:raw}}],
+                sources:[{label:raw,visual:true}],dfc_evidence:[{name:raw,ocr_status:'not_requested',segments_used:[1],segments_total:2}],
+                coverage_summary:{complete:true,files:[{name:raw,complete:true,scope_message:{message_key:'material.scope_full'},read:1,total:1}]},changes:[],usage:lastStatusSnapshot});
+            window.fixtureProcessing=processingCard();updateProcessing(fixtureProcessing,{message_key:'reading.file',params:{index:1,total:2,name:raw},percent:20});
+        }""")
+        self.page.locator('.reason summary').click()
+        for language in ['zh', 'en', 'de', 'zh', 'en', 'de']:
+            self.language(language)
+            raw = 'MODEL 原文 <b>Regel</b> {count}'
+            self.assertEqual(self.page.locator('#chat > .message').first.inner_text(), raw)
+            self.assertEqual(self.page.locator('.reason pre').inner_text(), raw)
+            self.assertEqual(self.page.locator('.reason summary').inner_text(), self.page.evaluate("t('model.reasoning')"))
+            self.assertEqual(self.page.locator('[data-process-text]').inner_text(), self.page.evaluate("t('reading.file',{index:1,total:2,name:'MODEL 原文 <b>Regel</b> {count}'})"))
+            self.assertIn(self.page.evaluate("t('evidence.visual')"), self.page.locator('#sources').inner_text())
+            self.assertIn(self.page.evaluate("t('state.not_requested')"), self.page.locator('#sources').inner_text())
+            self.assertEqual(self.page.locator('[data-ui-component="notices"]').inner_text(), self.page.evaluate("t('notice.dossier_failed',{detail:'MODEL 原文 <b>Regel</b> {count}'})"))
+
+    def test_german_mobile_drawer_long_error_folder_selection_and_close(self):
+        self.language('de')
+        self.prepare_rules()
+        self.button('leaveCodebookWorkspace()').click()
+        nested = self.f.bg_a / ('Unterlagen_' + 'lang_' * 18)
+        nested.mkdir()
+        (nested / ('Zeichnung_' + 'x' * 110 + '.txt')).write_text('Fixture material', encoding='utf-8')
+        for width in [390, 800, 1440]:
+            self.page.set_viewport_size({'width': width, 'height': 900})
+            self.open_drawer('materials')
+            self.page.route('**/api/pick/file', lambda route: route.fulfill(json={'path': str(self.f.bg_a / 'facts.txt')}))
+            self.button("contextPickTarget('file')").click()
+            self.page.wait_for_function('(path)=>document.getElementById("contexttargetpath").value===path', arg=str(self.f.bg_a / 'facts.txt'))
+            self.page.unroute('**/api/pick/file')
+            self.page.route('**/api/pick/folder', lambda route: route.fulfill(json={'path': str(self.f.bg_a)}))
+            self.button("contextPickTarget('folder')").click()
+            self.page.wait_for_function('(path)=>lastTargetTreePayload?.tree?.path===path', arg=str(self.f.bg_a))
+            self.page.unroute('**/api/pick/folder')
+            self.page.route('**/api/pick/folder', lambda route: route.fulfill(json={'path': ''}))
+            with self.page.expect_response(lambda response: response.url.endswith('/api/pick/folder')):
+                self.button("contextPickTarget('folder')").click()
+            self.assertEqual(self.page.input_value('#contexttargetpath'), str(self.f.bg_a))
+            self.page.unroute('**/api/pick/folder')
+            detail = str(nested / 'missing') + ': ' + ('Technische Fehlerbeschreibung ' * 30)
+            self.page.route('**/api/target-tree?*', lambda route: route.fulfill(status=400, content_type='application/json', body=json.dumps({
+                'detail': detail, 'message_key': 'error.operation_failed', 'params': {'detail': detail}})))
+            self.page.locator('#contexttargetpath').fill(str(nested / 'missing'))
+            self.button('contextSyncTarget();loadTargetTree()').click()
+            self.page.locator('#treestatus .error').wait_for()
+            self.assertIn(detail, self.page.locator('#treestatus').text_content())
+            self.page.screenshot(path=str(OUTPUT / f'de-long-error-{width}.png'))
+            box = self.page.locator('.context-drawer').bounding_box()
+            self.assertGreaterEqual(box['x'], -1)
+            self.assertLessEqual(box['x'] + box['width'], width + 1)
+            self.page.unroute('**/api/target-tree?*')
+            self.page.locator('#contexttargetpath').fill(str(self.f.bg_a))
+            self.button('contextSyncTarget();loadTargetTree()').click()
+            self.page.locator('input.tree-folder').first.wait_for()
+            folder = self.page.locator('input.tree-folder').first
+            folder.uncheck()
+            self.assertEqual(self.page.locator('input.tree-file:checked').count(), 0)
+            folder.check()
+            self.assertEqual(self.page.locator('input.tree-file:checked').count(), 2)
+            self.close_drawer()
+            self.assertEqual(self.page.locator('input.tree-file:checked').count(), 2)
+            self.open_drawer('materials')
+            self.page.keyboard.press('Escape')
+            self.page.wait_for_function('activeContextDrawer===null')
 
     def test_workspace_attribute_input_cannot_create_event_handler(self):
         payload = 'fixture" onpointerover="window.__auditXss=1'

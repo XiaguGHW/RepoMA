@@ -13,6 +13,7 @@ from typing import Any
 
 import requests
 from request_runtime import RequestControl, RequestStopped, ResponseLimitExceeded
+from workbench_i18n import UIMessage
 
 try:
     from openai import OpenAI
@@ -91,7 +92,7 @@ class LLMConnector:
             return self._call_openai(file_paths, user_prompt, system_prompt, generation_config,
                                      stream=stream, event_handler=event_handler, thinking=thinking)
         if stream and event_handler:
-            event_handler("notice", "当前模型的连接器使用非流式输出，步骤进度仍会显示。")
+            event_handler("notice", UIMessage('notice.nonstream'))
         return {"gemini": self._call_gemini, "claude": self._call_claude, "openai": self._call_openai}[self._family](
             file_paths, user_prompt, system_prompt, generation_config
         )
@@ -312,7 +313,7 @@ class LLMConnector:
                 use_stream = False
                 kwargs.pop("stream", None)
                 kwargs.pop("stream_options", None)
-                emit("notice", "Farm 拒绝流式输出，本次连接改用完整响应；仍显示等待耗时。")
+                emit("notice", UIMessage('notice.stream_fallback'))
                 connect, read = self._control.timeouts()
                 kwargs["timeout"] = transport.Timeout(read, connect=connect)
                 self._begin_usage_attempt()
