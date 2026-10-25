@@ -82,9 +82,12 @@ remain open.
   browser run used Noto Sans CJK SC installed only in the test environment.
   Run visual checks with a suitable Chinese font installed; DOM text tests alone
   do not establish that glyphs render correctly.
-- The existing repository ZIP is older than the repaired source and lacks new
-  runtime modules. It was only inspected read-only, not rebuilt or executed.
-  Do not treat that ZIP as the verified application version.
+- The repository ZIP was rebuilt from main at `76c6618` after the post-review
+  fixes. A cold-start check of an unpacked copy from another working directory
+  passed `--help`, page load, workspace setup and local self-check, including
+  a path containing spaces, Chinese and umlauts; no Bosch endpoint was contacted.
+  This is a distribution smoke test, not a replacement for the open static gates
+  or target Windows/Bosch verification.
 
 Post-review fix F-02 (2026-10-25) replaces the step-6 request defaults: one
 complete response may take 300 s (`WORKBENCH_RESPONSE_TIMEOUT_SECONDS`), stream
