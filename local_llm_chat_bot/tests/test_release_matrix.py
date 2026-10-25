@@ -37,11 +37,16 @@ class TransportMatrix(unittest.TestCase):
                 self.assertNotIn('private-fixture-key', answer)
 
     def test_timeout_connection_invalid_json_empty_and_recovery(self):
-        for error in (requests.Timeout('timeout'), requests.ConnectionError('connection')):
+        # The request never reached the provider: bounded retries are safe.
+        # A read timeout may still be generating/billing: never re-dispatch it.
+        for error, dispatches in ((requests.ConnectionError('connection'), 3),
+                                  (requests.exceptions.ConnectTimeout('connect'), 3),
+                                  (requests.exceptions.ReadTimeout('read'), 1),
+                                  (requests.Timeout('timeout'), 1)):
             llm = LLMConnector('gemini-test', 'fixture')
             with patch('requests.post', side_effect=error) as post, patch('request_runtime.RequestControl.pause'):
                 self.assertIsNotNone(w.connector_failure(llm.ask_about_files([], 'fixture')))
-                self.assertEqual(post.call_count, 3)
+                self.assertEqual(post.call_count, dispatches)
         llm = LLMConnector('gemini-test', 'fixture')
         with patch('requests.post', return_value=SimpleNamespace(ok=True, json=lambda: [])) as post:
             self.assertIsNotNone(w.connector_failure(llm.ask_about_files([], 'fixture')))

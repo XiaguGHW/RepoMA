@@ -86,6 +86,14 @@ remain open.
   runtime modules. It was only inspected read-only, not rebuilt or executed.
   Do not treat that ZIP as the verified application version.
 
+Post-review fix F-02 (2026-10-25) replaces the step-6 request defaults: one
+complete response may take 300 s (`WORKBENCH_RESPONSE_TIMEOUT_SECONDS`), stream
+chunk silence is 60 s, a whole operation 3600 s. Read timeouts are no longer
+re-dispatched; connection failures and HTTP 429/5xx keep bounded retries.
+Codebook preparation, coverage, comparison and dossier rebuild are stoppable
+via `POST /api/operation/cancel`. Run its regressions with
+`python -m unittest discover -s tests -p test_release_request_bounds.py -v`.
+
 Reproduce the final additional regression with:
 `python -m unittest discover -s tests -p test_release_step_nine.py -v`.
 All current static findings and exact tested source hashes are in the JSON;

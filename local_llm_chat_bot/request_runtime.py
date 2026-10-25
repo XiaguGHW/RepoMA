@@ -27,9 +27,18 @@ class ResponseLimitExceeded(RequestStopped):
 
 @dataclass(frozen=True)
 class RequestPolicy:
-    timeout: float = 180
+    """Bounds for one user operation and for each provider response.
+
+    ``timeout`` bounds a whole user operation (e.g. every Codebook page, every
+    material summary and the answer).  ``response_timeout`` is how long one
+    complete, non-streamed provider response may take: Gemini/Claude send
+    nothing until generation has finished.  ``read_timeout`` only bounds the
+    silence between chunks of a streamed response.
+    """
+    timeout: float = 3600
     connect_timeout: float = 5
-    read_timeout: float = 20
+    read_timeout: float = 60
+    response_timeout: float = 300
     attempts: int = 3
     backoff: float = 1
     max_response_chars: int = 262144
@@ -43,9 +52,10 @@ class RequestPolicy:
                 raise ValueError('Invalid WORKBENCH_' + name)
             return int(value) if integer else value
         return cls(
-            timeout=number('REQUEST_TIMEOUT_SECONDS', 180, .1, 1800),
+            timeout=number('REQUEST_TIMEOUT_SECONDS', 3600, .1, 14400),
             connect_timeout=number('CONNECT_TIMEOUT_SECONDS', 5, .05, 60),
-            read_timeout=number('READ_TIMEOUT_SECONDS', 20, .05, 120),
+            read_timeout=number('READ_TIMEOUT_SECONDS', 60, .05, 600),
+            response_timeout=number('RESPONSE_TIMEOUT_SECONDS', 300, .05, 3600),
             attempts=number('MAX_ATTEMPTS', 3, 1, 3, True),
             backoff=number('RETRY_BACKOFF_SECONDS', 1, 0, 5),
             max_response_chars=number('MAX_RESPONSE_CHARS', 262144, 1024, 2097152, True),
@@ -83,10 +93,12 @@ class RequestControl:
                 self.cancel_event.set()
             return True
 
-    def timeouts(self):
+    def timeouts(self, complete=False):
+        """(connect, read) seconds; ``complete`` waits for a whole non-streamed response."""
         self.check()
         remaining = max(.001, self.deadline - time.monotonic())
-        return min(self.policy.connect_timeout, remaining), min(self.policy.read_timeout, remaining)
+        read = self.policy.response_timeout if complete else self.policy.read_timeout
+        return min(self.policy.connect_timeout, remaining), min(read, remaining)
 
     def pause(self, seconds):
         self.check()

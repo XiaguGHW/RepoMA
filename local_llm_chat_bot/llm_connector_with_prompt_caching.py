@@ -259,7 +259,9 @@ class LLMConnector:
             response.stream = BoundedStream()
 
         client._client.event_hooks.setdefault('response', []).append(bound_response)
-        connect, read = self._control.timeouts()
+        use_stream = bool(stream and not self._stream_rejected)
+        # Streams are bounded by chunk silence; a full response by its total wait.
+        connect, read = self._control.timeouts(complete=not use_stream)
         kwargs = {"model": self.model_name, "messages": messages, "timeout": transport.Timeout(read, connect=connect),
                   "extra_query": {"api-version": "2024-08-01-preview"} if "openai" in base_url else {}}
         kwargs["max_completion_tokens" if reasoning else "max_tokens"] = tokens
@@ -274,7 +276,6 @@ class LLMConnector:
             kwargs["extra_body"] = {"thinking": {"type": thinking}}
         if name.startswith("deepseek") and thinking != "disabled":
             kwargs.pop("temperature", None)
-        use_stream = bool(stream and not self._stream_rejected)
         if use_stream:
             # OpenAI-compatible Chat Completions only sends final token usage
             # in streaming mode when this option is requested.
@@ -314,7 +315,7 @@ class LLMConnector:
                 kwargs.pop("stream", None)
                 kwargs.pop("stream_options", None)
                 emit("notice", UIMessage('notice.stream_fallback'))
-                connect, read = self._control.timeouts()
+                connect, read = self._control.timeouts(complete=True)
                 kwargs["timeout"] = transport.Timeout(read, connect=connect)
                 self._begin_usage_attempt()
                 result = client.chat.completions.create(**kwargs)
@@ -463,8 +464,10 @@ class LLMConnector:
             response = None
             try:
                 self._begin_usage_attempt()
+                # Gemini/Claude return nothing until generation has finished:
+                # wait for a complete response, not for a streaming chunk gap.
                 response = requests.post(url, headers=headers, data=json.dumps(payload),
-                                         timeout=self._control.timeouts(), stream=True)
+                                         timeout=self._control.timeouts(complete=True), stream=True)
                 try:
                     if hasattr(response, 'raw') and hasattr(response.raw, 'read1'):
                         chunks, size = [], 0
@@ -495,10 +498,18 @@ class LLMConnector:
                     self._control.pause(self._control.policy.backoff * 2 ** (attempt - 1)); continue
                 logging.error("HTTP %s", response.status_code)
                 return f"HTTP error {response.status_code}"
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            except requests.exceptions.ConnectionError as exc:
+                # Includes ConnectTimeout: the provider never received the request.
                 self._control.check()
                 if attempt == attempts: return f"Error after {attempts} attempts: {type(exc).__name__}"
                 self._control.pause(self._control.policy.backoff * 2 ** (attempt - 1))
+            except requests.exceptions.Timeout as exc:
+                # A read timeout means the provider may still be generating and
+                # billing this request. Never start a second paid generation.
+                self._control.check()
+                return (f"Error: no complete response within {self._control.policy.response_timeout:g} s "
+                        f"({type(exc).__name__}); not retried automatically. Increase "
+                        "WORKBENCH_RESPONSE_TIMEOUT_SECONDS if this model needs longer.")
             except RequestStopped:
                 raise
             except Exception as exc:

@@ -106,6 +106,28 @@ Help/argument validation works even before dependencies are installed.
 | State directory/file locked or not writable | Check permissions, available space and file locks. If necessary, close Workbench and move the complete program folder to a writable location before restarting. Do not put state in a BG source folder. |
 | Port already in use | If it is an existing Workbench instance, open its local URL. Otherwise choose another port, for example `--port 8877`. A different service on that port is not a Workbench instance. |
 
+### Request time limits and Stop
+
+Model calls are bounded so a stalled request cannot block the workbench, but the
+defaults leave room for real multimodal work. Override any value in the same
+`.env` file (or the process environment) and restart:
+
+| Variable | Default | Allowed | Meaning |
+|---|---:|---:|---|
+| `WORKBENCH_RESPONSE_TIMEOUT_SECONDS` | 300 | 0.05–3600 | Wait for one complete response. Gemini/Claude send nothing until they finish generating. |
+| `WORKBENCH_READ_TIMEOUT_SECONDS` | 60 | 0.05–600 | Maximum silence between chunks of a streamed response. |
+| `WORKBENCH_REQUEST_TIMEOUT_SECONDS` | 3600 | 0.1–14400 | Whole user operation, e.g. all Codebook pages plus merge, or all material summaries plus the answer. |
+| `WORKBENCH_CONNECT_TIMEOUT_SECONDS` | 5 | 0.05–60 | TCP/TLS connection setup. |
+| `WORKBENCH_MAX_ATTEMPTS` | 3 | 1–3 | Attempts for connection failures and HTTP 429/5xx. |
+| `WORKBENCH_RETRY_BACKOFF_SECONDS` | 1 | 0–5 | First retry delay (doubles per retry). |
+
+A response that exceeds `WORKBENCH_RESPONSE_TIMEOUT_SECONDS` is reported, and is
+never sent again automatically, because the provider may still be generating
+and billing it. Increase the value if a model regularly needs longer. The Stop
+button also stops Codebook preparation, material pre-reading, model comparison
+and dossier rebuilding. Stopped work saves no profile, report or answer.
+Usage that was already consumed is still counted.
+
 Startup checks are local and never contact Farm. Dependency/configuration/state
 or port failures exit nonzero with instructions. The port check is advisory;
 a later Uvicorn bind failure also prints recovery instructions. Native Windows

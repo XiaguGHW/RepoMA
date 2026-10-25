@@ -65,6 +65,11 @@ ACTIVE: dict[str, Any] = {}
 MODEL_WORK_IN_PROGRESS = threading.Event()
 CHAT_TASK_GUARD = threading.Lock()
 CHAT_TASK: dict[str, Any] = {}
+# Synchronous long model operations (Codebook preparation, coverage, comparison,
+# dossier rebuild) that a browser Stop can cancel by request_id.
+OPERATION_GUARD = threading.Lock()
+OPERATIONS: dict[str, RequestControl] = {}
+REQUEST_ID = r"^(?:[a-f0-9]{32})?$"
 
 # Retain existing local settings/sessions made by early workbench releases,
 # while never sending their obsolete dotted Farm IDs to the endpoint again.
@@ -365,6 +370,7 @@ class TargetRequest(BaseModel):
 class CodebookPrepareRequest(BaseModel):
     path: str
     model: str = ""
+    request_id: str = Field(default="", pattern=REQUEST_ID)
 
 
 class ChatRequest(BaseModel):
@@ -376,10 +382,12 @@ class ChatRequest(BaseModel):
 class CompareRequest(BaseModel):
     question: str = Field(max_length=50000)
     models: list[str]
+    request_id: str = Field(default="", pattern=REQUEST_ID)
 
 
 class CoverageRequest(BaseModel):
     full: bool = False
+    request_id: str = Field(default="", pattern=REQUEST_ID)
 
 
 class CacheFileRequest(BaseModel):
@@ -389,6 +397,11 @@ class CacheFileRequest(BaseModel):
 
 class CacheConfirmRequest(BaseModel):
     confirmed: bool = False
+    request_id: str = Field(default="", pattern=REQUEST_ID)
+
+
+class OperationCancelRequest(BaseModel):
+    request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
 
 
 def session() -> dict[str, Any]:
@@ -451,8 +464,12 @@ def reject_context_change_while_processing() -> None:
         raise HTTPException(409, ui_message(ACTIVE, 'error.busy'))
 
 
-def begin_model_work() -> dict[str, Any]:
-    """Reserve the single model slot and capture its complete request context."""
+def begin_model_work(request_id: str = "") -> dict[str, Any]:
+    """Reserve the single model slot and capture its complete request context.
+
+    A nonempty request_id makes a synchronous operation stoppable through
+    /api/operation/cancel; callers release it with end_model_work().
+    """
     if not LOCK.acquire(blocking=False):
         raise HTTPException(409, ui_message(ACTIVE, 'error.busy'))
     try:
@@ -461,10 +478,21 @@ def begin_model_work() -> dict[str, Any]:
         data = dict(session())
         data["request_control"] = RequestControl()
         data["cancel_event"] = data["request_control"].cancel_event
+        data["operation_id"] = request_id
+        if request_id:
+            with OPERATION_GUARD:
+                OPERATIONS[request_id] = data["request_control"]
         MODEL_WORK_IN_PROGRESS.set()
         return data
     finally:
         LOCK.release()
+
+
+def end_model_work(data: dict[str, Any]) -> None:
+    """Release a synchronous operation only after its work returned or raised."""
+    with OPERATION_GUARD:
+        OPERATIONS.pop(data.get("operation_id") or "", None)
+    MODEL_WORK_IN_PROGRESS.clear()
 
 
 def status_data(data: dict[str, Any]) -> dict[str, Any]:
@@ -1818,6 +1846,8 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
             token_usage = summarize_usage(usage_records)
             results.append({"requested_model": model, "model_response": actual_model, "ok": True,
                             "answer": answer, "classification": classification, "usage": token_usage, "notices": notices, "notice_messages": [message_payload(item) for item in notices]})
+        except RequestStopped:
+            raise  # Stop/deadline ends the comparison; consumed usage is already recorded.
         except Exception as exc:
             results.append({"requested_model": model, "model_response": model, "ok": False,
                             "answer": "", "error": str(error_copy(exc, data)), "error_message": message_payload(error_copy(exc, data)), "usage": summarize_usage(usage_records), "notices": notices, "notice_messages": [message_payload(item) for item in notices]})
@@ -2425,20 +2455,21 @@ def codebook_prepare(request: CodebookPrepareRequest):
     path = safe_file(request.path)
     if path.suffix.lower() not in {".pdf", ".docx"}:
         raise HTTPException(400, ui_message(ACTIVE, 'error.rules_format'))
-    data = begin_model_work()
+    data = begin_model_work(request.request_id)
     model = request.model.strip() or data["model"]
     try:
         with LOCK:
             profile = prepare_codebook_profile(data, path, model)
-            save_codebook_profile(profile)
-            rules_changed(data)
-            data["state"].data["selected_codebook_path"] = str(path)
-            data["state"].save()
+            with commit_answer(data):  # A Stop that wins here saves no profile.
+                save_codebook_profile(profile)
+                rules_changed(data)
+                data["state"].data["selected_codebook_path"] = str(path)
+                data["state"].save()
         return profile
     except Exception as exc:
         raise HTTPException(400, ui_message(ACTIVE, 'error.rules_prepare', detail=error_copy(exc, ACTIVE))) from exc
     finally:
-        MODEL_WORK_IN_PROGRESS.clear()
+        end_model_work(data)
 
 
 class CodebookEditRequest(BaseModel):
@@ -2520,12 +2551,12 @@ def coverage_status():
 
 @app.post("/api/coverage")
 def create_coverage(request: CoverageRequest = CoverageRequest()):
-    data = begin_model_work()
+    data = begin_model_work(request.request_id)
     try:
         with LOCK:
             return prepare_coverage(data, full=request.full)
     finally:
-        MODEL_WORK_IN_PROGRESS.clear()
+        end_model_work(data)
 
 
 @app.get("/api/cache/audit")
@@ -2560,7 +2591,7 @@ def rebuild_bg_dossier(request: CacheConfirmRequest):
     # Reserve the shared model slot before inspecting the session.  Until the
     # finally block runs, every context-changing route and every other model
     # task sees this rebuild as active.
-    data = begin_model_work()
+    data = begin_model_work(request.request_id)
     try:
         ensure_current_sources(data)
         coverage = load_coverage(data["state"])
@@ -2576,7 +2607,7 @@ def rebuild_bg_dossier(request: CacheConfirmRequest):
         return {"message": str(message), **message_payload(message), "dossier": dossier,
                 "usage": usage or summarize_usage([]), "audit": cache_audit(data)}
     finally:
-        MODEL_WORK_IN_PROGRESS.clear()
+        end_model_work(data)
 
 
 @app.post("/api/cache/clear")
@@ -2656,6 +2687,16 @@ def cancel_chat(request: ChatCancelRequest):
             if CHAT_TASK.get("id") == request.request_id and not task["done"].is_set():
                 CHAT_TASK["state"] = "cancelling"
     return get_chat_task(request.request_id)
+
+
+@app.post("/api/operation/cancel")
+def cancel_operation(request: OperationCancelRequest):
+    """Stop a running Codebook preparation, coverage, comparison or dossier rebuild."""
+    with OPERATION_GUARD:
+        control = OPERATIONS.get(request.request_id)
+    if control is None:
+        raise HTTPException(404, ui_message(ACTIVE, 'error.unknown_task'))
+    return {"request_id": request.request_id, "cancelled": bool(control.cancel())}
 
 
 @app.post("/api/chat/stream")
@@ -2783,12 +2824,12 @@ def compare(request: CompareRequest):
         raise HTTPException(400, ui_message(ACTIVE, 'error.question'))
     if not 2 <= len(models) <= 4:
         raise HTTPException(400, ui_message(ACTIVE, 'compare.models_required'))
-    data = begin_model_work()
+    data = begin_model_work(request.request_id)
     try:
         with LOCK:
             return call_comparison(data, question, models)
     finally:
-        MODEL_WORK_IN_PROGRESS.clear()
+        end_model_work(data)
 
 
 class ApplyRequest(BaseModel):
@@ -3184,7 +3225,7 @@ function renderCodebookStatus(profile){lastCodebookProfile=profile;let host=$('c
 async function loadCodebookStatus(){try{renderCodebookStatus(await api('/api/codebook'))}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
 function leaveCodebookWorkspace(){if(!allowRuleDraftTransition())return;lastCodebookWorkspaceProfile=null;let composer=$('composer');composer.style.display='flex';$('chat').classList.remove('codebook-workspace');loadHistory()}
 function showCodebookWorkspace(profile){if(ruleEditState){captureRuleEditor();if(ruleEditState.binding===ruleEditorBinding(profile)){renderRuleEditor();return}if(!allowRuleDraftTransition())return}lastCodebookWorkspaceProfile=profile;let draft=profile.draft||{};$('composer').style.display='none';let classes=(draft.classes||[]).map(item=>'<article class="card codebook-class"><h3>'+esc(item.name||t('rulews.untitled'))+'</h3><div>'+esc(item.definition||t('rulews.no_definition'))+'</div><b>'+t('rulews.decision_rules')+'</b>'+codebookList(item.decision_rules)+'<b>'+t('rulews.boundaries')+'</b>'+codebookList(item.boundaries)+'<div class="muted">'+t('rulews.evidence_pages')+'：'+esc((item.evidence_pages||[]).join('、')||'—')+'</div></article>').join('')||'<div class="card error">'+t('rulews.no_class')+'</div>';let usage=profile.usage||{},ocr=profile.ocr_runtime||{},locked=profile.status==='locked';let ocrText=ocr.status==='not applicable to DOCX'?t('rulews.ocr_docx'):(ocr.available?(t('rulews.ocr_enabled')+' · '+esc(ocr.command||'Tesseract')+(ocr.german_available?' · deu':' · eng')):(t('rulews.ocr_disabled')+' · '+esc(ocr.status||'Tesseract')));$('chat').className='chat codebook-workspace';$('chat').innerHTML='<section class="workspace-inner"><h1>'+t('rulews.title')+'</h1><div class="muted">'+(locked?t('rulews.locked_intro'):t('rulews.draft_intro'))+'</div><div class="card"><b>'+t('rulews.source')+'：</b>'+esc(profile.source_name||'—')+'<br><span class="muted">'+t('rulews.parser_model')+'：'+esc(profile.parser_model||'—')+' · '+t('rulews.pages')+'：'+esc(profile.page_count||0)+' · '+t('rulews.groups')+'：'+esc(profile.page_groups||0)+' · Token：'+usageNumber(usage.input)+' / '+usageNumber(usage.output)+(' · '+usageCost(usage))+'<br>'+ocrText+'</span></div><h2>'+t('rulews.classes')+'</h2>'+classes+'<h2>'+t('rulews.global_rules')+'</h2><div class="card">'+codebookList(draft.global_rules)+'</div><h2>'+t('rulews.table_rules')+'</h2><div class="card">'+codebookList(draft.table_rules)+'</div><h2>'+t('rulews.uncertainties')+'</h2><div class="card">'+codebookList(draft.uncertainties)+'</div><div class="workspace-actions"><button class="ghost" onclick="editCodebookDraft()">'+t('rules.edit')+'</button>'+ (locked?'<button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.back')+'</button>':'<button onclick="lockCodebook()">'+t('rulews.lock_action')+'</button><button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.defer')+'</button>')+'</div></section>';$('chat').scrollTop=0}
-async function prepareCodebook(){if(!allowRuleDraftTransition())return;let path=$('codebook').value.trim();if(!path){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.choose_file')+'</span>';return}let model=prompt(t('rulews.model_prompt'),selectedModel());if(model===null)return;model=model.trim();if(!model){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.model_required')+'</span>';return}try{setUIMessage($('codebookstatus'),{message_key:'rulews.preparing'});let profile=await api('/api/codebook/prepare',{method:'POST',body:JSON.stringify({path,model})});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile)}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
+async function prepareCodebook(){if(!allowRuleDraftTransition())return;let path=$('codebook').value.trim();if(!path){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.choose_file')+'</span>';return}let model=prompt(t('rulews.model_prompt'),selectedModel());if(model===null)return;model=model.trim();if(!model){$('codebookstatus').innerHTML='<span class="error">'+t('rulews.model_required')+'</span>';return}let operation=beginOperation();try{setUIMessage($('codebookstatus'),{message_key:'rulews.preparing'});let profile=await api('/api/codebook/prepare',{method:'POST',body:JSON.stringify({path,model,request_id:operation.id})});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile)}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}finally{endOperation(operation)}}
 async function viewCodebook(){if(!allowRuleDraftTransition())return;try{let profile=await api('/api/codebook');if(!profile||!profile.status)throw Error(t('rulews.not_prepared'));renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
 async function lockCodebook(){if(!allowRuleDraftTransition())return;if(!confirm(t('rulews.lock_confirm')))return;try{let profile=await api('/api/codebook/lock',{method:'POST'});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile);$('setupmsg').innerHTML='<span class="ok">'+t('rulews.lock_success')+'</span>'}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
 async function changeCodebook(){if(!allowRuleDraftTransition())return;if(!confirm(t('rulews.replace_confirm')))return;try{await api('/api/codebook',{method:'DELETE'});$('codebook').value='';renderCodebookStatus({status:'none'});leaveCodebookWorkspace();setUIMessage($('setupmsg'),{message_key:'rulews.replace_success'})}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
@@ -3238,7 +3279,7 @@ function renderScanDrawer(x){let files=(x.files||[]).map(f=>{let index=f.index_c
 function renderCacheAudit(x){let host=$('cacheaudit');if(!host)return;if(!x.files?.length){host.textContent=rt('material.none');return}let hasSummary=x.files.some(f=>(f.summary_entries||[]).length);if(!hasSummary){host.innerHTML='<div class="muted">'+rt('material.cache_empty')+'</div>';return}let dossier=x.dossier?.ready?`BG 综合档案：已缓存（${esc(x.dossier.model||'—')}）`:'BG 综合档案：尚未生成或材料范围已变化';let files=x.files.map(f=>{let summaries=(f.summary_entries||[]).map(s=>`${esc(s.model||'—')} · ${s.full?'全部页':'默认范围'} · ${s.complete?'完成':'未完成'}`).join('<br>')||'无摘要缓存';let read=(f.summary_entries||[]).length?'<br><button class="ghost" data-document-id="'+escAttr(f.id)+'" onclick="rebuildCachedFile(this.dataset.documentId)">仅重读此文件</button>':'';return `<div class="card"><b>${esc(f.name)}</b><br><span class="muted">索引：${esc(f.index_status)} · OCR：${esc(f.ocr_status)}<br>摘要：${summaries}</span>${read}</div>`}).join('');host.innerHTML='<div class="muted">'+dossier+(x.selection_current?'':'；当前材料范围待更新')+'</div><div class="row"><button class="ghost" onclick="rebuildDossier()">重建 BG 档案</button><button class="ghost" onclick="clearSummaryCaches()">清除摘要缓存</button></div>'+files}
 async function loadCacheAudit(){let host=$('cacheaudit');if(!host)return;try{renderCacheAudit(await api('/api/cache/audit'))}catch(e){setUIMessage(host,e.uiMessage||{text:e.message},'error')}}
 async function rebuildCachedFile(id){if(!confirm(t('cache.rebuild_file_confirm')))return;try{let x=await api('/api/cache/file/rebuild',{method:'POST',body:JSON.stringify({document_id:id,confirmed:true})});setUIMessage($('coveragestatus'),x);renderCacheAudit(x.audit)}catch(e){setUIMessage($('cacheaudit'),e.uiMessage||{text:e.message},'error')}}
-async function rebuildDossier(){if(!confirm(rt('dossier.confirm')))return;let host=$('cacheaudit');let button=host?.querySelector('button[onclick="rebuildDossier()"]');if(button)button.disabled=true;$('coveragestatus').textContent=rt('dossier.working');try{let x=await api('/api/cache/dossier/rebuild',{method:'POST',body:JSON.stringify({confirmed:true})});setUIMessage($('coveragestatus'),x);renderCacheAudit(x.audit);renderStatus(await api('/api/status'))}catch(e){$('coveragestatus').innerHTML='<span class="error">'+esc(rt('dossier.failed')+e.message)+'</span>';if(host)host.innerHTML='<span class="error">'+esc(rt('dossier.failed')+e.message)+'</span>'}finally{if(button)button.disabled=false}}
+async function rebuildDossier(){if(!confirm(rt('dossier.confirm')))return;let host=$('cacheaudit');let button=host?.querySelector('button[onclick="rebuildDossier()"]');if(button)button.disabled=true;let operation=beginOperation();$('coveragestatus').textContent=rt('dossier.working');try{let x=await api('/api/cache/dossier/rebuild',{method:'POST',body:JSON.stringify({confirmed:true,request_id:operation.id})});setUIMessage($('coveragestatus'),x);renderCacheAudit(x.audit);renderStatus(await api('/api/status'))}catch(e){$('coveragestatus').innerHTML='<span class="error">'+esc(rt('dossier.failed')+e.message)+'</span>';if(host)host.innerHTML='<span class="error">'+esc(rt('dossier.failed')+e.message)+'</span>'}finally{endOperation(operation);if(button)button.disabled=false}}
 async function clearSummaryCaches(){if(!confirm(t('cache.clear_confirm')))return;try{let x=await api('/api/cache/clear',{method:'POST',body:JSON.stringify({confirmed:true})});setUIMessage($('coveragestatus'),x);renderCacheAudit(x.audit)}catch(e){setUIMessage($('cacheaudit'),e.uiMessage||{text:e.message},'error')}}
 function clearTargetTree(){savedTargetSelection=new Set();treeRestoreNote='';scannedSelection='';setScanReportAvailable(null);$('targettree').textContent='选择文件夹后显示可展开的文件树。';$('targettree').classList.add('muted');$('treestatus').textContent='';updateMaterialFlowButtons()}
 // These renderers deliberately receive data, never pre-rendered text.  This
@@ -3368,7 +3409,7 @@ makeTreeNode=makeTreeNodeForLanguage;
 loadTargetTree=loadTargetTreeForLanguage;
 function selectedTargetPaths(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].map(x=>x.dataset.path)}
 async function analyzeTarget(){if(!allowRuleDraftTransition())return;let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent=rt('scan.reading')}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error(t('materials.selection_required'));let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');materialDraftDirty=false;clearResultPanels();await loadHistory();renderStatus(x.status);$('bgstatus').textContent=t(x.classification?'materials.confirmed_bg':'materials.confirmed_normal',{kind:tr(x.target_kind),count:x.sources});renderScanReport(x);$('coveragestatus').textContent=rt('material.updated');loadDocs();loadCacheAudit()}catch(e){setUIMessage($('bgstatus'),e.uiMessage||{text:e.message},'error')}finally{if(confirm)confirm.textContent=t('materials.confirm_selected');updateMaterialFlowButtons()}}
-async function prepareCoverage(full=false){if(busy)return;busy=true;setUIMessage($('coveragestatus'),{message_key:full?'coverage.preparing_full':'coverage.preparing'});try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full})});renderCoverageReport(x);renderStatus(await api('/api/status'))}catch(e){setUIMessage($('coveragestatus'),{message_key:'error.operation_failed',params:{detail:e.uiMessage||{text:e.message}}},'error')}finally{busy=false}}
+async function prepareCoverage(full=false){if(busy)return;busy=true;let operation=beginOperation();setUIMessage($('coveragestatus'),{message_key:full?'coverage.preparing_full':'coverage.preparing'});try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full,request_id:operation.id})});renderCoverageReport(x);renderStatus(await api('/api/status'))}catch(e){setUIMessage($('coveragestatus'),{message_key:'error.operation_failed',params:{detail:e.uiMessage||{text:e.message}}},'error')}finally{endOperation(operation);busy=false}}
 async function clearBg(){if(!allowRuleDraftTransition())return;try{renderStatus(await api('/api/bg',{method:'DELETE'}));setUIMessage($('bgstatus'),{message_key:'bg.exited'})}catch(e){$('bgstatus').textContent=e.message}}
 const compareOptions=[['claude-haiku-5-5','Claude Haiku 5.5'],['claude-sonnet-5-5','Claude Sonnet 5.5'],['claude-opus-5','Claude Opus 5'],['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite'],['gemini-2.5-pro','Gemini 2.5 Pro'],['gemini-2.5-flash','Gemini 2.5 Flash'],['deepseek-r1-0528-maas','DeepSeek R1 (0528)'],['llama-3.3-70b-instruct-maas','Llama 3.3 70B'],['glm-5-maas','GLM-5']];
 function renderCompareSlots(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">选择模型…</option>'+compareOptions.map(([value,label])=>'<option value="'+escAttr(value)+'" '+(slot.value===value?'selected':'')+'>'+label+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>其他：手动输入 Model ID…</option>';return '<div class="field"><label>对比模型 '+(index+1)+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+escAttr(slot.custom||'')+'" placeholder="输入准确的 Bosch Farm Model ID" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?'最多 4 个模型':'＋ 添加对比模型';if(compareSlots.length>=4)$('comparestatus').textContent='已达到最多 4 个对比模型。'}
@@ -3381,12 +3422,20 @@ function renderComparisonForLanguage(record){
   box.innerHTML='<div class="message assistant"><b>'+t('compare.title')+'</b><br>'+t('compare.question')+'：'+esc(record.question)+'<br><span class="muted">'+t('compare.same_evidence')+'：'+(x.sources||[]).map(esc).join(' · ')+'</span></div><div class="comparison-grid"></div>';
   let grid=box.querySelector('.comparison-grid');for(let r of x.results||[]){let card=document.createElement('article');card.className='card';if(!r.ok){card.innerHTML='<b>'+esc(r.requested_model)+'</b><p class="error">'+t('compare.request_failed')+'</p><div class="muted">'+esc(r.error_message?uiCopy(r.error_message):r.error||t('compare.unknown_error'))+'</div>';grid.append(card);continue}let u=r.usage||{},cost=usageCost(u),classification=r.classification?'<div class="chip">'+t('classification.verified')+'：'+esc(r.classification.label)+' · '+esc(r.classification.confidence)+'</div>':'';card.innerHTML='<b>'+esc(r.model_response)+'</b>'+(r.model_response!==r.requested_model?'<div class="muted">'+t('compare.requested_model')+'：'+esc(r.requested_model)+'</div>':'')+'<div class="muted ok">'+t('compare.success')+' · Token '+usageNumber(u.input)+' / '+usageNumber(u.output)+' · '+cost+'</div>'+classification+'<hr><div class="answer"></div>'+(r.notices?.length?'<div class="muted">'+(r.notice_messages||r.notices).map(value=>esc(uiCopy(value))).join('<br>')+'</div>':'');card.querySelector('.answer').textContent=r.answer;grid.append(card)}$('chat').append(box);
 }
-async function compareModels(){if(busy)return;if(lastStatusSnapshot?.context_issue){uiMessageNode({message_key:'context.reconfirm'});return;}if(materialDraftDirty){uiMessageNode({message_key:'materials.reconfirm'});return;}let q=$('question').value.trim()||lastQuestion;if(!q){setUIMessage($('comparestatus'),{message_key:'compare.question_required'},'error');return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){setUIMessage($('comparestatus'),{message_key:'compare.models_required'},'error');return}busy=true;lastQuestion=q;setUIMessage($('comparestatus'),{message_key:'compare.running',params:{count:models.length}});let wait=uiMessageNode({message_key:'compare.in_progress',params:{models:models.join(' · ')}});try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models})});wait.remove();lastComparison={question:q,data:x};renderComparisonForLanguage(lastComparison);renderStatus(x.usage);setUIMessage($('comparestatus'),{message_key:'compare.complete'},'ok')}catch(e){wait.uiData={message_key:'error.operation_failed',params:{detail:e.uiMessage||{text:e.message}}};wait.textContent=uiCopy(wait.uiData);wait.classList.add('error');setUIMessage($('comparestatus'),e.uiMessage||{text:e.message},'error')}finally{busy=false;$('chat').scrollTop=1e9}}
+async function compareModels(){if(busy)return;if(lastStatusSnapshot?.context_issue){uiMessageNode({message_key:'context.reconfirm'});return;}if(materialDraftDirty){uiMessageNode({message_key:'materials.reconfirm'});return;}let q=$('question').value.trim()||lastQuestion;if(!q){setUIMessage($('comparestatus'),{message_key:'compare.question_required'},'error');return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){setUIMessage($('comparestatus'),{message_key:'compare.models_required'},'error');return}busy=true;lastQuestion=q;let operation=beginOperation();setUIMessage($('comparestatus'),{message_key:'compare.running',params:{count:models.length}});let wait=uiMessageNode({message_key:'compare.in_progress',params:{models:models.join(' · ')}});try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models,request_id:operation.id})});wait.remove();lastComparison={question:q,data:x};renderComparisonForLanguage(lastComparison);renderStatus(x.usage);setUIMessage($('comparestatus'),{message_key:'compare.complete'},'ok')}catch(e){wait.uiData={message_key:'error.operation_failed',params:{detail:e.uiMessage||{text:e.message}}};wait.textContent=uiCopy(wait.uiData);wait.classList.add('error');setUIMessage($('comparestatus'),e.uiMessage||{text:e.message},'error')}finally{endOperation(operation);busy=false;$('chat').scrollTop=1e9}}
 function processingCard(){let card=document.createElement('section');card.className='message assistant';card.style.border='1px solid #334155';card.innerHTML='<b data-process-title>'+rt('model.processing')+'</b><div class="muted" data-process-text>'+rt('model.connecting')+'</div><div style="height:7px;background:#0b1220;border-radius:8px;overflow:hidden;margin-top:9px"><div data-process-bar style="height:100%;width:4%;background:#38bdf8;transition:width .25s ease"></div></div>';$('chat').append(card);return registerUI(card,'processing',null)}
 function updateProcessing(card,event){let text=card.querySelector('[data-process-text]'),bar=card.querySelector('[data-process-bar]');card.uiData=event;text.textContent=uiCopy(event)||rt('model.waiting');if(typeof event.percent==='number')bar.style.width=Math.max(4,Math.min(100,event.percent))+'%';if(event.phase==='complete'){card.style.borderColor='#22c55e';bar.style.background='#22c55e'}}
 function showChatResult(x){message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>'+t('model.reasoning')+'</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;registerUI(d,'reasoning',x.reasoning);$('chat').append(d)}if(x.notices?.length){let data=x.notice_messages||x.notices;registerUI(message(data.map(uiCopy).join('\n'),'assistant'),'notices',data)}renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${esc(c.path)}</b><br>${esc(c.reason)}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button data-plan-id="'+escAttr(x.plan_id||'')+'" onclick="apply(this.dataset.planId,this)">'+t('changes.apply')+'</button>':t('changes.none');if(!x.changes?.length)setUIMessage($('changes'),{message_key:'changes.none'});if(x.changes?.length){let review=$('changes').cloneNode(true);review.removeAttribute('id');review.className='message assistant change-plan';$('chat').append(review)}$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">'+t('export.assembly')+'</button>':t('export.assembly_unavailable');if(!x.can_export_bg)setUIMessage($('analysisexport'),{message_key:'export.assembly_unavailable'});renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}
 let activeChat=null;
+let activeOperation=null;
+function beginOperation(){let operation={id:crypto.randomUUID().replaceAll('-',''),stopping:false};activeOperation=operation;$('cancelchat').disabled=false;return operation}
+function endOperation(operation){if(activeOperation!==operation)return;activeOperation=null;if(!activeChat)$('cancelchat').disabled=true}
 async function stopChat(){
+  if(!activeChat&&activeOperation&&!activeOperation.stopping){
+    activeOperation.stopping=true;$('cancelchat').disabled=true;
+    try{await api('/api/operation/cancel',{method:'POST',body:JSON.stringify({request_id:activeOperation.id})})}catch{}
+    return;
+  }
   if(!activeChat||activeChat.stopping)return;
   activeChat.stopping=true;$('cancelchat').disabled=true;
   activeChat.controller.abort();
