@@ -140,6 +140,20 @@ without a stored summary hash. excel_agent safety refusals (`die()`) are
 reported instead of exiting the agent. Regressions:
 `python -m unittest discover -s tests -p test_release_excel_plan.py -v`.
 
+Post-review step 5 / F-13 (2026-10-25): the 16 UI functions that were
+redefined at runtime are now declared once and delegate to their
+`*ForLanguage` implementation (the material-flow DOM builder is
+`createMaterialFlow`); the dead legacy bodies, the unreachable code in
+`activate_bg()` and the unused `needs_bg_preparation()` are removed. Fourteen
+one-shot status lines built with `innerHTML` + `t()` (e.g. the model-switch
+confirmation) now use key-based `setUIMessage`, so a language switch redraws
+them. The browser method
+`test_full_workflow_and_diagnostics_have_no_chinese_ui_in_english_or_german`
+scans the visible EN/DE UI after rules, materials, classification, rules and
+materials drawers, diagnostics and the scan/cache report. Source checks:
+`python -m unittest discover -s tests -p test_release_frontend_cleanup.py -v`.
+Static baseline after this step: Ruff 256, mypy 44 (step 7 clears both).
+
 Reproduce the final additional regression with:
 `python -m unittest discover -s tests -p test_release_step_nine.py -v`.
 All current static findings and exact tested source hashes are in the JSON;

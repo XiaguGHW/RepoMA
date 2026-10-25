@@ -523,6 +523,59 @@ class BrowserRelease(unittest.TestCase):
         headings = self.page.locator(".classification-card h3").all_text_contents()
         self.assertIn(self.page.evaluate("t('classification.title')"), headings)
 
+    def visible_han_text(self):
+        """Visible UI text with Han characters, excluding user data such as fixture paths."""
+        return self.page.evaluate("""(root) => {
+            const han=/[\\u3400-\\u9fff]/, found=[];
+            const visible=el=>el.checkVisibility({opacityProperty:true, visibilityProperty:true});
+            const walker=document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+            for(let node;node=walker.nextNode();){
+              const text=node.nodeValue.trim(), parent=node.parentElement;
+              if(!text||!han.test(text)||!parent||!visible(parent)) continue;
+              if(parent.closest('script,style,option,input,textarea,select')) continue;
+              if(text.includes(root)||text.includes('Workbench 发布')) continue;  // synthetic path data
+              found.push((parent.id||parent.className||parent.tagName)+': '+text.slice(0,120));
+            }
+            for(const el of document.querySelectorAll('[title],[placeholder],[aria-label]'))
+              for(const name of ['title','placeholder','aria-label']){
+                const value=el.getAttribute(name);
+                if(value&&han.test(value)&&!value.includes(root)&&visible(el)) found.push(name+'@'+(el.id||el.className)+': '+value);
+              }
+            return found;
+        }""", str(self.f.root))
+
+    def test_full_workflow_and_diagnostics_have_no_chinese_ui_in_english_or_german(self):
+        """F-08 follow-up: scan after rules, materials, classification, scan report and diagnostics."""
+        self.page.select_option("#model", "gemini-2.5-pro")
+        self.page.wait_for_function('lastStatusSnapshot.model === "gemini-2.5-pro"')
+        for index, language in enumerate(["en", "de"]):
+            with self.subTest(language=language):
+                self.language(language)
+                if index == 0:
+                    self.prepare_rules()
+                    self.lock_rules()
+                    self.button("leaveCodebookWorkspace()").click()
+                    self.select_bg(self.f.bg_a)
+                self.ask("Classify this Baugruppe")
+                self.assertEqual(self.visible_han_text(), [], "after classification")
+                self.open_drawer("rules")
+                self.assertEqual(self.visible_han_text(), [], "rules drawer")
+                self.close_drawer()
+                self.open_drawer("materials")
+                self.page.locator("input.tree-file").first.wait_for(state="attached")
+                self.assertEqual(self.visible_han_text(), [], "materials drawer")
+                self.close_drawer()
+                self.page.evaluate("openContextDrawer('audit')")
+                self.page.wait_for_function(
+                    "document.getElementById('diagnosticsresult')?.textContent !== t('audit.diagnostics_loading')")
+                self.page.locator("#diagnosticsresult .card").first.wait_for()
+                self.assertEqual(self.visible_han_text(), [], "diagnostics drawer")
+                self.close_drawer()
+                self.page.evaluate("openScanReport();setTimeout(loadCacheAudit,80)")
+                self.page.wait_for_timeout(400)
+                self.assertEqual(self.visible_han_text(), [], "scan report and cache audit")
+                self.page.evaluate("closeScanReport()")
+
     def test_english_and_german_page_scan_has_no_chinese_ui_residue(self):
         """F-08: dynamic workflow, scan report, diagnostics and new chat rerender."""
         for language in ["en", "de"]:
