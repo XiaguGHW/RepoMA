@@ -571,11 +571,14 @@ def session_list_item(root: Path) -> dict[str, Any]:
         pass
     if not isinstance(data, dict): data = {}
     title = str(data.get("sidebar_title") or root.name)
+    title_key = "session.new_title" if (not data.get("sidebar_title") and root.name.startswith("chat_")
+                                      or is_new_session_title(title)) else ""
     try:
         updated = state_file.stat().st_mtime
     except OSError:
         updated = 0.0
-    return {"name": root.name, "title": title[:100], "pinned": bool(data.get("sidebar_pinned", False)),
+    return {"name": root.name, "title": title[:100], "title_key": title_key,
+            "pinned": bool(data.get("sidebar_pinned", False)),
             "updated_at": updated}
 
 
@@ -588,9 +591,14 @@ def available_sessions(state: ProjectState) -> list[dict[str, Any]]:
     return records or [session_list_item(state.root)]
 
 
+def is_new_session_title(value: Any) -> bool:
+    """Recognize historical new-chat labels while presentation stays in the catalog."""
+    return str(value or "").strip() in {"新聊天", "New chat", "Neuer Chat"}
+
+
 def title_session_from_question(state: ProjectState, question: str) -> None:
     current = str(state.data.get("sidebar_title", "")).strip()
-    if current and current != "新聊天":
+    if current and not is_new_session_title(current):
         return
     title = " ".join(str(question).strip().split())[:72]
     if title:
@@ -973,26 +981,33 @@ def write_session_export(data: dict[str, Any]) -> Path:
     target = exports / f"session_transcript_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
     usage = state.data.get("usage", {})
     transcript = state.full_history()
+    def copy(key, **params):
+        return str(ui_message(data, key, **params))
+
+    def number(value):
+        return 0 if value is None else value
+    cost = f"${float(number(usage.get('estimated_cost_usd', 0))):.6f}"
+    cost_text = f"{copy('state.unknown')}; {copy('export.known_tokens')}: {cost}" if usage.get("unpriced_requests") else cost
     lines = [
-        "# Local LLM Chat – 会话导出", "",
-        f"- 导出时间：{datetime.now().astimezone().isoformat(timespec='seconds')}",
-        f"- 会话：{state.root.name}",
-        f"- 当前模型：{data['model']}",
-        f"- 累计请求：{usage.get('requests', 0)}",
-        f"- 累计 token：输入 {usage.get('input', 0)} ｜ 输出 {usage.get('output', 0)}",
-        ("- 累计预估费用：未知；已知部分小计：$" if usage.get("unpriced_requests") else "- 累计预估费用：$") + f"{float(usage.get('estimated_cost_usd', 0)):.6f}",
-        f"- 已知 Token 小计：输入 {usage.get('known_input', usage.get('input', 0))} ｜ 输出 {usage.get('known_output', usage.get('output', 0))}",
-        "", "## 对话记录", "",
+        f"# {copy('export.session_heading')}", "",
+        f"- {copy('export.generated_at')}: {datetime.now().astimezone().isoformat(timespec='seconds')}",
+        f"- {copy('export.session_name')}: {state.root.name}",
+        f"- {copy('export.model')}: {data['model']}",
+        f"- {copy('export.total_requests')}: {number(usage.get('requests', 0))}",
+        f"- {copy('export.total_tokens')}: {number(usage.get('input', 0))} / {number(usage.get('output', 0))}",
+        f"- {copy('export.estimated_cost')}: {cost_text}",
+        f"- {copy('export.known_tokens')}: {number(usage.get('known_input', usage.get('input', 0)))} / {number(usage.get('known_output', usage.get('output', 0)))}",
+        "", f"## {copy('export.transcript')}", "",
     ]
     for item in transcript:
-        role = "用户" if item.get("role") == "user" else "助手"
+        role = copy('export.user') if item.get("role") == "user" else copy('export.assistant')
         timestamp = item.get("time", "")
         lines.extend([f"### {role} {timestamp}", "", str(item.get("content", "")), ""])
     target.write_text("\n".join(lines), encoding="utf-8")
     return target
 
 
-def write_bg_analysis_export(state: ProjectState) -> Path:
+def write_bg_analysis_export(state: ProjectState, language: str = "zh") -> Path:
     record = state.data.get("last_bg_analysis")
     if not isinstance(record, dict):
         raise HTTPException(400, ui_message(ACTIVE, 'error.export_missing'))
@@ -1000,32 +1015,38 @@ def write_bg_analysis_export(state: ProjectState) -> Path:
     exports.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     target = exports / f"bg_analysis_{timestamp}.md"
-    sources = "\n".join(f"- {item}" for item in record.get("sources", [])) or "- （没有可用的材料来源）"
+    def copy(key, **params):
+        return str(ui_message({"language": language}, key, **params))
+
+    def number(value):
+        return 0 if value is None else value
+    unknown = copy("state.unknown")
+    sources = "\n".join(f"- {item}" for item in record.get("sources", [])) or f"- {copy('export.no_sources')}"
     bg = record.get("bg_context") or {}
     token = record.get("token_usage") or {}
     content = "\n".join([
-        "# Baugruppe 分析结果",
+        "# " + copy("export.analysis_heading"),
         "",
-        "- 导出时间：" + str(record.get("created_at", "")),
-        "- 会话：" + str(record.get("session", "")),
-        "- 模型：" + str(record.get("model", "")),
-        "- Codebook：" + str(bg.get("codebook_name", "—")),
-        "- BG 文件夹：" + str(bg.get("folder", "—")),
-        "- 本轮 token：输入 " + str(token.get("input", 0)) + " ｜ 输出 " + str(token.get("output", 0)),
-        "- 推理 token（若网关返回）： " + str(token.get("reasoning", 0)),
-        "- Gemini thinking token（若网关返回）： " + str(token.get("gemini_thinking", 0)),
-        "- Claude 缓存：读取 " + str(token.get("cache_read", 0)) + " ｜ 写入 " + str(token.get("cache_write", 0)),
-        "- 本轮预估费用：" + ("unknown" if token.get("cost_usd") is None else "$" + format(float(token["cost_usd"]), ".6f")),
+        "- " + copy("export.generated_at") + ": " + str(record.get("created_at", "")),
+        "- " + copy("export.session_name") + ": " + str(record.get("session", "")),
+        "- " + copy("export.model") + ": " + str(record.get("model", "")),
+        "- " + copy("export.codebook") + ": " + str(bg.get("codebook_name") or "—"),
+        "- " + copy("export.folder") + ": " + str(bg.get("folder") or "—"),
+        "- " + copy("export.turn_tokens") + ": " + str(number(token.get("input", 0))) + " / " + str(number(token.get("output", 0))),
+        "- " + copy("export.reasoning_tokens") + ": " + str(number(token.get("reasoning", 0))),
+        "- " + copy("export.gemini_thinking_tokens") + ": " + str(number(token.get("gemini_thinking", 0))),
+        "- " + copy("export.claude_cache") + ": " + str(number(token.get("cache_read", 0))) + " / " + str(number(token.get("cache_write", 0))),
+        "- " + copy("export.turn_cost") + ": " + (unknown if token.get("cost_usd") is None else "$" + format(float(token["cost_usd"]), ".6f")),
         "",
-        "## 用户问题",
+        "## " + copy("export.question"),
         "",
         str(record.get("question", "")),
         "",
-        "## 模型分析",
+        "## " + copy("export.answer"),
         "",
         str(record.get("answer", "")),
         "",
-        "## 实际提供给模型的证据来源",
+        "## " + copy("export.evidence_sources"),
         "",
         sources,
         "",
@@ -2342,7 +2363,7 @@ def create_session():
     with LOCK:
         reject_context_change_while_processing()
         data = session()
-        stamp = datetime.now().astimezone().strftime("新聊天_%Y%m%d_%H%M%S")
+        stamp = datetime.now().astimezone().strftime("chat_%Y%m%d_%H%M%S")
         return activate_local_session(data, stamp)
 
 
@@ -2843,7 +2864,8 @@ def export_session():
 @app.post("/api/export/bg-analysis")
 def export_bg_analysis():
     ensure_current_page()
-    target = write_bg_analysis_export(session()["state"])
+    data = session()
+    target = write_bg_analysis_export(data["state"], data.get("language", "zh"))
     return {"path": str(target)}
 
 
@@ -3166,7 +3188,7 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 </select>
 <div class="row" id="custommodelrow" style="display:none;margin-top:7px"><input id="custommodel" placeholder="粘贴准确的 Bosch Farm Model ID" onkeydown="if(event.key==='Enter')confirmCustomModel()"><button class="ghost" onclick="confirmCustomModel()">确定</button></div></div><div id="modelstatus" class="muted"></div><div class="row"><button class="ghost" onclick="testModel()">测试模型</button></div><div id="modelmsg" class="muted"></div>
 <div class="field"><label>聊天会话</label><div class="row"><select id="session"></select><button class="ghost" onclick="openSession()">切换</button><button class="ghost" onclick="newSession()">新建</button><button class="ghost" onclick="renameSession()">改名</button><button class="ghost" onclick="deleteSession()">删除</button></div><div id="sessionmsg" class="muted"></div></div>
-<hr><b>Codebook</b><div id="codebookstatus" class="muted">尚未锁定 Codebook。</div><div class="field"><label>Codebook 文件（首次准备或更换时选择）</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf / .docx"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><div class="row"><button class="ghost" onclick="prepareCodebook()">准备 Codebook</button><button class="ghost" onclick="viewCodebook()">查看</button><button class="ghost" onclick="changeCodebook()">更换</button></div><hr><b>材料分析</b><div class="muted">文件直接分析；文件夹先显示结构，再明确勾选要用的材料。已锁定 Codebook 会自动用于分类。</div><div class="field"><label>分析目标：文件或文件夹</label><div class="row"><input id="targetpath" placeholder="PDF / Excel / PNG，或 Baugruppe 文件夹" oninput="clearTargetTree()"><button class="ghost" onclick="pick('file','targetpath')">文件</button><button class="ghost" onclick="pickFolderForTree()">文件夹</button></div></div><div class="row"><button class="ghost" onclick="loadTargetTree()">显示文件夹结构</button><button class="ghost" onclick="analyzeTarget()">用选中材料开始分析</button></div><div id="treestatus" class="muted"></div><div id="targettree" class="target-tree muted">选择文件夹后显示可展开的文件树。</div><button class="ghost" onclick="clearBg()">退出分类模式</button><div id="bgstatus" class="muted"></div><div id="scanreport" class="list"></div><div id="coveragestatus" class="muted">首次分类提问会自动读取并理解所选材料；无需预先操作。</div><div id="docs" class="list"></div>
+<hr><b>Codebook</b><div id="codebookstatus" class="muted">尚未锁定 Codebook。</div><div class="field"><label>Codebook 文件（首次准备或更换时选择）</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf / .docx"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><div class="row"><button class="ghost" onclick="prepareCodebook()">准备 Codebook</button><button class="ghost" onclick="viewCodebook()">查看</button><button class="ghost" onclick="changeCodebook()">更换</button></div><hr><b>材料分析</b><div class="muted">文件直接分析；文件夹先显示结构，再明确勾选要用的材料。已锁定 Codebook 会自动用于分类。</div><div class="field"><label>分析目标：文件或文件夹</label><div class="row"><input id="targetpath" placeholder="PDF / Excel / PNG，或 Baugruppe 文件夹" oninput="clearTargetTree()"><button class="ghost" onclick="pick('file','targetpath')">文件</button><button class="ghost" onclick="pickFolderForTree()">文件夹</button></div></div><div class="row"><button class="ghost" onclick="loadTargetTree()">显示文件夹结构</button><button class="ghost" onclick="analyzeTarget()">用选中材料开始分析</button></div><div id="treestatus" class="muted"></div><div id="targettree" class="target-tree muted">选择文件夹后显示可展开的文件树。</div><button class="ghost" onclick="clearBg()">退出分类模式</button><div id="bgstatus" class="muted"></div><div id="scanreport" class="list"></div><div id="coveragestatus" class="muted"></div><div id="docs" class="list"></div>
 <hr><b>多模型对比</b><div class="muted">同一条问题、同一份 BG 证据；逐个选择 2–4 个模型后顺序请求。结果不会写进普通聊天会话。</div><div id="comparemodels"></div><div class="row"><button class="ghost" id="addcompare" onclick="addCompareModel()">＋ 添加对比模型</button><button class="ghost" onclick="compareModels()">开始对比</button></div><div id="comparestatus" class="muted"></div></aside><div class="splitter" id="leftsplitter" role="separator" aria-orientation="vertical" aria-label="调整左侧栏宽度"></div>
 <main class="main"><div class="chat-header"><div><div class="chat-title">Baugruppen 分析</div><div class="chat-subtitle">基于当前分类规则与已选材料</div></div><div class="header-spacer"></div><button class="header-icon" title="多模型对比" onclick="openCompareDrawer()">⇄</button><button class="header-icon" title="导出会话" onclick="exportSession()">⇩</button></div><div class="chat" id="chat"><section class="welcome"><div class="eyebrow">Baugruppen Intelligence</div><h1>你想进行什么分析？</h1><p>选择单一文件或一个 BG 文件夹。程序会先在本地读取、提取文字与结构，再将必要信息交给模型。</p><div class="row" style="margin-top:22px"><button onclick="openContextDrawer('materials')">▣&nbsp; 选择 BG 文件夹</button><button class="ghost" onclick="openContextDrawer('rules')">▤&nbsp; 管理分类规则</button></div></section></div><div class="composer-wrap"><div class="composer" id="composer"><input id="question" placeholder="问代码，或根据分类规则判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button><button id="cancelchat" class="ghost" onclick="stopChat()" disabled>停止</button></div></div></main>
 <aside class="side right" id="contextpanel"><div class="context-title">当前上下文</div><button class="context-card" onclick="openContextDrawer('rules')"><strong>分类规则 <em>管理 ›</em></strong><span id="context-rule-summary">尚未选择分类规则文件</span></button><button class="context-card" onclick="openContextDrawer('materials')"><strong>本次材料 <em>管理 ›</em></strong><span id="context-material-summary">尚未选择文件或 BG 文件夹</span></button><button class="context-card" onclick="openContextDrawer('scan')"><strong>扫描状态 <em>查看 ›</em></strong><span id="context-scan-summary">等待选择材料</span></button><button class="context-card" onclick="openContextDrawer('audit')"><strong>材料缓存与审计 <em>查看 ›</em></strong><span id="context-audit-summary">尚无本地读取或模型缓存</span></button><div class="context-store"><div id="status" class="card muted">尚未打开工作区</div><div id="sessionexport" class="card"><button class="ghost" onclick="exportSession()">导出完整会话</button></div><div id="usagedetail" class="card muted">完成一次请求后显示。</div><div id="analysisexport" class="card muted">仅在 Baugruppe 分析完成后可导出。</div><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><div id="changes" class="list">无</div></div></aside></div>
@@ -3259,6 +3281,11 @@ function applyLanguage(){
   for(let item of initialStaticText)item.node.nodeValue=item.lead+t(item.key)+item.tail;
   for(let item of initialStaticAttributes)item.el.setAttribute(item.attr,t(item.key));
   for(let [selector,key,prefix=''] of STATIC_ELEMENT_BINDINGS){let el=document.querySelector(selector);if(el)el.textContent=prefix+t(key)}
+  $('leftsplitter')?.setAttribute('aria-label',t('layout.left_panel_width'));
+  setI18nText(document.querySelector('.side .brand + .muted'),'app.local_only');
+  setI18nText($('workspace')?.closest('.field')?.querySelector('label'),'workspace.path_label');
+  setI18nText($('targetpath')?.closest('.field')?.previousElementSibling,'materials.description');
+  setI18nText($('comparemodels')?.previousElementSibling,'compare.description');
 }
 let languageSave=Promise.resolve();
 async function changeLanguage(){uiLanguage=$('language').value;applyLanguage();rerenderLanguageSensitiveUI();let language=uiLanguage;languageSave=languageSave.catch(()=>{}).then(()=>api('/api/language',{method:'POST',body:JSON.stringify({language})}));try{await languageSave}catch(e){console.warn('Language save failed',e)}}
@@ -3280,9 +3307,10 @@ async function restoreLastWorkspace(){
 function setLeftPanelWidth(width){let available=Math.max(240,window.innerWidth-420-300-8);let bounded=Math.max(235,Math.min(Number(width)||270,Math.min(600,available)));document.documentElement.style.setProperty('--left-panel-width',bounded+'px');let drawerStyle=$('scan-drawer-position')||Object.assign(document.createElement('style'),{id:'scan-drawer-position'});drawerStyle.textContent='#scanbackdrop .scan-drawer{left:'+bounded+'px!important}';if(!drawerStyle.parentNode)document.head.append(drawerStyle);localStorage.setItem('bosch-workbench-left-panel-width',String(bounded))}
 function initLeftSplitter(){let splitter=$('leftsplitter');if(!splitter)return;let saved=Number(localStorage.getItem('bosch-workbench-left-panel-width'));if(saved)setLeftPanelWidth(saved);let dragging=false;function stop(){if(!dragging)return;dragging=false;splitter.classList.remove('dragging');document.body.style.userSelect=''}splitter.addEventListener('pointerdown',event=>{dragging=true;splitter.classList.add('dragging');splitter.setPointerCapture(event.pointerId);document.body.style.userSelect='none';event.preventDefault()});splitter.addEventListener('pointermove',event=>{if(dragging)setLeftPanelWidth(event.clientX)});splitter.addEventListener('pointerup',stop);splitter.addEventListener('pointercancel',stop);window.addEventListener('resize',()=>setLeftPanelWidth(Number(getComputedStyle(document.documentElement).getPropertyValue('--left-panel-width').replace('px',''))||270))}
 function initDarkScrollbars(){let style=document.createElement('style');style.textContent='*{scrollbar-color:#52637a #182235;scrollbar-width:thin}::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-track{background:#182235;border-radius:10px}::-webkit-scrollbar-thumb{background:#52637a;border:2px solid #182235;border-radius:10px}::-webkit-scrollbar-thumb:hover{background:#70839c}::-webkit-scrollbar-corner{background:#182235}select{width:100%;background:#0f172a!important;color:#e5e7eb!important;border:1px solid #3b4960!important;border-radius:6px;padding:8px;outline:none}select:hover{border-color:#526b88!important}select:focus{border-color:#3b82a8!important;box-shadow:0 0 0 2px rgba(59,130,168,.18)}select option{background:#172033;color:#e5e7eb}.language-picker select{width:auto;padding:3px 6px}.splitter{background:#263449!important}.splitter:hover,.splitter.dragging{background:#3b82a8!important}';document.head.append(style)}
-window.addEventListener('DOMContentLoaded',()=>{bindInitialStaticI18n();applyLanguage();initDarkScrollbars();initLeftSplitter();initSessionSidebar();initComposerControls();initVisualAdjustments();initLanguageLayout();renderCompareSlots();loadCodebookStatus();ensureMaterialFlow();initContextPanel();refreshAppChrome();restoreLastWorkspace()});
+window.addEventListener('DOMContentLoaded',()=>{bindInitialStaticI18n();applyLanguage();setUIMessage($('coveragestatus'),{message_key:'coverage.auto_hint'});initDarkScrollbars();initLeftSplitter();initSessionSidebar();initComposerControls();initVisualAdjustments();initLanguageLayout();renderCompareSlots();loadCodebookStatus();ensureMaterialFlow();initContextPanel();refreshAppChrome();restoreLastWorkspace()});
 function rerenderLanguageSensitiveUI(){
   refreshAppChrome();
+  $('contextbackdrop')?.querySelector('.context-drawer')?.setAttribute('aria-label',t('context.detail'));
   localizeComposerControls();
   localizeSessionChrome();
   for(let kind of ['materials','rules']){let node=$('contextshortcut-'+kind);if(node){node.title=t(kind==='materials'?'context.materials':'rules.title');node.setAttribute('aria-label',node.title)}}
@@ -3373,7 +3401,7 @@ function initContextPanel(){
     button.setAttribute('onclick',"openContextDrawer('"+kind+"')");document.querySelector('.chat-header').append(button);
   }
   let backdrop=document.createElement('div');backdrop.id='contextbackdrop';backdrop.className='context-backdrop';
-  backdrop.innerHTML='<section class="context-drawer" role="dialog" aria-modal="true" aria-label="上下文详情"><div class="context-drawer-head"><h2 id="contextdrawertitle">当前上下文</h2><button class="ghost" onclick="closeContextDrawer()">×</button></div><div id="contextdrawerbody" class="context-drawer-body"></div></section>';
+  backdrop.innerHTML='<section class="context-drawer" role="dialog" aria-modal="true" aria-label="'+t('context.detail')+'"><div class="context-drawer-head"><h2 id="contextdrawertitle">当前上下文</h2><button class="ghost" onclick="closeContextDrawer()">×</button></div><div id="contextdrawerbody" class="context-drawer-body"></div></section>';
   backdrop.addEventListener('click',e=>{if(e.target===backdrop)closeContextDrawer()});document.body.append(backdrop);
   document.addEventListener('keydown',e=>{if(e.key==='Escape')closeContextDrawer()});
   for(let id of ['codebookstatus','targetpath','targettree','treestatus','coveragestatus','usagedetail','status']){let el=$(id);if(el)new MutationObserver(refreshContextPanel).observe(el,{subtree:true,childList:true,characterData:true,attributes:true})}
@@ -3511,10 +3539,10 @@ function renderStatusForLanguage(s){let tokens=usageNumber(s.input_tokens)+' / '
 function renderUsageDetailForLanguage(u,model){if(!u)return;$('usagedetail').innerHTML=`${t('usage.actual_model')}：<b>${esc(model||'—')}</b><br>${t('usage.input_output_total')}：${usageNumber(u.input)} / ${usageNumber(u.output)} / ${usageNumber(u.total)}${u.usage_complete===false?' · '+t('usage.known_subtotal')+': '+usageNumber(u.known_input)+' / '+usageNumber(u.known_output):''}<br>${t('usage.reasoning')}：${usageNumber(u.reasoning)} ｜ ${t('usage.gemini_thinking')}：${usageNumber(u.gemini_thinking)}<br>${t('usage.claude_cache')}：${usageNumber(u.cache_read)} / ${usageNumber(u.cache_write)}<br>${t('usage.estimate')}：${usageCost(u)}`}
 function renderEvidenceSourcesForLanguage(sources,dfcEvidence){let normal=(sources||[]).map(s=>`<div class="card"><b>${esc(s.label||s.name||t('model.unknown_source'))}</b><br>${s.visual?'<span class="chip">'+t('evidence.visual')+'</span>':''}</div>`).join('');let dfc=(dfcEvidence||[]).map(d=>{let parts=(d.segments_used||[]).join('、')||'—';return `<div class="card"><b>DFC Struktur</b><br>${esc(d.name||'—')}<br><span class="chip">OCR：${esc(stateCopy(d.ocr_status))}</span><span class="chip">${t('dfc.segment_info',{segments:esc(parts),total:esc(d.segments_total||0)})}</span></div>`}).join('');$('sources').innerHTML=(dfc+normal)||t('evidence.none')}
 function renderCompareSlotsForLanguage(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">'+t('compare.select_model')+'</option>'+compareOptions.map(([value,label])=>'<option value="'+escAttr(value)+'" '+(slot.value===value?'selected':'')+'>'+esc(label)+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>'+t('model.other')+'</option>';return '<div class="field"><label>'+t('compare.model_number',{index:index+1})+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+escAttr(slot.custom||'')+'" placeholder="'+t('model.id_placeholder')+'" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?t('compare.maximum'):t('compare.add');if(compareSlots.length>=4)setUIMessage($('comparestatus'),{message_key:'compare.maximum'})}
-function renderSessionRowsForLanguage(items,append){let list=$('sessionlist');if(!list)return;if(!append)list.innerHTML='';for(let item of items){let row=document.createElement('div');row.className='session-row'+(item.name===currentSessionName?' active':'');row.onclick=()=>openSessionByName(item.name);let title=document.createElement('span');title.className='session-title';title.textContent=item.title;row.append(title);if(item.pinned){let pin=document.createElement('span');pin.className='session-pin';pin.textContent='●';pin.title=t('session.pin_title');row.append(pin)}let more=document.createElement('button');more.className='session-more';more.textContent='•••';more.title=t('session.more_title');more.onclick=e=>{e.stopPropagation();openSessionMenu(e,item)};row.append(more);list.append(row)}if(sessionLoading){let loading=document.createElement('div');loading.id='sessionloading';loading.className='session-loading';loading.textContent=t('session.loading');list.append(loading)}}
+function renderSessionRowsForLanguage(items,append){let list=$('sessionlist');if(!list)return;if(!append)list.innerHTML='';for(let item of items){let row=document.createElement('div');row.className='session-row'+(item.name===currentSessionName?' active':'');row.onclick=()=>openSessionByName(item.name);let title=document.createElement('span');title.className='session-title';title.textContent=item.title_key?t(item.title_key):item.title;row.append(title);if(item.pinned){let pin=document.createElement('span');pin.className='session-pin';pin.textContent='●';pin.title=t('session.pin_title');row.append(pin)}let more=document.createElement('button');more.className='session-more';more.textContent='•••';more.title=t('session.more_title');more.onclick=e=>{e.stopPropagation();openSessionMenu(e,item)};row.append(more);list.append(row)}if(sessionLoading){let loading=document.createElement('div');loading.id='sessionloading';loading.className='session-loading';loading.textContent=t('session.loading');list.append(loading)}}
 function openSessionMenuForLanguage(event,item){closeSessionMenu();let menu=document.createElement('div');menu.id='sessionmenu';menu.className='session-menu';let rect=event.currentTarget.getBoundingClientRect();menu.style.left=Math.min(window.innerWidth-145,rect.right+6)+'px';menu.style.top=rect.top+'px';menu.innerHTML='<button data-action="rename">'+t('actions.rename_full')+'</button><button data-action="pin">'+t(item.pinned?'session.unpin':'session.pin')+'</button><button class="delete" data-action="delete">'+t('actions.delete')+'</button>';menu.onclick=async e=>{let action=e.target.dataset.action;if(!action)return;if(action==='rename')await renameSession(item.name);if(action==='pin')await pinSession(item);if(action==='delete')await deleteSession(item.name);closeSessionMenu()};document.body.append(menu)}
 function renderCoverageReportForLanguage(x){
-  if(!x||!x.files){setUIMessage($('coveragestatus'),{message_key:'coverage.auto_prepare'});return}
+  if(!x||!x.files){setUIMessage($('coveragestatus'),{message_key:'coverage.auto_hint'});return}
   if(x.current_selection===false){$('coveragestatus').innerHTML='<span class="muted">'+t('coverage.selection_changed')+'</span>';return}
   let done=x.files.filter(f=>f.complete).length;
   let details=x.files.map(f=>{let pages=f.pages_total?t('coverage.pages')+'：'+t('coverage.read_pages',{pages:(f.pages_read||[]).join('、')||'—'})+((f.pages_unread||[]).length?'；'+t('coverage.unread_pages',{pages:f.pages_unread.join('、')}):''):t('coverage.no_pages');let dfc=f.dfc_structure?' · <span class="chip">'+t('coverage.dfc',{status:esc(stateCopy(f.dfc_structure.ocr_status)),count:esc(f.dfc_structure.segments_total||0)})+'</span>':'';let cache=f.cache_status==='reused'?' · <span class="chip">'+t('coverage.reused_summary')+'</span>':f.cache_status==='created'?' · <span class="chip">'+t('coverage.new_pre_read')+'</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${t('coverage.text_groups',{done:f.text_groups_processed,total:f.text_groups_total})} · ${esc(scopeCopy(f))} · ${esc(pages)}${cache}${dfc}${f.failures?.length?'（'+esc((f.failure_messages||f.failures).map(uiCopy).join('; '))+'）':''}`}).join('');
@@ -3566,6 +3594,7 @@ function localizeMaterialFlowControls(){
   if(report)report.textContent=t('scan.report');
   if(backdrop){
     backdrop.setAttribute('aria-label',t('scan.report.title'));
+    backdrop.querySelector('.scan-drawer')?.setAttribute('aria-label',t('scan.report.title'));
     let title=backdrop.querySelector('.scan-drawer-head b'),note=backdrop.querySelector('.scan-drawer-head .muted');
     if(title)title.textContent=t('scan.report.title');
     if(note)note.textContent=t('scan.report.local');
@@ -3630,6 +3659,8 @@ clearTargetTree=clearTargetTreeForLanguage;
 updateTreeStatus=updateTreeStatusForLanguage;
 makeTreeNode=makeTreeNodeForLanguage;
 loadTargetTree=loadTargetTreeForLanguage;
+const baseEnsureMaterialFlow=ensureMaterialFlow;
+ensureMaterialFlow=function(){baseEnsureMaterialFlow();$('scanbackdrop')?.querySelector('.scan-drawer')?.setAttribute('aria-label',t('scan.report.title'))};
 function selectedTargetPaths(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].map(x=>x.dataset.path)}
 async function analyzeTarget(){if(!allowRuleDraftTransition())return;let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent=rt('scan.reading')}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error(t('materials.selection_required'));let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');materialDraftDirty=false;clearResultPanels();await loadHistory();renderStatus(x.status);$('bgstatus').textContent=t(x.classification?'materials.confirmed_bg':'materials.confirmed_normal',{kind:tr(x.target_kind),count:x.sources});renderScanReport(x);$('coveragestatus').textContent=rt('material.updated');loadDocs();loadCacheAudit()}catch(e){setUIMessage($('bgstatus'),e.uiMessage||{text:e.message},'error')}finally{if(confirm)confirm.textContent=t('materials.confirm_selected');updateMaterialFlowButtons()}}
 async function prepareCoverage(full=false){if(busy)return;busy=true;let operation=beginOperation();setUIMessage($('coveragestatus'),{message_key:full?'coverage.preparing_full':'coverage.preparing'});try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full,request_id:operation.id})});renderCoverageReport(x);renderStatus(await api('/api/status'))}catch(e){setUIMessage($('coveragestatus'),{message_key:'error.operation_failed',params:{detail:e.uiMessage||{text:e.message}}},'error')}finally{endOperation(operation);busy=false}}
@@ -3637,7 +3668,7 @@ async function clearBg(){if(!allowRuleDraftTransition())return;try{renderStatus(
 const compareOptions=[['claude-haiku-5-5','Claude Haiku 5.5'],['claude-sonnet-5-5','Claude Sonnet 5.5'],['claude-opus-5','Claude Opus 5'],['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite'],['gemini-2.5-pro','Gemini 2.5 Pro'],['gemini-2.5-flash','Gemini 2.5 Flash'],['deepseek-r1-0528-maas','DeepSeek R1 (0528)'],['llama-3.3-70b-instruct-maas','Llama 3.3 70B'],['glm-5-maas','GLM-5']];
 function renderCompareSlots(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">选择模型…</option>'+compareOptions.map(([value,label])=>'<option value="'+escAttr(value)+'" '+(slot.value===value?'selected':'')+'>'+label+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>其他：手动输入 Model ID…</option>';return '<div class="field"><label>对比模型 '+(index+1)+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+escAttr(slot.custom||'')+'" placeholder="输入准确的 Bosch Farm Model ID" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?'最多 4 个模型':'＋ 添加对比模型';if(compareSlots.length>=4)$('comparestatus').textContent='已达到最多 4 个对比模型。'}
 function changeCompareModel(index){let select=$('cmpsel'+index);compareSlots[index].value=select.value;if(select.value!=='__custom__')compareSlots[index].custom='';renderCompareSlots();if(select.value==='__custom__')setTimeout(()=>$('cmpcustom'+index).focus(),0)}
-function addCompareModel(){if(compareSlots.length>=4){$('comparestatus').textContent='最多只能同时对比 4 个模型。';return}compareSlots.push({value:'',custom:''});renderCompareSlots();$('cmpsel'+(compareSlots.length-1)).focus()}
+function addCompareModel(){if(compareSlots.length>=4){setUIMessage($('comparestatus'),{message_key:'compare.maximum'});return}compareSlots.push({value:'',custom:''});renderCompareSlots();$('cmpsel'+(compareSlots.length-1)).focus()}
 function removeCompareModel(index){compareSlots.splice(index,1);renderCompareSlots();$('comparestatus').textContent=''}
 function selectedCompareModels(){return compareSlots.map((slot,index)=>slot.value==='__custom__'?$('cmpcustom'+index).value.trim():slot.value).filter(Boolean)}
 function renderComparisonForLanguage(record){

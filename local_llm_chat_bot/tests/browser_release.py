@@ -523,6 +523,58 @@ class BrowserRelease(unittest.TestCase):
         headings = self.page.locator(".classification-card h3").all_text_contents()
         self.assertIn(self.page.evaluate("t('classification.title')"), headings)
 
+    def test_english_and_german_page_scan_has_no_chinese_ui_residue(self):
+        """F-08: dynamic workflow, scan report, diagnostics and new chat rerender."""
+        for language in ["en", "de"]:
+            with self.subTest(language=language):
+                self.language(language)
+                self.page.evaluate("""() => {
+                    ensureMaterialFlow();
+                    renderScanReport({sources: 0, files: [], skipped_count: 0, skipped: []});
+                    openScanReport();
+                    while(compareSlots.length < 4) addCompareModel();
+                    addCompareModel();
+                    openContextDrawer('workspace');
+                }""")
+                self.assertEqual(
+                    self.page.locator('#coveragestatus').inner_text(),
+                    self.page.evaluate("t('coverage.auto_hint')"),
+                )
+                self.assertEqual(
+                    self.page.locator('#comparestatus').inner_text(),
+                    self.page.evaluate("t('compare.maximum')"),
+                )
+                self.assertEqual(
+                    self.page.locator('#leftsplitter').get_attribute('aria-label'),
+                    self.page.evaluate("t('layout.left_panel_width')"),
+                )
+                self.assertEqual(
+                    self.page.locator('.context-drawer').get_attribute('aria-label'),
+                    self.page.evaluate("t('context.detail')"),
+                )
+                self.assertEqual(
+                    self.page.locator('.scan-drawer').get_attribute('aria-label'),
+                    self.page.evaluate("t('scan.report.title')"),
+                )
+                self.close_drawer()
+                self.page.evaluate('closeScanReport()')
+                self.page.locator('#newsessionbutton').click()
+                self.page.wait_for_function(
+                    "[...document.querySelectorAll('.session-title')].some(node => node.textContent === t('session.new_title'))"
+                )
+                foreign = self.page.evaluate("""() => {
+                    const forbidden=/[\\u4e00-\\u9fff]/;
+                    const walker=document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                    const found=[];
+                    for(let node;node=walker.nextNode();){
+                      const text=node.nodeValue.trim(), parent=node.parentElement;
+                      if(text && forbidden.test(text) && !parent.closest('script,style,option,input,textarea,select,#workspaceshortcut')) found.push(text);
+                    }
+                    return found;
+                }""")
+                self.assertEqual(foreign, [], foreign)
+                self.close_drawer() if self.page.locator('#contextbackdrop').evaluate("n => n.classList.contains('open')") else None
+
     def test_long_invalid_draft_keeps_selection_scroll_errors_and_cancel_guard(self):
         self.prepare_rules()
         original = self.f.rules.read_bytes()
