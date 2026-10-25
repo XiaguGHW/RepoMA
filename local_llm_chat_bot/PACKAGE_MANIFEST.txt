@@ -1,0 +1,22 @@
+# Files explicitly shipped by the manually triggered local-chat-bot ZIP.
+# One relative path per line. Do not add tests, runtime state, caches, or .env files.
+CODE_CHAT_AGENT_README.md
+PACKAGE_MANIFEST.txt
+README.md
+bosch_chat.py
+chat_workbench.py
+code_chat_agent.py
+excel_agent.py
+excel_chat_agent.py
+llm_connector_with_prompt_caching.py
+local_document_library.py
+model_pricing.json
+release_safety.py
+request_runtime.py
+requirements.txt
+ui_copy_inventory.json
+ui_preview.html
+ui_terminology.json
+workbench_i18n.json
+workbench_i18n.py
+workbench_startup.py

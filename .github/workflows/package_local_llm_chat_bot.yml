@@ -1,12 +1,6 @@
 name: Package local LLM chat bot
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "local_llm_chat_bot/**"
-      - "local_llm_chat_bot.zip"
-      - ".github/workflows/package_local_llm_chat_bot.yml"
   workflow_dispatch:
 
 permissions:
@@ -17,11 +11,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install -r local_llm_chat_bot/requirements-dev.txt
+      - name: Run backend tests before packaging
+        working-directory: local_llm_chat_bot
+        run: python -m unittest discover -s tests -p 'test_*.py'
       - name: Build ZIP
         run: |
           rm -f local_llm_chat_bot.zip
-          zip -qr local_llm_chat_bot.zip local_llm_chat_bot \
-            -x "*/__pycache__/*" "*/tests/*" "*/.env" "*/visual_cache/*"
+          declare -a package_files=()
+          while IFS= read -r path; do
+            case "$path" in ''|'#'*) continue ;; esac
+            test -f "local_llm_chat_bot/$path"
+            package_files+=("local_llm_chat_bot/$path")
+          done < local_llm_chat_bot/PACKAGE_MANIFEST.txt
+          zip -q local_llm_chat_bot.zip "${package_files[@]}"
       - name: Commit updated ZIP
         run: |
           git config user.name "github-actions[bot]"

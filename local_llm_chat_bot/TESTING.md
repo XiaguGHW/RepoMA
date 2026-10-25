@@ -114,6 +114,13 @@ runs.
   `python -m unittest discover -s tests -p test_release_excel_plan.py -v`
 - F-13 dead-code and frontend-cleanup checks:
   `python -m unittest discover -s tests -p test_release_frontend_cleanup.py -v`
+- F-11 packaging gate (read-only; does not create a ZIP):
+  `python -m unittest tests/test_package_manifest.py -v`
+
+`tests/test_package_manifest.py` lists the exact payload from
+`PACKAGE_MANIFEST.txt` and rejects tests, state, caches and environment files.
+The package workflow is manual-only, installs `requirements-dev.txt`, and runs
+the backend suite before it can build an archive.
 
 Post-review fix F-02 (2026-10-25) replaces the step-6 request defaults: one
 complete response may take 300 s (`WORKBENCH_RESPONSE_TIMEOUT_SECONDS`), stream
