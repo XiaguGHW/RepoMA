@@ -118,9 +118,11 @@ class BrowserRelease(unittest.TestCase):
             "(l)=>document.documentElement.lang===l", arg=language
         )
 
-    def prepare_rules(self):
+    def prepare_rules(self, path=None, model="gemini-2.5-pro"):
         self.open_drawer("rules")
-        self.page.locator("#contextcodebookpath").fill(str(self.f.rules))
+        self.page.locator("#contextcodebookpath").fill(str(path or self.f.rules))
+        # The rule-parsing model is an in-page field (no native prompt()).
+        self.page.locator("#rulemodel").fill(model)
         self.button("contextSyncRule();prepareCodebook()").click()
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
         self.close_drawer()
@@ -128,6 +130,8 @@ class BrowserRelease(unittest.TestCase):
     def lock_rules(self):
         label = self.page.evaluate("t('rulews.lock_action')")
         self.page.get_by_role("button", name=label, exact=True).click()
+        # Locking asks for confirmation in the page itself, not a browser dialog.
+        self.page.locator("#appconfirmok").click()
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
 
     def select_bg(self, folder):
@@ -316,7 +320,7 @@ class BrowserRelease(unittest.TestCase):
         )
         self.assertIn("Section/chunk references", card.inner_text())
         self.assertIn(self.f.rules.name, card.inner_text())
-        self.page.select_option("#answermode", "explanation")
+        self.page.locator('#answermodegroup button[data-mode="explanation"]').click()
         self.language("de")
         self.assertEqual(self.page.input_value("#answermode"), "explanation")
         with self.page.expect_response(
@@ -956,6 +960,239 @@ class BrowserRelease(unittest.TestCase):
         self.page.reload()
         self.page.wait_for_function("(s)=>lastStatusSnapshot?.session_name===s", arg=session_b)
 
+
+    # ---- Classification-rule (Codebook) preparation ---------------------
+    def make_pdf(self, name, pages):
+        import fitz
+        path = self.f.root / name
+        with fitz.open() as pdf:
+            for text in pages:
+                pdf.new_page().insert_textbox(fitz.Rect(40, 40, 560, 800), text, fontsize=7)
+            pdf.save(path)
+        return path
+
+    def record_dialogs(self):
+        dialogs = []
+        self.page.on("dialog", lambda dialog: dialogs.append(dialog.type))
+        return dialogs
+
+    def start_rules(self, path, model):
+        self.open_drawer("rules")
+        self.page.locator("#contextcodebookpath").fill(str(path))
+        self.page.locator("#rulemodel").fill(model)
+        self.button("contextSyncRule();prepareCodebook()").click()
+
+    def card(self):
+        return self.page.locator("#context-rule-summary").inner_text()
+
+    def test_rule_preparation_shows_live_progress_without_native_dialogs_and_restores(self):
+        self.language("en")
+        dialogs = self.record_dialogs()
+        path = self.make_pdf("Codebook 3 pages.pdf", ["Rotationseinheit: rotation-1.", "Gantry.", "Greifer."])
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+
+        def slow(response, prompt, system):
+            if "transcribe exactly one" in system:
+                gate.wait(.7)
+            return response
+        self.f.response_transform = slow
+        self.open_drawer("rules")
+        self.page.locator("#contextcodebookpath").fill(str(path))
+        self.page.locator("#rulemodel").fill("gemini-2.5-pro")
+        self.assertEqual(self.page.locator("#rulemodelhint").inner_text(), "This run will use: gemini-2.5-pro")
+        self.button("contextSyncRule();prepareCodebook()").click()
+        self.page.wait_for_function("document.getElementById('rulejobpanel')?.innerText.includes('Parsing page')")
+        panel = self.page.locator("#rulejobpanel").inner_text()
+        for text in ["Preparing", "gemini-2.5-pro", "Codebook 3 pages.pdf", "PDF", " of 3"]:
+            self.assertIn(text, panel)
+        self.assertNotIn("%", panel)  # no invented percentage
+        # Switching the GUI language during the job is immediate (the language
+        # save must not wait for the job's lock) and redraws the live panel.
+        for language, fragment in [("de", "Seite"), ("zh", "页"), ("en", "Parsing page")]:
+            started = time.monotonic()
+            self.language(language)
+            self.assertLess(time.monotonic() - started, 3, language)
+            self.page.wait_for_function("(f)=>document.getElementById('rulejobpanel').innerText.includes(f)", arg=fragment)
+            self.assertEqual(self.page.evaluate("lastCodebookTask.state"), "running")
+        for selector in ["#ruleprepare", "#rulefilepick", "#contextcodebookpath", "#rulemodel", "#ruleview", "#rulereplace"]:
+            self.assertTrue(self.page.locator(selector).is_disabled(), selector)
+        self.close_drawer()
+        self.page.wait_for_function("/^Preparing: page [123] of 3$/.test(document.getElementById('context-rule-summary').innerText)")
+        # A reload while the job runs resumes the same server-side status.
+        self.page.reload()
+        self.page.wait_for_function("lastCodebookTask && ['running','succeeded'].includes(lastCodebookTask.state)")
+        self.assertNotIn(self.page.evaluate("t('error.busy')"), self.page.locator("body").inner_text())
+        gate.set()
+        self.page.wait_for_function("lastCodebookTask?.state === 'succeeded'", timeout=20000)
+        self.page.wait_for_function("lastCodebookProfile?.status === 'draft'")
+        self.assertEqual(self.card(), "Draft prepared, awaiting confirmation and lock · Codebook 3 pages.pdf")
+        self.open_drawer("rules")
+        panel = self.page.locator("#rulejobpanel").inner_text()
+        for text in ["Prepared successfully", str(path), "PDF", "gemini-2.5-pro",
+                     "Draft prepared, awaiting confirmation and lock"]:
+            self.assertIn(text, panel)
+        self.assertEqual(self.page.locator("#rulejobpanel dt:text-is('Pages') + dd").inner_text(), "3")
+        self.assertFalse(self.page.locator("#ruleprepare").is_disabled())
+        self.page.locator("#rulejobview").click()
+        self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
+        self.close_drawer()
+        self.lock_rules()
+        self.assertEqual(self.card(), "Locked and in use for classification · Codebook 3 pages.pdf")
+        # A second reload shows the last final state.
+        self.page.reload()
+        self.page.wait_for_function("lastCodebookTask?.state === 'succeeded' && lastCodebookProfile?.status === 'locked'")
+        self.assertEqual(dialogs, [])
+
+    def test_rule_page_three_max_tokens_is_explained_and_old_rules_stay_in_effect(self):
+        self.language("en")
+        self.page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+        self.prepare_rules()
+        self.lock_rules()
+        self.button("leaveCodebookWorkspace()").click()
+        dialogs = self.record_dialogs()
+        long_text = "Page three table: " + " ".join(f"Rule{index} Rotationseinheit Drehung" for index in range(260))
+        path = self.make_pdf("Codebook_Baugruppenklassifikation_v2_3.pdf", ["Rotationseinheit.", "Gantry.", long_text])
+
+        def page_three(response, prompt, system):
+            if "Codebook page 3 of 3" in prompt:
+                response["candidates"][0]["finishReason"] = "MAX_TOKENS"
+            return response
+        self.f.response_transform = page_three
+        self.start_rules(path, "claude-haiku-5-5")
+        self.page.wait_for_function("lastCodebookTask?.state === 'failed'", timeout=20000)
+        panel = self.page.locator("#rulejobpanel").inner_text()
+        for text in ["Preparation failed", "Page 3 is too long", "after 4 attempts", "Parsing the rules",
+                     "This failure did not change the existing rules.", "claude-haiku-5-5"]:
+            self.assertIn(text, panel)
+        self.assertTrue(self.page.locator("#rulejobretry").is_enabled())
+        self.assertTrue(self.page.locator("#ruleprepare").is_enabled())
+        self.assertNotIn("incomplete Claude response", panel.split(self.page.evaluate("t('rulejob.details.title')"))[0])
+        self.page.locator("#rulejobdetails summary").click()
+        self.assertIn("incomplete Claude response (max_tokens)", self.page.locator("#rulejobdiagnostics").inner_text())
+        self.assertIn("retrying in smaller parts", self.page.locator(".rulejob-log").inner_text())
+        self.page.locator("button[onclick='copyCodebookDiagnostics()']").click()
+        self.page.wait_for_function("document.getElementById('rulejobcopymsg').innerText.length > 0")
+        self.assertEqual(self.page.locator("#rulejobcopymsg").inner_text(), "Copied")
+        self.assertIn("max_tokens", self.page.evaluate("navigator.clipboard.readText()"))
+        self.close_drawer()
+        expected = ("Preparation failed: Page 3: output limit reached\n"
+                    f"Rules in effect: {self.f.rules.name} (Locked and in use for classification)")
+        self.assertEqual(self.card(), expected)
+        clipped = self.page.eval_on_selector("#context-rule-summary", "n=>n.scrollHeight>n.clientHeight+1||getComputedStyle(n).webkitLineClamp!=='none'")
+        self.assertFalse(clipped, "rule card text is clipped")
+        for language, fragment in [("zh", "第 3 页输出长度不足"), ("de", "Seite 3: Ausgabelimit erreicht")]:
+            self.language(language)
+            self.assertIn(fragment, self.card())
+            if language == "de":
+                self.assertNotRegex(self.card(), r"[一-鿿]")
+        self.open_drawer("rules")
+        self.assertIn("Seite 3 ist zu lang", self.page.locator("#rulejobpanel").inner_text())
+        self.language("zh")
+        self.assertIn("第 3 页内容过长，已尝试 4 次仍无法完成", self.page.locator("#rulejobpanel").inner_text())
+        self.language("en")
+        self.close_drawer()
+        # The previously locked rules still classify.
+        self.f.response_transform = None
+        self.select_bg(self.f.bg_a)
+        self.ask("Classify this Baugruppe")
+        self.assertIn("Rotationseinheit", self.page.locator(".classification-card").first.inner_text())
+        # Retry from the failure panel.
+        self.open_drawer("rules")
+        self.page.locator("#rulejobretry").click()
+        self.page.wait_for_function("lastCodebookTask?.state === 'succeeded'", timeout=20000)
+        self.assertEqual(dialogs, [])
+
+    def test_rule_model_validation_and_answer_mode_are_in_page_controls(self):
+        self.language("en")
+        dialogs = self.record_dialogs()
+        self.assertEqual(self.page.locator("select#answermode").count(), 0)
+        self.assertTrue(self.page.locator("#answermodestatic").is_visible())
+        self.assertFalse(self.page.locator("#answermodegroup").is_visible())
+        self.assertEqual(self.page.locator("#answermodestatic").inner_text(), "Current mode: Ordinary questions")
+        self.assertEqual(self.page.locator("#answermodehelp").inner_text(), self.page.evaluate("t('answer.unavailable_help')"))
+        calls = len(self.f.calls)
+        self.open_drawer("rules")
+        self.page.locator("#contextcodebookpath").fill(str(self.f.rules))
+        self.page.locator("#rulemodel").fill("not a model")
+        self.assertIn("is invalid", self.page.locator("#rulemodelhint").inner_text())
+        self.button("contextSyncRule();prepareCodebook()").click()
+        self.assertIn("is invalid", self.page.locator("#contextrulemsg").inner_text())
+        self.page.locator("#rulemodel").fill("")
+        self.button("contextSyncRule();prepareCodebook()").click()
+        self.assertEqual(self.page.locator("#contextrulemsg").inner_text(), "Enter a rule-parsing model ID.")
+        self.assertIsNone(self.page.evaluate("lastCodebookTask"))
+        self.assertEqual(len(self.f.calls), calls)
+        self.page.locator("#rulemodelrecommended").click()
+        self.assertEqual(self.page.input_value("#rulemodel"), "claude-haiku-5-5")
+        # A refused start (another model task is active) is explained in the page
+        # and leaves no running state or disabled controls behind.
+        w.MODEL_WORK_IN_PROGRESS.set()
+        try:
+            self.button("contextSyncRule();prepareCodebook()").click()
+            self.page.wait_for_function("document.getElementById('contextrulemsg').innerText.includes(t('error.busy'))")
+        finally:
+            w.MODEL_WORK_IN_PROGRESS.clear()
+        self.assertIsNone(self.page.evaluate("lastCodebookTask"))
+        self.assertTrue(self.page.locator("#ruleprepare").is_enabled())
+        self.assertTrue(self.page.locator("#cancelchat").is_disabled())
+        self.close_drawer()
+        self.prepare_rules()
+        self.lock_rules()
+        self.button("leaveCodebookWorkspace()").click()
+        self.select_bg(self.f.bg_a)
+        self.assertTrue(self.page.locator("#answermodegroup").is_visible())
+        self.assertFalse(self.page.locator("#answermodestatic").is_visible())
+        chosen = self.page.locator('#answermodegroup button[aria-checked="true"]')
+        self.assertEqual(chosen.get_attribute("data-mode"), "classification")
+        self.assertEqual(self.page.locator("#answermodehelp").inner_text(), self.page.evaluate("t('answer.classification_help')"))
+        self.page.locator('#answermodegroup button[data-mode="explanation"]').click()
+        self.assertEqual(self.page.input_value("#answermode"), "explanation")
+        self.assertEqual(chosen.get_attribute("data-mode"), "explanation")
+        self.assertEqual(self.page.locator("#answermodehelp").inner_text(), self.page.evaluate("t('answer.explanation_help')"))
+        self.assertEqual(dialogs, [])
+
+    def test_txt_rules_prepare_and_show_text_block_references(self):
+        self.language("de")
+        path = self.f.root / "Regeln ü.txt"
+        path.write_text("Rotationseinheit: Die Hauptfunktion ist die Drehung. Regel rotation-1.\n\nGrenzfall: Größe ist kein Kriterium.",
+                        encoding="utf-16")
+        self.prepare_rules(path=path)
+        workspace = self.page.locator(".codebook-workspace").inner_text()
+        self.assertIn(self.page.evaluate("t('rulews.evidence_blocks')"), workspace)
+        self.assertNotIn(self.page.evaluate("t('rulews.evidence_pages')"), workspace)
+        self.assertIn("OCR: für TXT nicht anwendbar", workspace)
+        self.open_drawer("rules")
+        self.assertIn("PDF / DOCX / TXT", self.page.locator("#contextdrawerbody").inner_text())
+        panel = self.page.locator("#rulejobpanel").inner_text()
+        for text in ["Erfolgreich vorbereitet", "TXT", "utf-16", self.page.evaluate("t('rulejob.panel.blocks')")]:
+            self.assertIn(text, panel)
+        self.assertNotRegex(panel.replace(str(path.parent), ""), r"[一-鿿]")  # the temp folder name is CJK
+
+    def test_rule_preparation_stop_closes_job_and_reenables_controls(self):
+        self.language("en")
+        from docx import Document
+        document = Document()
+        for index in range(9):
+            document.add_paragraph(f"Rule section {index}: " + "detail " * 520)
+        path = self.f.root / "Long rules.docx"
+        document.save(path)
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        self.f.response_transform = lambda response, prompt, system: (gate.wait(.5), response)[1]
+        self.start_rules(path, "gemini-2.5-pro")
+        self.page.wait_for_function("document.getElementById('rulejobpanel')?.innerText.includes('Parsing text blocks')")
+        self.assertRegex(self.page.locator("#rulejobpanel").inner_text(), r"group \d of \d")
+        self.page.locator("#rulejobstop").click()
+        self.page.wait_for_function("lastCodebookTask?.state === 'cancelled'", timeout=15000)
+        panel = self.page.locator("#rulejobpanel").inner_text()
+        self.assertIn("Rule preparation was cancelled; no rules were saved.", panel)
+        self.assertTrue(self.page.locator("#ruleprepare").is_enabled())
+        self.assertTrue(self.page.locator("#cancelchat").is_disabled())
+        self.close_drawer()
+        self.assertEqual(self.card(), "Rule preparation cancelled\nNo locked rules are available for classification")
+        self.assertEqual(w.load_codebook_profile(), {})
+        self.assertFalse(w.MODEL_WORK_IN_PROGRESS.is_set())
 
 class RecordedResult(unittest.TextTestResult):
     def addFailure(self, test, err):

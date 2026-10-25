@@ -42,8 +42,15 @@ class FixtureEnvironment:
             def do_POST(self):
                 body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 calls.append({'path':self.path,'body':body})
-                prompt='\n'.join(p.get('text','') for c in body.get('contents',[]) for p in c.get('parts',[]))
-                system='\n'.join(p.get('text','') for p in body.get('system_instruction',{}).get('parts',[]))
+                # Claude (Vertex rawPredict) requests get a Claude-shaped reply;
+                # transforms are always written against the Gemini shape.
+                claude=self.path.endswith(':rawPredict')
+                if claude:
+                    prompt='\n'.join(b.get('text','') for m in body.get('messages',[]) for b in (m.get('content') if isinstance(m.get('content'),list) else []) if isinstance(b,dict))
+                    system='\n'.join(b.get('text','') for b in body.get('system',[]) if isinstance(b,dict))
+                else:
+                    prompt='\n'.join(p.get('text','') for c in body.get('contents',[]) for p in c.get('parts',[]))
+                    system='\n'.join(p.get('text','') for p in body.get('system_instruction',{}).get('parts',[]))
                 if 'consolidate page-by-page' in system:
                     text=json.dumps(PROFILE)
                 elif 'transcribe exactly one' in system:
@@ -78,6 +85,12 @@ class FixtureEnvironment:
                           'usageMetadata':{'promptTokenCount':20,'candidatesTokenCount':10,'totalTokenCount':30}}
                 if fixture.response_transform:
                     response=fixture.response_transform(response, prompt, system)
+                if claude and 'candidates' in response:
+                    candidate=response['candidates'][0]
+                    reason=candidate.get('finishReason','STOP')
+                    response={'content':[{'type':'text','text':''.join(part.get('text','') for part in candidate.get('content',{}).get('parts',[]))}],
+                              'stop_reason':{'STOP':'end_turn','MAX_TOKENS':'max_tokens'}.get(reason,str(reason).lower()),
+                              'usage':{'input_tokens':20,'output_tokens':10}}
                 encoded=json.dumps(response).encode()
                 self.send_response(200)
                 self.send_header('Content-Type','application/json')

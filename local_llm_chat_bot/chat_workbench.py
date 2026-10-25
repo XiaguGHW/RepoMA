@@ -26,6 +26,7 @@ from contextvars import ContextVar
 from functools import wraps
 from queue import Empty, Full, Queue
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -45,8 +46,8 @@ try:
     from workbench_i18n import catalog_script_json, UIMessage, localize_message
     from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative, classification_manifest,
                                  excerpt, parse_json, prompt_for, safe_name, sha256)
-    from local_document_library import (LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS,
-                                        material_is_recommended, material_role, material_role_label)
+    from local_document_library import (LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS, TextDecodingError,
+                                        decode_text_bytes, material_is_recommended, material_role, material_role_label)
     from llm_connector_with_prompt_caching import LLMConnector, farm_base_url
     from request_runtime import (RequestControl, RequestStopped, RequestCancelled, RequestTimedOut,
                                  ResponseLimitExceeded, AnswerPreview, looks_like_action)
@@ -66,6 +67,8 @@ ACTIVE: dict[str, Any] = {}
 # request is queued for the lock or is using a captured session context.
 MODEL_WORK_IN_PROGRESS = threading.Event()
 CHAT_TASK_GUARD = threading.Lock()
+# Serializes small settings writes that may run while LOCK is held by model work.
+SETTINGS_GUARD = threading.Lock()
 CHAT_TASK: dict[str, Any] = {}
 # Synchronous long model operations (Codebook preparation, coverage, comparison,
 # dossier rebuild) that a browser Stop can cancel by request_id.
@@ -385,6 +388,9 @@ class CodebookPrepareRequest(BaseModel):
     path: str
     model: str = ""
     request_id: str = Field(default="", pattern=REQUEST_ID)
+    # The browser starts a background job and follows /api/codebook/task.
+    # API callers that omit it keep the original blocking response.
+    background: bool = False
 
 
 class ChatRequest(BaseModel):
@@ -735,6 +741,42 @@ def codebook_page_groups(document: dict, pages_per_group: int = 3) -> list[list[
     return [sum(ordered[index:index + pages_per_group], []) for index in range(0, len(ordered), pages_per_group)]
 
 
+def with_blocks(record: dict, values: object, key: str = "blocks") -> dict:
+    """Keep text-block references of nonpaged Codebooks (TXT/DOCX) when present.
+
+    The key is added only when the source carried it, so a PDF profile and an
+    unchanged edit round-trip keep exactly their previous shape.
+    """
+    if isinstance(values, list):
+        record[key] = [int(value) for value in values if str(value).isdigit() and int(value) > 0]
+    return record
+
+
+def nonpaged_references(draft: dict) -> dict:
+    """A TXT/DOCX Codebook has no physical pages: record block numbers instead.
+
+    Models sometimes put block numbers into ``pages``.  For a nonpaged source
+    those are moved to ``blocks`` so no rule ever claims a fabricated page.
+    """
+    def move(record: dict, pages_key: str, blocks_key: str) -> None:
+        pages = [page for page in record.get(pages_key, []) if type(page) is int and page > 0]
+        existing = record.get(blocks_key)
+        blocks = [value for value in existing if type(value) is int and value > 0] if isinstance(existing, list) else []
+        record[blocks_key] = sorted(set(blocks) | set(pages))
+        record[pages_key] = []
+    for item in draft.get("classes", []):
+        move(item, "evidence_pages", "evidence_blocks")
+        for key in ("decision_rules", "boundaries"):
+            for rule in item.get(key, []):
+                if isinstance(rule, dict):
+                    move(rule, "pages", "blocks")
+    for key in ("global_rules", "table_rules"):
+        for rule in draft.get(key, []):
+            if isinstance(rule, dict):
+                move(rule, "pages", "blocks")
+    return draft
+
+
 def parse_codebook_draft(raw: str) -> dict:
     text = raw.strip()
     if text.startswith("```"):
@@ -771,21 +813,22 @@ def parse_codebook_draft(raw: str) -> dict:
                 if isinstance(value, str):
                     result.append({"id": generated_id(f"{prefix}-{index}"), "text": value, "pages": []})
                 elif isinstance(value, dict) and str(value.get("text", "")).strip():
-                    result.append({"id": str(value.get("id") or generated_id(f"{prefix}-{index}")),
-                                   "text": str(value["text"]).strip(),
-                                   "pages": [int(page) for page in (value.get("pages") or []) if str(page).isdigit()]})
+                    result.append(with_blocks({"id": str(value.get("id") or generated_id(f"{prefix}-{index}")),
+                                               "text": str(value["text"]).strip(),
+                                               "pages": [int(page) for page in (value.get("pages") or []) if str(page).isdigit()]},
+                                              value.get("blocks")))
             return result
         name = item["name"].strip()
         if name.casefold() in seen_names or not isinstance(item.get("definition"), str) or not item["definition"].strip():
             raise UIValidationError(ui_message(ACTIVE, 'rules.class_definitions'))
         seen_names.add(name.casefold())
         key = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-") or "class"
-        classes.append({
+        classes.append(with_blocks({
             "name": name, "definition": str(item.get("definition", "")).strip(),
             "decision_rules": rules(item.get("decision_rules", []), f"{key}-rule"),
             "boundaries": rules(item.get("boundaries", []), f"{key}-boundary"),
             "evidence_pages": [int(page) for page in (item.get("evidence_pages") or []) if str(page).isdigit()],
-        })
+        }, item.get("evidence_blocks"), "evidence_blocks"))
     if not classes:
         raise UIValidationError(ui_message(ACTIVE, 'rules.classes_empty'))
     def profile_rules(values: object, prefix: str) -> list[dict[str, Any]]:
@@ -794,9 +837,10 @@ def parse_codebook_draft(raw: str) -> dict:
             if isinstance(value, str):
                 result.append({"id": generated_id(f"{prefix}-{index}"), "text": value, "pages": []})
             elif isinstance(value, dict) and str(value.get("text", "")).strip():
-                result.append({"id": str(value.get("id") or generated_id(f"{prefix}-{index}")), "text": str(value["text"]).strip(),
-                               "pages": [int(page) for page in (value.get("pages") or []) if str(page).isdigit()],
-                               "table": value.get("table") if isinstance(value.get("table"), dict) else None})
+                result.append(with_blocks({"id": str(value.get("id") or generated_id(f"{prefix}-{index}")), "text": str(value["text"]).strip(),
+                                           "pages": [int(page) for page in (value.get("pages") or []) if str(page).isdigit()],
+                                           "table": value.get("table") if isinstance(value.get("table"), dict) else None},
+                                          value.get("blocks")))
         return result
     return {"classes": classes, "global_rules": profile_rules(draft.get("global_rules", []), "global"),
             "table_rules": profile_rules(draft.get("table_rules", []), "table"), "uncertainties": draft.get("uncertainties", [])}
@@ -858,9 +902,55 @@ def namespace_duplicate_rule_ids(draft: dict) -> list[dict]:
     return renames
 
 
-CODEBOOK_PAGE_SYSTEM = """You transcribe exactly one technical classification Codebook page using supplied native text, OCR text and the full-page image. Return ONLY JSON: {\"page\":number,\"official_names\":[\"exact wording\"],\"definitions\":[\"...\"],\"decision_rules\":[\"...\"],\"boundaries\":[\"...\"],\"tables\":[{\"title\":\"...\",\"columns\":[\"...\"],\"rows\":[[\"cell\"]]}],\"uncertainties\":[\"...\"]}. Preserve table row/column meaning, do not invent text, and use the page number supplied in the prompt."""
-CODEBOOK_MERGE_SYSTEM = """You consolidate page-by-page Codebook transcriptions. Return ONLY JSON: {\"classes\":[{\"name\":\"exact official class name\",\"definition\":\"...\",\"decision_rules\":[{\"id\":\"class-rule-1\",\"text\":\"...\",\"pages\":[1]}],\"boundaries\":[{\"id\":\"class-boundary-1\",\"text\":\"...\",\"pages\":[1]}],\"evidence_pages\":[1]}],\"global_rules\":[{\"id\":\"global-1\",\"text\":\"...\",\"pages\":[1]}],\"table_rules\":[{\"id\":\"table-1\",\"text\":\"meaning of the table rule\",\"pages\":[1],\"table\":{\"columns\":[\"...\"],\"rows\":[[\"...\"]]}}],\"uncertainties\":[\"...\"]}. Preserve exact names, rule IDs and page numbers. Do not invent missing rules."""
+CODEBOOK_PAGE_SYSTEM = """You transcribe exactly one technical classification Codebook page, one part of a page, or one group of text blocks into compact rule notes, using the supplied native text, OCR text and page image. Return ONLY minified JSON: {\"source\":\"page 3\",\"official_names\":[\"exact wording\"],\"definitions\":[\"...\"],\"decision_rules\":[\"...\"],\"boundaries\":[\"...\"],\"tables\":[{\"title\":\"...\",\"columns\":[\"...\"],\"rows\":[[\"cell\"]]}],\"uncertainties\":[\"...\"]}. Keep official class names verbatim. State every definition, decision rule and boundary once, as one short sentence. For a table keep its title, its column names and only the rows that carry classification meaning, with short cells. Do not copy the page verbatim, do not repeat prose that carries no rule, do not invent text and omit empty fields. When the request covers only part of a page or of the text, cover only that part. Use the page or block numbers supplied in the prompt."""
+CODEBOOK_MERGE_SYSTEM = """You consolidate page-by-page Codebook transcriptions. Return ONLY JSON: {\"classes\":[{\"name\":\"exact official class name\",\"definition\":\"...\",\"decision_rules\":[{\"id\":\"class-rule-1\",\"text\":\"...\",\"pages\":[1]}],\"boundaries\":[{\"id\":\"class-boundary-1\",\"text\":\"...\",\"pages\":[1]}],\"evidence_pages\":[1]}],\"global_rules\":[{\"id\":\"global-1\",\"text\":\"...\",\"pages\":[1]}],\"table_rules\":[{\"id\":\"table-1\",\"text\":\"meaning of the table rule\",\"pages\":[1],\"table\":{\"columns\":[\"...\"],\"rows\":[[\"...\"]]}}],\"uncertainties\":[\"...\"]}. Preserve exact names, rule IDs and page numbers. Do not invent missing rules. Keep each text short and state each rule once. For a Codebook without physical pages (TXT/DOCX) put the supplied text block numbers in \"blocks\" (and \"evidence_blocks\" for classes) and leave \"pages\" and \"evidence_pages\" empty; never invent page numbers."""
 CODEBOOK_JSON_REPAIR_SYSTEM = """Return ONLY one complete, valid JSON object. Do not use Markdown fences or commentary. Preserve every fact, class name, rule, table value and page number from the supplied candidate; only repair JSON syntax such as missing commas, quotes, brackets or escaping."""
+
+# Codebook rule files the workbench can prepare, by lower-case suffix.
+CODEBOOK_FILE_TYPES = {".pdf": "pdf", ".docx": "docx", ".txt": "txt"}
+# Offered first when no rule-parsing model was used before (UI default only).
+CODEBOOK_RECOMMENDED_MODEL = "claude-haiku-5-5"
+
+
+@dataclass(frozen=True)
+class CodebookParseBudget:
+    """Output-token budget and call bounds for Codebook rule parsing only.
+
+    Chat answers, model tests and material summaries keep their own limits.
+    A *unit* is one PDF page or one group of DOCX/TXT text blocks.  When a
+    unit stops at the output limit (Claude ``max_tokens``, Gemini
+    ``MAX_TOKENS``, OpenAI ``length``), only the failed part is retried as
+    halves, then quarters; a part that still cannot finish, or that cannot be
+    split (e.g. a visual-only page), gets exactly one request with
+    ``escalated_output_tokens``.  A truncated response is never parsed, merged
+    or saved.  Every model call of one preparation is counted against
+    ``call_limit`` so a pathological file cannot cause unbounded cost.
+    """
+    unit_output_tokens: int = 2200
+    part_output_tokens: int = 2200
+    escalated_output_tokens: int = 4400
+    max_split_depth: int = 2
+    min_split_chars: int = 400
+    merge_output_tokens: tuple[int, ...] = (3500, 8000, 16000)
+    repair_output_tokens: int = 4096
+    max_total_calls: int = 300
+
+    @property
+    def max_attempts_per_unit(self) -> int:
+        """Strategy levels per unit: whole unit, each split depth, escalation."""
+        return self.max_split_depth + 2
+
+    @property
+    def max_calls_per_unit(self) -> int:
+        """Worst case: 1 + 2 + 4 split requests plus one escalation per quarter."""
+        return (2 ** (self.max_split_depth + 1) - 1) + 2 ** self.max_split_depth
+
+    def call_limit(self, units: int) -> int:
+        planned = max(1, units) * self.max_calls_per_unit + len(self.merge_output_tokens) + 1
+        return min(self.max_total_calls, planned)
+
+
+CODEBOOK_BUDGET = CodebookParseBudget()
 
 
 def accounted_model_call(data, connector, *args, usage_records=None, **kwargs):
@@ -924,18 +1014,24 @@ def check_answer_size(data, answer):
         raise ResponseLimitExceeded("Answer exceeds the configured size limit")
 
 
-def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data, usage_records=None) -> tuple[dict, dict | None]:
+def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data, usage_records=None,
+                                     on_call=None, output_tokens: int | None = None) -> tuple[dict, dict | None]:
     """Parse the final Codebook JSON, making one syntax-only repair attempt if needed."""
     try:
         return parse_codebook_draft(raw), None
     except (ValueError, json.JSONDecodeError) as initial_error:
+        if isinstance(initial_error, UIValidationError) and initial_error.ui_message.message_key != 'rules.model_json':
+            raise  # Structurally valid JSON without usable classes: a syntax repair cannot help.
         repair_prompt = (
             "The candidate Codebook JSON below could not be parsed. Repair its JSON syntax only; "
             "do not summarize, add, omit, translate, or change any factual content.\n"
             f"Parser error: {initial_error}\n\n--- CANDIDATE JSON ---\n{raw}"
         )
+        if on_call:
+            on_call()
+        tokens = output_tokens or CODEBOOK_BUDGET.repair_output_tokens
         repaired = accounted_model_call(data, connector, [], repair_prompt, CODEBOOK_JSON_REPAIR_SYSTEM,
-                                        {"maxOutputTokens": 4096, "temperature": 0}, stream=True,
+                                        {"maxOutputTokens": tokens, "temperature": 0}, stream=True,
                                         usage_records=usage_records)
         repaired = require_model_success(repaired, ui_message(data, 'model.context_codebook_repair'))
         repair_usage = connector.get_last_token_usage() or {}
@@ -945,42 +1041,515 @@ def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data,
             raise UIValidationError(ui_message(data, 'rules.repair_invalid', detail=error_copy(repair_error, data))) from initial_error
 
 
-def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str) -> dict:
-    document = data["documents"].add(str(path))
-    connector = LLMConnector(model, data["llm"].api_key, session_id=f"codebook_{os.urandom(6).hex()}")
-    ocr_runtime = data["documents"].ocr_runtime_status() if path.suffix.lower() == ".pdf" else {"available": False, "status": "not applicable to DOCX"}
-    records = data["documents"].codebook_page_records(path, app_state_home() / "codebook_visual_cache") if path.suffix.lower() == ".pdf" else []
-    groups, notes = codebook_page_groups(document), []
-    usages: list[dict] = []
-    if not records and not groups:
-        raise HTTPException(400, ui_message(ACTIVE, 'error.rules_empty'))
-    if records:
-        for record in records:
-            prompt = f"Codebook page {record['page']} of {len(records)}. Page type: {record['page_type']}.\n--- NATIVE TEXT ---\n{record['native_text'] or '[none]'}\n--- OCR TEXT ({record['ocr_status']}) ---\n{record['ocr_text'] or '[none]'}"
-            raw = accounted_model_call(data, connector, [record["image_path"]], prompt, CODEBOOK_PAGE_SYSTEM, {"maxOutputTokens": 2200, "temperature": 0}, stream=True, usage_records=usages)
-            raw = require_model_success(raw, ui_message(data, 'model.context_codebook_page', page=record["page"]))
-            notes.append(raw)
+# ---------------------------------------------------------------------------
+# Observable Codebook preparation
+#
+# One preparation is described by a small JSON record (stage, current unit,
+# log, final result or classified failure).  The record lives in memory while
+# the job runs and is mirrored to AI_Bot_State/codebook_task.json, so a page
+# reload or a restarted program can show the latest final state.  The rule
+# profile itself is written only after every unit, the merge and validation
+# succeeded; a failed or cancelled attempt never replaces existing rules.
+# ---------------------------------------------------------------------------
+CODEBOOK_JOB_GUARD = threading.Lock()
+CODEBOOK_JOB: dict[str, Any] = {}
+CODEBOOK_JOB_LOG_LIMIT = 200
+CODEBOOK_FAILURE_REASONS = {
+    "output_limit", "merge_output_limit", "timeout", "network", "http", "invalid_json", "empty", "model_error",
+    "cancelled", "call_limit", "no_rules", "empty_file", "encoding", "binary", "unreadable", "interrupted", "internal",
+}
+
+
+def codebook_job_path() -> Path:
+    return app_state_home() / "codebook_task.json"
+
+
+def local_timestamp() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def codebook_unit_label(unit: dict | None):
+    """Localized, user-facing name of one page or text-block range."""
+    if not unit:
+        return None
+    if unit.get("kind") == "page":
+        return UIMessage("rulejob.unit.page", "zh", number=unit["number"])
+    if unit.get("first") == unit.get("last"):
+        return UIMessage("rulejob.unit.block", "zh", number=unit["first"])
+    return UIMessage("rulejob.unit.blocks", "zh", first=unit["first"], last=unit["last"])
+
+
+class CodebookPrepareError(RuntimeError):
+    """A classified Codebook preparation failure with a user-explainable reason."""
+
+    def __init__(self, reason: str, stage: str, *, unit: dict | None = None, attempts: int | None = None,
+                 technical: Any = "", params: dict | None = None):
+        technical_text = safe_error(technical if isinstance(technical, str) else str(technical or ""))
+        super().__init__(technical_text or reason)
+        self.reason = reason if reason in CODEBOOK_FAILURE_REASONS else "internal"
+        self.stage, self.unit, self.attempts = stage, unit, attempts
+        self.technical, self.params = technical_text, dict(params or {})
+
+    def messages(self) -> tuple[UIMessage, UIMessage]:
+        """(full message, short card text); both re-localized by the browser."""
+        params = dict(self.params)
+        where = codebook_unit_label(self.unit) or UIMessage(f"rulejob.where.{self.stage}", "zh")
+        params.setdefault("where", where)
+        params.setdefault("unit", where)
+        if self.attempts is not None:
+            params.setdefault("attempts", self.attempts)
+        full = UIMessage(f"rulejob.reason.{self.reason}", "zh", **{
+            key: params[key] for key in re_placeholders(f"rulejob.reason.{self.reason}") if key in params})
+        short = UIMessage(f"rulejob.short.{self.reason}", "zh", **{
+            key: params[key] for key in re_placeholders(f"rulejob.short.{self.reason}") if key in params})
+        return full, short
+
+
+def re_placeholders(key: str) -> set[str]:
+    from workbench_i18n import runtime_messages
+    return set(re.findall(r"\{(\w+)\}", runtime_messages()["zh"][key]))
+
+
+def classify_model_failure(failure: Any) -> tuple[str, dict[str, Any]]:
+    """Map a connector failure text to a stable reason code."""
+    if isinstance(failure, UIMessage) and failure.message_key in {"model.empty", "model.empty_endpoint"}:
+        return "empty", {}
+    text = str(failure or "").casefold()
+    if "max_tokens" in text or "(length)" in text or "max tokens" in text:
+        return "output_limit", {}
+    if "no complete response within" in text or "timed out" in text or "timeout" in text:
+        return "timeout", {}
+    if text.startswith("http error"):
+        match = re.search(r"\d{3}", text)
+        return "http", {"status": match.group(0) if match else "?"}
+    if "connection" in text or text.startswith("error after"):
+        return "network", {}
+    return "model_error", {}
+
+
+class CodebookJob:
+    """Observable state of one Codebook preparation (background or direct API call)."""
+
+    def __init__(self, path: Path, file_type: str, model: str, request_id: str = "", previous: dict | None = None):
+        self.calls = 0
+        self.call_limit = CODEBOOK_BUDGET.max_total_calls
+        self.usages: list[dict] = []
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = None
+        now = local_timestamp()
+        self.record: dict[str, Any] = {
+            "task_id": uuid.uuid4().hex, "request_id": request_id, "state": "running", "stage": "reading",
+            "source": {"path": str(path), "name": path.name, "type": file_type, "bytes": size},
+            "model": model, "unit_kind": "page" if file_type == "pdf" else "block",
+            "progress": {}, "units_total": None, "started_at": now, "updated_at": now, "finished_at": None,
+            "result": None, "failure": None, "log": [], "calls": 0,
+            "budget": {"unit_output_tokens": CODEBOOK_BUDGET.unit_output_tokens,
+                       "max_attempts_per_unit": CODEBOOK_BUDGET.max_attempts_per_unit,
+                       "max_calls_per_unit": CODEBOOK_BUDGET.max_calls_per_unit,
+                       "max_total_calls": CODEBOOK_BUDGET.max_total_calls},
+            "previous_profile": previous,
+        }
+        self.event("reading", "rulejob.log.started", name=path.name, type=file_type.upper(), model=model)
+
+    def publish(self) -> None:
+        self.record["updated_at"] = local_timestamp()
+        self.record["calls"] = self.calls
+        snapshot = copy.deepcopy(self.record)
+        with CODEBOOK_JOB_GUARD:
+            CODEBOOK_JOB.clear()
+            CODEBOOK_JOB.update(home=str(app_state_home()), record=snapshot)
+        try:
+            write_json_atomically(codebook_job_path(), snapshot)
+        except OSError:
+            pass  # The in-memory record still serves the open page.
+
+    def event(self, stage: str, key: str, *, progress: dict | None = None, level: str = "info",
+              publish: bool = True, **params) -> None:
+        self.record["stage"] = stage
+        if progress is not None:
+            self.record["progress"] = progress
+        self.record["log"].append({"at": local_timestamp(), "stage": stage, "level": level,
+                                   "message": UIMessage(key, "zh", **params).payload()})
+        del self.record["log"][:-CODEBOOK_JOB_LOG_LIMIT]
+        if publish:
+            self.publish()
+
+    def count_call(self) -> None:
+        if self.calls >= self.call_limit:
+            raise CodebookPrepareError("call_limit", self.record["stage"], params={"limit": self.call_limit})
+        self.calls += 1
+        self.publish()  # The page shows the call count while the request is in flight.
+
+    def succeed(self, profile: dict) -> None:
+        nonpaged = profile.get("unit_kind") == "block"
+        self.record.update(state="succeeded", finished_at=local_timestamp(), usage=profile.get("usage"), result={
+            "status": profile.get("status"), "prepared_at": profile.get("prepared_at"),
+            "profile_version": profile.get("version"), "parser_model": profile.get("parser_model"),
+            "page_count": 0 if nonpaged else profile.get("page_count"),
+            "block_count": profile.get("block_count") if nonpaged else None,
+            "unit_count": profile.get("page_groups"), "classes": len((profile.get("draft") or {}).get("classes", [])),
+            "encoding": profile.get("source_encoding")})
+        # Published by run_codebook_job only after the model slot is free, so
+        # the page can never offer Lock while the server still reports busy.
+        self.event("done", "rulejob.log.succeeded", progress={}, publish=False,
+                   classes=self.record["result"]["classes"], calls=self.calls)
+
+    def fail(self, error: CodebookPrepareError) -> None:
+        full, short = error.messages()
+        state = "cancelled" if error.reason == "cancelled" else "failed"
+        self.record.update(state=state, finished_at=local_timestamp(), usage=summarize_usage(self.usages), failure={
+            "reason": error.reason, "stage": error.stage, "unit": error.unit, "attempts": error.attempts,
+            "message": full.payload(), "short": short.payload(), "technical": error.technical})
+        self.record["log"].append({"at": local_timestamp(), "stage": error.stage,
+                                   "level": "warning" if state == "cancelled" else "error",
+                                   "message": full.payload(), "technical": error.technical})
+        del self.record["log"][:-CODEBOOK_JOB_LOG_LIMIT]
+
+
+def codebook_failure(exc: BaseException, job: CodebookJob | None) -> CodebookPrepareError:
+    """Classify any exception raised while preparing rules."""
+    stage = job.record["stage"] if job else "reading"
+    if isinstance(exc, CodebookPrepareError):
+        return exc
+    if isinstance(exc, RequestCancelled):
+        return CodebookPrepareError("cancelled", stage, technical=str(exc))
+    if isinstance(exc, RequestTimedOut):
+        return CodebookPrepareError("timeout", stage, technical=str(exc))
+    if isinstance(exc, (UIRequestError, ResponseLimitExceeded)):
+        reason, params = classify_model_failure(exc)
+        return CodebookPrepareError(reason, stage, technical=str(exc), params=params)
+    return CodebookPrepareError("internal", stage, technical=f"{type(exc).__name__}: {exc}")
+
+
+def load_codebook_job() -> dict | None:
+    """The live job, or the last persisted final state (interrupted runs are closed)."""
+    home = str(app_state_home())
+    with CODEBOOK_JOB_GUARD:
+        live = copy.deepcopy(CODEBOOK_JOB.get("record")) if CODEBOOK_JOB.get("home") == home else None
+    if live and live.get("state") == "running":
+        return live
+    try:
+        record = json.loads(codebook_job_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return live
+    if not isinstance(record, dict):
+        return live
+    if record.get("state") == "running" and not MODEL_WORK_IN_PROGRESS.is_set():
+        # The program stopped (or crashed) mid-way: nothing was saved.
+        error = CodebookPrepareError("interrupted", str(record.get("stage") or "reading"))
+        full, short = error.messages()
+        record.update(state="failed", finished_at=record.get("updated_at"), failure={
+            "reason": "interrupted", "stage": error.stage, "unit": None, "attempts": None,
+            "message": full.payload(), "short": short.payload(), "technical": ""})
+        try:
+            write_json_atomically(codebook_job_path(), record)
+        except OSError:
+            pass
+    return record
+
+
+def parse_codebook_note(raw: str) -> dict | None:
+    """One complete JSON object from a page/block response, or None."""
+    text = str(raw or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I)
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end < start:
+        return None
+    try:
+        note = json.loads(text[start:end + 1])
+    except ValueError:
+        return None
+    return note if isinstance(note, dict) else None
+
+
+def split_text_in_half(text: str) -> tuple[str, str]:
+    """Split near the middle, preferring a line break, then a space."""
+    middle = len(text) // 2
+    window = max(80, len(text) // 5)
+    for separator in ("\n\n", "\n", " "):
+        left = text.rfind(separator, max(0, middle - window), middle + 1)
+        right = text.find(separator, middle, min(len(text), middle + window))
+        candidates = [index for index in (left, right) if index > 0]
+        if candidates:
+            cut = min(candidates, key=lambda index: abs(index - middle))
+            return text[:cut].strip(), text[cut:].strip()
+    return text[:middle].strip(), text[middle:].strip()
+
+
+def split_codebook_piece(piece: dict, minimum: int) -> list[dict] | None:
+    """Two smaller pieces of the same unit, or None when it cannot be split."""
+    k, n = piece["part"]
+    parts = [(2 * k - 1, 2 * n), (2 * k, 2 * n)]
+    if "chunks" in piece:
+        chunks = piece["chunks"]
+        if len(chunks) > 1:
+            middle = len(chunks) // 2
+            return [dict(piece, chunks=chunks[:middle], part=parts[0]), dict(piece, chunks=chunks[middle:], part=parts[1])]
+        number, label, text = chunks[0]
+        if len(text) < 2 * minimum:
+            return None
+        first, second = split_text_in_half(text)
+        return [dict(piece, chunks=[(number, label, first)], part=parts[0]),
+                dict(piece, chunks=[(number, label, second)], part=parts[1])]
+    native, ocr = piece.get("native", ""), piece.get("ocr", "")
+    if max(len(native), len(ocr)) < 2 * minimum:
+        return None
+    native_parts = split_text_in_half(native) if len(native) >= 2 * minimum else (native, "")
+    ocr_parts = split_text_in_half(ocr) if len(ocr) >= 2 * minimum else (ocr, "")
+    return [dict(piece, native=native_parts[0], ocr=ocr_parts[0], part=parts[0]),
+            dict(piece, native=native_parts[1], ocr=ocr_parts[1], part=parts[1])]
+
+
+def codebook_piece_request(unit: dict, piece: dict, total: int, file_type: str) -> tuple[list[str], str, str]:
+    """(files, prompt, source label) for one page/text piece."""
+    k, n = piece["part"]
+    if unit["kind"] == "page":
+        source = f"page {unit['number']}" + (f" part {k}/{n}" if n > 1 else "")
+        prompt = f"Codebook page {unit['number']} of {total}. Page type: {unit['page_type']}."
+        if n > 1:
+            prompt += (f" This request covers only part {k}/{n} of this page's text: extract only the rules stated in "
+                       "this part and use the page image only to understand its layout.")
+        prompt += (f"\n--- NATIVE TEXT ---\n{piece.get('native') or '[none]'}"
+                   f"\n--- OCR TEXT ({unit['ocr_status']}) ---\n{piece.get('ocr') or '[none]'}")
+        return [unit["image_path"]], prompt, source
+    numbers = [number for number, _label, _text in piece["chunks"]]
+    source = f"blocks {numbers[0]}-{numbers[-1]}" + (f" part {k}/{n}" if n > 1 else "")
+    prompt = (f"Codebook {file_type.upper()} text blocks {unit['first']}-{unit['last']} of {unit['blocks_total']}. "
+              "This Codebook has no physical pages: cite block numbers, never page numbers.")
+    if n > 1:
+        prompt += f" This request covers only part {k}/{n} of these blocks: extract only the rules stated in this part."
+    prompt += "\n\n" + "\n\n".join(f"--- BLOCK {number}: {label} ---\n{text}" for number, label, text in piece["chunks"])
+    return [], prompt, source
+
+
+def parse_codebook_unit(job: CodebookJob, data: dict[str, Any], connector: LLMConnector, unit: dict,
+                        total: int, file_type: str) -> list[dict]:
+    """Parse one unit within CODEBOOK_BUDGET; returns complete JSON notes only."""
+    budget = CODEBOOK_BUDGET
+    reference = {key: unit[key] for key in ("kind", "number", "first", "last") if key in unit}
+    tried = {"levels": 0, "escalated": False}
+
+    def attempts() -> int:
+        return tried["levels"] + (1 if tried["escalated"] else 0)
+
+    def request(piece: dict, tokens: int) -> tuple[dict | None, tuple[str, dict, str] | None]:
+        files, prompt, source = codebook_piece_request(unit, piece, total, file_type)
+        job.count_call()
+        raw = accounted_model_call(data, connector, files, prompt, CODEBOOK_PAGE_SYSTEM,
+                                   {"maxOutputTokens": tokens, "temperature": 0}, stream=True,
+                                   usage_records=job.usages)
+        failure = connector_failure(raw)
+        if failure:
+            reason, params = classify_model_failure(failure)
+            return None, (reason, params, str(failure))
+        note = parse_codebook_note(raw)
+        if note is None:
+            raise CodebookPrepareError("invalid_json", "parsing", unit=reference, technical=str(raw)[:800])
+        note["source"] = source
+        return note, None
+
+    def run(piece: dict, level: int) -> list[dict]:
+        tried["levels"] = max(tried["levels"], level + 1)
+        note, failure = request(piece, budget.unit_output_tokens if level == 0 else budget.part_output_tokens)
+        if note is not None:
+            return [note]
+        reason, params, technical = failure or ("model_error", {}, "")
+        if reason != "output_limit":
+            raise CodebookPrepareError(reason, "parsing", unit=reference, technical=technical, params=params)
+        parts = split_codebook_piece(piece, budget.min_split_chars) if level < budget.max_split_depth else None
+        if parts:
+            job.event("parsing", "rulejob.log.retry_split", level="warning", unit=codebook_unit_label(reference),
+                      attempt=level + 2, limit=budget.max_attempts_per_unit)
+            return [note for part in parts for note in run(part, level + 1)]
+        tried["escalated"] = True
+        job.event("parsing", "rulejob.log.retry_escalate", level="warning", unit=codebook_unit_label(reference),
+                  tokens=budget.escalated_output_tokens, attempt=attempts(), limit=budget.max_attempts_per_unit)
+        note, failure = request(piece, budget.escalated_output_tokens)
+        if note is not None:
+            return [note]
+        reason, params, technical = failure or ("model_error", {}, "")
+        raise CodebookPrepareError(reason, "parsing", unit=reference, attempts=attempts(),
+                                   technical=technical, params=params)
+
+    if unit["kind"] == "page":
+        piece = {"native": unit["native_text"], "ocr": unit["ocr_text"], "part": (1, 1)}
     else:
-        for index, group in enumerate(groups, start=1):
-            prompt = f"Codebook DOCX section {index}/{len(groups)}.\n" + "\n\n".join(f"--- {item['label']} ---\n{item['text']}" for item in group)
-            raw = accounted_model_call(data, connector, [], prompt, CODEBOOK_PAGE_SYSTEM, {"maxOutputTokens": 2200, "temperature": 0}, stream=True, usage_records=usages)
-            raw = require_model_success(raw, ui_message(data, 'model.context_codebook_section', page=index))
-            notes.append(raw)
-    merge_prompt = "Consolidate every Codebook page note below. All classes, tables and boundary rules must be retained.\n\n" + "\n\n".join(
-        f"--- PAGE GROUP {index} ---\n{note}" for index, note in enumerate(notes, start=1))
-    merged = accounted_model_call(data, connector, [], merge_prompt, CODEBOOK_MERGE_SYSTEM, {"maxOutputTokens": 3500, "temperature": 0}, stream=True, usage_records=usages)
-    merged = require_model_success(merged, ui_message(data, 'model.context_codebook_merge'))
-    draft, _ = parse_codebook_draft_with_repair(connector, merged, data=data, usage_records=usages)
+        piece = {"chunks": unit["chunks"], "part": (1, 1)}
+    return run(piece, 0)
+
+
+def merge_codebook_notes(job: CodebookJob, data: dict[str, Any], connector: LLMConnector,
+                         notes: list[list[dict]], nonpaged: bool) -> str:
+    """Merge every unit's notes; only an output-limit stop is retried, with a larger bounded budget."""
+    label = "TEXT BLOCK GROUP" if nonpaged else "PAGE GROUP"
+    prompt = (f"Consolidate every Codebook {'text-block' if nonpaged else 'page'} note below. "
+              "All classes, tables and boundary rules must be retained.")
+    if nonpaged:
+        prompt += (" This Codebook has no physical pages: cite the supplied block numbers in \"blocks\" and "
+                   "\"evidence_blocks\" and leave \"pages\" and \"evidence_pages\" empty.")
+    prompt += "\n\n" + "\n\n".join(
+        f"--- {label} {index} ---\n{json.dumps(unit_notes[0] if len(unit_notes) == 1 else unit_notes, ensure_ascii=False, separators=(',', ':'))}"
+        for index, unit_notes in enumerate(notes, start=1))
+    budgets = CODEBOOK_BUDGET.merge_output_tokens
+    technical = ""
+    for attempt, tokens in enumerate(budgets, start=1):
+        job.count_call()
+        raw = accounted_model_call(data, connector, [], prompt, CODEBOOK_MERGE_SYSTEM,
+                                   {"maxOutputTokens": tokens, "temperature": 0}, stream=True, usage_records=job.usages)
+        failure = connector_failure(raw)
+        if not failure:
+            return raw
+        reason, params = classify_model_failure(failure)
+        technical = str(failure)
+        if reason != "output_limit":
+            raise CodebookPrepareError(reason, "merging", technical=technical, params=params)
+        if attempt < len(budgets):
+            job.event("merging", "rulejob.log.merge_retry", level="warning", tokens=budgets[attempt],
+                      attempt=attempt + 1, limit=len(budgets))
+    raise CodebookPrepareError("merge_output_limit", "merging", attempts=len(budgets), technical=technical)
+
+
+def codebook_text_units(chunks: list[dict], per_unit: int = 3) -> list[dict]:
+    """Group nonpaged text blocks; block numbers match the material section labels."""
+    numbered = [(index, str(chunk.get("label", "")), str(chunk.get("text", "")))
+                for index, chunk in enumerate(chunks, start=1) if str(chunk.get("text", "")).strip()]
+    return [{"kind": "blocks", "first": group[0][0], "last": group[-1][0], "blocks_total": len(chunks), "chunks": group}
+            for group in (numbered[index:index + per_unit] for index in range(0, len(numbered), per_unit))]
+
+
+def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str, job: CodebookJob | None = None) -> dict:
+    """Read, parse, merge and validate a Codebook into an unsaved draft profile."""
+    file_type = CODEBOOK_FILE_TYPES.get(path.suffix.lower())
+    if not file_type:
+        raise CodebookPrepareError("unreadable", "reading", technical=f"Unsupported rule file type {path.suffix}")
+    job = job or CodebookJob(path, file_type, model, data.get("operation_id", ""))
+    encoding = None
+    try:
+        raw_bytes = path.read_bytes()
+    except OSError as exc:
+        raise CodebookPrepareError("unreadable", "reading", technical=f"{type(exc).__name__}: {exc}") from exc
+    if file_type == "txt":
+        job.event("extracting", "rulejob.stage.extracting_txt")
+        try:
+            _text, encoding = decode_text_bytes(raw_bytes)  # TXT stays local: no PDF, OCR or page images.
+        except TextDecodingError as exc:
+            reason = {"empty": "empty_file", "binary": "binary", "encoding": "encoding"}[exc.reason]
+            raise CodebookPrepareError(reason, "extracting", technical=str(exc)) from exc
+    else:
+        job.event("extracting", "rulejob.stage.extracting_pdf" if file_type == "pdf" else "rulejob.stage.extracting_docx")
+    try:
+        document = data["documents"].add(str(path))
+    except Exception as exc:
+        empty = "no extractable text" in str(exc).casefold()
+        raise CodebookPrepareError("empty_file" if empty else "unreadable", "extracting",
+                                   technical=f"{type(exc).__name__}: {exc}") from exc
+    connector = LLMConnector(model, data["llm"].api_key, session_id=f"codebook_{os.urandom(6).hex()}")
+    records: list[dict] = []
+    if file_type == "pdf":
+        ocr_runtime = data["documents"].ocr_runtime_status()
+
+        def extracted(current: int, total: int) -> None:
+            check_request(data)
+            job.event("extracting", "rulejob.stage.extracting_pdf_page", progress={"current": current, "total": total},
+                      current=current, total=total)
+        try:
+            records = data["documents"].codebook_page_records(path, app_state_home() / "codebook_visual_cache",
+                                                              progress=extracted)
+        except (RequestCancelled, RequestTimedOut):
+            raise
+        except Exception as exc:
+            raise CodebookPrepareError("unreadable", "extracting", technical=f"{type(exc).__name__}: {exc}") from exc
+        if not records:
+            raise CodebookPrepareError("empty_file", "extracting")
+        units = [{"kind": "page", "number": record["page"], "page_type": record["page_type"],
+                  "native_text": record["native_text"], "ocr_text": record["ocr_text"],
+                  "ocr_status": record["ocr_status"], "image_path": record["image_path"]} for record in records]
+    else:
+        ocr_runtime = {"available": False, "status": f"not applicable to {file_type.upper()}"}
+        units = codebook_text_units(document.get("chunks", []))
+        if not units:
+            raise CodebookPrepareError("empty_file", "extracting")
+        if encoding:
+            job.event("extracting", "rulejob.log.txt_decoded", encoding=encoding, blocks=len(document.get("chunks", [])))
+    nonpaged = file_type != "pdf"
+    job.record["units_total"] = len(units)
+    job.call_limit = CODEBOOK_BUDGET.call_limit(len(units))
+    notes: list[list[dict]] = []
+    for index, unit in enumerate(units, start=1):
+        if nonpaged:
+            job.event("parsing", "rulejob.stage.parsing_blocks", current=index, total=len(units),
+                      first=unit["first"], last=unit["last"],
+                      progress={"current": index, "total": len(units), "first": unit["first"], "last": unit["last"],
+                                "blocks": unit["blocks_total"]})
+        else:
+            job.event("parsing", "rulejob.stage.parsing_page", current=unit["number"], total=len(units),
+                      progress={"current": unit["number"], "total": len(units)})
+        notes.append(parse_codebook_unit(job, data, connector, unit, len(units), file_type))
+    job.event("merging", "rulejob.stage.merging", progress={})
+    merged = merge_codebook_notes(job, data, connector, notes, nonpaged)
+    try:
+        draft, _ = parse_codebook_draft_with_repair(connector, merged, data=data, usage_records=job.usages,
+                                                    on_call=job.count_call)
+    except UIValidationError as exc:
+        key = exc.ui_message.message_key
+        if key in {"rules.classes_required", "rules.classes_empty", "rules.class_definitions"}:
+            raise CodebookPrepareError("no_rules", "merging", technical=str(exc), params={"detail": exc.ui_message}) from exc
+        raise CodebookPrepareError("invalid_json", "merging", technical=str(exc)) from exc
+    except UIRequestError as exc:
+        reason, params = classify_model_failure(exc)
+        raise CodebookPrepareError("invalid_json" if reason == "output_limit" else reason, "merging",
+                                   technical=str(exc), params=params) from exc
+    if nonpaged:
+        nonpaged_references(draft)
     rule_id_renames = namespace_duplicate_rule_ids(draft)
-    usage = summarize_usage(usages)
-    page_numbers = {((item.get("visual") or {}).get("page")) for group in groups for item in group}
-    page_count = len([number for number in page_numbers if isinstance(number, int)]) or len(document.get("chunks", []))
+    usage = summarize_usage(job.usages)
+    chunk_count = len(document.get("chunks", []))
     return {"status": "draft", "source_path": str(path), "source_name": path.name, "sha256": file_digest(path),
-            "prepared_at": datetime.now().astimezone().isoformat(timespec="seconds"), "parser_model": connector.last_response_model or model,
-            "page_count": len(records) or page_count,
-            "page_groups": len(records) or len(groups), "usage": usage, "draft": draft, "document_id": document["id"],
+            "source_type": file_type, "unit_kind": "block" if nonpaged else "page",
+            "source_encoding": encoding,
+            "prepared_at": local_timestamp(), "parser_model": connector.last_response_model or model,
+            "requested_model": model,
+            "page_count": len(records) or chunk_count, "block_count": chunk_count if nonpaged else None,
+            "page_groups": len(units), "usage": usage, "draft": draft, "document_id": document["id"],
+            "parse_calls": job.calls,
             "page_records": [{key: record[key] for key in ("page", "page_type", "ocr_status", "embedded_image_count")} for record in records],
-            "page_transcriptions": notes, "ocr_runtime": ocr_runtime, "rule_id_renames": rule_id_renames}
+            "page_transcriptions": [json.dumps(unit_notes, ensure_ascii=False) for unit_notes in notes],
+            "ocr_runtime": ocr_runtime, "rule_id_renames": rule_id_renames}
+
+
+def run_codebook_job(data: dict[str, Any], job: CodebookJob, path: Path, model: str) -> dict:
+    """Prepare and save a draft; on any failure record it and keep existing rules.
+
+    Owns the model slot reserved by begin_model_work(): it is released before
+    the final state is published, so a finished state never meets a busy server.
+    """
+    try:
+        with LOCK:
+            profile = prepare_codebook_profile(data, path, model, job)
+            job.event("saving", "rulejob.stage.saving")
+            with commit_answer(data):  # A Stop that wins here saves no profile.
+                save_codebook_profile(profile)
+                rules_changed(data)
+                data["state"].data["selected_codebook_path"] = str(path)
+                data["state"].save()
+            # Saving rules changes the context revision.  The page that started
+            # the job (and was current then) may adopt the new token; any other
+            # page stays stale exactly as with every other context change.
+            job.record["context_after"] = context_token(data)
+        job.succeed(profile)
+        return profile
+    except Exception as exc:
+        error = codebook_failure(exc, job)
+        job.fail(error)
+        if error is exc:
+            raise
+        raise error from exc
+    finally:
+        end_model_work(data)
+        job.publish()
 
 
 def write_session_export(data: dict[str, Any]) -> Path:
@@ -2341,15 +2910,24 @@ def settings():
 @app.post("/api/language")
 def set_language(request: LanguageRequest):
     language = normalize_language(request.language)
-    with LOCK:
-        if ACTIVE:
-            data = session()
-            data['language'] = language
-            save_workbench_settings(data['state'].workspace, data['state'].root.name, data['model'], language)
-        else:
-            settings = load_workbench_settings()
-            settings['language'] = language
-            write_json_atomically(workbench_settings_path(), settings)
+    # A rule preparation or answer holds LOCK for minutes.  Saving the GUI
+    # language must not wait for it: while model work runs, setup and session
+    # switches are refused, so ACTIVE cannot be replaced underneath us, and the
+    # running job uses its own captured copy of the session.
+    acquired = LOCK.acquire(blocking=not MODEL_WORK_IN_PROGRESS.is_set())
+    try:
+        with SETTINGS_GUARD:
+            if ACTIVE:
+                data = ACTIVE
+                data['language'] = language
+                save_workbench_settings(data['state'].workspace, data['state'].root.name, data['model'], language)
+            else:
+                settings = load_workbench_settings()
+                settings['language'] = language
+                write_json_atomically(workbench_settings_path(), settings)
+    finally:
+        if acquired:
+            LOCK.release()
     return {"language": language}
 
 
@@ -2680,26 +3258,74 @@ def codebook_status():
     return load_codebook_profile()
 
 
+def codebook_profile_summary(profile: dict) -> dict | None:
+    """Which rules are in effect, recorded at the start of a new preparation."""
+    if not profile.get("status") or profile.get("status") == "none":
+        return None
+    return {key: profile.get(key) for key in ("status", "source_name", "source_path", "source_type", "version",
+                                              "prepared_at", "locked_at", "parser_model")}
+
+
+def validated_codebook_model(value: str, fallback: str) -> str:
+    model = canonical_model_id(value) or canonical_model_id(fallback)
+    try:
+        LLMConnector._detect_family(model)
+        if not model or any(character.isspace() for character in model) or any(character in model for character in "?#\\"):
+            raise ValueError(model)
+    except ValueError:
+        raise HTTPException(400, ui_message(ACTIVE, 'rulejob.model_invalid', model=model or '—')) from None
+    return model
+
+
+@app.get("/api/codebook/task")
+def codebook_task_status():
+    """Latest rule preparation (live or final) plus the model the page should offer."""
+    task = load_codebook_job()
+    profile = load_codebook_profile()
+    default = (task or {}).get("model") or profile.get("requested_model") or ""
+    return {"task": task, "running": bool(task and task.get("state") == "running"),
+            "default_model": default, "recommended_model": CODEBOOK_RECOMMENDED_MODEL,
+            "budget": {"unit_output_tokens": CODEBOOK_BUDGET.unit_output_tokens,
+                       "max_attempts_per_unit": CODEBOOK_BUDGET.max_attempts_per_unit,
+                       "max_total_calls": CODEBOOK_BUDGET.max_total_calls}}
+
+
 @app.post("/api/codebook/prepare")
 def codebook_prepare(request: CodebookPrepareRequest):
     path = safe_file(request.path)
-    if path.suffix.lower() not in {".pdf", ".docx"}:
+    file_type = CODEBOOK_FILE_TYPES.get(path.suffix.lower())
+    if not file_type:
         raise HTTPException(400, ui_message(ACTIVE, 'error.rules_format'))
-    data = begin_model_work(request.request_id)
-    model = request.model.strip() or data["model"]
+    session()
+    model = validated_codebook_model(request.model, ACTIVE.get("model", ""))
+    request_id = request.request_id or (uuid.uuid4().hex if request.background else "")
+    data = begin_model_work(request_id)
     try:
-        with LOCK:
-            profile = prepare_codebook_profile(data, path, model)
-            with commit_answer(data):  # A Stop that wins here saves no profile.
-                save_codebook_profile(profile)
-                rules_changed(data)
-                data["state"].data["selected_codebook_path"] = str(path)
-                data["state"].save()
-        return profile
-    except Exception as exc:
-        raise HTTPException(400, ui_message(ACTIVE, 'error.rules_prepare', detail=error_copy(exc, ACTIVE))) from exc
-    finally:
+        job = CodebookJob(path, file_type, model, request_id, codebook_profile_summary(load_codebook_profile()))
+        job.record["context_before"] = context_token(data)
+    except BaseException:
         end_model_work(data)
+        raise
+    if request.background:
+        def worker():
+            try:
+                run_codebook_job(data, job, path, model)
+            except Exception:
+                pass  # Recorded in the job; the browser reads /api/codebook/task.
+        try:
+            threading.Thread(target=worker, name="codebook-prepare", daemon=True).start()
+        except BaseException as exc:
+            job.fail(codebook_failure(exc, job))
+            end_model_work(data)
+            job.publish()
+            raise
+        return JSONResponse(status_code=202, content={"task": job.record, "running": True})
+    try:
+        return run_codebook_job(data, job, path, model)
+    except CodebookPrepareError as exc:
+        detail = error_copy(HTTPException(400, ui_message(ACTIVE, 'error.rules_prepare', detail=exc.technical or exc.reason)), ACTIVE)
+        return JSONResponse(status_code=400, content={'detail': str(detail), **message_payload(detail),
+                                                      'failure': job.record.get('failure')})
 
 
 class CodebookEditRequest(BaseModel):
@@ -3208,7 +3834,7 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 <style>
 *{box-sizing:border-box}:root{--left-panel-width:264px;--ui-bg:#0b1020;--ui-surface:#111a2c;--ui-surface-2:#172338;--ui-surface-3:#1d2b43;--ui-line:#283750;--ui-line-soft:#1c2a40;--ui-text:#edf3fb;--ui-muted:#92a2b8;--ui-faint:#687992;--ui-blue:#4f9bf5;--ui-cyan:#54c7dc;--ui-green:#43c59e;--ui-shadow:0 18px 60px rgba(0,0,0,.38)}body{margin:0;background:radial-gradient(900px 500px at 55% -220px,#1d407050,transparent 72%),var(--ui-bg);color:var(--ui-text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Arial,sans-serif}button,input,select{font:inherit}button{background:var(--ui-blue);color:white;border:0;border-radius:9px;padding:8px 10px;cursor:pointer}button.ghost{background:var(--ui-surface-2);color:#cbd9e9;border:1px solid var(--ui-line)}button.ghost:hover{background:var(--ui-surface-3);border-color:#456183}.topbar{height:58px;display:flex;align-items:center;gap:14px;padding:0 18px;border-bottom:1px solid var(--ui-line-soft);background:rgba(12,18,32,.82);backdrop-filter:blur(18px);position:relative;z-index:6}.app-brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.02em;font-size:15px}.brand-mark{width:25px;height:25px;border-radius:8px;background:linear-gradient(135deg,#65b9ff,#3275d1);box-shadow:0 0 22px #4f9bf568;position:relative}.brand-mark:after{content:"";position:absolute;inset:6px;border:2px solid white;border-left-color:transparent;border-radius:5px}.topbar-workspace{border:0;border-left:1px solid var(--ui-line);border-radius:0;background:transparent;color:var(--ui-muted);padding:4px 0 4px 14px;font-size:12px;max-width:370px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap}.topbar-workspace:hover{color:white}.top-spacer{flex:1}.topbar-status{display:flex;align-items:center;gap:7px;color:var(--ui-muted);font-size:12px}.status-dot{width:7px;height:7px;border-radius:50%;background:var(--ui-green);box-shadow:0 0 0 3px #43c59e22}.shell{height:calc(100vh - 58px);display:grid;grid-template-columns:var(--left-panel-width) 8px minmax(420px,1fr) 300px}.side{background:#0d1525;border-right:1px solid var(--ui-line-soft);padding:0;overflow:hidden}.splitter{cursor:col-resize;background:#162238;touch-action:none;transition:background .15s}.splitter:hover,.splitter.dragging{background:#345a80}.right{border-left:1px solid var(--ui-line-soft);border-right:0;background:#0e1728;padding:15px 13px;overflow:auto}.main{display:flex;flex-direction:column;min-width:0;position:relative;background:linear-gradient(120deg,rgba(14,24,42,.55),rgba(11,16,32,.2))}.chat-header{height:60px;border-bottom:1px solid var(--ui-line-soft);padding:0 28px;display:flex;align-items:center;gap:12px}.chat-title{font-weight:650;letter-spacing:-.01em}.chat-subtitle{font-size:12px;color:var(--ui-muted)}.header-spacer{flex:1}.header-icon{display:inline-grid;place-items:center;width:31px;height:31px;border:1px solid var(--ui-line);background:var(--ui-surface);color:var(--ui-muted);border-radius:8px;cursor:pointer}.header-icon:hover{color:white;border-color:#466185}.brand{font-weight:700;font-size:16px;margin-bottom:16px}.muted{color:var(--ui-muted);font-size:12px}.field{margin:10px 0}.field label{display:block;font-size:12px;color:#a9b6c8;margin-bottom:5px}input,select{width:100%;background:#0f172a;border:1px solid #3b4960;border-radius:8px;padding:8px;color:#f8fafc}.row{display:flex;gap:7px}.row>*{min-width:0}.row input{flex:1}.chat{flex:1;overflow:auto;padding:34px max(8%,42px)}.message{max-width:920px;margin:0 auto 18px;padding:13px 15px;border-radius:12px;white-space:pre-wrap;line-height:1.55}.user{background:#1d3a60;margin-left:auto;max-width:78%}.assistant{background:#17243a;border:1px solid #273b57}.reason{margin:8px auto 18px;max-width:920px;background:#121d30;border:1px solid #2b3e5a;border-radius:10px;padding:9px}.reason summary{cursor:pointer;color:#b9c9e2}.reason pre{white-space:pre-wrap;font-size:12px;color:#aab7c8}.composer-wrap{padding:0 28px 22px;background:linear-gradient(transparent,var(--ui-bg) 26%)}.composer{max-width:900px;width:100%;margin:auto;background:#141f33;border:1px solid #33435e;border-radius:14px;box-shadow:0 14px 40px #00000038;overflow:hidden;display:flex;flex-wrap:wrap;gap:0;padding:0}.composer input#question{border:0;background:transparent;padding:15px 14px;min-width:0;flex:1}.composer>button{margin:9px 10px 9px 0;height:38px}.composer-tools{width:100%;min-height:40px;border-top:1px solid #293851;display:flex;align-items:center;padding:5px 8px 5px 12px;gap:7px}.composer-tools .spacer{flex:1}.composer-tools select{width:auto;max-width:330px;color:#dbe8f8;background:#1c2b43;border:1px solid #354863;border-radius:999px;padding:5px 28px 5px 10px;font-size:12px}.composer-tools #custommodelrow{margin:0;align-items:center}.composer-tools #custommodelrow input{width:250px;padding:5px 8px}.composer-tools #custommodelrow button{padding:5px 8px}.model-test{font-size:12px;color:#a9bdd5;background:transparent;border:1px solid transparent;padding:5px 7px}.model-test:hover{background:#1e2e47;color:#fff}.card{border:1px solid #2b3e59;border-radius:10px;padding:10px;margin:10px 0;background:#121d30}.list{font-size:12px;line-height:1.5;word-break:break-word}.diff{white-space:pre-wrap;background:#0b1220;border-radius:6px;padding:8px;max-height:230px;overflow:auto;color:#d7e1ed}.ok{color:#86efac}.error{color:#fca5a5}.chip{display:inline-block;padding:3px 6px;border-radius:5px;background:#22314a;color:#bcd5ff;margin:2px;font-size:11px}.check{display:block;margin:5px 0;color:#dbeafe;font-size:12px}.check input{width:auto;margin-right:5px}.comparison{max-width:1180px;margin:0 auto 20px}.comparison-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:10px}.comparison .card{margin:0}.comparison .answer{white-space:pre-wrap;line-height:1.5;max-height:440px;overflow:auto}.target-tree{max-height:360px;overflow:auto;border:1px solid #334155;border-radius:8px;padding:7px;background:#0f172a}.target-tree details{margin:3px 0}.target-tree summary{cursor:pointer;list-style:none}.target-tree summary::-webkit-details-marker{display:none}.target-tree summary:before{content:'▸';display:inline-block;width:13px;color:#94a3b8}.target-tree details[open]>summary:before{content:'▾'}.target-tree label{cursor:pointer;margin-left:4px}.target-tree input{width:auto;vertical-align:middle}.tree-children{margin-left:17px;border-left:1px solid #29374d;padding-left:7px}.tree-file{margin:3px 0}.unsupported{color:#64748b}.classification-card{max-width:920px;margin:-8px auto 18px;border:1px solid #388ee8;border-radius:12px;padding:13px 15px;background:#10263a;line-height:1.55}.classification-card h3{margin:0 0 8px;color:#bae6fd;font-size:14px}.classification-card ul{margin:5px 0 0;padding-left:20px}.classification-card .result{font-size:16px;color:#f8fafc}.codebook-workspace{padding-top:28px}.codebook-workspace .workspace-inner{max-width:980px;margin:auto}.codebook-workspace h1{font-size:22px;margin:0 0 7px}.codebook-workspace h2{font-size:16px;margin:22px 0 8px}.codebook-class{border-left:3px solid #38bdf8}.codebook-class h3{margin:0 0 7px}.codebook-class ul{margin:7px 0;padding-left:20px;line-height:1.55}.workspace-actions{display:flex;gap:8px;position:sticky;bottom:0;padding:12px 0;background:#111827}.language-picker{position:relative;top:auto;right:auto;z-index:50;display:flex;align-items:center;gap:5px;padding:5px 7px;background:#172033;border:1px solid var(--ui-line);border-radius:8px;color:#cbd5e1;font-size:12px}.language-picker select{width:auto;background:transparent;border:0;color:#f8fafc;padding:3px}.context-title{font-size:12px;letter-spacing:.08em;color:var(--ui-faint);margin:2px 4px 11px;text-transform:uppercase}.context-card{width:100%;display:block;text-align:left;padding:13px;margin:0 0 10px;border:1px solid var(--ui-line);border-radius:11px;background:linear-gradient(150deg,#142138,#101a2b);color:#e5e7eb;transition:.18s}.context-card:hover{border-color:#42658f;background:#182841;transform:translateY(-1px)}.context-card strong{display:block;font-size:13px;margin-bottom:5px}.context-card span{display:block;color:var(--ui-muted);font-size:12px;line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.context-card em{font-style:normal;color:#67e8f9;font-size:11px;float:right}.context-store{display:none}.context-backdrop{position:fixed;inset:58px 0 0;background:#05091475;z-index:45;opacity:0;pointer-events:none;transition:opacity .18s;backdrop-filter:blur(2px)}.context-backdrop.open{opacity:1;pointer-events:auto}.context-drawer{position:absolute;right:300px;top:0;bottom:0;width:min(680px,calc(100vw - 340px));display:flex;flex-direction:column;background:#111c30;border:1px solid #3a4d68;border-right:3px solid #38bdf8;border-radius:12px 0 0 12px;box-shadow:-14px 18px 48px rgba(0,0,0,.48);transform:translateX(34px);opacity:0;transition:transform .22s ease,opacity .18s}.context-backdrop.open .context-drawer{transform:translateX(0);opacity:1}.context-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid var(--ui-line)}.context-drawer-head h2{font-size:16px;margin:0}.context-drawer-body{overflow:auto;padding:16px 18px}.context-drawer-body .target-tree{max-height:none}.context-drawer-body .field:first-child{margin-top:0}.welcome{max-width:750px;margin:20px auto}.welcome .eyebrow{color:var(--ui-cyan);font-size:12px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.welcome h1{font-size:31px;letter-spacing:-.04em;line-height:1.18;margin:10px 0}.welcome p{max-width:580px;color:var(--ui-muted);font-size:15px}.left-content{display:none!important}.side.left{display:flex!important;flex-direction:column!important;padding:0!important}.session-panel{border:0!important;margin:0!important;padding:16px 8px 8px!important;min-height:0!important;max-height:none!important;flex:1}.session-new{width:100%;margin:0 0 12px!important;text-align:left!important;padding:9px 10px!important;background:var(--ui-surface-2)!important;border:1px solid var(--ui-line)!important}.session-list{padding:0;overflow:auto}.session-row{border-radius:8px!important;margin:2px 0!important;padding:9px 7px!important;color:#b9c5d6!important}.session-row:hover,.session-row.active{background:#1a2c46!important;color:#fff!important}.session-more{font-size:15px!important}.session-menu{background:#19263a!important;border-color:#384b67!important;border-radius:10px!important;box-shadow:var(--ui-shadow)!important}.session-menu button{color:#dbe6f5!important}.session-menu button:hover{background:#293a56!important}@media(max-width:900px){.shell{grid-template-columns:minmax(220px,var(--left-panel-width)) 8px minmax(320px,1fr)}.right{display:none}.context-drawer{right:0;width:min(94vw,680px)}}
 .message,.reason,.classification-card,.codebook-class,.context-drawer-body{overflow-wrap:anywhere;min-width:0}.workspace-actions{flex-wrap:wrap}.message pre,.reason pre{max-width:100%;overflow:auto}textarea{font:inherit;background:#0f172a;color:#f8fafc;border:1px solid #3b4960;border-radius:8px;padding:10px}@media(max-width:650px){.shell{grid-template-columns:minmax(0,1fr)}.side,.splitter{display:none!important}.topbar{padding:0 8px;gap:6px}.app-brand{font-size:11px;max-width:105px}.topbar-status{display:none}.topbar-workspace{max-width:140px}.chat{padding:16px 10px}.composer-wrap{padding:0 10px 10px}.chat-header{padding:0 12px}.composer-tools{flex-wrap:wrap}.composer-tools select{max-width:100%}.context-drawer{width:96vw;right:0}.language-picker{padding:3px}.message{padding:10px}.context-backdrop{inset:58px 0 0}}
-</style></head><body><header class="topbar"><div class="app-brand"><span class="brand-mark"></span>Bosch Baugruppen Assistant</div><button class="topbar-workspace" id="workspaceshortcut" onclick="openContextDrawer('workspace')">选择工作区文件夹</button><div class="top-spacer"></div><div class="topbar-status"><span class="status-dot"></span><span id="topbarstatus">本地运行</span></div><div class="language-picker"><span>GUI:</span><select id="language" onchange="changeLanguage()"><option value="zh">ZH</option><option value="en">EN</option><option value="de">DE</option></select></div></header><div class="shell"><aside class="side"><div class="brand">Bosch Local Workbench</div><div class="muted">仅本机 127.0.0.1 · 缓存固定保存在程序目录 AI_Bot_State</div>
+.rulejob{display:grid;gap:7px}.rulejob-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.rulejob-chip{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid currentColor}.rulejob-chip.running{color:#7cc0ff}.rulejob-chip.succeeded{color:#86efac}.rulejob-chip.failed{color:#fca5a5}.rulejob-chip.cancelled{color:#fcd34d}.rulejob-spinner{width:11px;height:11px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:rulejobspin 1s linear infinite}@keyframes rulejobspin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.rulejob-spinner{animation:none}}.rulejob dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 12px;margin:0}.rulejob dt{color:var(--ui-muted)}.rulejob dd{margin:0;overflow-wrap:anywhere}.rulejob-stage{font-weight:600}.rulejob-note{font-size:12px;color:var(--ui-muted)}.rulejob-note.warning{color:#fcd34d}.rulejob-reason{color:#fca5a5}.rulejob details summary{cursor:pointer;color:#cbd9e9;font-size:12px}.rulejob-log{max-height:230px;overflow:auto;margin:6px 0;padding-left:30px;font-size:12px}.rulejob-log li.warning{color:#fcd34d}.rulejob-log li.error{color:#fca5a5}.rulejob-log time{color:var(--ui-faint);margin-right:6px}.rulejob pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:230px;overflow:auto;font-size:11px;background:#0b1424;border:1px solid var(--ui-line);border-radius:8px;padding:8px;margin:6px 0}.rulejob-actions{display:flex;gap:8px;flex-wrap:wrap}.rulejob-actions button,.rulejob dd button{padding:4px 9px;font-size:12px}#context-rule-summary{display:block!important;-webkit-line-clamp:unset!important;white-space:pre-line!important;overflow:visible!important}.answer-mode{display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;min-width:0}.answer-mode-group{display:inline-flex;border:1px solid #354863;border-radius:999px;overflow:hidden}.answer-mode-group button{background:transparent;color:#cbd9e9;border:0;border-radius:0;padding:5px 11px;font-size:12px}.answer-mode-group button+button{border-left:1px solid #354863}.answer-mode-group button[aria-checked="true"]{background:#1f4f86;color:#fff}.answer-mode-group button:disabled{opacity:.5;cursor:not-allowed}.answer-mode-static{font-size:12px;color:#cbd9e9;padding:4px 10px;border:1px dashed #475a78;border-radius:999px}.answer-mode-help{font-size:11px;color:var(--ui-muted)}.answer-mode [hidden]{display:none!important}.context-drawer-body button:disabled,.context-drawer-body input:disabled,.side button:disabled,.side input:disabled,.workspace-actions button:disabled{opacity:.45;cursor:not-allowed;filter:saturate(.4)}@media(max-width:560px){.rulejob dl{grid-template-columns:minmax(0,1fr);gap:1px}.rulejob dd{margin-bottom:6px}}.app-confirm-backdrop{position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;background:rgba(2,6,23,.62)}.app-confirm{width:min(520px,calc(100vw - 32px));background:#111c30;border:1px solid #3a4d68;border-radius:12px;padding:18px;box-shadow:var(--ui-shadow)}.app-confirm p{margin:0 0 16px;white-space:pre-line}.app-confirm .row{justify-content:flex-end}</style></head><body><header class="topbar"><div class="app-brand"><span class="brand-mark"></span>Bosch Baugruppen Assistant</div><button class="topbar-workspace" id="workspaceshortcut" onclick="openContextDrawer('workspace')">选择工作区文件夹</button><div class="top-spacer"></div><div class="topbar-status"><span class="status-dot"></span><span id="topbarstatus">本地运行</span></div><div class="language-picker"><span>GUI:</span><select id="language" onchange="changeLanguage()"><option value="zh">ZH</option><option value="en">EN</option><option value="de">DE</option></select></div></header><div class="shell"><aside class="side"><div class="brand">Bosch Local Workbench</div><div class="muted">仅本机 127.0.0.1 · 缓存固定保存在程序目录 AI_Bot_State</div>
 <div class="field"><label>工作区文件夹</label><div class="row"><input id="workspace" placeholder="C:\\...\\项目文件夹"><button class="ghost" onclick="pickWorkspace()">选择</button></div><div id="setupmsg" class="muted"></div></div><hr><div class="field"><label>模型</label>
 <select id="model" onchange="modelChanged()">
 <option value="claude-haiku-5-5">Claude Haiku 5.5（推荐：日常、便宜）</option>
@@ -3224,12 +3850,12 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 </select>
 <div class="row" id="custommodelrow" style="display:none;margin-top:7px"><input id="custommodel" placeholder="粘贴准确的 Bosch Farm Model ID" onkeydown="if(event.key==='Enter')confirmCustomModel()"><button class="ghost" onclick="confirmCustomModel()">确定</button></div></div><div id="modelstatus" class="muted"></div><div class="row"><button class="ghost" onclick="testModel()">测试模型</button></div><div id="modelmsg" class="muted"></div>
 <div class="field"><label>聊天会话</label><div class="row"><select id="session"></select><button class="ghost" onclick="openSession()">切换</button><button class="ghost" onclick="newSession()">新建</button><button class="ghost" onclick="renameSession()">改名</button><button class="ghost" onclick="deleteSession()">删除</button></div><div id="sessionmsg" class="muted"></div></div>
-<hr><b>Codebook</b><div id="codebookstatus" class="muted">尚未锁定 Codebook。</div><div class="field"><label>Codebook 文件（首次准备或更换时选择）</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf / .docx"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><div class="row"><button class="ghost" onclick="prepareCodebook()">准备 Codebook</button><button class="ghost" onclick="viewCodebook()">查看</button><button class="ghost" onclick="changeCodebook()">更换</button></div><hr><b>材料分析</b><div class="muted">文件直接分析；文件夹先显示结构，再明确勾选要用的材料。已锁定 Codebook 会自动用于分类。</div><div class="field"><label>分析目标：文件或文件夹</label><div class="row"><input id="targetpath" placeholder="PDF / Excel / PNG，或 Baugruppe 文件夹" oninput="clearTargetTree()"><button class="ghost" onclick="pick('file','targetpath')">文件</button><button class="ghost" onclick="pickFolderForTree()">文件夹</button></div></div><div class="row"><button class="ghost" onclick="loadTargetTree()">显示文件夹结构</button><button class="ghost" onclick="analyzeTarget()">用选中材料开始分析</button></div><div id="treestatus" class="muted"></div><div id="targettree" class="target-tree muted">选择文件夹后显示可展开的文件树。</div><button class="ghost" onclick="clearBg()">退出分类模式</button><div id="bgstatus" class="muted"></div><div id="scanreport" class="list"></div><div id="coveragestatus" class="muted"></div><div id="docs" class="list"></div>
+<hr><b>Codebook</b><div id="codebookstatus" class="muted">尚未锁定 Codebook。</div><div class="field"><label>Codebook 文件（首次准备或更换时选择）</label><div class="row"><input id="codebook" placeholder="…Codebook.pdf / .docx / .txt"><button class="ghost" onclick="pick('file','codebook')">选择</button></div></div><div class="row"><button class="ghost" onclick="prepareCodebook()">准备 Codebook</button><button class="ghost" onclick="viewCodebook()">查看</button><button class="ghost" onclick="changeCodebook()">更换</button></div><hr><b>材料分析</b><div class="muted">文件直接分析；文件夹先显示结构，再明确勾选要用的材料。已锁定 Codebook 会自动用于分类。</div><div class="field"><label>分析目标：文件或文件夹</label><div class="row"><input id="targetpath" placeholder="PDF / Excel / PNG，或 Baugruppe 文件夹" oninput="clearTargetTree()"><button class="ghost" onclick="pick('file','targetpath')">文件</button><button class="ghost" onclick="pickFolderForTree()">文件夹</button></div></div><div class="row"><button class="ghost" onclick="loadTargetTree()">显示文件夹结构</button><button class="ghost" onclick="analyzeTarget()">用选中材料开始分析</button></div><div id="treestatus" class="muted"></div><div id="targettree" class="target-tree muted">选择文件夹后显示可展开的文件树。</div><button class="ghost" onclick="clearBg()">退出分类模式</button><div id="bgstatus" class="muted"></div><div id="scanreport" class="list"></div><div id="coveragestatus" class="muted"></div><div id="docs" class="list"></div>
 <hr><b>多模型对比</b><div class="muted">同一条问题、同一份 BG 证据；逐个选择 2–4 个模型后顺序请求。结果不会写进普通聊天会话。</div><div id="comparemodels"></div><div class="row"><button class="ghost" id="addcompare" onclick="addCompareModel()">＋ 添加对比模型</button><button class="ghost" onclick="compareModels()">开始对比</button></div><div id="comparestatus" class="muted"></div></aside><div class="splitter" id="leftsplitter" role="separator" aria-orientation="vertical" aria-label="调整左侧栏宽度"></div>
 <main class="main"><div class="chat-header"><div><div class="chat-title">Baugruppen 分析</div><div class="chat-subtitle">基于当前分类规则与已选材料</div></div><div class="header-spacer"></div><button class="header-icon" title="多模型对比" onclick="openCompareDrawer()">⇄</button><button class="header-icon" title="导出会话" onclick="exportSession()">⇩</button></div><div class="chat" id="chat"><section class="welcome"><div class="eyebrow">Baugruppen Intelligence</div><h1>你想进行什么分析？</h1><p>选择单一文件或一个 BG 文件夹。程序会先在本地读取、提取文字与结构，再将必要信息交给模型。</p><div class="row" style="margin-top:22px"><button onclick="openContextDrawer('materials')">▣&nbsp; 选择 BG 文件夹</button><button class="ghost" onclick="openContextDrawer('rules')">▤&nbsp; 管理分类规则</button></div></section></div><div class="composer-wrap"><div class="composer" id="composer"><input id="question" placeholder="问代码，或根据分类规则判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button><button id="cancelchat" class="ghost" onclick="stopChat()" disabled>停止</button></div></div></main>
 <aside class="side right" id="contextpanel"><div class="context-title">当前上下文</div><button class="context-card" onclick="openContextDrawer('rules')"><strong>分类规则 <em>管理 ›</em></strong><span id="context-rule-summary">尚未选择分类规则文件</span></button><button class="context-card" onclick="openContextDrawer('materials')"><strong>本次材料 <em>管理 ›</em></strong><span id="context-material-summary">尚未选择文件或 BG 文件夹</span></button><button class="context-card" onclick="openContextDrawer('scan')"><strong>扫描状态 <em>查看 ›</em></strong><span id="context-scan-summary">等待选择材料</span></button><button class="context-card" onclick="openContextDrawer('audit')"><strong>材料缓存与审计 <em>查看 ›</em></strong><span id="context-audit-summary">尚无本地读取或模型缓存</span></button><div class="context-store"><div id="status" class="card muted">尚未打开工作区</div><div id="sessionexport" class="card"><button class="ghost" onclick="exportSession()">导出完整会话</button></div><div id="usagedetail" class="card muted">完成一次请求后显示。</div><div id="analysisexport" class="card muted">仅在 Baugruppe 分析完成后可导出。</div><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><div id="changes" class="list">无</div></div></aside></div>
 <script>
-const $=id=>document.getElementById(id);let busy=false,lastQuestion='',compareSlots=[{value:'claude-haiku-5-5',custom:''}],savedTargetSelection=new Set(),treeRestoreNote='',lastScanReport=null,scannedSelection='',uiLanguage='zh',activeContextDrawer=null,lastStatusSnapshot=null,lastUsageSnapshot=null,lastCodebookProfile=null,lastCodebookWorkspaceProfile=null,lastDocumentsSnapshot=null,lastCoverageReport=null,lastCacheAudit=null,lastSessionRows=[],lastTargetTreePayload=null,lastComparison=null;
+const $=id=>document.getElementById(id);let busy=false,lastQuestion='',compareSlots=[{value:'claude-haiku-5-5',custom:''}],savedTargetSelection=new Set(),treeRestoreNote='',lastScanReport=null,scannedSelection='',uiLanguage='zh',activeContextDrawer=null,lastStatusSnapshot=null,lastUsageSnapshot=null,lastCodebookProfile=null,lastCodebookTask=null,lastCodebookWorkspaceProfile=null,lastDocumentsSnapshot=null,lastCoverageReport=null,lastCacheAudit=null,lastSessionRows=[],lastTargetTreePayload=null,lastComparison=null;
 // Single source of translated copy. Compatibility adapters are temporary;
 // new UI components must use t('area.item', parameters).
 const CATALOG=__WORKBENCH_I18N_JSON__;
@@ -3326,6 +3952,19 @@ function applyLanguage(){
 let languageSave=Promise.resolve();
 async function changeLanguage(){uiLanguage=$('language').value;applyLanguage();rerenderLanguageSensitiveUI();let language=uiLanguage;languageSave=languageSave.catch(()=>{}).then(()=>api('/api/language',{method:'POST',body:JSON.stringify({language})}));try{await languageSave}catch(e){console.warn('Language save failed',e)}}
 
+// A rule preparation holds the model slot, so /api/setup would be refused as
+// busy after a reload.  The running job belongs to the session the saved
+// settings describe: attach to it read-only and keep following the job.
+let codebookAttachedTaskId=null;
+async function attachToRunningRulePreparation(){
+  try{
+    let job=await api('/api/codebook/task');if(!job.running||!job.task)return false;
+    let s=await api('/api/status');if(s.workspace!==$('workspace').value.trim())return false;
+    renderStatus(s);codebookAttachedTaskId=job.task.task_id;await restoreSessionContext();
+    await Promise.all([loadDocs(),loadSessions(),loadHistory()]);
+    setUIMessage($('setupmsg'),{message_key:'workspace.opened'});refreshAppChrome();$('startupnotice')?.remove();return true;
+  }catch{return false}
+}
 async function restoreLastWorkspace(){
   try{
     let s=await api('/api/settings');
@@ -3335,6 +3974,7 @@ async function restoreLastWorkspace(){
     setSelectedModel(s.model||'claude-haiku-5-5');
     $('session').innerHTML='<option>'+ esc(s.session||'default') +'</option>';
     setUIMessage($('setupmsg'),{message_key:'workspace.restoring'});
+    if(await attachToRunningRulePreparation())return;
     await setup();
   }catch{
     setUIMessage($('setupmsg'),{message_key:'workspace.restore_failed'});
@@ -3353,6 +3993,7 @@ function rerenderLanguageSensitiveUI(){
   if(lastStatusSnapshot)renderStatus(lastStatusSnapshot);
   if(lastUsageSnapshot)renderUsageDetail(lastUsageSnapshot.usage,lastUsageSnapshot.model);
   if(lastCodebookProfile)renderCodebookStatus(lastCodebookProfile);
+  renderAnswerMode();
   if(lastDocumentsSnapshot)renderDocuments(lastDocumentsSnapshot);
   if(lastTargetTreePayload){captureTargetTreeSelection();renderTargetTreeForLanguage(lastTargetTreePayload);}
   localizeMaterialFlowControls();
@@ -3395,19 +4036,32 @@ function learnPageContext(url,method,response){
   workbenchContext=token;
 }
 async function api(url,opt={}){let response,method=String(opt.method||'GET').toUpperCase();try{response=await fetch(url,{...opt,headers:{'Content-Type':'application/json','X-Workbench-Language':uiLanguage,...contextHeaders(),...(opt.headers||{})}})}catch(error){throw Error(t('model.connection_failed')+(error?.message?` ${error.message}`:''))}learnPageContext(url,method,response);return readApiResponse(response)}
-async function pick(kind,target){try{$(target).value=(await api('/api/pick/'+kind)).path||''}catch(e){alert(e.message)}}
+async function pick(kind,target){try{$(target).value=(await api('/api/pick/'+kind)).path||''}catch(e){if(target==='codebook')setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error');else alert(e.message)}}
 async function pickWorkspace(){try{let path=(await api('/api/pick/folder')).path||'';if(!path)return;$('workspace').value=path;await setup()}catch(e){setUIMessage($('setupmsg'),e.uiMessage||{text:e.message},'error')}}
 function refreshAppChrome(){let path=$('workspace')?.value.trim();let short=path?path.replace(/\\/g,'/').split('/').filter(Boolean).slice(-2).join(' / '):tr('选择工作区文件夹');if($('workspaceshortcut'))$('workspaceshortcut').textContent=short;if($('topbarstatus'))$('topbarstatus').textContent=path?tr('本地运行 · 工作区已打开'):tr('本地运行')}
 function initVisualAdjustments(){if($('visual-adjustments'))return;let style=document.createElement('style');style.id='visual-adjustments';style.textContent='.composer-tools select{border-radius:8px!important}';document.head.append(style)}
 function initLanguageLayout(){if($('language-layout'))return;let style=document.createElement('style');style.id='language-layout';style.textContent=`.context-shortcut{display:none}@media(max-width:1180px){.context-shortcut{display:inline-grid}}html[lang="zh"] body,html[lang="zh"] button,html[lang="zh"] input,html[lang="zh"] select{font-family:"Microsoft YaHei UI","Microsoft YaHei","Noto Sans SC","Segoe UI",sans-serif;letter-spacing:0}html[lang="en"] body,html[lang="en"] button,html[lang="en"] input,html[lang="en"] select,html[lang="de"] body,html[lang="de"] button,html[lang="de"] input,html[lang="de"] select{font-family:Inter,"Segoe UI",Arial,sans-serif}html[lang="zh"] .chat-subtitle,html[lang="zh"] .muted{line-height:1.55}html[lang="de"] .context-card strong,html[lang="de"] .context-drawer-head h2{letter-spacing:0}html[lang="de"] .context-card strong{padding-right:42px}.row{flex-wrap:wrap;align-items:center}.row input{min-width:min(100%,185px)}.row button{white-space:normal;line-height:1.25;min-height:34px}.context-card{min-height:78px}.context-card strong{position:relative;line-height:1.3;padding-right:50px;overflow-wrap:anywhere}.context-card em{position:absolute;right:0;top:0;float:none;white-space:nowrap}.context-card span{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.context-drawer-head h2,.context-drawer-body label,.classification-card h3{overflow-wrap:anywhere}.context-drawer-body button,.workspace-actions button{max-width:100%;overflow-wrap:anywhere}.composer-tools{flex-wrap:wrap;row-gap:5px}.composer-tools .spacer{min-width:0}.composer-tools select{min-width:170px;max-width:min(330px,100%)}html[lang="de"] .composer-tools select{max-width:285px}@media(max-width:1180px){.shell{grid-template-columns:minmax(220px,var(--left-panel-width)) 8px minmax(360px,1fr) 260px}.right{padding:13px 10px}.context-drawer{right:260px;width:min(640px,calc(100vw - 300px))}.chat-header{padding:0 20px}.composer-wrap{padding-left:20px;padding-right:20px}}@media(max-width:760px){.topbar{gap:8px;padding:0 10px}.app-brand{font-size:13px}.topbar-workspace{max-width:145px}.shell{grid-template-columns:minmax(180px,42vw) 7px minmax(0,1fr)}.chat{padding:20px 14px}.chat-header{padding:0 14px}.composer-wrap{padding:0 14px 14px}.welcome h1{font-size:26px}.composer-tools .spacer{display:none}.composer-tools select{width:100%;max-width:none}.composer-tools #custommodelrow{width:100%;flex-wrap:wrap}.composer-tools #custommodelrow input{width:100%}.context-drawer{left:0;right:0;width:auto;max-width:100vw;border-radius:0;transform:none!important;transition:opacity .18s}.context-drawer-body{min-width:0;overflow-x:hidden}.context-drawer-body input{min-width:0;max-width:100%}#scanbackdrop.open .scan-drawer{left:0!important;right:0;width:auto;max-width:100vw;transform:none}.main{min-width:0}.composer{grid-template-columns:minmax(0,1fr) auto}.composer #cancelchat{grid-column:2}.composer input{min-width:0}.composer-tools{grid-column:1/-1}.context-card{min-height:0}}@media(max-width:900px){.shell{grid-template-columns:minmax(220px,var(--left-panel-width)) 8px minmax(0,1fr)}}@media(max-width:650px){.shell{grid-template-columns:minmax(0,1fr)}.chat-header{gap:6px}.chat-subtitle{display:none}.chat-title{font-size:13px}}`;document.head.append(style)}
-function initComposerControls(){if($('composertools'))return;let composer=$('composer');if(!composer)return;let tools=document.createElement('div');tools.id='composertools';tools.className='composer-tools';let note=document.createElement('span');note.id='composermodelnote';note.className='muted';let spacer=document.createElement('span');spacer.className='spacer';let model=$('model'),custom=$('custommodelrow'),modelmsg=$('modelmsg'),test=document.querySelector('button[onclick="testModel()"]');if(model)tools.append(note,model);if(custom)tools.append(custom);if(test){test.id='modeltestbutton';test.className='model-test';tools.append(test)}if(modelmsg)tools.append(modelmsg);tools.append(spacer);let mode=document.createElement('select');mode.id='answermode';for(let value of ['classification','explanation']){let option=document.createElement('option');option.value=value;option.textContent=(value==='classification'?t('answer.classification'):t('answer.explanation'));mode.append(option)}tools.append(mode);composer.append(tools);mode.setAttribute('aria-label',t('answer.mode'));localizeComposerControls()}
-function localizeComposerControls(){setI18nText($('composermodelnote'),'model.current');setI18nText($('modeltestbutton'),'model.test')}
+function initComposerControls(){if($('composertools'))return;let composer=$('composer');if(!composer)return;let tools=document.createElement('div');tools.id='composertools';tools.className='composer-tools';let note=document.createElement('span');note.id='composermodelnote';note.className='muted';let spacer=document.createElement('span');spacer.className='spacer';let model=$('model'),custom=$('custommodelrow'),modelmsg=$('modelmsg'),test=document.querySelector('button[onclick="testModel()"]');if(model)tools.append(note,model);if(custom)tools.append(custom);if(test){test.id='modeltestbutton';test.className='model-test';tools.append(test)}if(modelmsg)tools.append(modelmsg);tools.append(spacer);let mode=document.createElement('div');mode.id='answermodecontrol';mode.className='answer-mode';mode.innerHTML='<input type="hidden" id="answermode" value="classification"><span id="answermodestatic" class="answer-mode-static"></span><span id="answermodegroup" class="answer-mode-group" role="radiogroup"><button type="button" role="radio" data-mode="classification" onclick="setAnswerMode(\'classification\')"></button><button type="button" role="radio" data-mode="explanation" onclick="setAnswerMode(\'explanation\')"></button></span><span id="answermodehelp" class="answer-mode-help"></span>';tools.append(mode);composer.append(tools);localizeComposerControls()}
+function localizeComposerControls(){setI18nText($('composermodelnote'),'model.current');setI18nText($('modeltestbutton'),'model.test');renderAnswerMode()}
+function answerModeAvailable(){return !lastStatusSnapshot?.context_issue&&!!lastStatusSnapshot?.bg_context}
+function setAnswerMode(value){let input=$('answermode');if(!input||!answerModeAvailable()||!['classification','explanation'].includes(value))return;input.value=value;renderAnswerMode()}
+// Fixed-rule classification and explanation follow-ups are both real modes.
+// Without locked rules and confirmed materials only ordinary questions are
+// possible, so a static label replaces the switch instead of a dead control.
+function renderAnswerMode(){
+  let input=$('answermode'),group=$('answermodegroup'),label=$('answermodestatic'),help=$('answermodehelp');if(!input||!group)return;
+  let available=answerModeAvailable(),value=input.value==='explanation'?'explanation':'classification';
+  group.hidden=!available;group.setAttribute('aria-label',t('answer.mode'));label.hidden=available;
+  for(let button of group.querySelectorAll('button')){let selected=button.dataset.mode===value;button.textContent=t(button.dataset.mode==='classification'?'answer.classification':'answer.explanation');button.setAttribute('aria-checked',String(selected));button.disabled=!available}
+  label.textContent=t('answer.current_mode',{mode:t('answer.normal')});
+  help.textContent=available?t(value==='classification'?'answer.classification_help':'answer.explanation_help'):t('answer.unavailable_help');
+}
 async function contextPickWorkspace(){try{let path=(await api('/api/pick/folder')).path||'';if(!path)return;$('workspace').value=path;$('contextworkspacepath').value=path;if(await setup()){refreshAppChrome();closeContextDrawer()}}catch(e){setUIMessage($('contextworkspacemsg'),e.uiMessage||{text:e.message},'error')}}
 async function contextOpenWorkspace(){let path=$('contextworkspacepath').value.trim();if(!path){setUIMessage($('contextworkspacemsg'),{message_key:'workspace.path_required'},'error');return}$('workspace').value=path;if(await setup()){refreshAppChrome();closeContextDrawer()}}
 let contextMoved=[];
 function contextText(id,fallback){let el=$(id);let text=(el?.innerText||el?.textContent||'').replace(/\s+/g,' ').trim();return text||fallback}
 function refreshContextPanel(){
-  let rule=contextText('codebookstatus',t('rules.no_file'));
+  let rule=codebookCardSummary();
   let path=$('targetpath')?.value.trim();let selected=treeFileCount?.()||0;
   let material=path?(selected?t('material.selected_path',{count:selected,path}):path):t('materials.no_selection');
   let scan=contextText('coveragestatus',path?t('coverage.selection_changed'):t('materials.waiting'));
@@ -3424,10 +4078,10 @@ function renderContextGuard(){
   if(host)host.textContent=issue?t('context.reconfirm'):'';
   if($('question'))$('question').disabled=issue;
   let mode=$('answermode'),revision=lastStatusSnapshot?.context_revision||'';
-  if(mode){mode.disabled=issue||!lastStatusSnapshot?.bg_context;if(mode.dataset.scope!==revision){mode.value='classification';mode.dataset.scope=revision}mode.setAttribute('aria-label',t('answer.mode'));for(let option of mode.options)option.textContent=(option.value==='classification'?t('answer.classification'):t('answer.explanation'))}
+  if(mode){if(mode.dataset.scope!==revision){mode.value='classification';mode.dataset.scope=revision}renderAnswerMode()}
   document.querySelectorAll('button[onclick="chat()"],button[onclick="compareModels()"]').forEach(button=>button.disabled=issue);
   let draft=$('contextcodebookpath')?.value.trim(),prepared=lastCodebookProfile?.source_path||'';
-  if($('contextrulemsg'))$('contextrulemsg').textContent=draft&&draft!==prepared?t('rules.pending_path',{path:prepared||'—'}):'';
+  let rulemsg=$('contextrulemsg');if(rulemsg&&!rulemsg.querySelector('.error'))rulemsg.textContent=draft&&draft!==prepared&&!codebookRunning()?t('rules.pending_path',{path:prepared||'—'}):'';
 }
 function initContextPanel(){
   if($('contextbackdrop'))return;
@@ -3479,7 +4133,9 @@ function openContextDrawer(kind){
   if(kind==='workspace'){
     title.textContent=t('workspace.title');body.innerHTML='<div class="muted">'+t('workspace.description')+'</div><div class="field"><label>'+t('workspace.path_label')+'</label><div class="row"><input id="contextworkspacepath" placeholder="'+t('workspace.path_label')+'" value="'+escAttr($('workspace').value)+'"><button class="ghost" onclick="contextPickWorkspace()">'+t('workspace.choose')+'</button></div></div><div class="row"><button onclick="contextOpenWorkspace()">'+t('workspace.open')+'</button></div><div id="contextworkspacemsg" class="muted" style="margin-top:10px"></div>';
   }else if(kind==='rules'){
-    title.textContent=t('rules.title');body.innerHTML='<div class="muted">'+t('rules.description')+'</div><div class="field"><label>'+t('rules.file_label')+'</label><div class="row"><input id="contextcodebookpath" placeholder="'+t('rules.choose')+'" value="'+escAttr($('codebook').value)+'" oninput="contextSyncRule()"><button class="ghost" onclick="contextPickRule()">'+t('workspace.choose')+'</button></div></div><div class="row"><button onclick="contextSyncRule();prepareCodebook()">'+t('rules.prepare')+'</button><button class="ghost" onclick="viewCodebook()">'+t('rules.view')+'</button><button class="ghost" onclick="changeCodebook()">'+t('rules.replace')+'</button></div><div id="contextrulemsg" class="muted" style="margin-top:10px"></div><div class="card">'+$('codebookstatus').innerHTML+'</div>';
+    title.textContent=t('rules.title');let options=[...$('model').options].filter(option=>option.value&&option.value!=='__custom__').map(option=>'<option value="'+escAttr(option.value)+'"></option>').join('');
+    body.innerHTML='<div class="muted">'+t('rules.description')+'</div><section id="rulejobpanel" class="card rulejob" aria-live="polite"></section><div class="field"><label for="contextcodebookpath">'+t('rules.file_label')+'</label><div class="row"><input id="contextcodebookpath" placeholder="'+t('rules.choose')+'" value="'+escAttr($('codebook').value)+'" oninput="contextSyncRule()"><button class="ghost" id="rulefilepick" onclick="contextPickRule()">'+t('workspace.choose')+'</button></div></div><div class="field"><label for="rulemodel">'+t('rulejob.model_label')+'</label><div class="row"><input id="rulemodel" list="rulemodeloptions" autocomplete="off" spellcheck="false" value="'+escAttr(ruleModelValue())+'" oninput="ruleModelDraft=this.value;renderRuleModelHint()" onkeydown="if(event.key===\'Enter\'){contextSyncRule();prepareCodebook()}"><button class="ghost" id="rulemodelrecommended" onclick="useRecommendedRuleModel()">'+t('rulejob.model_recommended')+'</button></div><datalist id="rulemodeloptions">'+options+'</datalist><div class="muted">'+t('rulejob.model_hint')+'</div><div id="rulemodelhint" class="muted"></div></div><div class="row"><button id="ruleprepare" onclick="contextSyncRule();prepareCodebook()">'+t('rules.prepare')+'</button><button class="ghost" id="ruleview" onclick="viewCodebook()">'+t('rules.view')+'</button><button class="ghost" id="rulereplace" onclick="changeCodebook()">'+t('rules.replace')+'</button></div><div id="contextrulemsg" class="muted" style="margin-top:10px"></div><div class="card" id="ruleeffective"><b>'+t('rulejob.effective_title')+'</b><br>'+$('codebookstatus').innerHTML+'</div>';
+    renderRuleJobPanel();renderRuleModelHint();
   }else if(kind==='materials'){
     title.textContent=t('materials.title');body.innerHTML='<div class="muted">'+t('materials.description')+'</div><div class="field"><label>'+t('materials.target_label')+'</label><div class="row"><input id="contexttargetpath" placeholder="'+t('materials.target_placeholder')+'" value="'+escAttr($('targetpath').value)+'" oninput="contextSyncTarget()"><button class="ghost" onclick="contextPickTarget(\'file\')">'+t('materials.file')+'</button><button class="ghost" onclick="contextPickTarget(\'folder\')">'+t('materials.folder')+'</button></div></div><div class="row"><button class="ghost" onclick="contextSyncTarget();loadTargetTree()">'+t('materials.show_tree')+'</button><button class="ghost" onclick="contextSyncTarget();analyzeTarget()">'+t('materials.confirm_scope')+'</button></div><div id="contexttargetmsg" class="muted" style="margin:8px 0"></div><div id="contextmaterialmount"></div>';
     moveContextElements(['treestatus','targettree','materialactions','bgstatus','coveragestatus'], $('contextmaterialmount'));
@@ -3504,15 +4160,112 @@ function setSelectedModel(model){let known=[...$('model').options].some(option=>
 function selectedModel(){let selected=$('model').value;return selected==='__custom__' ? $('custommodel').value.trim() : selected}
 async function modelChanged(){toggleCustomModel();loadModelStatus();if($('model').value!=='__custom__'&&$('workspace').value.trim())await switchModel()}
 async function confirmCustomModel(){if(!selectedModel()){ setUIMessage($('modelmsg'),{message_key:'model.id_required'},'error');return}if($('workspace').value.trim())await switchModel();else setUIMessage($('modelmsg'),{message_key:'model.custom_saved'})}
-function codebookList(items){let values=Array.isArray(items)?items.filter(Boolean):[];return values.length?'<ul>'+values.map(item=>{if(item&&typeof item==='object'){let text=esc(item.text||item.title||JSON.stringify(item));let id=item.id?' <span class="muted">['+esc(item.id)+']</span>':'';let pages=Array.isArray(item.pages)&&item.pages.length?' <span class="muted">('+t('rulews.evidence_pages')+' '+esc(item.pages.join('、'))+')</span>':'';return '<li>'+text+id+pages+'</li>'}return '<li>'+esc(String(item))+'</li>'}).join('')+'</ul>':'<div class="muted">'+t('classification.none')+'</div>'}
-function renderCodebookStatus(profile){lastCodebookProfile=profile;let host=$('codebookstatus');if(!profile||profile.status==='none'||!profile.status){host.textContent=t('rulews.not_prepared');return}let lock=profile.status==='locked';host.innerHTML=(lock?'<span class="ok">'+t('rulews.locked')+'</span>':'<span class="error">'+t('rulews.draft')+'</span>')+'：<b>'+esc(profile.source_path||profile.source_name||'—')+'</b><br>'+esc(profile.page_count||0)+' '+t('rulews.pages')+' · '+esc(profile.parser_model||'—')+(lock?'<br>'+t('rulews.reused'):'<br>'+t('rulews.confirm'))}
-async function loadCodebookStatus(){try{renderCodebookStatus(await api('/api/codebook'))}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
+function codebookList(items){let values=Array.isArray(items)?items.filter(Boolean):[];return values.length?'<ul>'+values.map(item=>{if(item&&typeof item==='object'){let text=esc(item.text||item.title||JSON.stringify(item));let id=item.id?' <span class="muted">['+esc(item.id)+']</span>':'';let pages=Array.isArray(item.pages)&&item.pages.length?' <span class="muted">('+t('rulews.evidence_pages')+' '+esc(item.pages.join('、'))+')</span>':'';let blocks=Array.isArray(item.blocks)&&item.blocks.length?' <span class="muted">('+t('rulews.evidence_blocks')+' '+esc(item.blocks.join('、'))+')</span>':'';return '<li>'+text+id+pages+blocks+'</li>'}return '<li>'+esc(String(item))+'</li>'}).join('')+'</ul>':'<div class="muted">'+t('classification.none')+'</div>'}
+function renderCodebookStatus(profile){lastCodebookProfile=profile;let host=$('codebookstatus');if(!profile||profile.status==='none'||!profile.status){host.textContent=t('rulews.not_prepared');let effective=$('ruleeffective');if(effective)effective.innerHTML='<b>'+t('rulejob.effective_title')+'</b><br>'+esc(t('rulews.not_prepared'));return}let lock=profile.status==='locked';host.innerHTML=(lock?'<span class="ok">'+t('rulews.locked')+'</span>':'<span class="error">'+t('rulews.draft')+'</span>')+'：<b>'+esc(profile.source_path||profile.source_name||'—')+'</b><br>'+(profile.unit_kind==='block'?esc(profile.block_count||profile.page_count||0)+' '+t('rulews.blocks'):esc(profile.page_count||0)+' '+t('rulews.pages'))+' · '+esc(profile.parser_model||'—')+(lock?'<br>'+t('rulews.reused'):'<br>'+t('rulews.confirm'));let effective=$('ruleeffective');if(effective)effective.innerHTML='<b>'+t('rulejob.effective_title')+'</b><br>'+host.innerHTML}
+async function loadCodebookStatus(){try{renderCodebookStatus(await api('/api/codebook'))}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}await loadCodebookTask()}
 function leaveCodebookWorkspace(){if(!allowRuleDraftTransition())return;lastCodebookWorkspaceProfile=null;let composer=$('composer');composer.style.display='flex';$('chat').classList.remove('codebook-workspace');loadHistory()}
-function showCodebookWorkspace(profile){if(ruleEditState){captureRuleEditor();if(ruleEditState.binding===ruleEditorBinding(profile)){renderRuleEditor();return}if(!allowRuleDraftTransition())return}lastCodebookWorkspaceProfile=profile;let draft=profile.draft||{};$('composer').style.display='none';let classes=(draft.classes||[]).map(item=>'<article class="card codebook-class"><h3>'+esc(item.name||t('rulews.untitled'))+'</h3><div>'+esc(item.definition||t('rulews.no_definition'))+'</div><b>'+t('rulews.decision_rules')+'</b>'+codebookList(item.decision_rules)+'<b>'+t('rulews.boundaries')+'</b>'+codebookList(item.boundaries)+'<div class="muted">'+t('rulews.evidence_pages')+'：'+esc((item.evidence_pages||[]).join('、')||'—')+'</div></article>').join('')||'<div class="card error">'+t('rulews.no_class')+'</div>';let usage=profile.usage||{},ocr=profile.ocr_runtime||{},locked=profile.status==='locked';let ocrText=ocr.status==='not applicable to DOCX'?t('rulews.ocr_docx'):(ocr.available?(t('rulews.ocr_enabled')+' · '+esc(ocr.command||'Tesseract')+(ocr.german_available?' · deu':' · eng')):(t('rulews.ocr_disabled')+' · '+esc(ocr.status||'Tesseract')));$('chat').className='chat codebook-workspace';$('chat').innerHTML='<section class="workspace-inner"><h1>'+t('rulews.title')+'</h1><div class="muted">'+(locked?t('rulews.locked_intro'):t('rulews.draft_intro'))+'</div><div class="card"><b>'+t('rulews.source')+'：</b>'+esc(profile.source_name||'—')+'<br><span class="muted">'+t('rulews.parser_model')+'：'+esc(profile.parser_model||'—')+' · '+t('rulews.pages')+'：'+esc(profile.page_count||0)+' · '+t('rulews.groups')+'：'+esc(profile.page_groups||0)+' · Token：'+usageNumber(usage.input)+' / '+usageNumber(usage.output)+(' · '+usageCost(usage))+'<br>'+ocrText+'</span></div><h2>'+t('rulews.classes')+'</h2>'+classes+'<h2>'+t('rulews.global_rules')+'</h2><div class="card">'+codebookList(draft.global_rules)+'</div><h2>'+t('rulews.table_rules')+'</h2><div class="card">'+codebookList(draft.table_rules)+'</div><h2>'+t('rulews.uncertainties')+'</h2><div class="card">'+codebookList(draft.uncertainties)+'</div><div class="workspace-actions"><button class="ghost" onclick="editCodebookDraft()">'+t('rules.edit')+'</button>'+ (locked?'<button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.back')+'</button>':'<button onclick="lockCodebook()">'+t('rulews.lock_action')+'</button><button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.defer')+'</button>')+'</div></section>';$('chat').scrollTop=0}
-async function prepareCodebook(){if(!allowRuleDraftTransition())return;let path=$('codebook').value.trim();if(!path){setUIMessage($('codebookstatus'),{message_key:'rulews.choose_file'},'error');return}let model=prompt(t('rulews.model_prompt'),selectedModel());if(model===null)return;model=model.trim();if(!model){setUIMessage($('codebookstatus'),{message_key:'rulews.model_required'},'error');return}let operation=beginOperation();try{setUIMessage($('codebookstatus'),{message_key:'rulews.preparing'});let profile=await api('/api/codebook/prepare',{method:'POST',body:JSON.stringify({path,model,request_id:operation.id})});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile)}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}finally{endOperation(operation)}}
-async function viewCodebook(){if(!allowRuleDraftTransition())return;try{let profile=await api('/api/codebook');if(!profile||!profile.status)throw Error(t('rulews.not_prepared'));renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
-async function lockCodebook(){if(!allowRuleDraftTransition())return;if(!confirm(t('rulews.lock_confirm')))return;try{let profile=await api('/api/codebook/lock',{method:'POST'});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile);setUIMessage($('setupmsg'),{message_key:'rulews.lock_success'},'ok')}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
-async function changeCodebook(){if(!allowRuleDraftTransition())return;if(!confirm(t('rulews.replace_confirm')))return;try{await api('/api/codebook',{method:'DELETE'});$('codebook').value='';renderCodebookStatus({status:'none'});leaveCodebookWorkspace();setUIMessage($('setupmsg'),{message_key:'rulews.replace_success'})}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
+function showCodebookWorkspace(profile){if(ruleEditState){captureRuleEditor();if(ruleEditState.binding===ruleEditorBinding(profile)){renderRuleEditor();return}if(!allowRuleDraftTransition())return}lastCodebookWorkspaceProfile=profile;let draft=profile.draft||{};$('composer').style.display='none';let classes=(draft.classes||[]).map(item=>'<article class="card codebook-class"><h3>'+esc(item.name||t('rulews.untitled'))+'</h3><div>'+esc(item.definition||t('rulews.no_definition'))+'</div><b>'+t('rulews.decision_rules')+'</b>'+codebookList(item.decision_rules)+'<b>'+t('rulews.boundaries')+'</b>'+codebookList(item.boundaries)+'<div class="muted">'+(Array.isArray(item.evidence_blocks)?t('rulews.evidence_blocks')+'：'+esc(item.evidence_blocks.join('、')||'—'):t('rulews.evidence_pages')+'：'+esc((item.evidence_pages||[]).join('、')||'—'))+'</div></article>').join('')||'<div class="card error">'+t('rulews.no_class')+'</div>';let usage=profile.usage||{},ocr=profile.ocr_runtime||{},locked=profile.status==='locked';let ocrText=ocr.status==='not applicable to DOCX'?t('rulews.ocr_docx'):ocr.status==='not applicable to TXT'?t('rulews.ocr_txt'):(ocr.available?(t('rulews.ocr_enabled')+' · '+esc(ocr.command||'Tesseract')+(ocr.german_available?' · deu':' · eng')):(t('rulews.ocr_disabled')+' · '+esc(ocr.status||'Tesseract')));$('chat').className='chat codebook-workspace';$('chat').innerHTML='<section class="workspace-inner"><h1>'+t('rulews.title')+'</h1><div class="muted">'+(locked?t('rulews.locked_intro'):t('rulews.draft_intro'))+'</div><div class="card"><b>'+t('rulews.source')+'：</b>'+esc(profile.source_name||'—')+'<br><span class="muted">'+t('rulews.parser_model')+'：'+esc(profile.parser_model||'—')+' · '+(profile.unit_kind==='block'?t('rulews.blocks')+'：'+esc(profile.block_count||profile.page_count||0):t('rulews.pages')+'：'+esc(profile.page_count||0))+' · '+t('rulews.groups')+'：'+esc(profile.page_groups||0)+' · Token：'+usageNumber(usage.input)+' / '+usageNumber(usage.output)+(' · '+usageCost(usage))+'<br>'+ocrText+'</span></div><h2>'+t('rulews.classes')+'</h2>'+classes+'<h2>'+t('rulews.global_rules')+'</h2><div class="card">'+codebookList(draft.global_rules)+'</div><h2>'+t('rulews.table_rules')+'</h2><div class="card">'+codebookList(draft.table_rules)+'</div><h2>'+t('rulews.uncertainties')+'</h2><div class="card">'+codebookList(draft.uncertainties)+'</div><div class="workspace-actions"><button class="ghost" onclick="editCodebookDraft()">'+t('rules.edit')+'</button>'+ (locked?'<button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.back')+'</button>':'<button onclick="lockCodebook()">'+t('rulews.lock_action')+'</button><button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.defer')+'</button>')+'</div></section>';$('chat').scrollTop=0}
+// ---- Codebook preparation: an observable background job --------------------
+// The server runs the job and keeps its state (stage, page/block, log, final
+// result or classified failure).  The page only renders that record, so a
+// reload or a reopened drawer shows the same, continuously updated status.
+let codebookPollTimer=null,codebookPollFailures=0,codebookOperation=null,codebookStopRequested=false,codebookModelDefaults={default_model:'',recommended_model:'claude-haiku-5-5'},ruleModelDraft=null,codebookStatusError=null;
+function codebookRunning(){return lastCodebookTask?.state==='running'}
+function jobCopy(group,name,params={}){let key=['rulejob',group,name].join('.');return t(key,params)}
+function codebookUnitText(unit){if(!unit)return '';if(unit.kind==='page')return t('rulejob.unit.page',{number:unit.number});return unit.first===unit.last?t('rulejob.unit.block',{number:unit.first}):t('rulejob.unit.blocks',{first:unit.first,last:unit.last})}
+function codebookProgressText(task){let p=task?.progress||{};if(p.total&&(task.stage==='parsing'||task.stage==='extracting')){if(task.unit_kind==='page')return t('rulejob.progress.page',{current:p.current,total:p.total});if(task.stage==='parsing')return t('rulejob.progress.blocks',{current:p.current,total:p.total})}return jobCopy('where',(task?.stage||'reading'))}
+function codebookStageText(task){let entries=(task?.log||[]).filter(entry=>String(entry.message?.message_key||'').startsWith('rulejob.stage.'));return entries.length?uiCopy(entries[entries.length-1].message):jobCopy('where',(task?.stage||'reading'))}
+function codebookLatestWarning(task){let log=task?.log||[],last=log[log.length-1];return last&&last.level==='warning'?uiCopy(last.message):''}
+function codebookTime(value){if(!value)return '—';let date=new Date(value);return isNaN(date)?String(value):date.toLocaleString(uiLanguage==='zh'?'zh-CN':uiLanguage==='de'?'de-DE':'en-GB')}
+function codebookElapsed(task){let start=Date.parse(task?.started_at),end=task?.finished_at?Date.parse(task.finished_at):Date.now();if(isNaN(start)||isNaN(end))return '—';let seconds=Math.max(0,Math.round((end-start)/1000));return seconds<60?seconds+' s':Math.floor(seconds/60)+' min '+String(seconds%60).padStart(2,'0')+' s'}
+function codebookEffectiveProfile(){let profile=lastCodebookProfile;return profile&&profile.status&&profile.status!=='none'?profile:null}
+function codebookCardSummary(){
+  let task=lastCodebookTask,profile=codebookEffectiveProfile(),lines=[];
+  if(task?.state==='running')return t('rulejob.card.running',{progress:codebookProgressText(task)});
+  if(task?.state==='failed')lines.push(t('rulejob.card.failed',{reason:uiCopy(task.failure?.short)||t('rulejob.short.internal')}));
+  else if(task?.state==='cancelled')lines.push(t('rulejob.card.cancelled'));
+  if(profile){let state=t(profile.status==='locked'?'rulejob.card.locked':'rulejob.card.draft');lines.push(lines.length?t('rulejob.card.effective',{name:profile.source_name||'—',status:state}):state+' · '+(profile.source_name||'—'))}
+  else if(lines.length)lines.push(t('rulejob.card.no_effective'));
+  return lines.join('\n')||t('rules.no_file');
+}
+function ruleModelValue(){return ruleModelDraft??(codebookModelDefaults.default_model||codebookModelDefaults.recommended_model||selectedModel())}
+function currentRuleModel(){let input=$('rulemodel');return String(input?input.value:ruleModelValue()).trim().toLowerCase()}
+function validRuleModelId(model){return !!model&&!/[\s?#\\]/.test(model)&&/(gemini|claude)|^(gpt|o1|o3|llama|glm|deepseek)|openai-/.test(model)}
+function renderRuleModelHint(){let host=$('rulemodelhint');if(!host)return;let model=currentRuleModel();if(!model){setUIMessage(host,{message_key:'rulejob.model_required'},'error');return}if(!validRuleModelId(model)){setUIMessage(host,{message_key:'rulejob.model_invalid',params:{model}},'error');return}setUIMessage(host,{message_key:'rulejob.model_this_run',params:{model}},'ok')}
+function useRecommendedRuleModel(){ruleModelDraft=codebookModelDefaults.recommended_model;let input=$('rulemodel');if(input)input.value=ruleModelDraft;renderRuleModelHint()}
+function codebookDiagnostics(task){return JSON.stringify({task:task||null,profile:codebookEffectiveProfile()&&{status:lastCodebookProfile.status,source_name:lastCodebookProfile.source_name,source_path:lastCodebookProfile.source_path,version:lastCodebookProfile.version}},null,2)}
+async function copyText(value,host){try{if(!navigator.clipboard)throw Error('clipboard');await navigator.clipboard.writeText(value);if(host)setUIMessage(host,{message_key:'rulejob.action.copied'},'ok')}catch{if(host)setUIMessage(host,{message_key:'rulejob.action.copy_failed'},'error')}}
+function copyCodebookPath(){copyText(lastCodebookTask?.source?.path||'',$('rulejobcopymsg'))}
+function copyCodebookDiagnostics(){let pre=$('rulejobdiagnostics');if(pre)pre.closest('details').open=true;copyText(codebookDiagnostics(lastCodebookTask),$('rulejobcopymsg'))}
+function ruleRow(label,value,raw=false){return '<dt>'+esc(label)+'</dt><dd>'+(raw?value:esc(value==null||value===''?'—':String(value)))+'</dd>'}
+function renderRuleJobPanel(){
+  let host=$('rulejobpanel');if(host){
+  let task=lastCodebookTask,details=host.querySelector('details'),open=!!details?.open;
+  if(!task){host.innerHTML='<div class="rulejob-head"><b>'+t('rulejob.panel.title')+'</b></div><div class="muted">'+t('rulejob.panel.idle')+'</div>'+(codebookStatusError?'<div class="error">'+esc(uiCopy(codebookStatusError))+'</div>':'')}
+  else{
+    let state=task.state==='succeeded'||task.state==='failed'||task.state==='cancelled'?task.state:'running',source=task.source||{},result=task.result||{},failure=task.failure||{};
+    let chip='<span class="rulejob-chip '+state+'">'+(state==='running'?'<span class="rulejob-spinner" aria-hidden="true"></span>':'')+esc(jobCopy('state',state))+'</span>';
+    let rows=ruleRow(t('rulejob.panel.file'),source.name)+ruleRow(t('rulejob.panel.type'),String(source.type||'').toUpperCase())+ruleRow(t('rulejob.model_label'),task.model);
+    let body='';
+    if(state==='running'){
+      rows+=ruleRow(t('rulejob.panel.stage'),'<span class="rulejob-stage">'+esc(codebookStageText(task))+'</span>',true)+ruleRow(t('rulejob.panel.progress'),codebookProgressText(task))+ruleRow(t('rulejob.panel.started'),codebookTime(task.started_at))+ruleRow(t('rulejob.panel.elapsed'),codebookElapsed(task))+ruleRow(t('rulejob.panel.calls'),task.calls??0);
+      let warning=codebookLatestWarning(task);
+      body+=(warning?'<div class="rulejob-note warning">'+esc(warning)+'</div>':'')+'<div class="rulejob-note">'+t(codebookStopRequested?'rulejob.stopping':'rulejob.busy_controls')+'</div><div class="rulejob-actions"><button class="ghost" id="rulejobstop" onclick="stopCodebookPreparation()"'+(codebookStopRequested?' disabled':'')+'>'+t('rulejob.action.stop')+'</button></div>';
+    }else if(state==='succeeded'){
+      let profile=codebookEffectiveProfile(),current=profile&&profile.version===result.profile_version;
+      let final=current?t(profile.status==='locked'?'rulejob.card.locked':'rulejob.card.draft'):t('rulejob.state.succeeded');
+      rows+=ruleRow(t('rulejob.panel.path'),'<code>'+esc(source.path||'—')+'</code> <button class="ghost" onclick="copyCodebookPath()">'+t('rulejob.action.copy_path')+'</button>',true)+ruleRow(t('rulejob.panel.finished'),codebookTime(task.finished_at))+(task.unit_kind==='page'?ruleRow(t('rulejob.panel.pages'),result.page_count):ruleRow(t('rulejob.panel.blocks'),result.block_count))+ruleRow(t('rulejob.panel.units'),result.unit_count)+ruleRow(t('rulejob.panel.calls'),task.calls)+(result.encoding?ruleRow(t('rulejob.panel.encoding'),result.encoding):'')+ruleRow(t('rulejob.panel.status'),final);
+      body+='<div class="rulejob-actions"><button class="ghost" id="rulejobview" onclick="viewPreparedCodebook()">'+t('rules.view')+'</button></div>';
+    }else{
+      rows+=ruleRow(t('rulejob.panel.path'),'<code>'+esc(source.path||'—')+'</code> <button class="ghost" onclick="copyCodebookPath()">'+t('rulejob.action.copy_path')+'</button>',true)+ruleRow(t('rulejob.panel.failed_stage'),jobCopy('where',(failure.stage||task.stage||'reading')))+(failure.unit?ruleRow(t('rulejob.panel.failed_unit'),codebookUnitText(failure.unit)):'')+ruleRow(t('rulejob.panel.finished'),codebookTime(task.finished_at));
+      body+='<div class="rulejob-reason">'+esc(uiCopy(failure.message)||t('rulejob.reason.internal'))+'</div>'+(task.previous_profile?'<div class="rulejob-note">'+esc(t('rulejob.panel.kept_rules'))+'</div>':'')+'<div class="rulejob-actions"><button id="rulejobretry" onclick="retryCodebookPreparation()">'+t('rulejob.action.retry')+'</button></div>';
+    }
+    let log=(task.log||[]).map(entry=>'<li class="'+escAttr(entry.level||'info')+'"><time>'+esc(codebookTime(entry.at))+'</time>'+esc(uiCopy(entry.message))+'</li>').join('');
+    let technical=failure.technical?'<b>'+t('rulejob.details.technical')+'</b><pre>'+esc(failure.technical)+'</pre>':'';
+    body+='<details id="rulejobdetails"'+(open?' open':'')+'><summary>'+t('rulejob.details.title')+'</summary><ol class="rulejob-log">'+log+'</ol>'+technical+'<pre id="rulejobdiagnostics">'+esc(codebookDiagnostics(task))+'</pre></details><div class="rulejob-actions"><button class="ghost" onclick="copyCodebookDiagnostics()">'+t('rulejob.action.copy_diagnostics')+'</button><span id="rulejobcopymsg" class="muted"></span></div>';
+    if(codebookStatusError)body+='<div class="error">'+esc(uiCopy(codebookStatusError))+'</div>';
+    host.innerHTML='<div class="rulejob-head"><b>'+t('rulejob.panel.title')+'</b>'+chip+'</div><dl>'+rows+'</dl>'+body;
+  }}
+  applyCodebookBusyState();refreshContextPanel();
+}
+// While a job runs nothing may change its file, start a second job or open a
+// draft that is not complete yet; the server enforces the same rule.
+function applyCodebookBusyState(){let running=codebookRunning();for(let id of ['ruleprepare','rulefilepick','contextcodebookpath','rulemodel','rulemodelrecommended','ruleview','rulereplace','codebook']){let node=$(id);if(node)node.disabled=running}for(let node of document.querySelectorAll('button[onclick="prepareCodebook()"],button[onclick="viewCodebook()"],button[onclick="viewPreparedCodebook()"],button[onclick="changeCodebook()"],button[onclick="lockCodebook()"],button[onclick="editCodebookDraft()"],button[onclick="pick(\'file\',\'codebook\')"]'))node.disabled=running}
+async function loadCodebookTask(){try{let x=await api('/api/codebook/task');codebookStatusError=null;codebookModelDefaults={default_model:x.default_model||'',recommended_model:x.recommended_model||codebookModelDefaults.recommended_model};let input=$('rulemodel');if(input&&ruleModelDraft==null&&!input.value)input.value=ruleModelValue();setCodebookTask(x.task)}catch(e){codebookStatusError={message_key:'rulejob.status_unavailable',params:{detail:e.uiMessage||{text:e.message}}};renderRuleJobPanel()}}
+function setCodebookTask(task){let wasRunning=codebookRunning();lastCodebookTask=task||null;renderRuleJobPanel();if(codebookRunning())startCodebookPolling();else{stopCodebookPolling();if(wasRunning||codebookOperation)finishCodebookPreparation()}}
+function startCodebookPolling(){if(codebookPollTimer)return;codebookPollFailures=0;codebookPollTimer=setInterval(pollCodebookTask,1000)}
+function stopCodebookPolling(){if(codebookPollTimer)clearInterval(codebookPollTimer);codebookPollTimer=null}
+async function pollCodebookTask(){try{let x=await api('/api/codebook/task');codebookPollFailures=0;codebookStatusError=null;setCodebookTask(x.task)}catch(e){codebookPollFailures+=1;codebookStatusError={message_key:'rulejob.status_unavailable',params:{detail:e.uiMessage||{text:e.message}}};if(codebookPollFailures>=5){stopCodebookPolling();if(lastCodebookTask?.state==='running')lastCodebookTask=null;if(codebookOperation){endOperation(codebookOperation);codebookOperation=null}}renderRuleJobPanel()}}
+async function finishCodebookPreparation(){
+  let operation=codebookOperation,task=lastCodebookTask;codebookOperation=null;codebookStopRequested=false;if(operation)endOperation(operation);
+  let ownJob=(operation&&task?.request_id===operation.id)||(codebookAttachedTaskId&&task?.task_id===codebookAttachedTaskId);codebookAttachedTaskId=null;
+  if(ownJob&&task.context_after&&!pageContextStale&&workbenchContext===task.context_before)workbenchContext=task.context_after;
+  try{let profile=await api('/api/codebook');renderCodebookStatus(profile);renderStatus(await api('/api/status'));if(operation&&task?.state==='succeeded'&&profile?.version===task.result?.profile_version)showCodebookWorkspace(profile)}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}
+  renderRuleJobPanel();
+}
+async function prepareCodebook(){
+  if(codebookRunning())return;
+  if(!allowRuleDraftTransition())return;
+  let host=$('contextrulemsg')||$('codebookstatus'),path=$('codebook').value.trim();
+  if(!path){setUIMessage(host,{message_key:'rulews.choose_file'},'error');return}
+  let model=currentRuleModel();
+  if(!model){setUIMessage(host,{message_key:'rulejob.model_required'},'error');$('rulemodel')?.focus();return}
+  if(!validRuleModelId(model)){setUIMessage(host,{message_key:'rulejob.model_invalid',params:{model}},'error');$('rulemodel')?.focus();return}
+  if(host)host.textContent='';
+  let previous=lastCodebookTask,operation=beginOperation();codebookOperation=operation;codebookStopRequested=false;
+  lastCodebookTask={state:'running',stage:'reading',model,request_id:operation.id,unit_kind:/\.pdf$/i.test(path)?'page':'block',source:{path,name:path.split(/[\\/]/).pop(),type:(path.split('.').pop()||'').toLowerCase()},progress:{},log:[],calls:0,started_at:new Date().toISOString()};
+  renderRuleJobPanel();
+  try{let x=await api('/api/codebook/prepare',{method:'POST',body:JSON.stringify({path,model,request_id:operation.id,background:true})});codebookModelDefaults.default_model=model;ruleModelDraft=null;setCodebookTask(x.task);if(codebookRunning())startCodebookPolling()}
+  catch(e){codebookOperation=null;endOperation(operation);lastCodebookTask=previous;renderRuleJobPanel();setUIMessage($('contextrulemsg')||host,{message_key:'rulejob.start_failed',params:{detail:e.uiMessage||{text:e.message}}},'error')}
+}
+function retryCodebookPreparation(){let source=lastCodebookTask?.source;if(source?.path&&!$('codebook').value.trim()){$('codebook').value=source.path;let input=$('contextcodebookpath');if(input)input.value=source.path}if(lastCodebookTask?.model&&ruleModelDraft==null){ruleModelDraft=lastCodebookTask.model;let input=$('rulemodel');if(input)input.value=ruleModelDraft}prepareCodebook()}
+async function stopCodebookPreparation(){let task=lastCodebookTask;if(!codebookRunning()||!task.request_id||codebookStopRequested)return;codebookStopRequested=true;if(activeOperation&&activeOperation.id===task.request_id)activeOperation.stopping=true;renderRuleJobPanel();try{await api('/api/operation/cancel',{method:'POST',body:JSON.stringify({request_id:task.request_id})})}catch(e){codebookStopRequested=false;codebookStatusError=e.uiMessage||{text:e.message};renderRuleJobPanel()}}
+function viewPreparedCodebook(){viewCodebook()}
+async function viewCodebook(){if(codebookRunning())return;if(!allowRuleDraftTransition())return;try{let profile=await api('/api/codebook');if(!profile||!profile.status)throw Error(t('rulews.not_prepared'));renderCodebookStatus(profile);showCodebookWorkspace(profile)}catch(e){setUIMessage($('contextrulemsg')||$('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
+// In-page confirmation; replaces the browser's native confirm() for rule actions.
+function appConfirm(text){return new Promise(resolve=>{$('appconfirm')?.remove();let backdrop=document.createElement('div');backdrop.id='appconfirm';backdrop.className='app-confirm-backdrop';backdrop.innerHTML='<section class="app-confirm" role="alertdialog" aria-modal="true" aria-labelledby="appconfirmtext"><p id="appconfirmtext"></p><div class="row"><button class="ghost" id="appconfirmcancel">'+t('confirm.cancel')+'</button><button id="appconfirmok">'+t('confirm.ok')+'</button></div></section>';backdrop.querySelector('#appconfirmtext').textContent=text;let done=value=>{window.removeEventListener('keydown',key,true);backdrop.remove();resolve(value)},key=event=>{if(event.key==='Escape'){event.stopImmediatePropagation();event.preventDefault();done(false)}};backdrop.querySelector('#appconfirmok').onclick=()=>done(true);backdrop.querySelector('#appconfirmcancel').onclick=()=>done(false);backdrop.addEventListener('click',event=>{if(event.target===backdrop)done(false)});window.addEventListener('keydown',key,true);document.body.append(backdrop);backdrop.querySelector('#appconfirmok').focus()})}
+async function lockCodebook(){if(codebookRunning())return;if(!allowRuleDraftTransition())return;if(!await appConfirm(t('rulews.lock_confirm')))return;try{let profile=await api('/api/codebook/lock',{method:'POST'});renderCodebookStatus(profile);renderStatus(await api('/api/status'));showCodebookWorkspace(profile);setUIMessage($('setupmsg'),{message_key:'rulews.lock_success'},'ok');renderRuleJobPanel()}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
+async function changeCodebook(){if(codebookRunning())return;if(!allowRuleDraftTransition())return;if(!await appConfirm(t('rulews.replace_confirm')))return;try{await api('/api/codebook',{method:'DELETE'});$('codebook').value='';let input=$('contextcodebookpath');if(input)input.value='';renderCodebookStatus({status:'none'});leaveCodebookWorkspace();setUIMessage($('setupmsg'),{message_key:'rulews.replace_success'});renderRuleJobPanel()}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}}
 let sessionOffset=0,sessionHasMore=false,sessionLoading=false,currentSessionName='';
 function initSessionSidebar(){if($('sessionpanel'))return;let left=document.querySelector('.shell > .side');if(!left)return;let style=document.createElement('style');style.textContent='.side.left{display:flex;flex-direction:column;overflow:hidden;padding-bottom:10px}.left-content{overflow:auto;min-height:0;padding-right:2px}.session-panel{border-top:1px solid #334155;margin-top:10px;padding-top:10px;display:flex;flex-direction:column;min-height:155px;max-height:42vh}.session-new{width:100%;margin-bottom:8px;text-align:left}.session-list{overflow:auto;min-height:0}.session-row{display:flex;align-items:center;gap:4px;border-radius:7px;margin:2px 0;padding:6px 5px;cursor:pointer;color:#dbeafe}.session-row:hover,.session-row.active{background:#263244}.session-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.session-more{visibility:hidden;width:25px;padding:2px 3px;background:transparent;color:#cbd5e1}.session-row:hover .session-more,.session-row.active .session-more{visibility:visible}.session-pin{font-size:10px;color:#7dd3fc}.session-loading{text-align:center;padding:8px;color:#94a3b8}.session-menu{position:fixed;z-index:100;min-width:130px;padding:5px;background:#1e293b;border:1px solid #475569;border-radius:8px;box-shadow:0 12px 30px rgba(0,0,0,.4)}.session-menu button{display:block;width:100%;text-align:left;background:transparent;color:#e5e7eb;padding:7px 9px}.session-menu button:hover{background:#334155}.session-menu button.delete{color:#fca5a5}';document.head.append(style);left.classList.add('left');let content=document.createElement('div');content.className='left-content';while(left.firstChild)content.append(left.firstChild);left.append(content);let old=$('session')?.closest('.field');if(old)old.style.display='none';let panel=document.createElement('section');panel.id='sessionpanel';panel.className='session-panel';panel.innerHTML='<button id="newsessionbutton" class="ghost session-new" onclick="newSession()"></button><div id="sessionlist" class="session-list"></div>';left.append(panel);localizeSessionChrome();$('sessionlist').addEventListener('scroll',()=>{let el=$('sessionlist');if(sessionHasMore&&!sessionLoading&&el.scrollTop+el.clientHeight>=el.scrollHeight-18)loadSessions(false)});document.addEventListener('click',event=>{if(!event.target.closest('.session-more')&&!event.target.closest('#sessionmenu'))closeSessionMenu()})}
 function localizeSessionChrome(){setI18nText($('newsessionbutton'),'session.new')}
@@ -3742,7 +4495,7 @@ async function chat(){
     previewText.appendData(text);
   }
   try{
-    let response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','X-Workbench-Language':uiLanguage,...contextHeaders()},signal:task.controller.signal,body:JSON.stringify({question:q,request_id:task.id,require_classification:$('answermode')?.value!=='explanation'})});
+    let response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','X-Workbench-Language':uiLanguage,...contextHeaders()},signal:task.controller.signal,body:JSON.stringify({question:q,request_id:task.id,require_classification:!(answerModeAvailable()&&$('answermode')?.value==='explanation')})});
     learnPageContext('/api/chat/stream','POST',response);
     if(!response.ok)await readApiResponse(response);
     let reader=response.body.getReader(),decoder=new TextDecoder();
