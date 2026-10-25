@@ -8,6 +8,7 @@ connector as the real ``stop_reason: max_tokens``.
 
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import threading
@@ -242,21 +243,78 @@ class CodebookPreparation(unittest.TestCase):
         self.assertEqual(w.ACTIVE["state"].data["usage"]["requests"], len(calls))  # failed calls still counted
         self.assert_closed()
 
-    def test_merge_output_limit_escalates_within_its_own_bounded_budget(self):
-        def merge_twice(response, prompt, system):
-            if "consolidate page-by-page" in system and merge_twice.count < 2:
-                merge_twice.count += 1
+    def test_large_merge_switches_to_sections_instead_of_longer_responses(self):
+        # Field case: every page parsed, but one merged response did not fit;
+        # 8000/16000-token single responses were cut by the corporate proxy.
+        path = make_pdf(self.f.root / "Codebook 6 Seiten.pdf", [RULE_TEXT] + [f"Seite {n}." for n in range(2, 7)])
+
+        def merge_too_long(response, prompt, system):
+            if "consolidate page-by-page" in system:
                 response["candidates"][0]["finishReason"] = "MAX_TOKENS"
             return response
-        merge_twice.count = 0
-        self.f.response_transform = merge_twice
+        self.f.response_transform = merge_too_long
         before = len(self.f.calls)
-        profile = self.post("/api/codebook/prepare", {"path": str(self.f.rules)})
-        self.assertEqual(profile["status"], "draft")
+        profile = self.post("/api/codebook/prepare", {"path": str(path), "model": CLAUDE})
+        self.assertEqual(profile["draft"]["classes"][0]["name"], "Rotationseinheit")
+        calls = [json.dumps(call["body"], ensure_ascii=False) for call in self.f.calls[before:]]
         merges = [call for call in self.f.calls[before:] if "consolidate page-by-page" in json.dumps(call["body"])]
-        self.assertEqual([call["body"]["generationConfig"]["maxOutputTokens"] for call in merges],
-                         list(w.CODEBOOK_BUDGET.merge_output_tokens))
-        self.assertEqual(sum(key == "rulejob.log.merge_retry" for key in self.keys(self.task())), 2)
+        sections = [call for call in self.f.calls[before:] if "one section per request" in json.dumps(call["body"])]
+        self.assertEqual([call["body"]["max_tokens"] for call in merges], [3500])  # one try, no escalation
+        self.assertEqual([re.search(r"SECTION (\w+)", json.dumps(call["body"]["messages"])).group(1) for call in sections],
+                         ["outline", "class", "general", "tables"])
+        self.assertTrue(all(call["body"]["max_tokens"] == 3500 for call in sections))
+        self.assertLessEqual(max(call["body"]["max_tokens"] for call in self.f.calls[before:]), 4400)
+        # The notes travel in the cached system prompt, not the user message.
+        self.assertTrue(all("CODEBOOK NOTES" in json.dumps(call["body"]["system"]) for call in sections))
+        self.assertEqual(len(calls), 6 + 1 + 4)
+        keys = self.keys(self.task())
+        self.assertIn("rulejob.log.merge_sectioned", keys)
+        self.assertEqual(keys.count("rulejob.log.merge_section"), 4)
+
+    def test_section_output_limit_fails_with_section_name_and_saves_nothing(self):
+        def class_too_long(response, prompt, system):
+            if "consolidate page-by-page" in system or "SECTION class" in prompt:
+                response["candidates"][0]["finishReason"] = "MAX_TOKENS"
+            return response
+        self.f.response_transform = class_too_long
+        response = self.client.post("/api/codebook/prepare", json={"path": str(self.f.rules)})
+        self.assertEqual(response.status_code, 400, response.text)
+        failure = self.task()["failure"]
+        self.assertEqual((failure["reason"], failure["stage"], failure["attempts"]), ("section_output_limit", "merging", 2))
+        self.assertIn("Merging “class Rotationseinheit” produced too much output", self.english(failure["message"]))
+        class_calls = [call for call in self.f.calls if "SECTION class" in json.dumps(call["body"])]
+        self.assertEqual([call["body"]["generationConfig"]["maxOutputTokens"] for call in class_calls], [3500, 7000])
+        self.assertIn("Be more concise", json.dumps(class_calls[1]["body"]))
+        self.assertEqual(w.load_codebook_profile(), {})
+        self.assert_closed()
+
+    def test_retry_reuses_completed_pages_and_only_redoes_the_merge(self):
+        path = make_pdf(self.f.root / "Codebook Wiederholung.pdf", [RULE_TEXT, "Gantry.", "Greifer.", "Grenzfall."])
+
+        def merge_fails(response, prompt, system):
+            if "consolidate page-by-page" in system:
+                response["candidates"][0]["finishReason"] = "SAFETY"
+            return response
+        self.f.response_transform = merge_fails
+        self.assertEqual(self.client.post("/api/codebook/prepare", json={"path": str(path)}).status_code, 400)
+        self.assertEqual(len(self.codebook_calls()), 4)
+        self.f.response_transform = None
+        before = len(self.f.calls)
+        profile = self.post("/api/codebook/prepare", {"path": str(path)})
+        self.assertEqual((profile["status"], profile["reused_units"]), ("draft", 4))
+        self.assertEqual(len(self.codebook_calls(before)), 0)  # no page is paid for twice
+        self.assertEqual(self.keys(self.task()).count("rulejob.log.unit_reused"), 4)
+        # Another model or changed content never reuses notes.
+        before = len(self.f.calls)
+        self.post("/api/codebook/prepare", {"path": str(path), "model": "gemini-2.5-flash"})
+        self.assertEqual(len(self.codebook_calls(before)), 4)
+
+    def test_proxy_interruption_is_reported_as_such(self):
+        reason, _params = w.classify_model_failure("Error after 3 attempts: ProxyError")
+        self.assertEqual(reason, "proxy")
+        full, short = w.CodebookPrepareError("proxy", "merging").messages()
+        self.assertIn("network proxy interrupted", str(localize_message(full, "en")))
+        self.assertEqual(str(localize_message(short, "zh")), "合并并校验规则：被网络代理中断")
 
     def test_total_call_limit_stops_a_run(self):
         from docx import Document
@@ -277,7 +335,8 @@ class CodebookPreparation(unittest.TestCase):
         budget = w.CodebookParseBudget()
         self.assertEqual((budget.unit_output_tokens, budget.escalated_output_tokens, budget.max_split_depth), (2200, 4400, 2))
         self.assertEqual((budget.max_attempts_per_unit, budget.max_calls_per_unit), (4, 11))
-        self.assertEqual(budget.call_limit(3), 3 * 11 + 4)
+        self.assertEqual(budget.call_limit(3), 3 * 11 + 1 + 2 * (40 + 3) + 1)
+        self.assertEqual((budget.merge_output_tokens, budget.section_output_tokens), ((3500,), (3500, 7000)))
         self.assertEqual(budget.call_limit(1000), budget.max_total_calls)
         self.assertLessEqual(max(budget.merge_output_tokens), 32000)  # connector ceiling
         self.post("/api/codebook/prepare", {"path": str(self.f.rules)})
@@ -414,7 +473,8 @@ class CodebookPreparation(unittest.TestCase):
         for reason in sorted(w.CODEBOOK_FAILURE_REASONS):
             for unit in [None, {"kind": "page", "number": 3}, {"kind": "blocks", "first": 4, "last": 6}]:
                 error = w.CodebookPrepareError(reason, "parsing", unit=unit, attempts=4,
-                                               params={"status": "503", "limit": 9, "detail": UIMessage("rules.classes_empty")})
+                                               params={"status": "503", "limit": 9, "detail": UIMessage("rules.classes_empty"),
+                                                       "section": UIMessage("rulejob.section.class", name="Gantry")})
                 for message in error.messages():
                     for language in ["zh", "en", "de"]:
                         text = str(localize_message(message, language))

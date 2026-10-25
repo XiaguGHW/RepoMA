@@ -51,7 +51,17 @@ class FixtureEnvironment:
                 else:
                     prompt='\n'.join(p.get('text','') for c in body.get('contents',[]) for p in c.get('parts',[]))
                     system='\n'.join(p.get('text','') for p in body.get('system_instruction',{}).get('parts',[]))
-                if 'consolidate page-by-page' in system:
+                if 'one section per request' in system:
+                    cls=PROFILE['classes'][0]
+                    if 'SECTION outline' in prompt:
+                        text=json.dumps({'classes':[{'name':cls['name']}]})
+                    elif 'SECTION class' in prompt:
+                        text=json.dumps(cls)
+                    elif 'SECTION general' in prompt:
+                        text=json.dumps({'global_rules':[],'uncertainties':[]})
+                    else:
+                        text=json.dumps({'table_rules':[]})
+                elif 'consolidate page-by-page' in system:
                     text=json.dumps(PROFILE)
                 elif 'transcribe exactly one' in system:
                     text=json.dumps({'page':1,'definitions':['Rotationseinheit: rotates objects']})

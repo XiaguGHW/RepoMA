@@ -904,6 +904,10 @@ def namespace_duplicate_rule_ids(draft: dict) -> list[dict]:
 
 CODEBOOK_PAGE_SYSTEM = """You transcribe exactly one technical classification Codebook page, one part of a page, or one group of text blocks into compact rule notes, using the supplied native text, OCR text and page image. Return ONLY minified JSON: {\"source\":\"page 3\",\"official_names\":[\"exact wording\"],\"definitions\":[\"...\"],\"decision_rules\":[\"...\"],\"boundaries\":[\"...\"],\"tables\":[{\"title\":\"...\",\"columns\":[\"...\"],\"rows\":[[\"cell\"]]}],\"uncertainties\":[\"...\"]}. Keep official class names verbatim. State every definition, decision rule and boundary once, as one short sentence. For a table keep its title, its column names and only the rows that carry classification meaning, with short cells. Do not copy the page verbatim, do not repeat prose that carries no rule, do not invent text and omit empty fields. When the request covers only part of a page or of the text, cover only that part. Use the page or block numbers supplied in the prompt."""
 CODEBOOK_MERGE_SYSTEM = """You consolidate page-by-page Codebook transcriptions. Return ONLY JSON: {\"classes\":[{\"name\":\"exact official class name\",\"definition\":\"...\",\"decision_rules\":[{\"id\":\"class-rule-1\",\"text\":\"...\",\"pages\":[1]}],\"boundaries\":[{\"id\":\"class-boundary-1\",\"text\":\"...\",\"pages\":[1]}],\"evidence_pages\":[1]}],\"global_rules\":[{\"id\":\"global-1\",\"text\":\"...\",\"pages\":[1]}],\"table_rules\":[{\"id\":\"table-1\",\"text\":\"meaning of the table rule\",\"pages\":[1],\"table\":{\"columns\":[\"...\"],\"rows\":[[\"...\"]]}}],\"uncertainties\":[\"...\"]}. Preserve exact names, rule IDs and page numbers. Do not invent missing rules. Keep each text short and state each rule once. For a Codebook without physical pages (TXT/DOCX) put the supplied text block numbers in \"blocks\" (and \"evidence_blocks\" for classes) and leave \"pages\" and \"evidence_pages\" empty; never invent page numbers."""
+CODEBOOK_SECTION_SYSTEM = """You merge Codebook page notes into a classification rule profile, one section per request. The complete notes of the whole Codebook follow below. Return ONLY one minified JSON object in exactly the shape the request asks for. Preserve exact official class names, rule IDs and page numbers, keep each text short, state each rule once and do not invent rules. For a Codebook without physical pages (TXT/DOCX) put the text block numbers in \"blocks\" (and \"evidence_blocks\" for a class) and leave \"pages\" and \"evidence_pages\" empty; never invent page numbers.
+
+--- CODEBOOK NOTES ---
+"""
 CODEBOOK_JSON_REPAIR_SYSTEM = """Return ONLY one complete, valid JSON object. Do not use Markdown fences or commentary. Preserve every fact, class name, rule, table value and page number from the supplied candidate; only repair JSON syntax such as missing commas, quotes, brackets or escaping."""
 
 # Codebook rule files the workbench can prepare, by lower-case suffix.
@@ -925,13 +929,21 @@ class CodebookParseBudget:
     ``escalated_output_tokens``.  A truncated response is never parsed, merged
     or saved.  Every model call of one preparation is counted against
     ``call_limit`` so a pathological file cannot cause unbounded cost.
+
+    The merge first tries one request.  A large Codebook does not fit one
+    response (and a multi-minute generation is cut by corporate proxies), so
+    on an output-limit stop the profile is merged section by section: a class
+    outline, one request per class, general rules and table rules, each with
+    a small budget and one more concise retry.  Sections are assembled locally.
     """
     unit_output_tokens: int = 2200
     part_output_tokens: int = 2200
     escalated_output_tokens: int = 4400
     max_split_depth: int = 2
     min_split_chars: int = 400
-    merge_output_tokens: tuple[int, ...] = (3500, 8000, 16000)
+    merge_output_tokens: tuple[int, ...] = (3500,)
+    section_output_tokens: tuple[int, ...] = (3500, 7000)
+    max_merge_classes: int = 40
     repair_output_tokens: int = 4096
     max_total_calls: int = 300
 
@@ -946,7 +958,8 @@ class CodebookParseBudget:
         return (2 ** (self.max_split_depth + 1) - 1) + 2 ** self.max_split_depth
 
     def call_limit(self, units: int) -> int:
-        planned = max(1, units) * self.max_calls_per_unit + len(self.merge_output_tokens) + 1
+        sectioned = len(self.section_output_tokens) * (self.max_merge_classes + 3)
+        planned = max(1, units) * self.max_calls_per_unit + len(self.merge_output_tokens) + sectioned + 1
         return min(self.max_total_calls, planned)
 
 
@@ -1055,8 +1068,9 @@ CODEBOOK_JOB_GUARD = threading.Lock()
 CODEBOOK_JOB: dict[str, Any] = {}
 CODEBOOK_JOB_LOG_LIMIT = 200
 CODEBOOK_FAILURE_REASONS = {
-    "output_limit", "merge_output_limit", "timeout", "network", "http", "invalid_json", "empty", "model_error",
+    "output_limit", "timeout", "network", "http", "invalid_json", "empty", "model_error",
     "cancelled", "call_limit", "no_rules", "empty_file", "encoding", "binary", "unreadable", "interrupted", "internal",
+    "proxy", "section_output_limit",
 }
 
 
@@ -1117,6 +1131,8 @@ def classify_model_failure(failure: Any) -> tuple[str, dict[str, Any]]:
     text = str(failure or "").casefold()
     if "max_tokens" in text or "(length)" in text or "max tokens" in text:
         return "output_limit", {}
+    if "proxyerror" in text or "proxy error" in text:
+        return "proxy", {}
     if "no complete response within" in text or "timed out" in text or "timeout" in text:
         return "timeout", {}
     if text.startswith("http error"):
@@ -1381,21 +1397,30 @@ def parse_codebook_unit(job: CodebookJob, data: dict[str, Any], connector: LLMCo
     return run(piece, 0)
 
 
+def codebook_notes_text(notes: list[list[dict]], nonpaged: bool) -> str:
+    label = "TEXT BLOCK GROUP" if nonpaged else "PAGE GROUP"
+    return "\n\n".join(
+        f"--- {label} {index} ---\n{json.dumps(unit_notes[0] if len(unit_notes) == 1 else unit_notes, ensure_ascii=False, separators=(',', ':'))}"
+        for index, unit_notes in enumerate(notes, start=1))
+
+
 def merge_codebook_notes(job: CodebookJob, data: dict[str, Any], connector: LLMConnector,
                          notes: list[list[dict]], nonpaged: bool) -> str:
-    """Merge every unit's notes; only an output-limit stop is retried, with a larger bounded budget."""
-    label = "TEXT BLOCK GROUP" if nonpaged else "PAGE GROUP"
+    """Merge every unit's notes into profile JSON.
+
+    One request first; on an output-limit stop the profile is merged section
+    by section (see CodebookParseBudget) instead of asking for ever longer
+    single responses.
+    """
+    budget = CODEBOOK_BUDGET
+    notes_text = codebook_notes_text(notes, nonpaged)
     prompt = (f"Consolidate every Codebook {'text-block' if nonpaged else 'page'} note below. "
               "All classes, tables and boundary rules must be retained.")
     if nonpaged:
         prompt += (" This Codebook has no physical pages: cite the supplied block numbers in \"blocks\" and "
                    "\"evidence_blocks\" and leave \"pages\" and \"evidence_pages\" empty.")
-    prompt += "\n\n" + "\n\n".join(
-        f"--- {label} {index} ---\n{json.dumps(unit_notes[0] if len(unit_notes) == 1 else unit_notes, ensure_ascii=False, separators=(',', ':'))}"
-        for index, unit_notes in enumerate(notes, start=1))
-    budgets = CODEBOOK_BUDGET.merge_output_tokens
-    technical = ""
-    for attempt, tokens in enumerate(budgets, start=1):
+    prompt += "\n\n" + notes_text
+    for tokens in budget.merge_output_tokens:
         job.count_call()
         raw = accounted_model_call(data, connector, [], prompt, CODEBOOK_MERGE_SYSTEM,
                                    {"maxOutputTokens": tokens, "temperature": 0}, stream=True, usage_records=job.usages)
@@ -1403,13 +1428,118 @@ def merge_codebook_notes(job: CodebookJob, data: dict[str, Any], connector: LLMC
         if not failure:
             return raw
         reason, params = classify_model_failure(failure)
-        technical = str(failure)
         if reason != "output_limit":
-            raise CodebookPrepareError(reason, "merging", technical=technical, params=params)
-        if attempt < len(budgets):
-            job.event("merging", "rulejob.log.merge_retry", level="warning", tokens=budgets[attempt],
-                      attempt=attempt + 1, limit=len(budgets))
-    raise CodebookPrepareError("merge_output_limit", "merging", attempts=len(budgets), technical=technical)
+            raise CodebookPrepareError(reason, "merging", technical=str(failure), params=params)
+    job.event("merging", "rulejob.log.merge_sectioned", level="warning", tokens=budget.section_output_tokens[0])
+    return json.dumps(merge_codebook_sections(job, data, connector, notes_text), ensure_ascii=False)
+
+
+def merge_codebook_sections(job: CodebookJob, data: dict[str, Any], connector: LLMConnector, notes_text: str) -> dict:
+    """Outline, one request per class, general rules and table rules; assembled locally.
+
+    The notes travel in the system prompt so Claude's prompt cache serves the
+    repeated input; every response stays within a small output budget.
+    """
+    budget = CODEBOOK_BUDGET
+    system = CODEBOOK_SECTION_SYSTEM + notes_text
+
+    def section(label: UIMessage, request: str, current: int, total: int) -> dict:
+        job.event("merging", "rulejob.log.merge_section", progress={"current": current, "total": total},
+                  current=current, total=total, section=label)
+        technical = ""
+        for attempt, tokens in enumerate(budget.section_output_tokens, start=1):
+            text = request if attempt == 1 else (
+                request + " Be more concise: shorten every text and keep only rule-bearing table rows.")
+            job.count_call()
+            raw = accounted_model_call(data, connector, [], text, system,
+                                       {"maxOutputTokens": tokens, "temperature": 0}, stream=True,
+                                       usage_records=job.usages)
+            failure = connector_failure(raw)
+            if failure:
+                reason, params = classify_model_failure(failure)
+                technical = str(failure)
+                if reason != "output_limit":
+                    raise CodebookPrepareError(reason, "merging", technical=technical, params=params)
+                continue
+            result = parse_codebook_note(raw)
+            if result is None:
+                raise CodebookPrepareError("invalid_json", "merging", technical=str(raw)[:800])
+            return result
+        raise CodebookPrepareError("section_output_limit", "merging", attempts=len(budget.section_output_tokens),
+                                   technical=technical, params={"section": label})
+
+    outline = section(UIMessage("rulejob.section.outline", "zh"),
+                      'SECTION outline. Return {"classes":[{"name":"exact official class name"}]} listing every '
+                      'classification class defined in the notes, in Codebook order. Names only.', 1, 1)
+    names: list[str] = []
+    for item in outline.get("classes", []) if isinstance(outline.get("classes"), list) else []:
+        name = str((item.get("name") if isinstance(item, dict) else item) or "").strip()
+        if name and name.casefold() not in {known.casefold() for known in names}:
+            names.append(name)
+    if not names:
+        raise CodebookPrepareError("no_rules", "merging", technical="The class outline contains no class",
+                                   params={"detail": UIMessage("rules.classes_empty", "zh")})
+    if len(names) > budget.max_merge_classes:
+        raise CodebookPrepareError("call_limit", "merging", params={"limit": budget.max_merge_classes},
+                                   technical=f"{len(names)} classes exceed max_merge_classes")
+    total = len(names) + 3
+    classes = []
+    for index, name in enumerate(names, start=2):
+        key = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-") or "class"
+        result = section(UIMessage("rulejob.section.class", "zh", name=name),
+                         f'SECTION class. Return {{"name":{json.dumps(name, ensure_ascii=False)},"definition":"...",'
+                         f'"decision_rules":[{{"id":"{key}-rule-1","text":"...","pages":[1]}}],'
+                         f'"boundaries":[{{"id":"{key}-boundary-1","text":"...","pages":[1]}}],"evidence_pages":[1]}} '
+                         f'for the class {json.dumps(name, ensure_ascii=False)} only, with every decision rule and '
+                         'boundary/exclusion rule that applies to it.', index, total)
+        result["name"] = name  # The outline fixes the exact official name.
+        classes.append(result)
+    general = section(UIMessage("rulejob.section.general", "zh"),
+                      'SECTION general. Return {"global_rules":[{"id":"global-1","text":"...","pages":[1]}],'
+                      '"uncertainties":["..."]} with rules that apply to all classes (procedure, counting, required '
+                      'fields) and the uncertainties noted. Do not repeat class-specific rules.', total - 1, total)
+    tables = section(UIMessage("rulejob.section.tables", "zh"),
+                     'SECTION tables. Return {"table_rules":[{"id":"table-1","text":"meaning of the table rule",'
+                     '"pages":[1],"table":{"columns":["..."],"rows":[["..."]]}}]} for the decision tables. Keep only '
+                     'classification-relevant rows with short cells; return {"table_rules":[]} if there are none.',
+                     total, total)
+    return {"classes": classes,
+            "global_rules": general.get("global_rules", []) if isinstance(general.get("global_rules"), list) else [],
+            "table_rules": tables.get("table_rules", []) if isinstance(tables.get("table_rules"), list) else [],
+            "uncertainties": general.get("uncertainties", []) if isinstance(general.get("uncertainties"), list) else []}
+
+
+# Completed page/block notes are kept per file content, model and parsing
+# prompt, so a retry after a failed merge or a dropped connection does not
+# pay for pages that already succeeded.  Notes are complete JSON only.
+CODEBOOK_NOTES_VERSION = hashlib.sha256(json.dumps([
+    CODEBOOK_PAGE_SYSTEM, CODEBOOK_BUDGET.unit_output_tokens, CODEBOOK_BUDGET.part_output_tokens,
+    CODEBOOK_BUDGET.escalated_output_tokens, CODEBOOK_BUDGET.max_split_depth, CODEBOOK_BUDGET.min_split_chars,
+]).encode("utf-8")).hexdigest()[:12]
+
+
+def codebook_note_cache_path(file_sha: str, model: str) -> Path:
+    identity = hashlib.sha256(f"{model}\0{CODEBOOK_NOTES_VERSION}".encode("utf-8")).hexdigest()[:12]
+    return app_state_home() / "codebook_note_cache" / f"{file_sha[:20]}_{identity}.json"
+
+
+def codebook_unit_key(unit: dict) -> str:
+    if unit["kind"] == "page":
+        content = f"{unit['native_text']}\0{unit['ocr_text']}\0{unit['page_type']}"
+        return f"page:{unit['number']}:" + hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+    content = "\0".join(text for _number, _label, text in unit["chunks"])
+    return f"blocks:{unit['first']}-{unit['last']}:" + hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+
+
+def load_codebook_note_cache(path: Path) -> dict[str, list[dict]]:
+    try:
+        cached = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(cached, dict):
+        return {}
+    return {key: value for key, value in cached.items()
+            if isinstance(value, list) and value and all(isinstance(note, dict) for note in value)}
 
 
 def codebook_text_units(chunks: list[dict], per_unit: int = 3) -> list[dict]:
@@ -1478,6 +1608,9 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str, job: 
     job.record["units_total"] = len(units)
     job.call_limit = CODEBOOK_BUDGET.call_limit(len(units))
     notes: list[list[dict]] = []
+    note_cache_path = codebook_note_cache_path(hashlib.sha256(raw_bytes).hexdigest(), model)
+    note_cache = load_codebook_note_cache(note_cache_path)
+    reused_units = 0
     for index, unit in enumerate(units, start=1):
         if nonpaged:
             job.event("parsing", "rulejob.stage.parsing_blocks", current=index, total=len(units),
@@ -1487,7 +1620,20 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str, job: 
         else:
             job.event("parsing", "rulejob.stage.parsing_page", current=unit["number"], total=len(units),
                       progress={"current": unit["number"], "total": len(units)})
-        notes.append(parse_codebook_unit(job, data, connector, unit, len(units), file_type))
+        key = codebook_unit_key(unit)
+        if key in note_cache:
+            reused_units += 1
+            job.event("parsing", "rulejob.log.unit_reused", unit=codebook_unit_label(
+                {name: unit[name] for name in ("kind", "number", "first", "last") if name in unit}))
+            notes.append(note_cache[key])
+            continue
+        unit_notes = parse_codebook_unit(job, data, connector, unit, len(units), file_type)
+        notes.append(unit_notes)
+        note_cache[key] = unit_notes
+        try:
+            write_json_atomically(note_cache_path, note_cache)
+        except OSError:
+            pass  # Reuse is an optimisation only.
     job.event("merging", "rulejob.stage.merging", progress={})
     merged = merge_codebook_notes(job, data, connector, notes, nonpaged)
     try:
@@ -1514,7 +1660,7 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str, job: 
             "requested_model": model,
             "page_count": len(records) or chunk_count, "block_count": chunk_count if nonpaged else None,
             "page_groups": len(units), "usage": usage, "draft": draft, "document_id": document["id"],
-            "parse_calls": job.calls,
+            "parse_calls": job.calls, "reused_units": reused_units,
             "page_records": [{key: record[key] for key in ("page", "page_type", "ocr_status", "embedded_image_count")} for record in records],
             "page_transcriptions": [json.dumps(unit_notes, ensure_ascii=False) for unit_notes in notes],
             "ocr_runtime": ocr_runtime, "rule_id_renames": rule_id_renames}
@@ -4173,8 +4319,8 @@ let codebookPollTimer=null,codebookPollFailures=0,codebookOperation=null,codeboo
 function codebookRunning(){return lastCodebookTask?.state==='running'}
 function jobCopy(group,name,params={}){let key=['rulejob',group,name].join('.');return t(key,params)}
 function codebookUnitText(unit){if(!unit)return '';if(unit.kind==='page')return t('rulejob.unit.page',{number:unit.number});return unit.first===unit.last?t('rulejob.unit.block',{number:unit.first}):t('rulejob.unit.blocks',{first:unit.first,last:unit.last})}
-function codebookProgressText(task){let p=task?.progress||{};if(p.total&&(task.stage==='parsing'||task.stage==='extracting')){if(task.unit_kind==='page')return t('rulejob.progress.page',{current:p.current,total:p.total});if(task.stage==='parsing')return t('rulejob.progress.blocks',{current:p.current,total:p.total})}return jobCopy('where',(task?.stage||'reading'))}
-function codebookStageText(task){let entries=(task?.log||[]).filter(entry=>String(entry.message?.message_key||'').startsWith('rulejob.stage.'));return entries.length?uiCopy(entries[entries.length-1].message):jobCopy('where',(task?.stage||'reading'))}
+function codebookProgressText(task){let p=task?.progress||{};if(p.total&&(task.stage==='parsing'||task.stage==='extracting')){if(task.unit_kind==='page')return t('rulejob.progress.page',{current:p.current,total:p.total});if(task.stage==='parsing')return t('rulejob.progress.blocks',{current:p.current,total:p.total})}if(p.total&&task?.stage==='merging')return t('rulejob.progress.merge',{current:p.current,total:p.total});return jobCopy('where',(task?.stage||'reading'))}
+function codebookStageText(task){let entries=(task?.log||[]).filter(entry=>/^rulejob\.(stage\.|log\.merge_section$)/.test(String(entry.message?.message_key||'')));return entries.length?uiCopy(entries[entries.length-1].message):jobCopy('where',(task?.stage||'reading'))}
 function codebookLatestWarning(task){let log=task?.log||[],last=log[log.length-1];return last&&last.level==='warning'?uiCopy(last.message):''}
 function codebookTime(value){if(!value)return '—';let date=new Date(value);return isNaN(date)?String(value):date.toLocaleString(uiLanguage==='zh'?'zh-CN':uiLanguage==='de'?'de-DE':'en-GB')}
 function codebookElapsed(task){let start=Date.parse(task?.started_at),end=task?.finished_at?Date.parse(task.finished_at):Date.now();if(isNaN(start)||isNaN(end))return '—';let seconds=Math.max(0,Math.round((end-start)/1000));return seconds<60?seconds+' s':Math.floor(seconds/60)+' min '+String(seconds%60).padStart(2,'0')+' s'}
