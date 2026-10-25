@@ -55,7 +55,8 @@ class TransportMatrix(unittest.TestCase):
     def test_provider_usage_missing_zero_invalid_and_thoughts(self):
         for raw in ({'prompt_tokens': 12, 'completion_tokens': 3}, {'input_tokens': 12, 'output_tokens': 3},
                     {'promptTokenCount': 12, 'candidatesTokenCount': 3}):
-            u = normalize_usage(raw); self.assertEqual((u['input_tokens'], u['output_tokens'], u['total_tokens']), (12, 3, 15))
+            u = normalize_usage(raw)
+            self.assertEqual((u['input_tokens'], u['output_tokens'], u['total_tokens']), (12, 3, 15))
         self.assertIsNone(normalize_usage({})['input_tokens'])
         self.assertEqual(normalize_usage({'prompt_tokens': 0, 'completion_tokens': 0})['total_tokens'], 0)
         for value in (-1, 'bad', float('nan'), float('inf')):
@@ -114,69 +115,115 @@ class ApiAndFileMatrix(unittest.TestCase):
         import fitz
         from docx import Document
         from PIL import Image
-        source = self.root/'材料 ü'; source.mkdir()
-        pdf = fitz.open(); pdf.new_page().insert_text((30,30), 'Linear motor'); pdf.save(source/'fixture.pdf'); pdf.close()
-        doc = Document(); doc.add_paragraph('Linear motor'); doc.save(source/'fixture.docx')
-        book = Workbook(); book.active['A1']='part'; book.active['B2']='=1+1'; book.active.merge_cells('C1:D1'); book.save(source/'fixture.xlsx'); book.close()
-        for ext in ['png','jpg','jpeg','webp']: Image.new('RGB', (64,64), 'white').save(source/f'fixture.{ext}')
-        for ext in ['csv','txt','md']: (source/f'fixture.{ext}').write_text('motor,linear\n1,2', encoding='utf-8')
+        source = self.root/'材料 ü'
+        source.mkdir()
+        pdf = fitz.open()
+        pdf.new_page().insert_text((30,30), 'Linear motor')
+        pdf.save(source/'fixture.pdf')
+        pdf.close()
+        doc = Document()
+        doc.add_paragraph('Linear motor')
+        doc.save(source/'fixture.docx')
+        book = Workbook()
+        book.active['A1']='part'
+        book.active['B2']='=1+1'
+        book.active.merge_cells('C1:D1')
+        book.save(source/'fixture.xlsx')
+        book.close()
+        for ext in ['png','jpg','jpeg','webp']:
+            Image.new('RGB', (64,64), 'white').save(source/f'fixture.{ext}')
+        for ext in ['csv','txt','md']:
+            (source/f'fixture.{ext}').write_text('motor,linear\n1,2', encoding='utf-8')
         before = {p.name:p.read_bytes() for p in source.iterdir()}
         w.analyze_target(w.TargetRequest(target=str(source), selected_paths=['.']))
         self.assertEqual(len(w.ACTIVE['state'].data['active_source_ids']), len(before))
         self.assertEqual(before, {p.name:p.read_bytes() for p in source.iterdir()})
 
     def test_empty_corrupt_oversize_nested_duplicate_selection(self):
-        folder=self.root/'BG'; (folder/'nested').mkdir(parents=True)
+        folder=self.root/'BG'
+        (folder/'nested').mkdir(parents=True)
         (folder/'nested'/'good.txt').write_text('technical motor')
         (folder/'bad.pdf').write_bytes(b'broken PDF')
         (folder/'empty.txt').write_text('')
-        book=Workbook(); book.save(folder/'blank.xlsx'); book.close()
+        book=Workbook()
+        book.save(folder/'blank.xlsx')
+        book.close()
         x=w.analyze_target(w.TargetRequest(target=str(folder),selected_paths=['.','nested/good.txt']))
-        self.assertEqual(x['sources'],1); self.assertEqual(x['skipped_count'],3)
+        self.assertEqual(x['sources'],1)
+        self.assertEqual(x['skipped_count'],3)
         self.assertTrue(any('bad.pdf' in e for e in x['skipped']))
-        with self.assertRaises(w.HTTPException): w.analyze_target(w.TargetRequest(target=str(folder),selected_paths=[]))
+        with self.assertRaises(w.HTTPException):
+            w.analyze_target(w.TargetRequest(target=str(folder),selected_paths=[]))
         from local_document_library import MAX_DOCUMENT_BYTES
         large=folder/'large.txt'
-        with large.open('wb') as handle: handle.truncate(MAX_DOCUMENT_BYTES+1)
-        with self.assertRaisesRegex(ValueError,'larger'): w.ACTIVE['documents'].add(str(large))
+        with large.open('wb') as handle:
+            handle.truncate(MAX_DOCUMENT_BYTES+1)
+        with self.assertRaisesRegex(ValueError,'larger'):
+            w.ACTIVE['documents'].add(str(large))
 
     def test_no_source_scope_means_no_old_documents(self):
-        source=self.root/'old.txt';source.write_text('SECRET_OLD motor')
+        source=self.root/'old.txt'
+        source.write_text('SECRET_OLD motor')
         w.ACTIVE['documents'].add(str(source))
         self.assertEqual(w.ACTIVE['documents'].search('motor', allowed_ids=[]), [])
 
     def test_pending_cancel_confirm_backup_and_rollback(self):
-        a=self.workspace/'a.txt'; b=self.workspace/'b.txt'; a.write_text('A'); b.write_text('B')
+        a=self.workspace/'a.txt'
+        b=self.workspace/'b.txt'
+        a.write_text('A')
+        b.write_text('B')
         state=w.ACTIVE['state']
         changes=w.build_diff(state,[{'path':'a.txt','content':'new A'},{'path':'b.txt','content':'new B'}])
         plan_id = w.publish_pending(w.ACTIVE, changes)
-        with self.assertRaises(w.HTTPException): w.apply(w.ApplyRequest(confirmed=False))
+        with self.assertRaises(w.HTTPException):
+            w.apply(w.ApplyRequest(confirmed=False))
         self.assertEqual(a.read_text(),'A')
         real_replace=os.replace
         def fail_second(source,dest):
-            if Path(dest)==b: raise PermissionError('file locked')
+            if Path(dest)==b:
+                raise PermissionError('file locked')
             return real_replace(source,dest)
         with patch.object(w.os,'replace',side_effect=fail_second), self.assertRaises(PermissionError):
             w.apply(w.ApplyRequest(confirmed=True, plan_id=plan_id))
-        self.assertEqual(a.read_text(),'A'); self.assertEqual(b.read_text(),'B')
+        self.assertEqual(a.read_text(),'A')
+        self.assertEqual(b.read_text(),'B')
         self.assertTrue(list((state.root/'backups').rglob('a.txt')))
-        w.cancel_pending(); self.assertEqual(w.ACTIVE['pending'],[])
+        w.cancel_pending()
+        self.assertEqual(w.ACTIVE['pending'],[])
 
     def test_atomic_excel_publication_preserves_formulas_and_failure(self):
-        source=self.root/'source.xlsx'; output=self.root/'result.xlsx'
-        book=Workbook(); sheet=book.active; sheet.title='Data'; sheet['A1']='ID';sheet['A2']='1';sheet['B1']='Template';sheet['B2']='x';sheet['D2']='=A2';sheet.merge_cells('E1:F1');book.save(source);book.close()
+        source=self.root/'source.xlsx'
+        output=self.root/'result.xlsx'
+        book=Workbook()
+        sheet=book.active
+        sheet.title='Data'
+        sheet['A1']='ID'
+        sheet['A2']='1'
+        sheet['B1']='Template'
+        sheet['B2']='x'
+        sheet['D2']='=A2'
+        sheet.merge_cells('E1:F1')
+        book.save(source)
+        book.close()
         book=excel.load_book(source)
         plan={'source_sha256':excel.sha256(source),'source_formula_fingerprint':excel.formula_fingerprint(book),
               'sheet':'Data','target_column':'C','template_column':'B','header_row':1,
               'edits':[{'cell':'Data!C1','value':'New'},{'cell':'Data!C2','value':'Gantry'}]}
-        book.close(); path=self.root/'plan.json';path.write_text(json.dumps(plan))
+        book.close()
+        path=self.root/'plan.json'
+        path.write_text(json.dumps(plan))
         args=SimpleNamespace(workbook=str(source),output=str(output),plan=str(path),force=False)
-        with contextlib.redirect_stdout(io.StringIO()): excel.command_apply(args)
-        self.assertEqual(excel.sha256(source),plan['source_sha256']);self.assertTrue(excel.verify_plan(output,plan)['ok'])
+        with contextlib.redirect_stdout(io.StringIO()):
+            excel.command_apply(args)
+        self.assertEqual(excel.sha256(source),plan['source_sha256'])
+        self.assertTrue(excel.verify_plan(output,plan)['ok'])
         output.unlink()
-        with patch('openpyxl.workbook.workbook.Workbook.save',side_effect=PermissionError('locked')), self.assertRaises(PermissionError): excel.command_apply(args)
-        self.assertFalse(output.exists()); self.assertEqual(excel.sha256(source),plan['source_sha256'])
+        with patch('openpyxl.workbook.workbook.Workbook.save',side_effect=PermissionError('locked')), self.assertRaises(PermissionError):
+            excel.command_apply(args)
+        self.assertFalse(output.exists())
+        self.assertEqual(excel.sha256(source),plan['source_sha256'])
         self.assertFalse(list(self.root.glob('.result.*')))
 
 
-if __name__=='__main__': unittest.main()
+if __name__=='__main__':
+    unittest.main()

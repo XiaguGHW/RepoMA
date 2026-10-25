@@ -7,8 +7,10 @@ from typing import Any
 
 def token_count(value):
     try:
-        if value is None or isinstance(value, bool): return None
-        if isinstance(value, int): return value if value >= 0 else None
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value >= 0 else None
         number = float(value)
         return int(number) if math.isfinite(number) and number >= 0 and number.is_integer() else None
     except (ValueError, TypeError, OverflowError):
@@ -39,7 +41,8 @@ def normalize_usage(raw):
         uncached = token_count(raw.get('uncached_input_tokens')) if raw.get('_usage_normalized') else (
             incoming - cache_read - cache_write if all(v is not None for v in (incoming, cache_read, cache_write)) and incoming >= cache_read + cache_write else None)
     total = first('total_tokens', 'totalTokenCount')
-    if total is None and incoming is not None and outgoing is not None: total = incoming + outgoing
+    if total is None and incoming is not None and outgoing is not None:
+        total = incoming + outgoing
     return {**raw, 'input_tokens': incoming, 'output_tokens': outgoing, 'total_tokens': total,
             'uncached_input_tokens': uncached, 'cache_read_input_tokens': cache_read,
             'cache_creation_input_tokens': cache_write,
@@ -89,7 +92,8 @@ def redact_secrets(value, key=None):
 def safe_error(error, key=None):
     text = str(error)
     for secret in (key, os.getenv('BOSCH_FARM_SUBSCRIPTION_KEY'), os.getenv('BOSCH_FARM_API_KEY')):
-        if secret: text = text.replace(secret, '[redacted]')
+        if secret:
+            text = text.replace(secret, '[redacted]')
     text = re.sub(r'(?i)(bearer\s+|subscription-key[\s\x22\x27:=]+)[^\s,}\x22\x27]+', r'\1[redacted]', text)
     return text[:1200]
 

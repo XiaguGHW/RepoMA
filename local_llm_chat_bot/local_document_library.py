@@ -331,7 +331,8 @@ class LocalDocumentLibrary:
                 manifest = document.get("dfc_structure")
                 if not isinstance(manifest, dict):
                     manifest = self.dfc_segment_manifest(Path(document["path"]))
-                    document["dfc_structure"] = manifest; changed = True
+                    document["dfc_structure"] = manifest
+                    changed = True
                 segments = manifest.get("segments", []) if isinstance(manifest, dict) else []
                 for segment in segments:
                     if segment.get("ocr_status") not in {None, "not_requested"}:
@@ -352,4 +353,4 @@ class LocalDocumentLibrary:
                     {key: segment.get(key) for key in ("part", "path", "top_px", "bottom_px", "ocr_status")}
                     for segment in selected
                 ]
-                visual["dfc_ocr_status"] = self._dfc_ocr_status(seg
+                visual["dfc_ocr_status"] = self.

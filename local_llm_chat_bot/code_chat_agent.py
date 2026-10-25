@@ -156,7 +156,8 @@ class PricingCatalog:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             self.entries = data.get("entries", []) if isinstance(data, dict) else []
-            if not isinstance(self.entries, list): self.entries = []
+            if not isinstance(self.entries, list):
+                self.entries = []
             self.entries = [e for e in self.entries if isinstance(e, dict)]
         except (OSError, json.JSONDecodeError) as exc:
             self.error = str(exc)
@@ -202,7 +203,8 @@ class PricingCatalog:
         else:
             usage = normalize_usage(usage)
         input_tokens, output_tokens = usage["input_tokens"], usage["output_tokens"]
-        if not usage["usage_complete"]: return None
+        if not usage["usage_complete"]:
+            return None
         price = self.price_for(model)
         if not price:
             return None
@@ -211,7 +213,8 @@ class PricingCatalog:
             count = usage[key]
             if count:
                 counts.append((count, price[field + "_price"]))
-        if any(count is None or rate is None for count, rate in counts): return None
+        if any(count is None or rate is None for count, rate in counts):
+            return None
         cost = sum((Decimal(count) * Decimal(str(rate)) for count, rate in counts), Decimal(0)) / Decimal(1_000_000)
         return {
             **price,
@@ -247,10 +250,12 @@ class ProjectState:
                     "files": {}, "history": [], "summary": "", "usage": {"requests": 0, "input": 0, "output": 0, "estimated_cost_usd": 0.0, "unpriced_requests": 0}}
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-            if not isinstance(data, dict) or data.get("workspace") != str(self.workspace): return defaults
+            if not isinstance(data, dict) or data.get("workspace") != str(self.workspace):
+                return defaults
             context_problem = context_state_error(data)
             for key, value in defaults.items():
-                if not isinstance(data.get(key), type(value)): data[key] = value
+                if not isinstance(data.get(key), type(value)):
+                    data[key] = value
             for key, value in defaults["usage"].items():
                 current = data["usage"].get(key)
                 if key in {"input", "output"} and current is None and data["usage"].get("accounting_version") == 2:
@@ -327,7 +332,4 @@ class ProjectState:
         self.save_memory()
         return True
 
-    def edit_memory(self, item_id: str, content: str):
-        item = self.find_memory(item_id)
-        if not item:
-            
+    def edit_memory(self, item_id: str, content: str)

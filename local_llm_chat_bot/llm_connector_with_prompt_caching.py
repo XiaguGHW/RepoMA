@@ -170,7 +170,8 @@ class LLMConnector:
         candidates = reply.get("candidates", [])
         candidate = candidates[0] if candidates else {}
         reason = candidate.get("finishReason", "unknown")
-        if reason not in {"STOP", "unknown"}: return f"Error: incomplete Gemini response ({reason})"
+        if reason not in {"STOP", "unknown"}:
+            return f"Error: incomplete Gemini response ({reason})"
         texts = [p["text"] for p in candidate.get("content", {}).get("parts", []) if isinstance(p, dict) and isinstance(p.get("text"), str) and not p.get("thought")]
         return "".join(texts) or f"(no text content, finishReason={reason})"
 
@@ -398,7 +399,8 @@ class LLMConnector:
                         if image.mode != "RGB":
                             image = image.convert("RGB")
                         image.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
-                        buffer = io.BytesIO(); image.save(buffer, format="JPEG", quality=85)
+                        buffer = io.BytesIO()
+                        image.save(buffer, format="JPEG", quality=85)
                         return buffer.getvalue(), "image/jpeg"
                 except Exception as exc:
                     logging.warning("Image compression failed for %s: %s", path.name, exc)
@@ -420,16 +422,24 @@ class LLMConnector:
             data = path.read_bytes()
             if len(data) > 4 * 1024 * 1024 and _FITZ_AVAILABLE:
                 try:
-                    doc = fitz.open(path); clipped = fitz.open(); limit = int(5.5 * 1024 * 1024)
+                    doc = fitz.open(path)
+                    clipped = fitz.open()
+                    limit = int(5.5 * 1024 * 1024)
                     for page in doc:
-                        if clipped.page_count >= 4: break
+                        if clipped.page_count >= 4:
+                            break
                         clipped.insert_pdf(doc, from_page=page.number, to_page=page.number)
                         if len(base64.b64encode(clipped.write())) > limit:
-                            if clipped.page_count > 1: clipped.delete_page(clipped.page_count - 1)
+                            if clipped.page_count > 1:
+                                clipped.delete_page(clipped.page_count - 1)
                             else:
-                                clipped.close(); doc.close(); return self._fallback_single_page_to_image(str(path))
+                                clipped.close()
+                                doc.close()
+                                return self._fallback_single_page_to_image(str(path))
                             break
-                    data = clipped.write(); clipped.close(); doc.close()
+                    data = clipped.write()
+                    clipped.close()
+                    doc.close()
                 except Exception as exc:
                     logging.warning("PDF clipping failed: %s", exc)
             return {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(data).decode()}}
@@ -438,7 +448,9 @@ class LLMConnector:
 
     def _fallback_single_page_to_image(self, file_path: str, page_idx: int = 0) -> dict | None:
         try:
-            doc = fitz.open(file_path); pix = doc[page_idx].get_pixmap(matrix=fitz.Matrix(150 / 72, 150 / 72)); doc.close()
+            doc = fitz.open(file_path)
+            pix = doc[page_idx].get_pixmap(matrix=fitz.Matrix(150 / 72, 150 / 72))
+            doc.close()
             return {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(pix.tobytes("jpeg")).decode()}}
         except Exception as exc:
             logging.error("PDF image fallback failed: %s", exc)
@@ -451,14 +463,18 @@ class LLMConnector:
                 logging.warning("PyMuPDF is required to send PDFs to GPT.")
                 return []
             try:
-                doc = fitz.open(path); images = []
+                doc = fitz.open(path)
+                images = []
                 for i, page in enumerate(doc):
-                    if i >= 4: break
+                    if i >= 4:
+                        break
                     pix = page.get_pixmap(matrix=fitz.Matrix(150 / 72, 150 / 72))
                     images.append(base64.b64encode(pix.tobytes("jpeg")).decode())
-                doc.close(); return images
+                doc.close()
+                return images
             except Exception as exc:
-                logging.error("PDF-to-image conversion failed: %s", exc); return []
+                logging.error("PDF-to-image conversion failed: %s", exc)
+                return []
         data, _ = self._read_and_optimize_file(str(path))
         return [base64.b64encode(data).decode()] if data else []
 
@@ -500,13 +516,15 @@ class LLMConnector:
                     self._control.limit(len(answer))
                     return answer
                 if response.status_code in retryable and attempt < attempts:
-                    self._control.pause(self._control.policy.backoff * 2 ** (attempt - 1)); continue
+                    self._control.pause(self._control.policy.backoff * 2 ** (attempt - 1))
+                    continue
                 logging.error("HTTP %s", response.status_code)
                 return f"HTTP error {response.status_code}"
             except requests.exceptions.ConnectionError as exc:
                 # Includes ConnectTimeout: the provider never received the request.
                 self._control.check()
-                if attempt == attempts: return f"Error after {attempts} attempts: {type(exc).__name__}"
+                if attempt == attempts:
+                    return f"Error after {attempts} attempts: {type(exc).__name__}"
                 self._control.pause(self._control.policy.backoff * 2 ** (attempt - 1))
             except requests.exceptions.Timeout as exc:
                 # A read timeout means the provider may still be generating and

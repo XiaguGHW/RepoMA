@@ -174,15 +174,18 @@ def load_material_selection(folder: Path) -> tuple[set[str], int, int]:
             path = (folder / item["path"]).resolve()
             path.relative_to(folder)
         except (OSError, ValueError):
-            missing += 1; continue
+            missing += 1
+            continue
         if not path.is_file():
-            missing += 1; continue
+            missing += 1
+            continue
         restored.add(item["path"])
         try:
             if item.get("bytes") != path.stat().st_size or item.get("mtime_ns") != path.stat().st_mtime_ns:
                 changed += 1
         except OSError:
-            missing += 1; restored.discard(item["path"])
+            missing += 1
+            restored.discard(item["path"])
     return restored, missing, changed
 
 
@@ -413,6 +416,3 @@ class CacheConfirmRequest(BaseModel):
 
 class OperationCancelRequest(BaseModel):
     request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
-
-
-def session() -> dict[str, Any

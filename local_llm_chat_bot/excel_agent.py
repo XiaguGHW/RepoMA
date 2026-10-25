@@ -462,19 +462,33 @@ def parser() -> argparse.ArgumentParser:
         sub.set_defaults(func=func)
         sub.add_argument("workbook")
         if name == "sheet":
-            sub.add_argument("--sheet", required=True); sub.add_argument("--rows", type=int, default=40); sub.add_argument("--cols", type=int, default=20)
+            sub.add_argument("--sheet", required=True)
+            sub.add_argument("--rows", type=int, default=40)
+            sub.add_argument("--cols", type=int, default=20)
         elif name == "range":
-            sub.add_argument("--sheet", required=True); sub.add_argument("--range", required=True)
+            sub.add_argument("--sheet", required=True)
+            sub.add_argument("--range", required=True)
         elif name == "trace":
             sub.add_argument("--cell", required=True)
         elif name in {"apply", "verify"}:
             sub.add_argument("--plan", required=True)
-            if name == "apply": sub.add_argument("--output", required=True); sub.add_argument("--force", action="store_true")
+            if name == "apply":
+                sub.add_argument("--output", required=True)
+                sub.add_argument("--force", action="store_true")
     sub = commands.add_parser("plan-participants")
     sub.set_defaults(func=command_plan_participants)
-    sub.add_argument("workbook"); sub.add_argument("--sheet", required=True); sub.add_argument("--header-row", required=True, type=int)
-    sub.add_argument("--id-header", required=True); sub.add_argument("--template-header", required=True); sub.add_argument("--target-column", required=True); sub.add_argument("--new-header", required=True)
-    sub.add_argument("--results", required=True); sub.add_argument("--results-id-column", required=True); sub.add_argument("--results-value-column", required=True); sub.add_argument("--plan", required=True); sub.add_argument("--force", action="store_true")
+    sub.add_argument("workbook")
+    sub.add_argument("--sheet", required=True)
+    sub.add_argument("--header-row", required=True, type=int)
+    sub.add_argument("--id-header", required=True)
+    sub.add_argument("--template-header", required=True)
+    sub.add_argument("--target-column", required=True)
+    sub.add_argument("--new-header", required=True)
+    sub.add_argument("--results", required=True)
+    sub.add_argument("--results-id-column", required=True)
+    sub.add_argument("--results-value-column", required=True)
+    sub.add_argument("--plan", required=True)
+    sub.add_argument("--force", action="store_true")
     return root
 
 

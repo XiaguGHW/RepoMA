@@ -18,31 +18,43 @@ class ReleaseRegressionTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='发布 Prüfung ')
         self.root = Path(self.tmp.name)
-        self.workspace = self.root / 'app'; self.workspace.mkdir()
-        self.old = dict(w.ACTIVE); w.ACTIVE.clear(); w.MODEL_WORK_IN_PROGRESS.clear()
+        self.workspace = self.root / 'app'
+        self.workspace.mkdir()
+        self.old = dict(w.ACTIVE)
+        w.ACTIVE.clear()
+        w.MODEL_WORK_IN_PROGRESS.clear()
         self.patches = [patch.object(w, 'app_state_home', return_value=self.workspace / 'AI_Bot_State'),
                         patch.object(w, 'load_dotenv'),
                         patch.dict(os.environ, {'BOSCH_FARM_SUBSCRIPTION_KEY': 'fixture-only',
                                                 'WORKBENCH_ALLOW_TEST_HOST': '1'})]
-        for p in self.patches: p.start()
+        for p in self.patches:
+            p.start()
         w.setup(w.Setup(workspace=str(self.workspace), state_dir='', model='gemini-test'))
 
     def tearDown(self):
-        w.ACTIVE.clear(); w.ACTIVE.update(self.old); w.MODEL_WORK_IN_PROGRESS.clear()
-        for p in reversed(self.patches): p.stop()
+        w.ACTIVE.clear()
+        w.ACTIVE.update(self.old)
+        w.MODEL_WORK_IN_PROGRESS.clear()
+        for p in reversed(self.patches):
+            p.stop()
         self.tmp.cleanup()
 
     def test_single_file_without_codebook(self):
-        source = self.root / 'Bauteil 中文 ü.txt'; source.write_text('linear motor evidence', encoding='utf-8')
+        source = self.root / 'Bauteil 中文 ü.txt'
+        source.write_text('linear motor evidence', encoding='utf-8')
         result = w.analyze_target(w.TargetRequest(target=str(source)))
         self.assertFalse(result['classification'])
 
     def test_target_switch_clears_old_prompt_and_export(self):
-        state = w.ACTIVE['state']; state.add_turn('assistant', 'OLD_BG_SECRET')
+        state = w.ACTIVE['state']
+        state.add_turn('assistant', 'OLD_BG_SECRET')
         state.data['last_bg_analysis'] = {'answer': 'OLD_BG_SECRET'}
-        source = self.root / 'BG_B.txt'; source.write_text('New assembly')
-        try: w.analyze_target(w.TargetRequest(target=str(source)))
-        except UnboundLocalError: pass  # independent regression for context isolation
+        source = self.root / 'BG_B.txt'
+        source.write_text('New assembly')
+        try:
+            w.analyze_target(w.TargetRequest(target=str(source)))
+        except UnboundLocalError:
+            pass  # independent regression for context isolation
         self.assertEqual(state.data['history'], [])
         self.assertNotIn('last_bg_analysis', state.data)
 
@@ -53,7 +65,8 @@ class ReleaseRegressionTests(unittest.TestCase):
         self.assertIs(w.ACTIVE.get('state'), before)
 
     def test_state_scan_excludes_private_application_state(self):
-        state = w.ACTIVE['state']; secret = state.root / 'private.json'
+        state = w.ACTIVE['state']
+        secret = state.root / 'private.json'
         secret.write_text('{"secret":"old material"}')
         state.scan()
         self.assertFalse(any('AI_Bot_State' in p for p in state.data['files']))
@@ -100,7 +113,8 @@ class ReleaseRegressionTests(unittest.TestCase):
                          {'type': 'text', 'text': 'A'}, {'type': 'text', 'text': 'B'}]}), 'AB')
 
     def test_partial_usage_is_unknown_not_zero_cost(self):
-        state = w.ACTIVE['state']; before = state.data['usage']['requests']
+        state = w.ACTIVE['state']
+        before = state.data['usage']['requests']
         cost = state.note_usage({}, w.ACTIVE['pricing'], 'gemini-2.5-pro')
         self.assertIsNone(cost)
         self.assertEqual(state.data['usage']['requests'], before + 1)
@@ -113,21 +127,28 @@ class ReleaseRegressionTests(unittest.TestCase):
             self.assertIsNone(PricingCatalog(path).estimate('gemini-test', 10, 10))
 
     def test_invalid_image_is_not_indexed_as_valid_evidence(self):
-        path = self.root / 'broken.png'; path.write_bytes(b'not an image')
-        with self.assertRaises(Exception): w.ACTIVE['documents'].add(str(path))
+        path = self.root / 'broken.png'
+        path.write_bytes(b'not an image')
+        with self.assertRaises(Exception):
+            w.ACTIVE['documents'].add(str(path))
 
     def test_corrupt_document_index_type(self):
-        path = self.root / 'documents.json'; path.write_text('[]')
+        path = self.root / 'documents.json'
+        path.write_text('[]')
         self.assertEqual(LocalDocumentLibrary(path).list(), [])
 
     def test_sparse_excel_preserves_source_row_coordinates(self):
         from openpyxl import Workbook
-        path = self.root / 'sparse.xlsx'; book = Workbook(); book.active['A100'] = 'EVIDENCE'
-        book.save(path); book.close()
+        path = self.root / 'sparse.xlsx'
+        book = Workbook()
+        book.active['A100'] = 'EVIDENCE'
+        book.save(path)
+        book.close()
         doc = w.ACTIVE['documents'].add(str(path))
         chunk = next(c for c in doc['chunks'] if 'EVIDENCE' in c['text'])
         self.assertLessEqual(chunk['visual']['start_row'], 100)
         self.assertGreaterEqual(chunk['visual']['end_row'], 100)
 
 
-if __name__ == '__main__': unittest.main()
+if __name__ == '__main__':
+    unittest.main()
