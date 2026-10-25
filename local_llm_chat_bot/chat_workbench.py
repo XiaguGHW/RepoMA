@@ -5,6 +5,10 @@ files, credentials and session data stay on the computer that starts it.
 """
 from __future__ import annotations
 
+from workbench_startup import (StartupConfig, StartupError, FarmEnvironment, HOST, bootstrap,
+                               check_state_directory, check_port, install_command)
+
+
 import difflib
 import asyncio
 import copy
@@ -14,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 import uuid
@@ -24,21 +29,31 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
-from pydantic import BaseModel, Field
-import uvicorn
+STARTUP_CONFIG = bootstrap() if __name__ == '__main__' else StartupConfig()
+FARM_ENVIRONMENT = FarmEnvironment()
 
-from release_safety import safe_error, normalize_usage, summarize_usage, context_state_error, valid_rule_profile
-from dotenv import load_dotenv
-from workbench_i18n import catalog_script_json, UIMessage, localize_message
-from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative, classification_manifest,
-                             excerpt, parse_json, prompt_for, safe_name, sha256)
-from local_document_library import (LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS,
-                                    material_is_recommended, material_role, material_role_label)
-from llm_connector_with_prompt_caching import LLMConnector, farm_base_url
-from request_runtime import (RequestControl, RequestStopped, RequestCancelled, RequestTimedOut,
-                             ResponseLimitExceeded, AnswerPreview, looks_like_action)
+try:
+    from fastapi import FastAPI, HTTPException, Request
+    from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+    from pydantic import BaseModel, Field
+    import uvicorn
+
+    from release_safety import safe_error, normalize_usage, summarize_usage, context_state_error, valid_rule_profile
+    from dotenv import load_dotenv
+    from workbench_i18n import catalog_script_json, UIMessage, localize_message
+    from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative, classification_manifest,
+                                 excerpt, parse_json, prompt_for, safe_name, sha256)
+    from local_document_library import (LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS,
+                                        material_is_recommended, material_role, material_role_label)
+    from llm_connector_with_prompt_caching import LLMConnector, farm_base_url
+    from request_runtime import (RequestControl, RequestStopped, RequestCancelled, RequestTimedOut,
+                                 ResponseLimitExceeded, AnswerPreview, looks_like_action)
+except ImportError as exc:
+    if __name__ != '__main__':
+        raise
+    print('Cannot import runtime module: ' + str(exc.name or 'required dependency') +
+          '\nKeep all downloaded program files together. Repair this Python environment with:\n' + install_command(), file=sys.stderr)
+    raise SystemExit(1) from None
 
 
 app = FastAPI(title="Bosch Local Workbench", docs_url=None, redoc_url=None)
@@ -199,17 +214,28 @@ def local_diagnostics() -> dict[str, Any]:
     This deliberately never calls a model endpoint and never includes a
     credential (or even its length).  It is safe to show directly in the UI.
     """
-    env_file = Path(__file__).resolve().parent / ".env"
-    load_dotenv(env_file)
-    key_present = bool(os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY") or os.getenv("BOSCH_FARM_API_KEY"))
+    env_file, explicit = effective_env_file()
+    configuration_error = None
+    endpoint = ''
+    try:
+        with FARM_ENVIRONMENT.use(env_file, load_dotenv, explicit=explicit, commit=False):
+            endpoint = validate_farm_endpoint(env_file)
+        key_present = True
+    except StartupError as exc:
+        configuration_error = exc
+        key_present = False
     checks: list[dict[str, Any]] = [
-        {"id": "env_file", "label": "配置文件 (.env)", "ok": env_file.is_file(), "required": True,
-         "detail": "已找到。" if env_file.is_file() else "未找到；请在程序目录添加 .env。"},
+        {"id": "env_file", "label": "配置文件 (.env)", "ok": env_file.is_file(), "required": explicit or not key_present,
+         "path": str(env_file), "detail": "已找到。" if env_file.is_file() else "未找到；请在程序目录添加 .env。"},
         {"id": "farm_key", "label": "Bosch Farm 密钥", "ok": key_present, "required": True,
          "detail": "已读取（不会显示密钥）。" if key_present else "未读取；请设置 BOSCH_FARM_SUBSCRIPTION_KEY。"},
-        {"id": "farm_endpoint", "label": "Bosch Farm 地址", "ok": bool(farm_base_url()), "required": True,
-         "detail": farm_base_url() or "未配置。"},
+        {"id": "farm_endpoint", "label": "Bosch Farm 地址", "ok": bool(endpoint), "required": True,
+         "detail": endpoint or "未配置。"},
     ]
+    if configuration_error:
+        error = error_copy(configuration_error, ACTIVE)
+        checks[1]['detail'] = str(error)
+        checks[1]['detail_message'] = message_payload(error)
     package_groups = {
         "Web 服务": ("fastapi", "uvicorn"),
         "PDF 读取 (PyMuPDF)": ("fitz",),
@@ -235,15 +261,13 @@ def local_diagnostics() -> dict[str, Any]:
                        "required": False, "detail": "检查失败：" + str(exc)[:160]})
     try:
         state_dir = app_state_home()
-        state_dir.mkdir(parents=True, exist_ok=True)
-        check_file = state_dir / f".diagnostic-{os.getpid()}-{threading.get_ident()}.tmp"
-        check_file.write_text("ok", encoding="utf-8")
-        check_file.unlink()
+        check_state_directory(state_dir)
         checks.append({"id": "state_storage", "label": "本地状态目录", "ok": True,
                        "required": True, "detail": "可读写。"})
-    except OSError as exc:
+    except StartupError as exc:
+        error = error_copy(exc, ACTIVE)
         checks.append({"id": "state_storage", "label": "本地状态目录", "ok": False,
-                       "required": True, "detail": "不可写：" + str(exc)[:160]})
+                       "required": True, "detail": str(error), "detail_message": message_payload(error)})
     settings = load_workbench_settings()
     active_model = str(ACTIVE.get("model") or settings.get("model") or "")
     previous_test = load_model_tests().get(active_model, {})
@@ -396,6 +420,8 @@ class UIValidationError(ValueError):
 
 def error_copy(error, data):
     value = error.detail if isinstance(error, HTTPException) else getattr(error, 'ui_message', str(error))
+    if isinstance(error, StartupError):
+        value = ui_message(data, error.code, **error.params)
     def redact(item):
         if isinstance(item, UIMessage):
             return UIMessage(item.message_key, item.language, **{key: redact(part) for key, part in item.params.items()})
@@ -1894,7 +1920,8 @@ def ensure_current_sources(data):
 @app.exception_handler(RuntimeError)
 async def readable_error(request: Request, exc: Exception):
     detail = error_copy(exc, {'language': request.headers.get('X-Workbench-Language') or ACTIVE.get('language', 'zh')})
-    return JSONResponse(status_code=400, content={"detail": str(detail), **message_payload(detail)})
+    status = 503 if isinstance(exc, StartupError) and exc.code == 'startup.state_unwritable' else 400
+    return JSONResponse(status_code=status, content={"detail": str(detail), **message_payload(detail)})
 
 
 @app.middleware("http")
@@ -1912,36 +1939,59 @@ def index():
     return HTML
 
 
+def effective_env_file(override: str = '') -> tuple[Path, bool]:
+    if override.strip():
+        try:
+            return Path(override.strip().strip('"')).expanduser().resolve(), True
+        except (OSError, ValueError):
+            raise StartupError('startup.env_unreadable', path=override) from None
+    active_path = ACTIVE.get('env_file')
+    return (Path(active_path), bool(ACTIVE.get('env_explicit'))) if active_path else (STARTUP_CONFIG.env_file, STARTUP_CONFIG.env_explicit)
+
+
+def validate_farm_endpoint(path: Path) -> str:
+    try:
+        return farm_base_url()
+    except ValueError:
+        raise StartupError('startup.endpoint_invalid', path=path) from None
+
+
 @app.post("/api/setup")
 @context_mutation
 def setup(request: Setup):
     reject_context_change_while_processing()
-    if not request.workspace.strip(): raise HTTPException(400, ui_message(ACTIVE, 'error.workspace_required'))
+    if not request.workspace.strip():
+        raise HTTPException(400, ui_message(ACTIVE, 'error.workspace_required'))
     workspace = Path(request.workspace.strip().strip('"')).expanduser().resolve()
-    if not workspace.is_dir(): raise HTTPException(400, ui_message(ACTIVE, 'error.workspace_missing', path=workspace))
-    env_file = Path(__file__).resolve().parent / ".env"
-    load_dotenv(env_file)
-    key = os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY") or os.getenv("BOSCH_FARM_API_KEY")
-    if not key: raise HTTPException(400, ui_message(ACTIVE, 'error.key_missing', path=env_file))
+    if not workspace.is_dir():
+        raise HTTPException(400, ui_message(ACTIVE, 'error.workspace_missing', path=workspace))
     state_home = app_state_home()
-    state = ProjectState(state_home, workspace, request.session)
-    documents = LocalDocumentLibrary(state.root.parent / "documents.json")
-    price_file = Path(__file__).resolve().parent / "model_pricing.json"
-    language = normalize_language(request.language)
-    model = canonical_model_id(request.model)
-    connector = LLMConnector(model, key, session_id=state.data["session_id"])
-    with LOCK:
-        reject_context_change_while_processing()
-        state.scan()
-        ACTIVE.clear(); ACTIVE.update({"state": state, "documents": documents, "model": model, "language": language,
-                                        "llm": connector,
-                                        "pricing": PricingCatalog(price_file), "pending": []})
-        restore_context_binding(ACTIVE)
-        state.scan()
-        state.data["selected_model"] = model
-        state.save()
-        save_workbench_settings(workspace, state.root.name, model, language)
-        return status_data(ACTIVE)
+    if request.state_dir.strip():
+        raise StartupError('startup.state_fixed', path=state_home)
+    env_file, explicit = effective_env_file(request.env_file)
+    try:
+        with FARM_ENVIRONMENT.use(env_file, load_dotenv, explicit=explicit) as key:
+            validate_farm_endpoint(env_file)
+            check_state_directory(state_home)
+            state = ProjectState(state_home, workspace, request.session)
+            documents = LocalDocumentLibrary(state.root.parent / "documents.json")
+            price_file = Path(__file__).resolve().parent / "model_pricing.json"
+            language = normalize_language(request.language)
+            model = canonical_model_id(request.model)
+            connector = LLMConnector(model, key, session_id=state.data["session_id"])
+            candidate = {"state": state, "documents": documents, "model": model, "language": language,
+                         "llm": connector, "env_file": str(env_file), "env_explicit": explicit,
+                         "pricing": PricingCatalog(price_file), "pending": []}
+            restore_context_binding(candidate)
+            state.scan()
+            state.data["selected_model"] = model
+            state.save()
+            save_workbench_settings(workspace, state.root.name, model, language)
+            ACTIVE.clear()
+            ACTIVE.update(candidate)
+            return status_data(ACTIVE)
+    except OSError:
+        raise StartupError('startup.state_unwritable', path=state_home) from None
 
 
 @app.get("/api/status")
@@ -2112,20 +2162,26 @@ def model_tests():
 
 
 @app.get("/api/diagnostics")
+@context_mutation
 def diagnostics():
     """Local-only readiness checks; this endpoint never contacts Bosch Farm."""
     return local_diagnostics()
 
 
 @app.post("/api/model-test")
+@context_mutation
 def model_test(request: ModelTestRequest):
+    env_file, explicit = effective_env_file()
+    with FARM_ENVIRONMENT.use(env_file, load_dotenv, explicit=explicit, commit=not bool(ACTIVE)) as key:
+        validate_farm_endpoint(env_file)
+        check_state_directory(app_state_home())
+        return run_model_test(request, key)
+
+
+def run_model_test(request: ModelTestRequest, key: str):
     model = request.model.strip()
     if not model:
         raise HTTPException(400, ui_message(ACTIVE, 'model.id_required'))
-    load_dotenv(Path(__file__).resolve().parent / ".env")
-    key = os.getenv("BOSCH_FARM_SUBSCRIPTION_KEY") or os.getenv("BOSCH_FARM_API_KEY")
-    if not key:
-        raise HTTPException(400, ui_message(ACTIVE, 'error.key_missing', path=".env"))
     def record(ok: bool, message: str, **extra):
         result = {
             "requested_model": model, "ok": ok, "message": str(message), **message_payload(message),
@@ -2896,6 +2952,12 @@ function uiCopy(value){
 }
 function registerUI(node,kind,data){node.dataset.uiComponent=kind;node.uiData=data;return node}
 function setUIMessage(host,data,kind=''){if(!host)return;let node=document.createElement('span');node.className=kind;node.textContent=uiCopy(data);registerUI(node,'message',data);host.replaceChildren(node);return node}
+function showStartupNotice(data){
+  let host=$('startupnotice');
+  if(!host){host=document.createElement('div');host.id='startupnotice';host.className='message error';host.setAttribute('role','alert');host.style.cssText='margin:8px 14px;max-height:30vh;overflow:auto;flex-shrink:0';$('chat').before(host)}
+  setUIMessage(host,data,'error');
+}
+
 function uiMessageNode(data,kind='assistant'){return registerUI(message(uiCopy(data),kind),'message',data)}
 function scopeCopy(record){
   if(record.scope_message)return uiCopy(record.scope_message);
@@ -2988,7 +3050,13 @@ function rerenderLanguageSensitiveUI(){
   rerenderUIComponents();
   for(let node of document.querySelectorAll('button[data-plan-id]'))node.textContent=t('changes.apply');
   for(let node of document.querySelectorAll('button[onclick="exportBgAnalysis()"]'))node.textContent=t('export.assembly');
-  if(activeContextDrawer){let kind=activeContextDrawer,values=[...$('contextdrawerbody').querySelectorAll('input[id],textarea[id]')].filter(node=>!node.classList.contains('tree-file')&&!node.classList.contains('tree-folder')).map(node=>[node.id,node.value,node.selectionStart,node.selectionEnd]);openContextDrawer(kind);for(let [id,value,start,end] of values){let node=$(id);if(node){node.value=value;if(node.setSelectionRange&&start!=null)node.setSelectionRange(start,end)}}}
+  if(activeContextDrawer){
+    let kind=activeContextDrawer,values=[...$('contextdrawerbody').querySelectorAll('input[id],textarea[id]')].filter(node=>!node.classList.contains('tree-file')&&!node.classList.contains('tree-folder')).map(node=>[node.id,node.value,node.selectionStart,node.selectionEnd]);
+    let notices=[...$('contextdrawerbody').querySelectorAll('[data-ui-component="message"]')].filter(node=>node.parentElement?.id.startsWith('context')).map(node=>[node.parentElement.id,node.uiData,node.className]);
+    openContextDrawer(kind);
+    for(let [id,value,start,end] of values){let node=$(id);if(node){node.value=value;if(node.setSelectionRange&&start!=null)node.setSelectionRange(start,end)}}
+    for(let [id,data,kind] of notices)setUIMessage($(id),data,kind);
+  }
   refreshContextPanel();
 }
 function responseTextSummary(raw){let text=String(raw||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();return text.length>360?text.slice(0,357)+'…':text}
@@ -3002,8 +3070,8 @@ function initVisualAdjustments(){if($('visual-adjustments'))return;let style=doc
 function initLanguageLayout(){if($('language-layout'))return;let style=document.createElement('style');style.id='language-layout';style.textContent=`.context-shortcut{display:none}@media(max-width:1180px){.context-shortcut{display:inline-grid}}html[lang="zh"] body,html[lang="zh"] button,html[lang="zh"] input,html[lang="zh"] select{font-family:"Microsoft YaHei UI","Microsoft YaHei","Noto Sans SC","Segoe UI",sans-serif;letter-spacing:0}html[lang="en"] body,html[lang="en"] button,html[lang="en"] input,html[lang="en"] select,html[lang="de"] body,html[lang="de"] button,html[lang="de"] input,html[lang="de"] select{font-family:Inter,"Segoe UI",Arial,sans-serif}html[lang="zh"] .chat-subtitle,html[lang="zh"] .muted{line-height:1.55}html[lang="de"] .context-card strong,html[lang="de"] .context-drawer-head h2{letter-spacing:0}html[lang="de"] .context-card strong{padding-right:42px}.row{flex-wrap:wrap;align-items:center}.row input{min-width:min(100%,185px)}.row button{white-space:normal;line-height:1.25;min-height:34px}.context-card{min-height:78px}.context-card strong{position:relative;line-height:1.3;padding-right:50px;overflow-wrap:anywhere}.context-card em{position:absolute;right:0;top:0;float:none;white-space:nowrap}.context-card span{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.context-drawer-head h2,.context-drawer-body label,.classification-card h3{overflow-wrap:anywhere}.context-drawer-body button,.workspace-actions button{max-width:100%;overflow-wrap:anywhere}.composer-tools{flex-wrap:wrap;row-gap:5px}.composer-tools .spacer{min-width:0}.composer-tools select{min-width:170px;max-width:min(330px,100%)}html[lang="de"] .composer-tools select{max-width:285px}@media(max-width:1180px){.shell{grid-template-columns:minmax(220px,var(--left-panel-width)) 8px minmax(360px,1fr) 260px}.right{padding:13px 10px}.context-drawer{right:260px;width:min(640px,calc(100vw - 300px))}.chat-header{padding:0 20px}.composer-wrap{padding-left:20px;padding-right:20px}}@media(max-width:760px){.topbar{gap:8px;padding:0 10px}.app-brand{font-size:13px}.topbar-workspace{max-width:145px}.shell{grid-template-columns:minmax(180px,42vw) 7px minmax(0,1fr)}.chat{padding:20px 14px}.chat-header{padding:0 14px}.composer-wrap{padding:0 14px 14px}.welcome h1{font-size:26px}.composer-tools .spacer{display:none}.composer-tools select{width:100%;max-width:none}.composer-tools #custommodelrow{width:100%;flex-wrap:wrap}.composer-tools #custommodelrow input{width:100%}.context-drawer{left:0;right:0;width:auto;max-width:100vw;border-radius:0;transform:none!important;transition:opacity .18s}.context-drawer-body{min-width:0;overflow-x:hidden}.context-drawer-body input{min-width:0;max-width:100%}#scanbackdrop.open .scan-drawer{left:0!important;right:0;width:auto;max-width:100vw;transform:none}.main{min-width:0}.composer{grid-template-columns:minmax(0,1fr) auto}.composer #cancelchat{grid-column:2}.composer input{min-width:0}.composer-tools{grid-column:1/-1}.context-card{min-height:0}}@media(max-width:900px){.shell{grid-template-columns:minmax(220px,var(--left-panel-width)) 8px minmax(0,1fr)}}@media(max-width:650px){.shell{grid-template-columns:minmax(0,1fr)}.chat-header{gap:6px}.chat-subtitle{display:none}.chat-title{font-size:13px}}`;document.head.append(style)}
 function initComposerControls(){if($('composertools'))return;let composer=$('composer');if(!composer)return;let tools=document.createElement('div');tools.id='composertools';tools.className='composer-tools';let note=document.createElement('span');note.id='composermodelnote';note.className='muted';let spacer=document.createElement('span');spacer.className='spacer';let model=$('model'),custom=$('custommodelrow'),modelmsg=$('modelmsg'),test=document.querySelector('button[onclick="testModel()"]');if(model)tools.append(note,model);if(custom)tools.append(custom);if(test){test.id='modeltestbutton';test.className='model-test';tools.append(test)}if(modelmsg)tools.append(modelmsg);tools.append(spacer);let mode=document.createElement('select');mode.id='answermode';for(let value of ['classification','explanation']){let option=document.createElement('option');option.value=value;option.textContent=(value==='classification'?t('answer.classification'):t('answer.explanation'));mode.append(option)}tools.append(mode);composer.append(tools);mode.setAttribute('aria-label',t('answer.mode'));localizeComposerControls()}
 function localizeComposerControls(){setI18nText($('composermodelnote'),'model.current');setI18nText($('modeltestbutton'),'model.test')}
-async function contextPickWorkspace(){try{let path=(await api('/api/pick/folder')).path||'';if(!path)return;$('workspace').value=path;$('contextworkspacepath').value=path;await setup();refreshAppChrome();closeContextDrawer()}catch(e){setUIMessage($('contextworkspacemsg'),e.uiMessage||{text:e.message},'error')}}
-async function contextOpenWorkspace(){let path=$('contextworkspacepath').value.trim();if(!path){$('contextworkspacemsg').innerHTML='<span class="error">'+t('workspace.path_required')+'</span>';return}$('workspace').value=path;await setup();refreshAppChrome();closeContextDrawer()}
+async function contextPickWorkspace(){try{let path=(await api('/api/pick/folder')).path||'';if(!path)return;$('workspace').value=path;$('contextworkspacepath').value=path;if(await setup()){refreshAppChrome();closeContextDrawer()}}catch(e){setUIMessage($('contextworkspacemsg'),e.uiMessage||{text:e.message},'error')}}
+async function contextOpenWorkspace(){let path=$('contextworkspacepath').value.trim();if(!path){$('contextworkspacemsg').innerHTML='<span class="error">'+t('workspace.path_required')+'</span>';return}$('workspace').value=path;if(await setup()){refreshAppChrome();closeContextDrawer()}}
 let contextMoved=[];
 function contextText(id,fallback){let el=$(id);let text=(el?.innerText||el?.textContent||'').replace(/\s+/g,' ').trim();return text||fallback}
 function refreshContextPanel(){
@@ -3063,7 +3131,7 @@ function renderDiagnostics(report){
     // The endpoint deliberately remains language-neutral.  Convert its stable
     // status fields at presentation time; raw details stay visible only in ZH
     // or as a technical fallback for unknown future checks.
-    let detail=uiLanguage==='zh'?String(check.detail||'—'):check.ok===true?t('diagnostic.available'):check.ok===null?t('diagnostic.not_tested'):t('diagnostic.not_available');
+    let detail=check.detail_message?uiCopy(check.detail_message):uiLanguage==='zh'?String(check.detail||'—'):check.ok===true?t('diagnostic.available'):check.ok===null?t('diagnostic.not_tested'):t('diagnostic.not_available');if(check.path)detail+=' · '+check.path;
     return '<div class="card"><b>'+marker+' '+esc(label)+'</b><br><span class="muted">'+esc(detail)+'</span></div>';
   }).join('');
   host.innerHTML='<div class="'+(ready?'ok':'error')+'"><b>'+t(ready?'audit.diagnostics_ready':'audit.diagnostics_attention')+'</b></div>'+rows;
@@ -3131,7 +3199,7 @@ async function renameSession(name){let value=prompt(t('session.rename_prompt'),n
 async function pinSession(item){try{await api('/api/session/pin',{method:'POST',body:JSON.stringify({name:item.name,pinned:!item.pinned})});await loadSessions(true)}catch(e){alert(e.message)}}
 async function deleteSession(name){if(name===currentSessionName&&!allowRuleDraftTransition())return;if(!confirm(t('session.delete_confirm')))return;try{let wasCurrent=name===currentSessionName;let s=await api('/api/session/delete',{method:'POST',body:JSON.stringify({confirmed:true,name})});renderStatus(s);if(wasCurrent){await restoreSessionContext();await loadHistory()}await loadSessions(true)}catch(e){alert(e.message)}}
 async function loadHistory(){if(ruleEditState)return;try{let x=await api('/api/history');if(ruleEditState)return;$('chat').innerHTML='';if(!x.history.length){uiMessageNode({message_key:'session.new_hint'});return}for(let item of x.history)message(item.content,item.role==='user'?'user':'assistant')}catch{}}
-async function setup(){if(!allowRuleDraftTransition())return;try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default',language:uiLanguage})});renderStatus(s);await restoreSessionContext();await Promise.all([loadDocs(),loadSessions(),loadHistory(),loadCodebookStatus()]);setUIMessage($('setupmsg'),{message_key:'workspace.opened'});refreshAppChrome()}catch(e){setUIMessage($('setupmsg'),e.uiMessage||{text:e.message},'error')}}
+async function setup(){if(!allowRuleDraftTransition())return false;try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:$('workspace').value,state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default',language:uiLanguage})});renderStatus(s);await restoreSessionContext();await Promise.all([loadDocs(),loadSessions(),loadHistory(),loadCodebookStatus()]);setUIMessage($('setupmsg'),{message_key:'workspace.opened'});refreshAppChrome();$('startupnotice')?.remove();return true}catch(e){let detail=e.uiMessage||{text:e.message};setUIMessage($('setupmsg'),detail,'error');setUIMessage($('contextworkspacemsg'),detail,'error');showStartupNotice(detail);return false}}
 async function openLegacySession(){if(!$('session').value)return;await setup()}
 async function switchModel(){if(!allowRuleDraftTransition())return;try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));let s=await api('/api/model',{method:'POST',body:JSON.stringify({model})});renderStatus(s);clearResultPanels();await loadHistory();$('modelmsg').innerHTML='<span class="ok">'+t('model.switched_prefix')+esc(model)+t('model.context_unchanged')+'</span>'}catch(e){setUIMessage($('modelmsg'),e.uiMessage||{text:e.message},'error')}}
 async function loadModelStatus(){try{
@@ -3143,14 +3211,14 @@ async function loadModelStatus(){try{
 }catch{}}
 async function testModel(){try{
   let model=selectedModel();if(!model)throw Error(t('model.id_required'));
-  setUIMessage($('setupmsg'),{message_key:'model.testing'});
-  let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});
-  setUIMessage($('setupmsg'),x.ok?[{message_key:'model.available'},x.model,'; ',x.streaming_message||{text:x.streaming||''},
+  setUIMessage($('modelmsg'),{message_key:'model.testing'});
+  let x=await api('/api/model-test',{method:'POST',body:JSON.stringify({model})});$('startupnotice')?.remove();
+  setUIMessage($('modelmsg'),x.ok?[{message_key:'model.available'},x.model,'; ',x.streaming_message||{text:x.streaming||''},
     {message_key:'usage.input_fragment'},String(x.input_tokens),{message_key:'usage.output_fragment'},String(x.output_tokens),
     {message_key:'usage.token_suffix'},' ',...(x.usage_available===false?[{message_key:'usage.unavailable'}]:[])]:
     [{message_key:'model.test_failed'},x.message_key?x:{text:x.message}],x.ok?'ok':'error');
   loadModelStatus();
-}catch(e){setUIMessage($('setupmsg'),e.uiMessage||{text:e.message},'error')}}
+}catch(e){let detail=e.uiMessage||{text:e.message};setUIMessage($('modelmsg'),detail,'error');showStartupNotice(detail)}}
 function renderDocuments(documents){lastDocumentsSnapshot=documents;$('docs').innerHTML=documents.map(d=>`<div class="card">${esc(d.name)}<br><span class="muted">${esc(roleCopy(d.material_role_label))} · ${t('scan.report.chunks',{count:d.chunks})}</span></div>`).join('')||t('materials.empty')}
 async function loadDocs(){try{renderDocuments(await api('/api/documents'))}catch{}}
 async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:JSON.stringify({path:$('docpath').value})});$('docpath').value='';loadDocs();$('setupmsg').textContent=`已索引 ${d.name}（${d.chunks} chunks）`}catch(e){setUIMessage($('setupmsg'),e.uiMessage||{text:e.message},'error')}}
@@ -3456,7 +3524,26 @@ window.addEventListener('beforeunload',event=>{captureRuleEditor();if(ruleEditSt
 HTML = HTML.replace('__WORKBENCH_I18N_JSON__', catalog_script_json())
 
 
+def main() -> None:
+    config = STARTUP_CONFIG
+    try:
+        with FARM_ENVIRONMENT.use(config.env_file, load_dotenv, explicit=config.env_explicit):
+            validate_farm_endpoint(config.env_file)
+            check_state_directory(app_state_home())
+            check_port(config.port)
+        print(f"Bosch Local Workbench: http://{HOST}:{config.port}", flush=True)
+        uvicorn.run(app, host=HOST, port=config.port)
+    except StartupError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from None
+    except (OSError, SystemExit) as exc:
+        if isinstance(exc, SystemExit) and exc.code in (None, 0):
+            raise
+        # The port probe is advisory; another process may bind before Uvicorn.
+        print(str(StartupError('startup.server_failed', port=config.port)), file=sys.stderr)
+        raise SystemExit(1) from None
+
+
 if __name__ == "__main__":
-    print("Bosch Local Workbench: http://127.0.0.1:8765")
-    uvicorn.run(app, host="127.0.0.1", port=8765)
+    main()
 

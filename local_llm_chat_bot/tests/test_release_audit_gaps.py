@@ -19,6 +19,8 @@ class AuditGaps(unittest.TestCase):
     def test_gui_cli_must_honor_explicit_port(self):
         with (
             patch("uvicorn.run") as serve,
+            patch("workbench_startup.check_state_directory"),
+            patch("workbench_startup.check_port"),
             patch.object(
                 sys, "argv", [str(APP / "chat_workbench.py"), "--port", "8877"]
             ),

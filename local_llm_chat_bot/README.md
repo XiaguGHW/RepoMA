@@ -1,7 +1,11 @@
-# Bosch Farm Terminal Chat
+# Bosch Farm Workbench and Terminal Chat
 
 Download the complete `local_llm_chat_bot` folder anywhere on your Bosch computer.
-These Python files must remain together inside it:
+Use Python 3.10 or newer and keep the complete folder together, including all
+Python/JSON files and requirements.txt. The graphical workbench also needs
+chat_workbench.py, workbench_startup.py, workbench_i18n.py/workbench_i18n.json,
+request_runtime.py, release_safety.py, code_chat_agent.py and
+local_document_library.py. The terminal/Excel entry points include:
 
 - `llm_connector_with_prompt_caching.py`
 - `bosch_chat.py`
@@ -53,6 +57,63 @@ BOSCH_FARM_SUBSCRIPTION_KEY=...
 # Optional if your Farm base URL differs from the connector default:
 BOSCH_FARM_BASE_URL=https://aoai-farm.bosch-temp.com/api
 ```
+
+### GUI startup, configuration and recovery
+
+The GUI listens only on `127.0.0.1`, on port `8765` by default. Its default `.env`
+and `AI_Bot_State` are resolved beside the program, independently of the current
+terminal directory or selected workspace/BG. It never creates a default `.env`
+or state directory in a selected BG source folder.
+
+For example, from another directory in PowerShell, using the
+`Documents\Python_Projects\BoschTools` layout:
+
+```powershell
+python "$env:USERPROFILE\Documents\Python_Projects\BoschTools\local_llm_chat_bot\chat_workbench.py" `
+  --env-file "C:\path with spaces\Farm ü.env" `
+  --port 8877
+# Open http://127.0.0.1:8877
+```
+
+`--env-file` selects an existing UTF-8 file (a UTF-8 BOM is supported). Relative
+paths use the launch directory; the default always uses the program directory.
+An explicitly selected missing/unreadable file fails with recovery instructions,
+even if an environment key exists. Existing process environment variables take
+precedence over dotenv values. On a successful config-file change, values loaded
+from the previous file are replaced; failed changes restore the previous runtime
+environment and active session. No key is printed, returned by the GUI or saved
+in session/settings files. Keep keys in the config file or process environment,
+never in command arguments.
+
+The GUI does not need an env-file picker. Setup, model tests and diagnostics use
+the selected application config. After editing that file, reopen the workspace
+to apply it to the active connector; diagnostics/model probes can inspect the
+updated file without changing an existing session. For API callers only, a
+nonempty `/api/setup` `env_file` overrides the application file for successful
+setup; later empty values retain it until restart. Pass the CLI flag again on
+restart when using a custom file. GUI `state_dir` overrides are rejected;
+application state remains beside the program.
+
+Run `python .\chat_workbench.py --help` for supported flags. Unknown options,
+invalid ports and `--host` are rejected, rather than silently starting a server.
+Help/argument validation works even before dependencies are installed.
+
+| Failure | Recovery |
+|---|---|
+| Python/dependency missing or broken | Select Python 3.10+, then install requirements.txt with that interpreter. The error prints a command using its exact executable (PowerShell syntax on Windows). Keep the complete downloaded folder together. |
+| Config missing/unreadable or no Farm key | Create/fix the selected UTF-8 env file with BOSCH_FARM_SUBSCRIPTION_KEY or BOSCH_FARM_API_KEY, then retry/restart with the same `--env-file`. A default missing .env is allowed when a process environment key exists. |
+| Invalid Farm URL | Set BOSCH_FARM_BASE_URL to an HTTP(S) URL without embedded username/password. |
+| State directory/file locked or not writable | Check permissions, available space and file locks. If necessary, close Workbench and move the complete program folder to a writable location before restarting. Do not put state in a BG source folder. |
+| Port already in use | If it is an existing Workbench instance, open its local URL. Otherwise choose another port, for example `--port 8877`. A different service on that port is not a Workbench instance. |
+
+Startup checks are local and never contact Farm. Dependency/configuration/state
+or port failures exit nonzero with instructions. The port check is advisory;
+a later Uvicorn bind failure also prints recovery instructions. Native Windows
+ACL/locking and real Bosch connectivity still require separate local verification.
+
+The automated test environment, pinned test tools, commands and known static
+findings are documented in [TESTING.md](TESTING.md). No release ZIP is generated
+by running those tests.
 
 Install the listed packages once in the Python environment that already uses
 your Bosch proxy, from inside the downloaded tool folder:

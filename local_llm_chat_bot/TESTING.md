@@ -25,7 +25,7 @@ Run each command even if an earlier command fails when collecting the baseline;
 do not treat the last command's exit code as the result of all checks.
 Python requirements retain the application's existing lower bounds; they are not
 a complete lockfile. The testing tools are pinned in requirements-dev.txt.
-The repository's mypy configuration explicitly checks all ten application
+The repository's mypy configuration explicitly checks all eleven application
 modules, including function bodies. Third-party missing stubs and followed
 imports are excluded, not the application's source files. Mypy 1.15.0 is used
 because 2.4.0 crashed in this container's process discovery before checking code.
@@ -60,6 +60,34 @@ because 2.4.0 crashed in this container's process discovery before checking code
   Keep browser screenshots, generated state, environments and logs out of commits.
 
 ## Current gates
+
+After step 8 (R16), discovery runs 183 methods: 182 pass, no failures/errors and
+the existing native Windows test is skipped on Linux. Fourteen new startup/config
+methods and all 15 promoted audit methods pass. The browser suite has 17 passing
+methods, including visible localized startup recovery and retry at 390px.
+
+```bash
+python -m unittest discover -s tests -p test_release_step_eight.py -v
+python -m unittest discover -s tests -p test_release_audit_gaps.py -v
+python tests/browser_release.py
+```
+
+Subprocess startup tests copy the application into disposable paths with spaces,
+Chinese and umlauts, clear Farm key variables, use actual synthetic env files,
+test missing dependencies with Python -S, occupy a loopback port, simulate blocked
+state and a post-probe bind failure, then start/stop/restart a real local server
+from another cwd. API model probes use the loopback fixture only. Windows ACLs
+and file locks still require Windows; no real Bosch connectivity is inferred.
+
+Mypy explicitly targets Python 3.10 and checks all 11 application modules, including
+workbench_startup.py. Runtime tests here use Python 3.12.14. Full Ruff remains
+non-green with 260 findings; full mypy remains non-green with 44 errors in 6 files.
+The new startup module and startup/browser tests pass full Ruff, and the startup
+module has no mypy findings. Every remaining static finding is documented in
+docs/release-reports/Workbench_Repair_Step_08_Static_Findings_2026-10-25.md at
+repository root. No exclusions or blanket ignores were added. Step 9's final
+R01–R16 evidence consolidation has not been performed.
+See docs/release-reports/Workbench_Repair_Step_08_2026-10-25.md at repository root.
 
 After step 7 (R13–R15), discovery runs 169 tests: 165 pass, 3 fail and the native
 Windows test remains skipped on Linux. Seven new draft/message/image-group

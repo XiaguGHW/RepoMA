@@ -552,6 +552,7 @@ class BrowserRelease(unittest.TestCase):
         self.button('contextOpenWorkspace()').click()
         self.assertEqual(self.page.evaluate('lastStatusSnapshot.workspace'), str(self.f.workspace))
         self.assertEqual(self.page.input_value('#ruleeditor'), raw)
+        self.close_drawer()
         self.open_drawer('rules')
         self.page.once('dialog', lambda dialog: dialog.dismiss())
         self.button('contextSyncRule();prepareCodebook()').click()
@@ -666,14 +667,40 @@ class BrowserRelease(unittest.TestCase):
             self.page.keyboard.press('Escape')
             self.page.wait_for_function('activeContextDrawer===null')
 
+    def test_startup_configuration_errors_are_visible_localized_and_recoverable(self):
+        self.language('en')
+        for code in ['startup.key_missing', 'startup.state_unwritable']:
+            if code == 'startup.state_unwritable':
+                self.page.set_viewport_size({'width': 390, 'height': 900})
+            self.open_drawer('workspace')
+            state = w.ACTIVE['state']
+            failure = w.StartupError(code, path=self.f.root / 'Konfiguration 中文 ü')
+            with patch.object(w, 'check_state_directory', side_effect=failure):
+                self.button('contextOpenWorkspace()').click()
+                self.page.locator('#contextworkspacemsg .error').wait_for()
+                self.assertIs(w.ACTIVE['state'], state)
+                self.assertEqual(self.page.evaluate('activeContextDrawer'), 'workspace')
+                self.assertTrue(self.page.locator('#startupnotice').is_visible())
+                for language in ['de', 'zh', 'en']:
+                    self.language(language)
+                    expected = self.page.evaluate('(v)=>t(v.code,{path:v.path})', {'code': code, 'path': str(self.f.root / 'Konfiguration 中文 ü')})
+                    self.assertEqual(self.page.locator('#startupnotice').inner_text(), expected)
+                    self.assertEqual(self.page.locator('#contextworkspacemsg').inner_text(), expected)
+                    self.assertTrue(self.page.locator('#contextworkspacemsg').is_visible())
+                    if code == 'startup.state_unwritable' and language == 'de':
+                        self.page.screenshot(path=str(OUTPUT / 'startup-recovery-de-390.png'))
+                    self.assertEqual(self.page.input_value('#contextworkspacepath'), str(self.f.workspace))
+            self.button('contextOpenWorkspace()').click()
+            self.page.wait_for_function('activeContextDrawer===null && !document.getElementById("startupnotice")')
+
     def test_workspace_attribute_input_cannot_create_event_handler(self):
         payload = 'fixture" onpointerover="window.__auditXss=1'
         self.open_drawer("workspace")
         self.page.locator("#contextworkspacepath").fill(payload)
         self.button("contextOpenWorkspace()").click()
-        self.page.wait_for_function(
-            "!document.getElementById('contextbackdrop')?.classList.contains('open')"
-        )
+        self.page.locator('#contextworkspacemsg .error').wait_for()
+        self.assertEqual(self.page.evaluate('lastStatusSnapshot.workspace'), str(self.f.workspace))
+        self.close_drawer()
         self.open_drawer("workspace")
         field = self.page.locator("#contextworkspacepath")
         field.dispatch_event("pointerover")
