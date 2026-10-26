@@ -2687,6 +2687,18 @@ def image_group_notices(data, report):
             for item in report.get('image_group_details', [])]
 
 
+# Answer output limits.  max_tokens is a ceiling, not a charge: only generated
+# tokens cost.  An answer cut at its ceiling is never used; it is asked for
+# once more, explicitly shortened, with a higher ceiling.  That bounded retry
+# is the only extra call, and only for an answer that was actually cut.
+ANSWER_RETRY_OUTPUT_TOKENS = 8192
+ANSWER_SHORTEN_INSTRUCTION = (
+    "\n\nIMPORTANT: Your previous reply to this request exceeded the output limit and was discarded. "
+    "Reply again with the same JSON fields, but keep \"answer\" within about 800 Chinese characters "
+    "(or equivalent) and at most 3 short points per section. The JSON, including any classification "
+    "object, must be complete.")
+
+
 def call_model(data: dict[str, Any], question: str, progress=None, *, require_classification: bool = True) -> dict[str, Any]:
     state, documents, llm = data["state"], data["documents"], data["llm"]
     ensure_current_sources(data)
@@ -2792,6 +2804,13 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
         raw_response = accounted_model_call(data, llm, visuals, prompt, SYSTEM,
                                             {"maxOutputTokens": tokens, "temperature": 0}, stream=True,
                                             event_handler=model_events, usage_records=usage_records)
+        failure = connector_failure(raw_response)
+        if failure and classify_model_failure(failure)[0] == "output_limit":
+            if tokens >= ANSWER_RETRY_OUTPUT_TOKENS:
+                raise UIRequestError(ui_message(data, 'model.answer_too_long', tokens=tokens))
+            report("model", ui_message(data, 'progress.answer_shorten'), 92)
+            notices.append(ui_message(data, 'notice.answer_shortened'))
+            return answer_call(prompt + ANSWER_SHORTEN_INSTRUCTION, ANSWER_RETRY_OUTPUT_TOKENS)
         # Non-streaming providers cannot emit early chunks; still use the same
         # safe answer decoder, without replaying chunks from streaming providers.
         if not preview.started and not preview.disabled:

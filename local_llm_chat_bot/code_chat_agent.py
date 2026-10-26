@@ -61,10 +61,13 @@ Rules:
 - Write the natural-language answer in the response language requested in the user prompt.
   Keep official Codebook category names, filenames, part numbers, source quotations,
   supplied table labels, and supplied technical evidence exactly as provided.
-- Exception — when the supplied prompt contains BG CLASSIFICATION MODE, give a
-  detailed, evidence-led assessment. It may exceed the normal length limit.
+- Exception — when the supplied prompt contains BG CLASSIFICATION MODE, give an
+  evidence-led assessment of at most about 1500 Chinese characters (or equivalent).
   Use concise equivalent sections in the requested response language: recommendation;
   Codebook decision path; evidence (file/page/sheet/row); alternatives; uncertainty.
+  At most 4 short points per section; cite evidence labels instead of quoting long
+  passages. The classification object must always be complete: shorten the answer
+  rather than leave the JSON unfinished.
   Do not invent evidence. Separate an observed fact from an inference.
 - Write for a narrow plain terminal, not for Markdown rendering. Use this default shape in the requested language:
   Short conclusion: one sentence
