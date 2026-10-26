@@ -123,7 +123,7 @@ defaults leave room for real multimodal work. Override any value in the same
 | `WORKBENCH_RESPONSE_TIMEOUT_SECONDS` | 300 | 0.05–3600 | Wait for one complete response. Gemini/Claude send nothing until they finish generating. |
 | `WORKBENCH_READ_TIMEOUT_SECONDS` | 60 | 0.05–600 | Maximum silence between chunks of a streamed response. |
 | `WORKBENCH_REQUEST_TIMEOUT_SECONDS` | 3600 | 0.1–14400 | Whole user operation, e.g. all Codebook pages plus merge, or all material summaries plus the answer. |
-| `WORKBENCH_CONNECT_TIMEOUT_SECONDS` | 5 | 0.05–60 | TCP/TLS connection setup. |
+| `WORKBENCH_CONNECT_TIMEOUT_SECONDS` | 15 | 0.05–60 | TCP/TLS connection and proxy tunnel setup. A timeout here means the request was never sent, so it is retried. |
 | `WORKBENCH_MAX_ATTEMPTS` | 3 | 1–3 | Attempts for connection failures and HTTP 429/5xx. |
 | `WORKBENCH_RETRY_BACKOFF_SECONDS` | 1 | 0–5 | First retry delay (doubles per retry). |
 

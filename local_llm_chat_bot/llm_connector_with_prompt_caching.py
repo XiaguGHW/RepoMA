@@ -5,8 +5,10 @@ Reconstructed from the supplied working version.  Secrets belong in .env, never 
 import base64
 import io
 import json
+import time
 import logging
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -47,6 +49,27 @@ def farm_base_url() -> str:
 
 
 MIME_MAP = {".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+
+
+def connection_setup_timeout(error: BaseException, elapsed: float, connect_timeout: float, read_timeout: float) -> bool:
+    """True only when a timeout provably fired before the request was sent.
+
+    The socket uses the connect timeout until the connection (and any proxy
+    tunnel) is established and the read timeout afterwards.  Through a proxy,
+    urllib3 reports a slow tunnel as "Read timed out. (read timeout=<connect
+    timeout>)".  Both the reported value and the elapsed time must point to
+    the setup phase; otherwise the provider may already be generating (and
+    billing), so the caller must not send the request again.
+    """
+    margin = 1.5
+    match = re.search(r"read timeout=([0-9.]+)", str(error))
+    if not match or read_timeout <= connect_timeout + margin:
+        return False
+    try:
+        reported = float(match.group(1))
+    except ValueError:
+        return False
+    return abs(reported - connect_timeout) < 0.01 and elapsed < connect_timeout + margin
 
 
 class LLMConnector:
@@ -484,12 +507,15 @@ class LLMConnector:
         attempts = self._control.policy.attempts
         for attempt in range(1, attempts + 1):
             response = None
+            started = time.monotonic()
+            connect_timeout, read_timeout = 0.0, 0.0
             try:
                 self._begin_usage_attempt()
                 # Gemini/Claude return nothing until generation has finished:
                 # wait for a complete response, not for a streaming chunk gap.
+                connect_timeout, read_timeout = self._control.timeouts(complete=True)
                 response = requests.post(url, headers=headers, data=json.dumps(payload),
-                                         timeout=self._control.timeouts(complete=True), stream=True)
+                                         timeout=(connect_timeout, read_timeout), stream=True)
                 try:
                     if hasattr(response, 'raw') and hasattr(response.raw, 'read1'):
                         chunks, size = [], 0
@@ -528,10 +554,21 @@ class LLMConnector:
                     return f"Error after {attempts} attempts: {type(exc).__name__}"
                 self._control.pause(self._control.policy.backoff * 2 ** (attempt - 1))
             except requests.exceptions.Timeout as exc:
+                self._control.check()
+                elapsed = time.monotonic() - started
+                if connection_setup_timeout(exc, elapsed, connect_timeout, read_timeout):
+                    # Through an HTTP(S) proxy, a slow CONNECT tunnel is raised
+                    # as ReadTimeout after the *connect* timeout.  The request
+                    # was never sent, so it is retried like a connection error.
+                    if attempt == attempts:
+                        return (f"Error after {attempts} attempts: ConnectTimeout (connection or proxy tunnel "
+                                f"setup took longer than {connect_timeout:g} s). Increase "
+                                "WORKBENCH_CONNECT_TIMEOUT_SECONDS if the network proxy is slow.")
+                    self._control.pause(self._control.policy.backoff * 2 ** (attempt - 1))
+                    continue
                 # A read timeout means the provider may still be generating and
                 # billing this request. Never start a second paid generation.
-                self._control.check()
-                return (f"Error: no complete response within {self._control.policy.response_timeout:g} s "
+                return (f"Error: no complete response within {read_timeout:g} s "
                         f"({type(exc).__name__}); not retried automatically. Increase "
                         "WORKBENCH_RESPONSE_TIMEOUT_SECONDS if this model needs longer.")
             except RequestStopped:

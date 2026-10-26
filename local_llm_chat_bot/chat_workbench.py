@@ -1070,7 +1070,7 @@ CODEBOOK_JOB_LOG_LIMIT = 200
 CODEBOOK_FAILURE_REASONS = {
     "output_limit", "timeout", "network", "http", "invalid_json", "empty", "model_error",
     "cancelled", "call_limit", "no_rules", "empty_file", "encoding", "binary", "unreadable", "interrupted", "internal",
-    "proxy", "section_output_limit",
+    "proxy", "section_output_limit", "connect_timeout",
 }
 
 
@@ -1133,6 +1133,8 @@ def classify_model_failure(failure: Any) -> tuple[str, dict[str, Any]]:
         return "output_limit", {}
     if "proxyerror" in text or "proxy error" in text:
         return "proxy", {}
+    if "connecttimeout" in text:
+        return "connect_timeout", {}
     if "no complete response within" in text or "timed out" in text or "timeout" in text:
         return "timeout", {}
     if text.startswith("http error"):
@@ -1405,7 +1407,8 @@ def codebook_notes_text(notes: list[list[dict]], nonpaged: bool) -> str:
 
 
 def merge_codebook_notes(job: CodebookJob, data: dict[str, Any], connector: LLMConnector,
-                         notes: list[list[dict]], nonpaged: bool) -> str:
+                         notes: list[list[dict]], nonpaged: bool,
+                         cache: tuple[dict, Path] | None = None) -> str:
     """Merge every unit's notes into profile JSON.
 
     One request first; on an output-limit stop the profile is merged section
@@ -1431,10 +1434,11 @@ def merge_codebook_notes(job: CodebookJob, data: dict[str, Any], connector: LLMC
         if reason != "output_limit":
             raise CodebookPrepareError(reason, "merging", technical=str(failure), params=params)
     job.event("merging", "rulejob.log.merge_sectioned", level="warning", tokens=budget.section_output_tokens[0])
-    return json.dumps(merge_codebook_sections(job, data, connector, notes_text), ensure_ascii=False)
+    return json.dumps(merge_codebook_sections(job, data, connector, notes_text, cache), ensure_ascii=False)
 
 
-def merge_codebook_sections(job: CodebookJob, data: dict[str, Any], connector: LLMConnector, notes_text: str) -> dict:
+def merge_codebook_sections(job: CodebookJob, data: dict[str, Any], connector: LLMConnector, notes_text: str,
+                            cache: tuple[dict, Path] | None = None) -> dict:
     """Outline, one request per class, general rules and table rules; assembled locally.
 
     The notes travel in the system prompt so Claude's prompt cache serves the
@@ -1443,9 +1447,18 @@ def merge_codebook_sections(job: CodebookJob, data: dict[str, Any], connector: L
     budget = CODEBOOK_BUDGET
     system = CODEBOOK_SECTION_SYSTEM + notes_text
 
-    def section(label: UIMessage, request: str, current: int, total: int) -> dict:
-        job.event("merging", "rulejob.log.merge_section", progress={"current": current, "total": total},
-                  current=current, total=total, section=label)
+    def section(label: UIMessage, request: str, current: int | None, total: int | None) -> dict:
+        # A section that succeeded before (same notes, request and model) is
+        # reused, so a retry after a dropped connection pays only for the rest.
+        key = "section:" + hashlib.sha256(f"{system}\0{request}".encode("utf-8")).hexdigest()[:24]
+        if cache and isinstance(cache[0].get(key), list) and cache[0][key]:
+            job.event("merging", "rulejob.log.section_reused", section=label)
+            return dict(cache[0][key][0])
+        if total is None:
+            job.event("merging", "rulejob.log.merge_outline", progress={}, section=label)
+        else:
+            job.event("merging", "rulejob.log.merge_section", progress={"current": current, "total": total},
+                      current=current, total=total, section=label)
         technical = ""
         for attempt, tokens in enumerate(budget.section_output_tokens, start=1):
             text = request if attempt == 1 else (
@@ -1464,13 +1477,19 @@ def merge_codebook_sections(job: CodebookJob, data: dict[str, Any], connector: L
             result = parse_codebook_note(raw)
             if result is None:
                 raise CodebookPrepareError("invalid_json", "merging", technical=str(raw)[:800])
+            if cache:
+                cache[0][key] = [result]
+                try:
+                    write_json_atomically(cache[1], cache[0])
+                except OSError:
+                    pass
             return result
         raise CodebookPrepareError("section_output_limit", "merging", attempts=len(budget.section_output_tokens),
                                    technical=technical, params={"section": label})
 
     outline = section(UIMessage("rulejob.section.outline", "zh"),
                       'SECTION outline. Return {"classes":[{"name":"exact official class name"}]} listing every '
-                      'classification class defined in the notes, in Codebook order. Names only.', 1, 1)
+                      'classification class defined in the notes, in Codebook order. Names only.', None, None)
     names: list[str] = []
     for item in outline.get("classes", []) if isinstance(outline.get("classes"), list) else []:
         name = str((item.get("name") if isinstance(item, dict) else item) or "").strip()
@@ -1482,9 +1501,9 @@ def merge_codebook_sections(job: CodebookJob, data: dict[str, Any], connector: L
     if len(names) > budget.max_merge_classes:
         raise CodebookPrepareError("call_limit", "merging", params={"limit": budget.max_merge_classes},
                                    technical=f"{len(names)} classes exceed max_merge_classes")
-    total = len(names) + 3
+    total = len(names) + 2
     classes = []
-    for index, name in enumerate(names, start=2):
+    for index, name in enumerate(names, start=1):
         key = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-") or "class"
         result = section(UIMessage("rulejob.section.class", "zh", name=name),
                          f'SECTION class. Return {{"name":{json.dumps(name, ensure_ascii=False)},"definition":"...",'
@@ -1635,7 +1654,7 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str, job: 
         except OSError:
             pass  # Reuse is an optimisation only.
     job.event("merging", "rulejob.stage.merging", progress={})
-    merged = merge_codebook_notes(job, data, connector, notes, nonpaged)
+    merged = merge_codebook_notes(job, data, connector, notes, nonpaged, (note_cache, note_cache_path))
     try:
         draft, _ = parse_codebook_draft_with_repair(connector, merged, data=data, usage_records=job.usages,
                                                     on_call=job.count_call)
@@ -4471,7 +4490,7 @@ function codebookRunning(){return lastCodebookTask?.state==='running'}
 function jobCopy(group,name,params={}){let key=['rulejob',group,name].join('.');return t(key,params)}
 function codebookUnitText(unit){if(!unit)return '';if(unit.kind==='page')return t('rulejob.unit.page',{number:unit.number});return unit.first===unit.last?t('rulejob.unit.block',{number:unit.first}):t('rulejob.unit.blocks',{first:unit.first,last:unit.last})}
 function codebookProgressText(task){let p=task?.progress||{};if(p.total&&(task.stage==='parsing'||task.stage==='extracting')){if(task.unit_kind==='page')return t('rulejob.progress.page',{current:p.current,total:p.total});if(task.stage==='parsing')return t('rulejob.progress.blocks',{current:p.current,total:p.total})}if(p.total&&task?.stage==='merging')return t('rulejob.progress.merge',{current:p.current,total:p.total});return jobCopy('where',(task?.stage||'reading'))}
-function codebookStageText(task){let entries=(task?.log||[]).filter(entry=>/^rulejob\.(stage\.|log\.merge_section$)/.test(String(entry.message?.message_key||'')));return entries.length?uiCopy(entries[entries.length-1].message):jobCopy('where',(task?.stage||'reading'))}
+function codebookStageText(task){let entries=(task?.log||[]).filter(entry=>/^rulejob\.(stage\.|log\.merge_(section|outline)$)/.test(String(entry.message?.message_key||'')));return entries.length?uiCopy(entries[entries.length-1].message):jobCopy('where',(task?.stage||'reading'))}
 function codebookLatestWarning(task){let log=task?.log||[],last=log[log.length-1];return last&&last.level==='warning'?uiCopy(last.message):''}
 function codebookTime(value){if(!value)return '—';let date=new Date(value);return isNaN(date)?String(value):date.toLocaleString(uiLanguage==='zh'?'zh-CN':uiLanguage==='de'?'de-DE':'en-GB')}
 function codebookElapsed(task){let start=Date.parse(task?.started_at),end=task?.finished_at?Date.parse(task.finished_at):Date.now();if(isNaN(start)||isNaN(end))return '—';let seconds=Math.max(0,Math.round((end-start)/1000));return seconds<60?seconds+' s':Math.floor(seconds/60)+' min '+String(seconds%60).padStart(2,'0')+' s'}

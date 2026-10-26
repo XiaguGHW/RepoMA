@@ -36,7 +36,7 @@ class RequestPolicy:
     silence between chunks of a streamed response.
     """
     timeout: float = 3600
-    connect_timeout: float = 5
+    connect_timeout: float = 15  # corporate proxies can be slow to open a tunnel
     read_timeout: float = 60
     response_timeout: float = 300
     attempts: int = 3
@@ -53,7 +53,7 @@ class RequestPolicy:
             return int(value) if integer else value
         return cls(
             timeout=number('REQUEST_TIMEOUT_SECONDS', 3600, .1, 14400),
-            connect_timeout=number('CONNECT_TIMEOUT_SECONDS', 5, .05, 60),
+            connect_timeout=number('CONNECT_TIMEOUT_SECONDS', 15, .05, 60),
             read_timeout=number('READ_TIMEOUT_SECONDS', 60, .05, 600),
             response_timeout=number('RESPONSE_TIMEOUT_SECONDS', 300, .05, 3600),
             attempts=number('MAX_ATTEMPTS', 3, 1, 3, True),
