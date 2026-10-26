@@ -427,17 +427,45 @@ class CodebookPreparation(unittest.TestCase):
         time.sleep(.7)
         self.assert_closed()
 
-    def test_invalid_json_from_page_and_from_merge_is_rejected(self):
-        def bad_page(response, prompt, system):
-            if "transcribe exactly one" in system:
-                response["candidates"][0]["content"]["parts"][0]["text"] = "Sorry, here is prose instead of JSON."
-            return response
-        self.f.response_transform = bad_page
-        response = self.client.post("/api/codebook/prepare", json={"path": str(self.f.rules)})
-        self.assertEqual(response.status_code, 400)
-        failure = self.task()["failure"]
-        self.assertEqual((failure["reason"], failure["stage"]), ("invalid_json", "parsing"))
+    def test_complete_but_malformed_page_note_is_merged_as_text_and_flagged(self):
+        # Field case: page 6 returned a complete note with a JSON syntax error.
+        path = make_pdf(self.f.root / "Codebook 6 Seiten.pdf", [RULE_TEXT] + [f"Seite {n}." for n in range(2, 7)])
+        broken = '{"source":"page 6","decision_rules":["Greifer auf einer Hubachse: R = 0, T = 1 "Klasse 1""]}'
 
+        def page_six_malformed(response, prompt, system):
+            if "transcribe exactly one" in system and "Codebook page 6 of 6" in prompt:
+                response["candidates"][0]["content"]["parts"][0]["text"] = broken
+            return response
+        self.f.response_transform = page_six_malformed
+        before = len(self.f.calls)
+        profile = self.post("/api/codebook/prepare", {"path": str(path), "model": CLAUDE})
+        self.assertEqual(profile["status"], "draft")
+        self.assertEqual(profile["unparsed_units"], [{"kind": "page", "number": 6}])
+        self.assertEqual(len(self.f.calls) - before, 6 + 1)  # no repeated page call, no repair call
+        merge = next(json.dumps(call["body"], ensure_ascii=False) for call in self.f.calls[before:]
+                     if "consolidate page-by-page" in json.dumps(call["body"]))
+        self.assertIn("unparsed_note", merge)
+        self.assertIn("Greifer auf einer Hubachse", merge)
+        task = self.task()
+        self.assertIn("rulejob.log.note_unparsed", self.keys(task))
+        self.assertIn("Expecting", task["unparsed_units"][0]["detail"])  # parser position for diagnostics
+        self.assertIn("Klasse 1", task["unparsed_units"][0]["detail"])
+        # A retry reuses the note and keeps the review flag.
+        self.f.response_transform = None
+        before = len(self.f.calls)
+        again = self.post("/api/codebook/prepare", {"path": str(path), "model": CLAUDE})
+        self.assertEqual((again["reused_units"], again["unparsed_units"]), (6, [{"kind": "page", "number": 6}]))
+        self.assertEqual(len(self.codebook_calls(before)), 0)
+        status = [entry["message"]["params"] for entry in self.task()["log"]
+                  if entry["message"]["message_key"] == "rulejob.log.cache_status"]
+        self.assertEqual((status[0]["reusable"], status[0]["total"]), (6, 6))
+
+    def test_page_note_parsing_tolerates_common_wrappers_but_not_empty_text(self):
+        self.assertEqual(w.parse_codebook_note('```json\n{"a": [1, 2,],}\n```'), {"a": [1, 2]})
+        self.assertEqual(w.parse_codebook_note('{"a": 1} Hinweis: weitere Regeln folgen.'), {"a": 1})
+        self.assertIsNone(w.parse_codebook_note("Sorry, prose."))
+
+    def test_invalid_json_from_the_merge_is_still_rejected(self):
         def bad_merge(response, prompt, system):
             if "consolidate page-by-page" in system or "repair its JSON syntax" in prompt:
                 response["candidates"][0]["content"]["parts"][0]["text"] = '{"classes": [{"name": '
