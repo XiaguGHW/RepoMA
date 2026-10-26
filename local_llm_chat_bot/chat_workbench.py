@@ -1813,6 +1813,91 @@ def material_summary_cache_path(document: dict, model: str, full: bool, read_pag
     return app_state_home() / "material_cache" / digest / f"{key}.json"
 
 
+# Material pre-reading prompts.  Output is bounded by form (number and length
+# of bullet points) so a dense group fits its token budget instead of being cut.
+MATERIAL_SUMMARY_SYSTEM = "You are a careful technical evidence extractor. Use only the supplied file content. Write concise Chinese factual notes. Do not classify the Baugruppe and do not invent missing information."
+MATERIAL_GROUP_TOKENS = 900
+MATERIAL_MERGE_TOKENS = 1400
+MATERIAL_GROUP_FORMAT = ("输出格式：最多 10 条要点，每条一句，不超过约 50 个汉字，句末用方括号注明来源页面/表格标签；"
+                         "只写上述主题的事实，相同事实只写一次；不复述原文，不写引言或总结；表格只摘取关键行。")
+MATERIAL_MERGE_FORMAT = ("输出格式：最多 15 条要点，每条一句；相同事实只写一次；"
+                         "必须保留冲突、不确定处与证据标签；不写引言或总结。")
+# Changing a prompt or budget above invalidates cached group notes, never a
+# completed per-file summary (those stay tied to source hash, model and scope).
+MATERIAL_GROUP_NOTE_VERSION = hashlib.sha256(json.dumps(
+    ["material-group-v1", MATERIAL_SUMMARY_SYSTEM, MATERIAL_GROUP_FORMAT, MATERIAL_GROUP_TOKENS],
+    ensure_ascii=False).encode("utf-8")).hexdigest()[:12]
+
+
+def material_group_note_path(document: dict, model: str, group: str) -> Path:
+    """One successful group note, keyed by its exact text, model and prompt version.
+
+    Lives below the file's material_cache folder, so rebuilding that file or
+    clearing summary caches removes it too.
+    """
+    digest = str(document.get("sha256") or "unknown")
+    identity = hashlib.sha256(f"{MATERIAL_GROUP_NOTE_VERSION}\0{model}\0{group}".encode("utf-8")).hexdigest()[:24]
+    return app_state_home() / "material_cache" / digest / "groups" / f"{identity}.json"
+
+
+def load_material_group_note(document: dict, model: str, group: str) -> str | None:
+    try:
+        cached = json.loads(material_group_note_path(document, model, group).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(cached, dict) or cached.get("version") != MATERIAL_GROUP_NOTE_VERSION or cached.get("model") != model:
+        return None
+    note = cached.get("note")
+    return note if isinstance(note, str) and note.strip() else None
+
+
+def save_material_group_note(document: dict, model: str, group: str, note: str) -> None:
+    try:
+        write_json_atomically(material_group_note_path(document, model, group), {
+            "version": MATERIAL_GROUP_NOTE_VERSION, "model": model, "note": note,
+            "created_at": datetime.now().astimezone().isoformat(timespec="seconds")})
+    except OSError:
+        pass  # Reuse is an optimisation; the pre-reading result is unaffected.
+
+
+# Output-limit recovery for material pre-reading.  Only a group that was cut
+# at its output limit is split, exactly once, into two halves that keep the
+# same budget; no group is split twice and no budget is raised.  Each split
+# costs two extra calls, and one scan may spend at most material_retry_limit()
+# extra calls; beyond that a cut group stays an honestly reported gap.
+MATERIAL_MIN_SPLIT_CHARS = 800
+MATERIAL_RETRY_SHARE = 0.2
+MATERIAL_RETRY_MIN_CALLS = 2
+MATERIAL_RETRY_MAX_CALLS = 10
+
+
+def material_retry_limit(total_groups: int) -> int:
+    """Extra calls one scan may spend: 20 % of its groups, at least 2, at most 10."""
+    share = -(-max(0, total_groups) * MATERIAL_RETRY_SHARE // 1)
+    return int(min(MATERIAL_RETRY_MAX_CALLS, max(MATERIAL_RETRY_MIN_CALLS, share)))
+
+
+def split_material_group(group: str) -> tuple[str, str] | None:
+    """Two halves of one summary group, each keeping its evidence label.
+
+    Split between labelled chunks near the middle; a single long chunk is
+    split in its text and its label line is repeated on the second half.
+    """
+    headers = [match.start() for match in re.finditer(r"(?m)^--- .+ ---$", group)]
+    if len(headers) >= 2:
+        middle = len(group) // 2
+        cut = min(headers[1:], key=lambda index: abs(index - middle))
+        return group[:cut], group[cut:]
+    if len(group) < 2 * MATERIAL_MIN_SPLIT_CHARS:
+        return None
+    header, _newline, body = group.partition("\n") if group.startswith("--- ") else ("", "", group)
+    first, second = split_text_in_half(body)
+    if not first or not second:
+        return None
+    prefix = header + "\n" if header else ""
+    return prefix + first + "\n", prefix + second + "\n"
+
+
 def load_material_summary_cache(document: dict, model: str, full: bool, read_pages: list[int]) -> dict | None:
     path = material_summary_cache_path(document, model, full, read_pages)
     try:
@@ -2091,8 +2176,13 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
     previous_report = load_coverage(state)
     previous_records = {(item.get("id"), item.get("sha256")): item for item in previous_report.get("files", [])
                         if isinstance(item, dict)} if previous_report.get("model") == data["model"] and previous_report.get("requested_full_coverage") is full else {}
-    summary_system = "You are a careful technical evidence extractor. Use only the supplied file content. Write concise Chinese factual notes. Do not classify the Baugruppe and do not invent missing information."
+    summary_system = MATERIAL_SUMMARY_SYSTEM
     total_documents = len(selected)
+    # The retry allowance is sized from every group this scan may read.
+    planned_groups = sum(len(summary_groups(item, selected_reading_chunks(item, full=full)[0], folder=material_folder(data)))
+                         for item in selected)
+    retry_limit = material_retry_limit(planned_groups)
+    retry_calls = 0
     for file_index, document in enumerate(selected, start=1):
         if progress:
             progress("reading", ui_message(data, "reading.file", index=file_index, total=total_documents, name=document["name"]),
@@ -2129,21 +2219,79 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
             continue
         groups = summary_groups(document, read_chunks, folder=material_folder(data))
         notes, failures = [], []
-        for number, group in enumerate(groups, start=1):
+        reused_groups = 0
+        file_retry_calls = 0
+
+        def group_call(text: str, label: str) -> str:
+            nonlocal total_calls
+            attempts: list[dict] = []
             try:
-                if progress:
-                    progress("reading", ui_message(data, "reading.group", name=document["name"], index=number, total=len(groups)),
-                             12 + int((file_index - 1 + number / max(len(groups), 1)) / max(total_documents, 1) * 48))
-                attempts: list[dict] = []
-                try:
-                    raw = accounted_model_call(data, llm, [], f"文件：{document['name']}。这是第 {number}/{len(groups)} 个完整文本片段组。提取结构、部件、驱动、运动、接口、尺寸和不确定处，并保留页面/表格标签。\n\n{group}",
-                                               summary_system, {"maxOutputTokens": 900, "temperature": 0}, stream=True, usage_records=attempts)
-                finally:
-                    total_calls += len(attempts)
-                    if usage_records is not None:
-                        usage_records.extend(attempts)
-                raw = require_model_success(raw, ui_message(data, 'model.context_group', name=document["name"]))
-                notes.append(raw.strip())
+                return accounted_model_call(data, llm, [], f"文件：{document['name']}。{label}提取结构、部件、驱动、运动、接口、尺寸和不确定处，并保留页面/表格标签。{MATERIAL_GROUP_FORMAT}\n\n{text}",
+                                            summary_system, {"maxOutputTokens": MATERIAL_GROUP_TOKENS, "temperature": 0}, stream=True, usage_records=attempts)
+            finally:
+                total_calls += len(attempts)
+                if usage_records is not None:
+                    usage_records.extend(attempts)
+
+        for number, group in enumerate(groups, start=1):
+            # A group that succeeded before (e.g. in a scan where another group
+            # failed) is never paid for again.
+            cached_note = load_material_group_note(document, data["model"], group)
+            if cached_note:
+                notes.append(cached_note)
+                reused_groups += 1
+                continue
+            halves = split_material_group(group)
+            half_notes = [load_material_group_note(document, data["model"], half) for half in halves] if halves else []
+            if halves and all(half_notes):
+                notes.append("\n".join(note for note in half_notes if note))
+                reused_groups += 1
+                continue
+            label = f"这是第 {number}/{len(groups)} 个完整文本片段组。"
+            try:
+                # A cached half means this whole group was cut before: go
+                # straight to the missing half instead of paying for it again.
+                split = bool(halves) and any(half_notes)
+                if not split:
+                    if progress:
+                        progress("reading", ui_message(data, "reading.group", name=document["name"], index=number, total=len(groups)),
+                                 12 + int((file_index - 1 + number / max(len(groups), 1)) / max(total_documents, 1) * 48))
+                    raw = group_call(group, label)
+                    failure = connector_failure(raw)
+                    if failure and classify_model_failure(failure)[0] == "output_limit" and halves:
+                        split = True
+                    else:
+                        raw = require_model_success(raw, ui_message(data, 'model.context_group', name=document["name"]))
+                        notes.append(raw.strip())
+                        save_material_group_note(document, data["model"], group, raw.strip())
+                        continue
+                needed = sum(1 for note in half_notes if not note)
+                if retry_calls + needed > retry_limit:
+                    failures.append(ui_message(data, "reading.retry_limit", index=number, limit=retry_limit))
+                    notes.extend(note for note in half_notes if note)
+                    continue
+                collected = list(half_notes)
+                for part, half in enumerate(halves or (), start=1):
+                    if collected[part - 1]:
+                        continue
+                    if progress:
+                        progress("reading", ui_message(data, "reading.group_part", name=document["name"], index=number,
+                                                       total=len(groups), part=part), None)
+                    retry_calls += 1
+                    file_retry_calls += 1
+                    raw = group_call(half, label + f"本次只处理该组的第 {part}/2 部分。")
+                    try:
+                        note = require_model_success(raw, ui_message(data, 'model.context_group', name=document["name"])).strip()
+                    except RequestStopped:
+                        raise
+                    except Exception as exc:
+                        failures.append(ui_message(data, "reading.part_failed", index=number, part=part, detail=error_copy(exc, data)))
+                        continue
+                    collected[part - 1] = note
+                    save_material_group_note(document, data["model"], half, note)
+                notes.extend(note for note in collected if note)
+                if all(collected):
+                    save_material_group_note(document, data["model"], group, "\n".join(note for note in collected if note))
             except RequestStopped:
                 raise
             except Exception as exc:
@@ -2151,10 +2299,10 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
         if notes and len(notes) > 1:
             try:
                 merged = "\n\n".join(f"[片段组 {i}]\n{note}" for i, note in enumerate(notes, start=1))
-                attempts = []
+                attempts: list[dict] = []
                 try:
-                    raw = accounted_model_call(data, llm, [], f"请将下列同一文件的全部片段笔记合成为一份不遗漏冲突或不确定处的技术摘要。必须保留证据标签。\n\n文件：{document['name']}\n\n{merged}",
-                                               summary_system, {"maxOutputTokens": 1400, "temperature": 0}, stream=True, usage_records=attempts)
+                    raw = accounted_model_call(data, llm, [], f"请将下列同一文件的全部片段笔记合成为一份不遗漏冲突或不确定处的技术摘要。必须保留证据标签。{MATERIAL_MERGE_FORMAT}\n\n文件：{document['name']}\n\n{merged}",
+                                               summary_system, {"maxOutputTokens": MATERIAL_MERGE_TOKENS, "temperature": 0}, stream=True, usage_records=attempts)
                 finally:
                     total_calls += len(attempts)
                     if usage_records is not None:
@@ -2174,7 +2322,9 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                   "full_coverage": not unread_pages,
                   "text_chunks_total": len(document.get("chunks", [])), "text_chunks_selected": len(read_chunks),
                   "reading_scope": reading_scope, "reading_scope_message": UIMessage("material.scope_full" if reading_scope == "完整文本预读" else "material.scope_datasheet", pages=15).payload(), "text_groups_total": len(groups),
-                  "text_groups_processed": len(notes), "complete": bool(notes) and not failures,
+                  "text_groups_processed": len(notes), "text_groups_reused": reused_groups,
+                  "retry_calls": file_retry_calls,
+                  "complete": bool(notes) and not failures,
                   "failures": failures, "failure_messages": [message_payload(item) for item in failures], "dfc_structure": documents.dfc_audit(document), "summary": summary,
                   "cache_status": "created"}
         records.append(record)
@@ -2186,6 +2336,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                      12 + int(file_index / max(total_documents, 1) * 48))
     report = {"context_revision": state.data.get("context_revision"), "created_at": datetime.now().astimezone().isoformat(timespec="seconds"), "model": data["model"], "requested_full_coverage": full,
               "files": records, "complete": all(item["complete"] for item in records), "model_calls": total_calls,
+              "retry_calls": retry_calls, "retry_limit": retry_limit,
               "reused_files": reused_files, "created_files": created_files}
     write_json_atomically(coverage_path(state), report)
     return report
@@ -4471,7 +4622,7 @@ function renderCoverageReportForLanguage(x){
   let done=x.files.filter(f=>f.complete).length;
   let details=x.files.map(f=>{let pages=f.pages_total?t('coverage.pages')+'：'+t('coverage.read_pages',{pages:(f.pages_read||[]).join('、')||'—'})+((f.pages_unread||[]).length?'；'+t('coverage.unread_pages',{pages:f.pages_unread.join('、')}):''):t('coverage.no_pages');let dfc=f.dfc_structure?' · <span class="chip">'+t('coverage.dfc',{status:esc(stateCopy(f.dfc_structure.ocr_status)),count:esc(f.dfc_structure.segments_total||0)})+'</span>':'';let cache=f.cache_status==='reused'?' · <span class="chip">'+t('coverage.reused_summary')+'</span>':f.cache_status==='created'?' · <span class="chip">'+t('coverage.new_pre_read')+'</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}：${t('coverage.text_groups',{done:f.text_groups_processed,total:f.text_groups_total})} · ${esc(scopeCopy(f))} · ${esc(pages)}${cache}${dfc}${f.failures?.length?'（'+esc((f.failure_messages||f.failures).map(uiCopy).join('; '))+'）':''}`}).join('');
   let dossier=x.bg_dossier?.ready?' · <span class="chip">'+t('coverage.dossier_ready')+'</span>':' · <span class="chip">'+t('coverage.dossier_pending')+'</span>';
-  $('coveragestatus').innerHTML=(x.complete?'<span class="ok">'+t('coverage.ready')+'：</span>':'<span class="error">'+t('coverage.incomplete')+'：</span>')+' '+t('coverage.overview',{done,total:x.files.length,reused:x.reused_files||0,created:x.created_files||0,calls:x.model_calls||0})+dossier+details;
+  $('coveragestatus').innerHTML=(x.complete?'<span class="ok">'+t('coverage.ready')+'：</span>':'<span class="error">'+t('coverage.incomplete')+'：</span>')+' '+t('coverage.overview',{done,total:x.files.length,reused:x.reused_files||0,created:x.created_files||0,calls:x.model_calls||0})+(x.retry_calls?' · <span class="chip">'+t('coverage.retries',{calls:x.retry_calls,limit:x.retry_limit})+'</span>':'')+dossier+details;
 }
 function renderScanDrawerForLanguage(x){
   let files=(x.files||[]).map(f=>{let index=f.index_cache_status==='reused'?t('scan.index.reused'):f.index_cache_status==='changed'?t('scan.index.changed'):f.index_cache_status==='new'?t('scan.index.created'):'—';return `<article class="file-card"><b>${esc(f.name)}</b><br><span class="muted">${esc(roleCopy(f.material_role_label))} · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB<br>${t('scan.report.chunks',{count:f.chunks})} · ${index}</span></article>`}).join('')||'<div class="muted">'+t('scan.report.none')+'</div>';
