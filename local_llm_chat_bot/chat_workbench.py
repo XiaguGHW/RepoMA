@@ -1269,18 +1269,43 @@ def load_codebook_job() -> dict | None:
 
 
 def parse_codebook_note(raw: str) -> dict | None:
-    """One complete JSON object from a page/block response, or None."""
+    """One JSON object from a complete page/block or section response, or None.
+
+    Tolerates what models commonly add around otherwise valid JSON: Markdown
+    fences, text after the object, a second object and trailing commas.  The
+    response itself is already known to be complete (its stop reason was
+    checked), so this never turns a truncated answer into rules.
+    """
     text = str(raw or "").strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I)
-    start, end = text.find("{"), text.rfind("}")
-    if start < 0 or end < start:
+    start = text.find("{")
+    if start < 0:
         return None
+    candidates = [text[start:]]
+    without_trailing_commas = re.sub(r",(\s*[}\]])", r"\1", text[start:])
+    if without_trailing_commas != candidates[0]:
+        candidates.append(without_trailing_commas)
+    for candidate in candidates:
+        try:
+            note, _end = json.JSONDecoder().raw_decode(candidate)
+        except ValueError:
+            continue
+        if isinstance(note, dict):
+            return note
+    return None
+
+
+def json_error_detail(raw: str) -> str:
+    """Where a response stopped being valid JSON, for the diagnostics only."""
+    text = str(raw or "")
+    start = max(0, text.find("{"))
     try:
-        note = json.loads(text[start:end + 1])
-    except ValueError:
-        return None
-    return note if isinstance(note, dict) else None
+        json.JSONDecoder().raw_decode(text[start:])
+    except ValueError as exc:
+        position = start + getattr(exc, "pos", 0)
+        return f"{exc}; near: {text[max(0, position - 80):position + 80]!r}"
+    return ""
 
 
 def split_text_in_half(text: str) -> tuple[str, str]:
@@ -1365,7 +1390,16 @@ def parse_codebook_unit(job: CodebookJob, data: dict[str, Any], connector: LLMCo
             return None, (reason, params, str(failure))
         note = parse_codebook_note(raw)
         if note is None:
-            raise CodebookPrepareError("invalid_json", "parsing", unit=reference, technical=str(raw)[:800])
+            if not str(raw).strip():
+                raise CodebookPrepareError("invalid_json", "parsing", unit=reference, technical=str(raw)[:800])
+            # The response is complete (its stop reason was checked) but not
+            # valid JSON.  A page note is only input to the merge, so its text
+            # is passed on as is instead of failing the whole Codebook or
+            # paying for the page again.  The final profile is still validated
+            # strictly, and the page is flagged for review before locking.
+            note = {"unparsed_note": str(raw).strip()[:20000]}
+            job.record.setdefault("unparsed_units", []).append(dict(reference, detail=json_error_detail(raw)[:600]))
+            job.event("parsing", "rulejob.log.note_unparsed", level="warning", unit=codebook_unit_label(reference))
         note["source"] = source
         return note, None
 
@@ -1629,6 +1663,8 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str, job: 
     notes: list[list[dict]] = []
     note_cache_path = codebook_note_cache_path(hashlib.sha256(raw_bytes).hexdigest(), model)
     note_cache = load_codebook_note_cache(note_cache_path)
+    job.event("parsing", "rulejob.log.cache_status", reusable=sum(codebook_unit_key(unit) in note_cache for unit in units),
+              total=len(units), file=note_cache_path.name)
     reused_units = 0
     for index, unit in enumerate(units, start=1):
         if nonpaged:
@@ -1642,6 +1678,9 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str, job: 
         key = codebook_unit_key(unit)
         if key in note_cache:
             reused_units += 1
+            if any("unparsed_note" in note for note in note_cache[key]):
+                job.record.setdefault("unparsed_units", []).append(
+                    {name: unit[name] for name in ("kind", "number", "first", "last") if name in unit})
             job.event("parsing", "rulejob.log.unit_reused", unit=codebook_unit_label(
                 {name: unit[name] for name in ("kind", "number", "first", "last") if name in unit}))
             notes.append(note_cache[key])
@@ -1680,6 +1719,8 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str, job: 
             "page_count": len(records) or chunk_count, "block_count": chunk_count if nonpaged else None,
             "page_groups": len(units), "usage": usage, "draft": draft, "document_id": document["id"],
             "parse_calls": job.calls, "reused_units": reused_units,
+            "unparsed_units": [{key: item[key] for key in ("kind", "number", "first", "last") if key in item}
+                               for item in job.record.get("unparsed_units", [])],
             "page_records": [{key: record[key] for key in ("page", "page_type", "ocr_status", "embedded_image_count")} for record in records],
             "page_transcriptions": [json.dumps(unit_notes, ensure_ascii=False) for unit_notes in notes],
             "ocr_runtime": ocr_runtime, "rule_id_renames": rule_id_renames}
@@ -4480,7 +4521,7 @@ function codebookList(items){let values=Array.isArray(items)?items.filter(Boolea
 function renderCodebookStatus(profile){lastCodebookProfile=profile;let host=$('codebookstatus');if(!profile||profile.status==='none'||!profile.status){host.textContent=t('rulews.not_prepared');let effective=$('ruleeffective');if(effective)effective.innerHTML='<b>'+t('rulejob.effective_title')+'</b><br>'+esc(t('rulews.not_prepared'));return}let lock=profile.status==='locked';host.innerHTML=(lock?'<span class="ok">'+t('rulews.locked')+'</span>':'<span class="error">'+t('rulews.draft')+'</span>')+'：<b>'+esc(profile.source_path||profile.source_name||'—')+'</b><br>'+(profile.unit_kind==='block'?esc(profile.block_count||profile.page_count||0)+' '+t('rulews.blocks'):esc(profile.page_count||0)+' '+t('rulews.pages'))+' · '+esc(profile.parser_model||'—')+(lock?'<br>'+t('rulews.reused'):'<br>'+t('rulews.confirm'));let effective=$('ruleeffective');if(effective)effective.innerHTML='<b>'+t('rulejob.effective_title')+'</b><br>'+host.innerHTML}
 async function loadCodebookStatus(){try{renderCodebookStatus(await api('/api/codebook'))}catch(e){setUIMessage($('codebookstatus'),e.uiMessage||{text:e.message},'error')}await loadCodebookTask()}
 function leaveCodebookWorkspace(){if(!allowRuleDraftTransition())return;lastCodebookWorkspaceProfile=null;let composer=$('composer');composer.style.display='flex';$('chat').classList.remove('codebook-workspace');loadHistory()}
-function showCodebookWorkspace(profile){if(ruleEditState){captureRuleEditor();if(ruleEditState.binding===ruleEditorBinding(profile)){renderRuleEditor();return}if(!allowRuleDraftTransition())return}lastCodebookWorkspaceProfile=profile;let draft=profile.draft||{};$('composer').style.display='none';let classes=(draft.classes||[]).map(item=>'<article class="card codebook-class"><h3>'+esc(item.name||t('rulews.untitled'))+'</h3><div>'+esc(item.definition||t('rulews.no_definition'))+'</div><b>'+t('rulews.decision_rules')+'</b>'+codebookList(item.decision_rules)+'<b>'+t('rulews.boundaries')+'</b>'+codebookList(item.boundaries)+'<div class="muted">'+(Array.isArray(item.evidence_blocks)?t('rulews.evidence_blocks')+'：'+esc(item.evidence_blocks.join('、')||'—'):t('rulews.evidence_pages')+'：'+esc((item.evidence_pages||[]).join('、')||'—'))+'</div></article>').join('')||'<div class="card error">'+t('rulews.no_class')+'</div>';let usage=profile.usage||{},ocr=profile.ocr_runtime||{},locked=profile.status==='locked';let ocrText=ocr.status==='not applicable to DOCX'?t('rulews.ocr_docx'):ocr.status==='not applicable to TXT'?t('rulews.ocr_txt'):(ocr.available?(t('rulews.ocr_enabled')+' · '+esc(ocr.command||'Tesseract')+(ocr.german_available?' · deu':' · eng')):(t('rulews.ocr_disabled')+' · '+esc(ocr.status||'Tesseract')));$('chat').className='chat codebook-workspace';$('chat').innerHTML='<section class="workspace-inner"><h1>'+t('rulews.title')+'</h1><div class="muted">'+(locked?t('rulews.locked_intro'):t('rulews.draft_intro'))+'</div><div class="card"><b>'+t('rulews.source')+'：</b>'+esc(profile.source_name||'—')+'<br><span class="muted">'+t('rulews.parser_model')+'：'+esc(profile.parser_model||'—')+' · '+(profile.unit_kind==='block'?t('rulews.blocks')+'：'+esc(profile.block_count||profile.page_count||0):t('rulews.pages')+'：'+esc(profile.page_count||0))+' · '+t('rulews.groups')+'：'+esc(profile.page_groups||0)+' · Token：'+usageNumber(usage.input)+' / '+usageNumber(usage.output)+(' · '+usageCost(usage))+'<br>'+ocrText+'</span></div><h2>'+t('rulews.classes')+'</h2>'+classes+'<h2>'+t('rulews.global_rules')+'</h2><div class="card">'+codebookList(draft.global_rules)+'</div><h2>'+t('rulews.table_rules')+'</h2><div class="card">'+codebookList(draft.table_rules)+'</div><h2>'+t('rulews.uncertainties')+'</h2><div class="card">'+codebookList(draft.uncertainties)+'</div><div class="workspace-actions"><button class="ghost" onclick="editCodebookDraft()">'+t('rules.edit')+'</button>'+ (locked?'<button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.back')+'</button>':'<button onclick="lockCodebook()">'+t('rulews.lock_action')+'</button><button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.defer')+'</button>')+'</div></section>';$('chat').scrollTop=0}
+function showCodebookWorkspace(profile){if(ruleEditState){captureRuleEditor();if(ruleEditState.binding===ruleEditorBinding(profile)){renderRuleEditor();return}if(!allowRuleDraftTransition())return}lastCodebookWorkspaceProfile=profile;let draft=profile.draft||{};$('composer').style.display='none';let classes=(draft.classes||[]).map(item=>'<article class="card codebook-class"><h3>'+esc(item.name||t('rulews.untitled'))+'</h3><div>'+esc(item.definition||t('rulews.no_definition'))+'</div><b>'+t('rulews.decision_rules')+'</b>'+codebookList(item.decision_rules)+'<b>'+t('rulews.boundaries')+'</b>'+codebookList(item.boundaries)+'<div class="muted">'+(Array.isArray(item.evidence_blocks)?t('rulews.evidence_blocks')+'：'+esc(item.evidence_blocks.join('、')||'—'):t('rulews.evidence_pages')+'：'+esc((item.evidence_pages||[]).join('、')||'—'))+'</div></article>').join('')||'<div class="card error">'+t('rulews.no_class')+'</div>';let usage=profile.usage||{},ocr=profile.ocr_runtime||{},locked=profile.status==='locked';let ocrText=ocr.status==='not applicable to DOCX'?t('rulews.ocr_docx'):ocr.status==='not applicable to TXT'?t('rulews.ocr_txt'):(ocr.available?(t('rulews.ocr_enabled')+' · '+esc(ocr.command||'Tesseract')+(ocr.german_available?' · deu':' · eng')):(t('rulews.ocr_disabled')+' · '+esc(ocr.status||'Tesseract')));$('chat').className='chat codebook-workspace';$('chat').innerHTML='<section class="workspace-inner"><h1>'+t('rulews.title')+'</h1><div class="muted">'+(locked?t('rulews.locked_intro'):t('rulews.draft_intro'))+'</div><div class="card"><b>'+t('rulews.source')+'：</b>'+esc(profile.source_name||'—')+'<br><span class="muted">'+t('rulews.parser_model')+'：'+esc(profile.parser_model||'—')+' · '+(profile.unit_kind==='block'?t('rulews.blocks')+'：'+esc(profile.block_count||profile.page_count||0):t('rulews.pages')+'：'+esc(profile.page_count||0))+' · '+t('rulews.groups')+'：'+esc(profile.page_groups||0)+' · Token：'+usageNumber(usage.input)+' / '+usageNumber(usage.output)+(' · '+usageCost(usage))+'<br>'+ocrText+'</span></div><h2>'+t('rulews.classes')+'</h2>'+((profile.unparsed_units||[]).length?'<div class="card error">'+esc(t('rulews.unparsed_units',{units:profile.unparsed_units.map(codebookUnitText).join('、')}))+'</div>':'')+classes+'<h2>'+t('rulews.global_rules')+'</h2><div class="card">'+codebookList(draft.global_rules)+'</div><h2>'+t('rulews.table_rules')+'</h2><div class="card">'+codebookList(draft.table_rules)+'</div><h2>'+t('rulews.uncertainties')+'</h2><div class="card">'+codebookList(draft.uncertainties)+'</div><div class="workspace-actions"><button class="ghost" onclick="editCodebookDraft()">'+t('rules.edit')+'</button>'+ (locked?'<button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.back')+'</button>':'<button onclick="lockCodebook()">'+t('rulews.lock_action')+'</button><button class="ghost" onclick="leaveCodebookWorkspace()">'+t('rulews.defer')+'</button>')+'</div></section>';$('chat').scrollTop=0}
 // ---- Codebook preparation: an observable background job --------------------
 // The server runs the job and keeps its state (stage, page/block, log, final
 // result or classified failure).  The page only renders that record, so a

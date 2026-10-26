@@ -1194,6 +1194,21 @@ class BrowserRelease(unittest.TestCase):
         self.assertEqual(w.load_codebook_profile(), {})
         self.assertFalse(w.MODEL_WORK_IN_PROGRESS.is_set())
 
+    def test_malformed_page_note_is_flagged_in_the_rules_workspace(self):
+        self.language("en")
+        path = self.make_pdf("Codebook flagged.pdf", ["Rotationseinheit: rotation-1.", "Gantry."])
+
+        def page_two_malformed(response, prompt, system):
+            if "transcribe exactly one" in system and "Codebook page 2 of 2" in prompt:
+                response["candidates"][0]["content"]["parts"][0]["text"] = '{"source":"page 2","definitions":["a "b""]}'
+            return response
+        self.f.response_transform = page_two_malformed
+        self.prepare_rules(path=path)
+        expected = self.page.evaluate("t('rulews.unparsed_units',{units:t('rulejob.unit.page',{number:2})})")
+        self.assertIn(expected, self.page.locator(".codebook-workspace").inner_text())
+        self.language("de")
+        self.assertIn("Seite 2", self.page.locator(".codebook-workspace .card.error").inner_text())
+
 class RecordedResult(unittest.TextTestResult):
     def addFailure(self, test, err):
         super().addFailure(test, err)
