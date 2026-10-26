@@ -269,7 +269,10 @@ class CodebookPreparation(unittest.TestCase):
         self.assertEqual(len(calls), 6 + 1 + 4)
         keys = self.keys(self.task())
         self.assertIn("rulejob.log.merge_sectioned", keys)
-        self.assertEqual(keys.count("rulejob.log.merge_section"), 4)
+        self.assertEqual((keys.count("rulejob.log.merge_outline"), keys.count("rulejob.log.merge_section")), (1, 3))
+        progress = [entry["message"]["params"] for entry in self.task()["log"]
+                    if entry["message"]["message_key"] == "rulejob.log.merge_section"]
+        self.assertEqual([(item["current"], item["total"]) for item in progress], [(1, 3), (2, 3), (3, 3)])
 
     def test_section_output_limit_fails_with_section_name_and_saves_nothing(self):
         def class_too_long(response, prompt, system):
@@ -308,6 +311,36 @@ class CodebookPreparation(unittest.TestCase):
         before = len(self.f.calls)
         self.post("/api/codebook/prepare", {"path": str(path), "model": "gemini-2.5-flash"})
         self.assertEqual(len(self.codebook_calls(before)), 4)
+
+    def test_retry_reuses_completed_merge_sections(self):
+        def merge_cut_and_tables_fail(response, prompt, system):
+            if "consolidate page-by-page" in system:
+                response["candidates"][0]["finishReason"] = "MAX_TOKENS"
+            if "SECTION tables" in prompt and merge_cut_and_tables_fail.fail:
+                response["candidates"][0]["finishReason"] = "SAFETY"
+            return response
+        merge_cut_and_tables_fail.fail = True
+        self.f.response_transform = merge_cut_and_tables_fail
+        self.assertEqual(self.client.post("/api/codebook/prepare", json={"path": str(self.f.rules)}).status_code, 400)
+        merge_cut_and_tables_fail.fail = False
+        before = len(self.f.calls)
+        self.assertEqual(self.post("/api/codebook/prepare", {"path": str(self.f.rules)})["status"], "draft")
+        sections = [re.search(r"SECTION (\w+)", json.dumps(call["body"])).group(1)
+                    for call in self.f.calls[before:] if "one section per request" in json.dumps(call["body"])]
+        self.assertEqual(sections, ["tables"])  # outline, class and general rules are reused
+        self.assertEqual(self.keys(self.task()).count("rulejob.log.section_reused"), 3)
+        self.assertEqual(len(self.codebook_calls(before)), 0)  # pages reused as well
+
+    def test_connection_setup_timeout_is_reported_as_unsent_and_retryable(self):
+        reason, _params = w.classify_model_failure(
+            "Error after 3 attempts: ConnectTimeout (connection or proxy tunnel setup took longer than 15 s).")
+        self.assertEqual(reason, "connect_timeout")
+        full, short = w.CodebookPrepareError("connect_timeout", "merging").messages()
+        self.assertIn("the request was not sent and costs nothing", str(localize_message(full, "en")))
+        self.assertIn("WORKBENCH_CONNECT_TIMEOUT_SECONDS", str(localize_message(full, "de")))
+        self.assertEqual(str(localize_message(short, "zh")), "合并并校验规则：连接超时（网络或代理）")
+        # A genuine read timeout still means "maybe generating": not this reason.
+        self.assertEqual(w.classify_model_failure("Error: no complete response within 300 s (ReadTimeout)")[0], "timeout")
 
     def test_proxy_interruption_is_reported_as_such(self):
         reason, _params = w.classify_model_failure("Error after 3 attempts: ProxyError")
