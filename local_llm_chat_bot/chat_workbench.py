@@ -1813,6 +1813,53 @@ def material_summary_cache_path(document: dict, model: str, full: bool, read_pag
     return app_state_home() / "material_cache" / digest / f"{key}.json"
 
 
+# Material pre-reading prompts.  Output is bounded by form (number and length
+# of bullet points) so a dense group fits its token budget instead of being cut.
+MATERIAL_SUMMARY_SYSTEM = "You are a careful technical evidence extractor. Use only the supplied file content. Write concise Chinese factual notes. Do not classify the Baugruppe and do not invent missing information."
+MATERIAL_GROUP_TOKENS = 900
+MATERIAL_MERGE_TOKENS = 1400
+MATERIAL_GROUP_FORMAT = ("输出格式：最多 10 条要点，每条一句，不超过约 50 个汉字，句末用方括号注明来源页面/表格标签；"
+                         "只写上述主题的事实，相同事实只写一次；不复述原文，不写引言或总结；表格只摘取关键行。")
+MATERIAL_MERGE_FORMAT = ("输出格式：最多 15 条要点，每条一句；相同事实只写一次；"
+                         "必须保留冲突、不确定处与证据标签；不写引言或总结。")
+# Changing a prompt or budget above invalidates cached group notes, never a
+# completed per-file summary (those stay tied to source hash, model and scope).
+MATERIAL_GROUP_NOTE_VERSION = hashlib.sha256(json.dumps(
+    ["material-group-v1", MATERIAL_SUMMARY_SYSTEM, MATERIAL_GROUP_FORMAT, MATERIAL_GROUP_TOKENS],
+    ensure_ascii=False).encode("utf-8")).hexdigest()[:12]
+
+
+def material_group_note_path(document: dict, model: str, group: str) -> Path:
+    """One successful group note, keyed by its exact text, model and prompt version.
+
+    Lives below the file's material_cache folder, so rebuilding that file or
+    clearing summary caches removes it too.
+    """
+    digest = str(document.get("sha256") or "unknown")
+    identity = hashlib.sha256(f"{MATERIAL_GROUP_NOTE_VERSION}\0{model}\0{group}".encode("utf-8")).hexdigest()[:24]
+    return app_state_home() / "material_cache" / digest / "groups" / f"{identity}.json"
+
+
+def load_material_group_note(document: dict, model: str, group: str) -> str | None:
+    try:
+        cached = json.loads(material_group_note_path(document, model, group).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(cached, dict) or cached.get("version") != MATERIAL_GROUP_NOTE_VERSION or cached.get("model") != model:
+        return None
+    note = cached.get("note")
+    return note if isinstance(note, str) and note.strip() else None
+
+
+def save_material_group_note(document: dict, model: str, group: str, note: str) -> None:
+    try:
+        write_json_atomically(material_group_note_path(document, model, group), {
+            "version": MATERIAL_GROUP_NOTE_VERSION, "model": model, "note": note,
+            "created_at": datetime.now().astimezone().isoformat(timespec="seconds")})
+    except OSError:
+        pass  # Reuse is an optimisation; the pre-reading result is unaffected.
+
+
 def load_material_summary_cache(document: dict, model: str, full: bool, read_pages: list[int]) -> dict | None:
     path = material_summary_cache_path(document, model, full, read_pages)
     try:
@@ -2091,7 +2138,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
     previous_report = load_coverage(state)
     previous_records = {(item.get("id"), item.get("sha256")): item for item in previous_report.get("files", [])
                         if isinstance(item, dict)} if previous_report.get("model") == data["model"] and previous_report.get("requested_full_coverage") is full else {}
-    summary_system = "You are a careful technical evidence extractor. Use only the supplied file content. Write concise Chinese factual notes. Do not classify the Baugruppe and do not invent missing information."
+    summary_system = MATERIAL_SUMMARY_SYSTEM
     total_documents = len(selected)
     for file_index, document in enumerate(selected, start=1):
         if progress:
@@ -2129,21 +2176,30 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
             continue
         groups = summary_groups(document, read_chunks, folder=material_folder(data))
         notes, failures = [], []
+        reused_groups = 0
         for number, group in enumerate(groups, start=1):
+            # A group that succeeded before (e.g. in a scan where another group
+            # failed) is never paid for again.
+            cached_note = load_material_group_note(document, data["model"], group)
+            if cached_note:
+                notes.append(cached_note)
+                reused_groups += 1
+                continue
             try:
                 if progress:
                     progress("reading", ui_message(data, "reading.group", name=document["name"], index=number, total=len(groups)),
                              12 + int((file_index - 1 + number / max(len(groups), 1)) / max(total_documents, 1) * 48))
                 attempts: list[dict] = []
                 try:
-                    raw = accounted_model_call(data, llm, [], f"文件：{document['name']}。这是第 {number}/{len(groups)} 个完整文本片段组。提取结构、部件、驱动、运动、接口、尺寸和不确定处，并保留页面/表格标签。\n\n{group}",
-                                               summary_system, {"maxOutputTokens": 900, "temperature": 0}, stream=True, usage_records=attempts)
+                    raw = accounted_model_call(data, llm, [], f"文件：{document['name']}。这是第 {number}/{len(groups)} 个完整文本片段组。提取结构、部件、驱动、运动、接口、尺寸和不确定处，并保留页面/表格标签。{MATERIAL_GROUP_FORMAT}\n\n{group}",
+                                               summary_system, {"maxOutputTokens": MATERIAL_GROUP_TOKENS, "temperature": 0}, stream=True, usage_records=attempts)
                 finally:
                     total_calls += len(attempts)
                     if usage_records is not None:
                         usage_records.extend(attempts)
                 raw = require_model_success(raw, ui_message(data, 'model.context_group', name=document["name"]))
                 notes.append(raw.strip())
+                save_material_group_note(document, data["model"], group, raw.strip())
             except RequestStopped:
                 raise
             except Exception as exc:
@@ -2153,8 +2209,8 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                 merged = "\n\n".join(f"[片段组 {i}]\n{note}" for i, note in enumerate(notes, start=1))
                 attempts = []
                 try:
-                    raw = accounted_model_call(data, llm, [], f"请将下列同一文件的全部片段笔记合成为一份不遗漏冲突或不确定处的技术摘要。必须保留证据标签。\n\n文件：{document['name']}\n\n{merged}",
-                                               summary_system, {"maxOutputTokens": 1400, "temperature": 0}, stream=True, usage_records=attempts)
+                    raw = accounted_model_call(data, llm, [], f"请将下列同一文件的全部片段笔记合成为一份不遗漏冲突或不确定处的技术摘要。必须保留证据标签。{MATERIAL_MERGE_FORMAT}\n\n文件：{document['name']}\n\n{merged}",
+                                               summary_system, {"maxOutputTokens": MATERIAL_MERGE_TOKENS, "temperature": 0}, stream=True, usage_records=attempts)
                 finally:
                     total_calls += len(attempts)
                     if usage_records is not None:
@@ -2174,7 +2230,8 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                   "full_coverage": not unread_pages,
                   "text_chunks_total": len(document.get("chunks", [])), "text_chunks_selected": len(read_chunks),
                   "reading_scope": reading_scope, "reading_scope_message": UIMessage("material.scope_full" if reading_scope == "完整文本预读" else "material.scope_datasheet", pages=15).payload(), "text_groups_total": len(groups),
-                  "text_groups_processed": len(notes), "complete": bool(notes) and not failures,
+                  "text_groups_processed": len(notes), "text_groups_reused": reused_groups,
+                  "complete": bool(notes) and not failures,
                   "failures": failures, "failure_messages": [message_payload(item) for item in failures], "dfc_structure": documents.dfc_audit(document), "summary": summary,
                   "cache_status": "created"}
         records.append(record)
