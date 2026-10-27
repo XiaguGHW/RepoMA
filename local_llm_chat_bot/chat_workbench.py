@@ -312,14 +312,14 @@ def load_workbench_settings() -> dict[str, str]:
             "workspace": str(data.get("workspace", "")),
             "session": str(data.get("session", "default")) or "default",
             "model": canonical_model_id(data.get("model", "claude-haiku-5-5")) or "claude-haiku-5-5",
-            "language": normalize_language(data.get("language", "zh")),
-        } if isinstance(data, dict) else {"workspace": "", "session": "default", "model": "claude-haiku-5-5", "language": "zh"}
+            "language": normalize_language(data.get("language", "de")),
+        } if isinstance(data, dict) else {"workspace": "", "session": "default", "model": "claude-haiku-5-5", "language": "de"}
     except (OSError, ValueError):
-        return {"workspace": "", "session": "default", "model": "claude-haiku-5-5", "language": "zh"}
+        return {"workspace": "", "session": "default", "model": "claude-haiku-5-5", "language": "de"}
 
 
 def normalize_language(value: Any) -> str:
-    return str(value or "zh").lower() if str(value or "zh").lower() in {"zh", "en", "de"} else "zh"
+    return str(value or "de").lower() if str(value or "de").lower() in {"zh", "en", "de"} else "de"
 
 
 def save_workbench_settings(workspace: Path, session_name: str, model: str, language: str = "zh") -> None:
@@ -335,7 +335,7 @@ class Setup(BaseModel):
     model: str = "gpt-5.5"
     session: str = "default"
     env_file: str = ""
-    language: str = "zh"
+    language: str = "de"
 
 
 class PathRequest(BaseModel):
@@ -475,7 +475,7 @@ def ui_state(data, value):
 
 @app.exception_handler(HTTPException)
 async def localized_http_error(request: Request, error: HTTPException):
-    language = request.headers.get('X-Workbench-Language') or ACTIVE.get('language', 'zh')
+    language = request.headers.get('X-Workbench-Language') or ACTIVE.get('language', 'de')
     detail = error_copy(error, {'language': language})
     return JSONResponse(status_code=error.status_code,
                         content={'detail': str(detail), **message_payload(detail)}, headers=error.headers)
@@ -3140,7 +3140,7 @@ def ensure_current_sources(data):
 @app.exception_handler(OSError)
 @app.exception_handler(RuntimeError)
 async def readable_error(request: Request, exc: Exception):
-    detail = error_copy(exc, {'language': request.headers.get('X-Workbench-Language') or ACTIVE.get('language', 'zh')})
+    detail = error_copy(exc, {'language': request.headers.get('X-Workbench-Language') or ACTIVE.get('language', 'de')})
     status = 503 if isinstance(exc, StartupError) and exc.code == 'startup.state_unwritable' else 400
     return JSONResponse(status_code=status, content={"detail": str(detail), **message_payload(detail)})
 
@@ -3482,7 +3482,7 @@ def pick(kind: str, request: Request):
         root = tk.Tk()
         root.withdraw()
         root.attributes("-topmost", True)
-        language = request.headers.get('X-Workbench-Language') or ACTIVE.get('language', 'zh')
+        language = request.headers.get('X-Workbench-Language') or ACTIVE.get('language', 'de')
         value = filedialog.askopenfilename(title=ui_message(language, 'picker.file_title')) if kind == "file" else filedialog.askdirectory(title=ui_message(language, 'picker.folder_title'))
         root.destroy()
     except Exception as exc:
@@ -4269,7 +4269,7 @@ HTML = r'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Bos
 <main class="main"><div class="chat-header"><div><div class="chat-title">Baugruppen 分析</div><div class="chat-subtitle">基于当前分类规则与已选材料</div></div><div class="header-spacer"></div><button class="header-icon" title="多模型对比" onclick="openCompareDrawer()">⇄</button><button class="header-icon" title="导出会话" onclick="exportSession()">⇩</button></div><div class="chat" id="chat"><section class="welcome"><div class="eyebrow">Baugruppen Intelligence</div><h1>你想进行什么分析？</h1><p>选择单一文件或一个 BG 文件夹。程序会先在本地读取、提取文字与结构，再将必要信息交给模型。</p><div class="row" style="margin-top:22px"><button onclick="openContextDrawer('materials')">▣&nbsp; 选择 BG 文件夹</button><button class="ghost" onclick="openContextDrawer('rules')">▤&nbsp; 管理分类规则</button></div></section></div><div class="composer-wrap"><div class="composer" id="composer"><input id="question" placeholder="问代码，或根据分类规则判断 Baugruppe …" onkeydown="if(event.key==='Enter')chat()"><button onclick="chat()">发送</button><button id="cancelchat" class="ghost" onclick="stopChat()" disabled>停止</button></div></div></main>
 <aside class="side right" id="contextpanel"><div class="context-title">当前上下文</div><button class="context-card" onclick="openContextDrawer('rules')"><strong>分类规则 <em>管理 ›</em></strong><span id="context-rule-summary">尚未选择分类规则文件</span></button><button class="context-card" onclick="openContextDrawer('materials')"><strong>本次材料 <em>管理 ›</em></strong><span id="context-material-summary">尚未选择文件或 BG 文件夹</span></button><button class="context-card" onclick="openContextDrawer('scan')"><strong>扫描状态 <em>查看 ›</em></strong><span id="context-scan-summary">等待选择材料</span></button><button class="context-card" onclick="openContextDrawer('audit')"><strong>材料缓存与审计 <em>查看 ›</em></strong><span id="context-audit-summary">尚无本地读取或模型缓存</span></button><div class="context-store"><div id="status" class="card muted">尚未打开工作区</div><div id="sessionexport" class="card"><button class="ghost" onclick="exportSession()">导出完整会话</button></div><div id="usagedetail" class="card muted">完成一次请求后显示。</div><div id="analysisexport" class="card muted">仅在 Baugruppe 分析完成后可导出。</div><div id="sources" class="card list">回答后会显示实际传给模型的来源。</div><div id="changes" class="list">无</div></div></aside></div>
 <script>
-const $=id=>document.getElementById(id);let busy=false,lastQuestion='',compareSlots=[{value:'claude-haiku-5-5',custom:''}],savedTargetSelection=new Set(),treeRestoreNote='',lastScanReport=null,scannedSelection='',uiLanguage='zh',activeContextDrawer=null,lastStatusSnapshot=null,lastUsageSnapshot=null,lastCodebookProfile=null,lastCodebookTask=null,lastCodebookWorkspaceProfile=null,lastDocumentsSnapshot=null,lastCoverageReport=null,lastCacheAudit=null,lastSessionRows=[],lastTargetTreePayload=null,lastComparison=null;
+const $=id=>document.getElementById(id);let busy=false,lastQuestion='',compareSlots=[{value:'claude-haiku-5-5',custom:''}],savedTargetSelection=new Set(),treeRestoreNote='',lastScanReport=null,scannedSelection='',uiLanguage='de',activeContextDrawer=null,lastStatusSnapshot=null,lastUsageSnapshot=null,lastCodebookProfile=null,lastCodebookTask=null,lastCodebookWorkspaceProfile=null,lastDocumentsSnapshot=null,lastCoverageReport=null,lastCacheAudit=null,lastSessionRows=[],lastTargetTreePayload=null,lastComparison=null;
 // Single source of translated copy. Compatibility adapters are temporary;
 // new UI components must use t('area.item', parameters).
 const CATALOG=__WORKBENCH_I18N_JSON__;
@@ -4382,7 +4382,7 @@ async function attachToRunningRulePreparation(){
 async function restoreLastWorkspace(){
   try{
     let s=await api('/api/settings');
-    uiLanguage=['zh','en','de'].includes(s.language)?s.language:'zh';$('language').value=uiLanguage;applyLanguage();
+    uiLanguage=['zh','en','de'].includes(s.language)?s.language:'de';$('language').value=uiLanguage;applyLanguage();
     if(!s.workspace)return;
     $('workspace').value=s.workspace;
     setSelectedModel(s.model||'claude-haiku-5-5');
