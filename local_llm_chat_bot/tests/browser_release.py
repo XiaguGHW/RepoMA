@@ -575,7 +575,7 @@ class BrowserRelease(unittest.TestCase):
                 self.page.locator("#diagnosticsresult .card").first.wait_for()
                 self.assertEqual(self.visible_han_text(), [], "diagnostics drawer")
                 self.close_drawer()
-                self.page.evaluate("openScanReport();setTimeout(loadCacheAudit,80)")
+                self.page.evaluate("openAuditDetail()")
                 self.page.wait_for_timeout(400)
                 self.assertEqual(self.visible_han_text(), [], "scan report and cache audit")
                 self.page.evaluate("closeScanReport()")
