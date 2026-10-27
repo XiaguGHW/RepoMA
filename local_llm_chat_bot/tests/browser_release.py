@@ -137,15 +137,19 @@ class BrowserRelease(unittest.TestCase):
     def select_bg(self, folder):
         self.open_drawer("materials")
         self.page.locator("#contexttargetpath").fill(str(folder))
-        self.button("contextSyncTarget();loadTargetTree()").click()
+        # The folder tree loads by itself once the path is entered.
+        self.page.locator("#contexttargetpath").press("Enter")
         self.page.wait_for_function(
             "(path)=>lastTargetTreePayload?.tree?.path===path", arg=str(folder)
         )
         self.page.locator("input.tree-file").first.wait_for(state="attached")
-        self.button("contextSyncTarget();analyzeTarget()").click()
+        self.page.locator("#confirmmaterials").click()
         self.page.wait_for_function(
             "(path)=>lastStatusSnapshot.bg_context?.folder===path", arg=str(folder)
         )
+        # Confirming opens the scan report above the drawer; close it first.
+        self.page.wait_for_function("$('scanbackdrop').classList.contains('open')")
+        self.page.evaluate("closeScanReport()")
         self.close_drawer()
 
     def ask(self, question):
@@ -289,9 +293,11 @@ class BrowserRelease(unittest.TestCase):
         with self.page.expect_response(
             lambda response: response.url.endswith("/api/target")
         ) as response:
-            self.button("contextSyncTarget();analyzeTarget()").click()
+            self.page.locator("#confirmmaterials").click()
         self.assertEqual(response.value.status, 200)
         self.page.wait_for_function("!document.getElementById('question').disabled")
+        self.page.wait_for_function("$('scanbackdrop').classList.contains('open')")
+        self.page.evaluate("closeScanReport()")
         self.close_drawer()
         self.ask("Classify this Baugruppe")
         card = self.page.locator(".classification-card").filter(
@@ -470,7 +476,7 @@ class BrowserRelease(unittest.TestCase):
                 self.assertGreaterEqual(box["x"], -1, box)
                 self.assertLessEqual(box["x"] + box["width"], width + 1, box)
                 self.page.locator("#contexttargetpath").fill(str(self.f.bg_a))
-                self.button("contextSyncTarget();loadTargetTree()").click()
+                self.page.locator("#contexttargetpath").press("Enter")
                 self.page.locator("input.tree-file").first.wait_for(state="attached")
                 # Expand/collapse the actual tree and change a checkbox, then restore it.
                 toggle = self.page.locator("#targettree summary").first
@@ -480,7 +486,7 @@ class BrowserRelease(unittest.TestCase):
                 checkbox = self.page.locator("input.tree-file").first
                 checkbox.uncheck()
                 checkbox.check()
-                confirm = self.button("contextSyncTarget();analyzeTarget()")
+                confirm = self.page.locator("#confirmmaterials")
                 confirm.scroll_into_view_if_needed()
                 rect = confirm.bounding_box()
                 self.assertGreaterEqual(rect["x"], 0, rect)
@@ -492,6 +498,8 @@ class BrowserRelease(unittest.TestCase):
                 ) as response:
                     confirm.click()
                 self.assertEqual(response.value.status, 200)
+                self.page.wait_for_function("$('scanbackdrop').classList.contains('open')")
+                self.page.evaluate("closeScanReport()")
                 self.close_drawer()
                 self.page.wait_for_function(
                     "!document.getElementById('contextbackdrop').classList.contains('open')"
@@ -759,7 +767,7 @@ class BrowserRelease(unittest.TestCase):
             self.page.route('**/api/target-tree?*', lambda route: route.fulfill(status=400, content_type='application/json', body=json.dumps({
                 'detail': detail, 'message_key': 'error.operation_failed', 'params': {'detail': detail}})))
             self.page.locator('#contexttargetpath').fill(str(nested / 'missing'))
-            self.button('contextSyncTarget();loadTargetTree()').click()
+            self.page.locator('#contexttargetpath').press('Enter')
             self.page.locator('#treestatus .error').wait_for()
             self.assertIn(detail, self.page.locator('#treestatus').text_content())
             self.page.screenshot(path=str(OUTPUT / f'de-long-error-{width}.png'))
@@ -768,7 +776,7 @@ class BrowserRelease(unittest.TestCase):
             self.assertLessEqual(box['x'] + box['width'], width + 1)
             self.page.unroute('**/api/target-tree?*')
             self.page.locator('#contexttargetpath').fill(str(self.f.bg_a))
-            self.button('contextSyncTarget();loadTargetTree()').click()
+            self.page.locator('#contexttargetpath').press('Enter')
             self.page.locator('input.tree-folder').first.wait_for()
             folder = self.page.locator('input.tree-folder').first
             folder.uncheck()

@@ -22,7 +22,8 @@ class CatalogTests(unittest.TestCase):
         source = (ROOT / 'chat_workbench.py').read_text(encoding='utf-8')
         handler = source.split('function contextSyncTarget(){', 1)[1].split('\nfunction ', 1)[0]
         handler = 'function contextSyncTarget(){' + handler
-        self.assertIn('onclick="contextSyncTarget();analyzeTarget()"', source)
+        # Confirming in the materials drawer syncs the drawer's path before analysing.
+        self.assertIn("async function analyzeTarget(){if(!allowRuleDraftTransition())return;if($('contexttargetpath'))contextSyncTarget();", source)
         assertions = r'''
 const assert=require('node:assert/strict');
 const fields={contexttargetpath:{value:' C:\\BG A '},targetpath:{value:'C:\\BG A'}};
