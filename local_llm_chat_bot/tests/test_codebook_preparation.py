@@ -202,7 +202,7 @@ class CodebookPreparation(unittest.TestCase):
         self.assertEqual(retries[0]["message"]["params"]["unit"]["params"], {"number": 3})
         page_three = [call for call in self.codebook_calls() if "Codebook page 3 of 4" in json.dumps(call["body"])]
         self.assertEqual(len(page_three), 3)  # whole page, then two halves
-        self.assertTrue(all(call["body"]["max_tokens"] == 2200 for call in page_three))
+        self.assertTrue(all(call["body"]["max_tokens"] == w.CODEBOOK_BUDGET.part_output_tokens for call in page_three))
         parts = json.loads(profile["page_transcriptions"][2])
         self.assertEqual([note["source"] for note in parts], ["page 3 part 1/2", "page 3 part 2/2"])
 
@@ -225,18 +225,17 @@ class CodebookPreparation(unittest.TestCase):
                          ("output_limit", "parsing", {"kind": "page", "number": 3}))
         self.assertEqual(failure["attempts"], budget.max_attempts_per_unit)
         self.assertEqual(self.english(failure["message"]).split(";")[0], "Page 3 is too long")
-        self.assertIn("after 4 attempts", self.english(failure["message"]))
+        self.assertIn("after 2 attempts", self.english(failure["message"]))
         self.assertEqual(self.english(failure["short"]), "Page 3: output limit reached")
         self.assertIn("incomplete Claude response (max_tokens)", failure["technical"])
         calls = self.f.calls[before:]
         page_three = [call for call in calls if "Codebook page 3 of 4" in json.dumps(call["body"])]
-        # Depth-first and fail-fast: whole page, first half, its first quarter,
-        # one escalation of that quarter.  The worst case (earlier parts
-        # succeeding) is still capped by max_calls_per_unit.
+        # Depth-first and fail-fast: whole page, then its first half; both at
+        # the full ceiling, no further splitting or escalation.
         self.assertEqual(len(page_three), budget.max_attempts_per_unit)
         self.assertLessEqual(len(page_three), budget.max_calls_per_unit)
-        self.assertEqual([call["body"]["max_tokens"] for call in page_three], [2200, 2200, 2200, 4400])
-        self.assertEqual(sum(key == "rulejob.log.retry_split" for key in self.keys(self.task())), 2)
+        self.assertEqual([call["body"]["max_tokens"] for call in page_three], [8192, 8192])
+        self.assertEqual(sum(key == "rulejob.log.retry_split" for key in self.keys(self.task())), 1)
         self.assertFalse(any("consolidate page-by-page" in json.dumps(call["body"]) for call in calls))  # no merge
         self.assertFalse(any("Codebook page 4 of 4" in json.dumps(call["body"]) for call in calls))
         self.assertEqual(w.load_codebook_profile(), {})  # no half profile
@@ -259,11 +258,11 @@ class CodebookPreparation(unittest.TestCase):
         calls = [json.dumps(call["body"], ensure_ascii=False) for call in self.f.calls[before:]]
         merges = [call for call in self.f.calls[before:] if "consolidate page-by-page" in json.dumps(call["body"])]
         sections = [call for call in self.f.calls[before:] if "one section per request" in json.dumps(call["body"])]
-        self.assertEqual([call["body"]["max_tokens"] for call in merges], [3500])  # one try, no escalation
+        self.assertEqual([call["body"]["max_tokens"] for call in merges], [8192])  # one try, no escalation
         self.assertEqual([re.search(r"SECTION (\w+)", json.dumps(call["body"]["messages"])).group(1) for call in sections],
                          ["outline", "class", "general", "tables"])
-        self.assertTrue(all(call["body"]["max_tokens"] == 3500 for call in sections))
-        self.assertLessEqual(max(call["body"]["max_tokens"] for call in self.f.calls[before:]), 4400)
+        self.assertTrue(all(call["body"]["max_tokens"] == 8192 for call in sections))
+        self.assertLessEqual(max(call["body"]["max_tokens"] for call in self.f.calls[before:]), 8192)
         # The notes travel in the cached system prompt, not the user message.
         self.assertTrue(all("CODEBOOK NOTES" in json.dumps(call["body"]["system"]) for call in sections))
         self.assertEqual(len(calls), 6 + 1 + 4)
@@ -283,11 +282,10 @@ class CodebookPreparation(unittest.TestCase):
         response = self.client.post("/api/codebook/prepare", json={"path": str(self.f.rules)})
         self.assertEqual(response.status_code, 400, response.text)
         failure = self.task()["failure"]
-        self.assertEqual((failure["reason"], failure["stage"], failure["attempts"]), ("section_output_limit", "merging", 2))
+        self.assertEqual((failure["reason"], failure["stage"], failure["attempts"]), ("section_output_limit", "merging", 1))
         self.assertIn("Merging “class Rotationseinheit” produced too much output", self.english(failure["message"]))
         class_calls = [call for call in self.f.calls if "SECTION class" in json.dumps(call["body"])]
-        self.assertEqual([call["body"]["generationConfig"]["maxOutputTokens"] for call in class_calls], [3500, 7000])
-        self.assertIn("Be more concise", json.dumps(class_calls[1]["body"]))
+        self.assertEqual([call["body"]["generationConfig"]["maxOutputTokens"] for call in class_calls], [8192])
         self.assertEqual(w.load_codebook_profile(), {})
         self.assert_closed()
 
@@ -364,12 +362,51 @@ class CodebookPreparation(unittest.TestCase):
         self.assertEqual(len(self.f.calls) - before, 2)
         self.assert_closed()
 
+    def txt_rules(self):
+        path = self.f.root / "Regeln Leiter.txt"
+        blocks = [RULE_TEXT] + [f"Grenzfall {n}: " + "Die Größe ist kein Kriterium. " * 12 for n in range(1, 4)]
+        path.write_text("\n\n".join(blocks), encoding="utf-8")
+        return path
+
+    def test_txt_cut_unit_is_retried_once_as_halves_at_full_ceiling(self):
+        def whole_unit_too_long(response, prompt, system):
+            if "transcribe exactly one" in system and "part " not in prompt:
+                response["candidates"][0]["finishReason"] = "MAX_TOKENS"
+            return response
+        self.f.response_transform = whole_unit_too_long
+        before = len(self.f.calls)
+        profile = self.post("/api/codebook/prepare", {"path": str(self.txt_rules()), "model": "gemini-2.5-pro"})
+        self.assertEqual(profile["status"], "draft")
+        calls = self.codebook_calls(before)
+        self.assertEqual(len(calls), 3)  # whole unit, then two halves
+        self.assertTrue(all(call["body"]["generationConfig"]["maxOutputTokens"] == 8192 for call in calls))
+        self.assertEqual(self.keys(self.task()).count("rulejob.log.retry_split"), 1)
+
+    def test_txt_unit_cut_again_after_splitting_fails_after_two_attempts(self):
+        def always_too_long(response, prompt, system):
+            if "transcribe exactly one" in system:
+                response["candidates"][0]["finishReason"] = "MAX_TOKENS"
+            return response
+        self.f.response_transform = always_too_long
+        before = len(self.f.calls)
+        response = self.client.post("/api/codebook/prepare", json={"path": str(self.txt_rules()), "model": "gemini-2.5-pro"})
+        self.assertEqual(response.status_code, 400, response.text)
+        failure = self.task()["failure"]
+        self.assertEqual((failure["reason"], failure["attempts"]), ("output_limit", 2))
+        self.assertIn("after 2 attempts", self.english(failure["message"]))
+        calls = self.codebook_calls(before)
+        self.assertEqual([call["body"]["generationConfig"]["maxOutputTokens"] for call in calls], [8192, 8192])
+        self.assertFalse(any("retry_escalate" in key for key in self.keys(self.task())))
+        self.assertEqual(w.load_codebook_profile(), {})
+        self.assert_closed()
+
     def test_budget_is_explicit_and_separate_from_chat(self):
         budget = w.CodebookParseBudget()
-        self.assertEqual((budget.unit_output_tokens, budget.escalated_output_tokens, budget.max_split_depth), (2200, 4400, 2))
-        self.assertEqual((budget.max_attempts_per_unit, budget.max_calls_per_unit), (4, 11))
-        self.assertEqual(budget.call_limit(3), 3 * 11 + 1 + 2 * (40 + 3) + 1)
-        self.assertEqual((budget.merge_output_tokens, budget.section_output_tokens), ((3500,), (3500, 7000)))
+        self.assertEqual((budget.unit_output_tokens, budget.part_output_tokens, budget.max_split_depth), (8192, 8192, 1))
+        self.assertFalse(hasattr(budget, "escalated_output_tokens"))
+        self.assertEqual((budget.max_attempts_per_unit, budget.max_calls_per_unit), (2, 3))
+        self.assertEqual(budget.call_limit(3), 3 * 3 + 1 + 1 * (40 + 3) + 1)
+        self.assertEqual((budget.merge_output_tokens, budget.section_output_tokens), ((8192,), (8192,)))
         self.assertEqual(budget.call_limit(1000), budget.max_total_calls)
         self.assertLessEqual(max(budget.merge_output_tokens), 32000)  # connector ceiling
         self.post("/api/codebook/prepare", {"path": str(self.f.rules)})
@@ -377,8 +414,9 @@ class CodebookPreparation(unittest.TestCase):
         self.post("/api/target", {"target": str(self.f.bg_a), "selected_paths": ["facts.txt"]})
         before = len(self.f.calls)
         self.post("/api/chat", {"question": "Classify this Baugruppe"})
-        configs = [call["body"].get("generationConfig", {}) for call in self.f.calls[before:]]
-        self.assertFalse(any(config.get("maxOutputTokens") in {2200, 4400} for config in configs), configs)
+        # Chat never runs through the Codebook parser's prompts.
+        bodies = [json.dumps(call["body"], ensure_ascii=False) for call in self.f.calls[before:]]
+        self.assertFalse(any(w.CODEBOOK_PAGE_SYSTEM[:60] in body for body in bodies))
 
     # 5. A failed new preparation keeps the previously locked rules usable
     def test_failed_new_rules_keep_old_locked_rules_in_effect(self):

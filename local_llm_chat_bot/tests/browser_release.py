@@ -1084,7 +1084,7 @@ class BrowserRelease(unittest.TestCase):
         self.start_rules(path, "claude-haiku-5-5")
         self.page.wait_for_function("lastCodebookTask?.state === 'failed'", timeout=20000)
         panel = self.page.locator("#rulejobpanel").inner_text()
-        for text in ["Preparation failed", "Page 3 is too long", "after 4 attempts", "Parsing the rules",
+        for text in ["Preparation failed", "Page 3 is too long", "after 2 attempts", "Parsing the rules",
                      "This failure did not change the existing rules.", "claude-haiku-5-5"]:
             self.assertIn(text, panel)
         self.assertTrue(self.page.locator("#rulejobretry").is_enabled())

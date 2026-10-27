@@ -924,42 +924,41 @@ CODEBOOK_RECOMMENDED_MODEL = "claude-haiku-5-5"
 class CodebookParseBudget:
     """Output-token budget and call bounds for Codebook rule parsing only.
 
-    Chat answers, model tests and material summaries keep their own limits.
-    A *unit* is one PDF page or one group of DOCX/TXT text blocks.  When a
-    unit stops at the output limit (Claude ``max_tokens``, Gemini
-    ``MAX_TOKENS``, OpenAI ``length``), only the failed part is retried as
-    halves, then quarters; a part that still cannot finish, or that cannot be
-    split (e.g. a visual-only page), gets exactly one request with
-    ``escalated_output_tokens``.  A truncated response is never parsed, merged
-    or saved.  Every model call of one preparation is counted against
-    ``call_limit`` so a pathological file cannot cause unbounded cost.
+    A *unit* is one PDF page or one group of DOCX/TXT text blocks.  Every
+    request starts at the same 8192-token ceiling as chat answers (a ceiling,
+    not a charge).  When a unit still stops at the output limit (Claude
+    ``max_tokens``, Gemini ``MAX_TOKENS``, OpenAI ``length``), only that unit
+    is retried once as two halves; if a half is cut too, or the unit cannot
+    be split (e.g. a visual-only page), preparation fails for that unit.  A
+    truncated response is never parsed, merged or saved.  Every model call of
+    one preparation is counted against ``call_limit`` so a pathological file
+    cannot cause unbounded cost.
 
-    The merge first tries one request.  A large Codebook does not fit one
-    response (and a multi-minute generation is cut by corporate proxies), so
-    on an output-limit stop the profile is merged section by section: a class
-    outline, one request per class, general rules and table rules, each with
-    a small budget and one more concise retry.  Sections are assembled locally.
+    The merge first tries one request.  If that is cut (a large Codebook does
+    not fit one response, and a multi-minute generation is cut by corporate
+    proxies), the profile is merged section by section: a class outline, one
+    request per class, general rules and table rules, each one request.
+    Sections are assembled locally.
     """
-    unit_output_tokens: int = 2200
-    part_output_tokens: int = 2200
-    escalated_output_tokens: int = 4400
-    max_split_depth: int = 2
+    unit_output_tokens: int = 8192
+    part_output_tokens: int = 8192
+    max_split_depth: int = 1
     min_split_chars: int = 400
-    merge_output_tokens: tuple[int, ...] = (3500,)
-    section_output_tokens: tuple[int, ...] = (3500, 7000)
+    merge_output_tokens: tuple[int, ...] = (8192,)
+    section_output_tokens: tuple[int, ...] = (8192,)
     max_merge_classes: int = 40
-    repair_output_tokens: int = 4096
+    repair_output_tokens: int = 8192
     max_total_calls: int = 300
 
     @property
     def max_attempts_per_unit(self) -> int:
-        """Strategy levels per unit: whole unit, each split depth, escalation."""
-        return self.max_split_depth + 2
+        """Strategy levels per unit: whole unit, then its halves."""
+        return self.max_split_depth + 1
 
     @property
     def max_calls_per_unit(self) -> int:
-        """Worst case: 1 + 2 + 4 split requests plus one escalation per quarter."""
-        return (2 ** (self.max_split_depth + 1) - 1) + 2 ** self.max_split_depth
+        """Worst case: the whole unit plus its two halves."""
+        return 2 ** (self.max_split_depth + 1) - 1
 
     def call_limit(self, units: int) -> int:
         sectioned = len(self.section_output_tokens) * (self.max_merge_classes + 3)
@@ -1380,10 +1379,10 @@ def parse_codebook_unit(job: CodebookJob, data: dict[str, Any], connector: LLMCo
     """Parse one unit within CODEBOOK_BUDGET; returns complete JSON notes only."""
     budget = CODEBOOK_BUDGET
     reference = {key: unit[key] for key in ("kind", "number", "first", "last") if key in unit}
-    tried = {"levels": 0, "escalated": False}
+    tried = {"levels": 0}
 
     def attempts() -> int:
-        return tried["levels"] + (1 if tried["escalated"] else 0)
+        return tried["levels"]
 
     def request(piece: dict, tokens: int) -> tuple[dict | None, tuple[str, dict, str] | None]:
         files, prompt, source = codebook_piece_request(unit, piece, total, file_type)
@@ -1423,13 +1422,7 @@ def parse_codebook_unit(job: CodebookJob, data: dict[str, Any], connector: LLMCo
             job.event("parsing", "rulejob.log.retry_split", level="warning", unit=codebook_unit_label(reference),
                       attempt=level + 2, limit=budget.max_attempts_per_unit)
             return [note for part in parts for note in run(part, level + 1)]
-        tried["escalated"] = True
-        job.event("parsing", "rulejob.log.retry_escalate", level="warning", unit=codebook_unit_label(reference),
-                  tokens=budget.escalated_output_tokens, attempt=attempts(), limit=budget.max_attempts_per_unit)
-        note, failure = request(piece, budget.escalated_output_tokens)
-        if note is not None:
-            return [note]
-        reason, params, technical = failure or ("model_error", {}, "")
+        # Already at the full ceiling and split once (or not splittable): stop.
         raise CodebookPrepareError(reason, "parsing", unit=reference, attempts=attempts(),
                                    technical=technical, params=params)
 
@@ -1483,7 +1476,7 @@ def merge_codebook_sections(job: CodebookJob, data: dict[str, Any], connector: L
     """Outline, one request per class, general rules and table rules; assembled locally.
 
     The notes travel in the system prompt so Claude's prompt cache serves the
-    repeated input; every response stays within a small output budget.
+    repeated input; each section is one request with the normal ceiling.
     """
     budget = CODEBOOK_BUDGET
     system = CODEBOOK_SECTION_SYSTEM + notes_text
@@ -1502,8 +1495,7 @@ def merge_codebook_sections(job: CodebookJob, data: dict[str, Any], connector: L
                       current=current, total=total, section=label)
         technical = ""
         for attempt, tokens in enumerate(budget.section_output_tokens, start=1):
-            text = request if attempt == 1 else (
-                request + " Be more concise: shorten every text and keep only rule-bearing table rows.")
+            text = request
             job.count_call()
             raw = accounted_model_call(data, connector, [], text, system,
                                        {"maxOutputTokens": tokens, "temperature": 0}, stream=True,
@@ -1574,7 +1566,7 @@ def merge_codebook_sections(job: CodebookJob, data: dict[str, Any], connector: L
 # pay for pages that already succeeded.  Notes are complete JSON only.
 CODEBOOK_NOTES_VERSION = hashlib.sha256(json.dumps([
     CODEBOOK_PAGE_SYSTEM, CODEBOOK_BUDGET.unit_output_tokens, CODEBOOK_BUDGET.part_output_tokens,
-    CODEBOOK_BUDGET.escalated_output_tokens, CODEBOOK_BUDGET.max_split_depth, CODEBOOK_BUDGET.min_split_chars,
+    CODEBOOK_BUDGET.max_split_depth, CODEBOOK_BUDGET.min_split_chars,
 ]).encode("utf-8")).hexdigest()[:12]
 
 
