@@ -89,6 +89,13 @@ class BrowserRelease(unittest.TestCase):
     def button(self, handler, root=""):
         return self.page.locator(f'{root} button[onclick="{handler}"]')
 
+    def accept_confirm_if_shown(self):
+        """Re-confirming materials with an existing conversation asks first."""
+        try:
+            self.page.locator("#appconfirmok").click(timeout=1500)
+        except Exception:
+            pass
+
     def close_drawer(self):
         self.button("closeContextDrawer()", ".context-drawer-head").click()
 
@@ -144,6 +151,7 @@ class BrowserRelease(unittest.TestCase):
         )
         self.page.locator("input.tree-file").first.wait_for(state="attached")
         self.page.locator("#confirmmaterials").click()
+        self.accept_confirm_if_shown()
         self.page.wait_for_function(
             "(path)=>lastStatusSnapshot.bg_context?.folder===path", arg=str(folder)
         )
@@ -246,16 +254,19 @@ class BrowserRelease(unittest.TestCase):
         self.select_bg(self.f.bg_a)
         self.ask("Classify this Baugruppe")
         self.open_drawer("rules")
-        alternate = str(self.f.root / "not prepared ü.docx")
-        self.page.locator("#contextcodebookpath").fill(alternate)
-        self.assertIn(
-            str(self.f.rules), self.page.locator("#contextrulemsg").inner_text()
-        )
+        # Locked rules: path, file picker and parser model are read-only until
+        # "Replace"; preparing again only reports that the rules are ready.
+        for control in ["#contextcodebookpath", "#rulefilepick", "#rulemodel", "#rulemodelrecommended"]:
+            self.assertTrue(self.page.locator(control).is_disabled(), control)
+        self.assertEqual(self.page.input_value("#contextcodebookpath"), str(self.f.rules))
         self.assertIn(
             str(self.f.rules), self.page.locator("#codebookstatus").inner_text()
         )
-        self.page.locator("#contextcodebookpath").fill(str(self.f.rules))
-        self.assertEqual(self.page.locator("#contextrulemsg").inner_text(), "")
+        calls = len(self.f.calls)
+        self.page.locator("#ruleprepare").click()
+        self.assertIn(self.f.rules.name, self.page.locator("#contextrulemsg").inner_text())
+        self.assertEqual(len(self.f.calls), calls)
+        self.assertTrue(self.page.locator("#rulereplace").is_enabled())
         self.button("viewCodebook()", "#contextdrawerbody").click()
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
         self.close_drawer()
@@ -294,6 +305,7 @@ class BrowserRelease(unittest.TestCase):
             lambda response: response.url.endswith("/api/target")
         ) as response:
             self.page.locator("#confirmmaterials").click()
+            self.accept_confirm_if_shown()
         self.assertEqual(response.value.status, 200)
         self.page.wait_for_function("!document.getElementById('question').disabled")
         self.page.wait_for_function("$('scanbackdrop').classList.contains('open')")
@@ -309,7 +321,7 @@ class BrowserRelease(unittest.TestCase):
         )
         self.assertIn("New same-BG fixture class", card.inner_text())
 
-    def test_explicit_explanation_mode_and_nonpaged_rule_references(self):
+    def test_auto_mode_and_nonpaged_rule_references(self):
         self.language("en")
         self.page.select_option("#model", "gemini-2.5-pro")
         self.page.wait_for_function('lastStatusSnapshot.model === "gemini-2.5-pro"')
@@ -317,7 +329,8 @@ class BrowserRelease(unittest.TestCase):
         self.lock_rules()
         self.button("leaveCodebookWorkspace()").click()
         self.select_bg(self.f.bg_a)
-        self.assertEqual(self.page.input_value("#answermode"), "classification")
+        # There is no answer-mode switch; the server decides per question.
+        self.assertEqual(self.page.locator("#answermodegroup").count(), 0)
         self.ask("Classify this Baugruppe")
         card = self.page.locator(".classification-card").filter(
             has=self.page.get_by_role(
@@ -326,25 +339,26 @@ class BrowserRelease(unittest.TestCase):
         )
         self.assertIn("Section/chunk references", card.inner_text())
         self.assertIn(self.f.rules.name, card.inner_text())
-        self.page.locator('#answermodegroup button[data-mode="explanation"]').click()
         self.language("de")
-        self.assertEqual(self.page.input_value("#answermode"), "explanation")
         with self.page.expect_response(
             lambda response: response.url.endswith("/api/chat/stream")
         ) as response:
             self.ask("Erläutere die Motorfunktion")
-        self.assertFalse(
-            response.value.request.post_data_json["require_classification"]
-        )
+        payload = response.value.request.post_data_json
+        self.assertNotIn("require_classification", payload)
+        self.assertEqual(payload["focus_source_id"], "")
+        # A follow-up explanation adds no second classification card.
         self.assertEqual(self.page.locator('.classification-card').filter(
             has=self.page.get_by_role('heading', name=self.page.evaluate("t('classification.title')"), exact=True)
         ).count(), 1)
+        self.assertIn(self.page.evaluate("t('scope.kind_answer')"),
+                      self.page.locator(".scope-tag").last.inner_text())
         self.assertNotIn(
             "classification",
             self.page.locator("#chat .message.error").all_text_contents(),
         )
         self.select_bg(self.f.bg_b)
-        self.assertEqual(self.page.input_value("#answermode"), "classification")
+        self.assertEqual(self.page.evaluate("scopeFocusId"), "")
 
     def test_answer_preview_stop_keeps_busy_until_worker_exits_then_retry(self):
         self.language('en')
@@ -1111,14 +1125,12 @@ class BrowserRelease(unittest.TestCase):
         self.page.wait_for_function("lastCodebookTask?.state === 'succeeded'", timeout=20000)
         self.assertEqual(dialogs, [])
 
-    def test_rule_model_validation_and_answer_mode_are_in_page_controls(self):
+    def test_rule_model_validation_and_scope_bar_are_in_page_controls(self):
         self.language("en")
         dialogs = self.record_dialogs()
-        self.assertEqual(self.page.locator("select#answermode").count(), 0)
-        self.assertTrue(self.page.locator("#answermodestatic").is_visible())
-        self.assertFalse(self.page.locator("#answermodegroup").is_visible())
-        self.assertEqual(self.page.locator("#answermodestatic").inner_text(), "Current mode: Ordinary questions")
-        self.assertEqual(self.page.locator("#answermodehelp").inner_text(), self.page.evaluate("t('answer.unavailable_help')"))
+        self.assertEqual(self.page.locator("#answermodegroup").count(), 0)
+        # Without confirmed materials the scope bar stays hidden.
+        self.assertFalse(self.page.locator("#scopebar").is_visible())
         calls = len(self.f.calls)
         self.open_drawer("rules")
         self.page.locator("#contextcodebookpath").fill(str(self.f.rules))
@@ -1149,15 +1161,8 @@ class BrowserRelease(unittest.TestCase):
         self.lock_rules()
         self.button("leaveCodebookWorkspace()").click()
         self.select_bg(self.f.bg_a)
-        self.assertTrue(self.page.locator("#answermodegroup").is_visible())
-        self.assertFalse(self.page.locator("#answermodestatic").is_visible())
-        chosen = self.page.locator('#answermodegroup button[aria-checked="true"]')
-        self.assertEqual(chosen.get_attribute("data-mode"), "classification")
-        self.assertEqual(self.page.locator("#answermodehelp").inner_text(), self.page.evaluate("t('answer.classification_help')"))
-        self.page.locator('#answermodegroup button[data-mode="explanation"]').click()
-        self.assertEqual(self.page.input_value("#answermode"), "explanation")
-        self.assertEqual(chosen.get_attribute("data-mode"), "explanation")
-        self.assertEqual(self.page.locator("#answermodehelp").inner_text(), self.page.evaluate("t('answer.explanation_help')"))
+        # One confirmed file: nothing to choose, so the bar stays hidden.
+        self.assertFalse(self.page.locator("#scopebar").is_visible())
         self.assertEqual(dialogs, [])
 
     def test_txt_rules_prepare_and_show_text_block_references(self):

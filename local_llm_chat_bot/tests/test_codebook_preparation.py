@@ -555,8 +555,9 @@ class CodebookPreparation(unittest.TestCase):
             body = source[source.index(f"async function {name}()"):]
             body = body[:body.index("\n")]
             self.assertNotIn("confirm(t(", body.replace("appConfirm(t(", ""))
-        self.assertNotIn("createElement('select');mode.id='answermode'", source)
-        self.assertIn('id="answermodegroup"', source)
+        # No answer-mode switch any more; the composer offers a question-scope bar.
+        self.assertNotIn("answermode", source)
+        self.assertIn("bar.id='scopebar'", source)
         self.assertNotRegex(source, r"rulews\.model_prompt")
 
 

@@ -61,8 +61,8 @@ Rules:
 - Write the natural-language answer in the response language requested in the user prompt.
   Keep official Codebook category names, filenames, part numbers, source quotations,
   supplied table labels, and supplied technical evidence exactly as provided.
-- Exception — when the supplied prompt contains BG CLASSIFICATION MODE, give an
-  evidence-led assessment of at most about 1500 Chinese characters (or equivalent).
+- Exception — when the supplied prompt contains BG CLASSIFICATION MODE and you return a
+  non-null classification object, give an evidence-led assessment of at most about 1500 Chinese characters (or equivalent).
   Use concise equivalent sections in the requested response language: recommendation;
   Codebook decision path; evidence (file/page/sheet/row); alternatives; uncertainty.
   At most 4 short points per section; cite evidence labels instead of quoting long
@@ -655,7 +655,8 @@ def classification_manifest(evidence, context):
 def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], full_files: dict[str, str] | None = None,
                document_snippets: list[dict] | None = None, bg_context: dict | None = None,
                coverage_summaries: list[dict] | None = None, bg_dossier: dict | None = None,
-               response_language: str = "zh", require_classification: bool = True):
+               response_language: str = "zh", require_classification: bool | None = True,
+               focus_name: str = ""):
     recent = "\n".join(f"{turn['role']}: {turn['content']}" for turn in state.data["history"][-HISTORY_MESSAGES_PER_REQUEST:]) or "(new conversation)"
     memories = state.search_memory(question)
     memory_text = "\n".join(f"- [{item['id']}] {item['content']}" for item in memories) or "(No relevant confirmed long-term memory.)"
@@ -676,7 +677,19 @@ def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], ful
         locked_profile = bg_context.get("locked_profile") or {}
         profile_text = json.dumps(locked_profile, ensure_ascii=False) if locked_profile else "(No locked structured profile available.)"
         manifest = json.dumps(classification_manifest(document_snippets or [], bg_context), ensure_ascii=False)
-        response_mode = "CLASSIFICATION REQUIRED: return a complete classification object." if require_classification else "EXPLANATION MODE: classification may be null; any non-null classification must meet every validation rule."
+        if require_classification is None:
+            response_mode = ("AUTO MODE: decide from the user request. If the user asks to classify, determine, confirm or "
+                             "re-check the Baugruppe class, return a complete classification object and use the detailed "
+                             "classification format. Otherwise answer exactly what was asked in the normal answer shape, set "
+                             "classification to null, and treat earlier classification results in the conversation as background only.")
+        elif require_classification:
+            response_mode = "CLASSIFICATION REQUIRED: return a complete classification object."
+        else:
+            response_mode = ("EXPLANATION MODE: answer the user's question directly; classification should be null unless the user "
+                             "explicitly asks for a classification. Any non-null classification must meet every validation rule.")
+        focus = (f"- FOCUS FILE: the user restricted this turn to the single file '{focus_name}'. Only its excerpts were supplied. "
+                 "Answer about this file; do not draw conclusions from other files except earlier results in the conversation, "
+                 "and say so when you use them.\n") if focus_name else ""
         bg_instruction = f"""
 BG CLASSIFICATION MODE (active):
 - Codebook: {bg_context.get('codebook_name', 'unknown')}
@@ -684,10 +697,10 @@ BG CLASSIFICATION MODE (active):
 - Locked Codebook profile (user-confirmed; use this as the primary rule source): {profile_text}
 - Classification reference manifest: {manifest}
 - {response_mode}
-- Give the full detailed classification format required by the system prompt.
+{focus}- When you return a classification, give the full detailed classification format required by the system prompt.
 - Treat the Codebook as the rule source. Cite evidence labels exactly as supplied.
 - A source marked visual/scanned may require visual inspection; do not infer text that was not supplied.
-- In CLASSIFICATION REQUIRED mode include this `classification` object; in EXPLANATION MODE it may be null:
+- In CLASSIFICATION REQUIRED mode include this `classification` object; in AUTO or EXPLANATION MODE it may be null:
   {{"label": "exact Codebook class name", "confidence": "high|medium|low", "alternative_label": "exact Codebook class name or empty", "codebook_rule_ids": ["exact rule id from the locked profile"], "codebook_rule_pages": [], "codebook_rule_refs": ["exact codebook_labels entry"], "evidence_labels": ["exact supplied document label"], "bg_evidence_pages": ["exact bg_labels entry"], "uncertainties": []}}.
 - Copy the class and evidence-label spelling exactly. Use only evidence labels supplied in this prompt. A non-empty evidence_labels list is mandatory for a classification.
 - A non-empty codebook_rule_ids list is mandatory; it must name the actual locked rule(s) used for the decision. Keep Codebook-rule pages and BG-evidence pages separate.

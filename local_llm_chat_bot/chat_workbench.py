@@ -396,7 +396,10 @@ class CodebookPrepareRequest(BaseModel):
 class ChatRequest(BaseModel):
     request_id: str = Field(default="", pattern=r"^(?:[a-f0-9]{32})?$")
     question: str = Field(max_length=50000)
-    require_classification: bool = True
+    # None = decide from the question (the UI no longer offers a mode switch).
+    require_classification: bool | None = None
+    # Optional single active material this turn is restricted to.
+    focus_source_id: str = Field(default="", max_length=200)
 
 
 class CompareRequest(BaseModel):
@@ -2699,7 +2702,8 @@ ANSWER_SHORTEN_INSTRUCTION = (
     "object, must be complete.")
 
 
-def call_model(data: dict[str, Any], question: str, progress=None, *, require_classification: bool = True) -> dict[str, Any]:
+def call_model(data: dict[str, Any], question: str, progress=None, *, require_classification: bool | None = True,
+               focus_source_id: str = "") -> dict[str, Any]:
     state, documents, llm = data["state"], data["documents"], data["llm"]
     ensure_current_sources(data)
     invalidate_pending(data)
@@ -2711,10 +2715,19 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     report("search", ui_message(data, 'progress.check'), 5)
     bg_context = state.data.get("bg_context")
     active_source_ids = state.data.get("active_source_ids", [])
+    material_ids = list(bg_context.get("source_ids", [])) if bg_context else list(active_source_ids)
+    focus = None
+    if focus_source_id:
+        if focus_source_id not in material_ids:
+            raise HTTPException(409, ui_message(data, 'scope.focus_invalid'))
+        focus = next((item for item in documents.list() if item.get("id") == focus_source_id), None)
+        if not focus:
+            raise HTTPException(409, ui_message(data, 'scope.focus_invalid'))
+        material_ids = [focus_source_id]
     matches = state.search(question)
     snippets = {item: excerpt(state, item, question) for item in matches}
-    preferred = ([bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))) if bg_context else active_source_ids
-    allowed = list(bg_context.get("source_ids", [])) + [bg_context.get("codebook_id")] if bg_context else active_source_ids
+    preferred = ([bg_context.get("codebook_id")] + material_ids) if bg_context else material_ids
+    allowed = material_ids + [bg_context.get("codebook_id")] if bg_context else material_ids
     report("search", ui_message(data, 'progress.search'), 10)
     evidence = traceable_evidence(data, documents.search(question, preferred_ids=preferred,
                                                          classification=bool(bg_context), allowed_ids=allowed))
@@ -2726,6 +2739,8 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     visuals = documents.visual_paths(evidence, state.root / "visual_cache",
                                      bilder_images=documents.bilder_image_paths(allowed))
     reasoning, notices = [], []
+    turn_scope = ({"kind": "file", "id": focus["id"], "name": focus["name"]} if focus
+                  else {"kind": "all", "count": len(material_ids)})
     visual_report = documents.last_visual_report
     if visual_report.get("short_drawings"):
         names = "、".join(str(name) for name in visual_report["short_drawings"])
@@ -2748,11 +2763,22 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     usage_records: list[dict] = []
     coverage = load_coverage(state)
     auto_prepared = False
-    classification_request = bool(bg_context) and require_classification
+    if require_classification is None:
+        # No mode switch: the first whole-material question on a confirmed
+        # Baugruppe is a classification; later questions let the model decide.
+        first_turn = not state.data.get("history")
+        classification_request = (True if first_turn and not focus else None) if bg_context else False
+    else:
+        classification_request = bool(bg_context) and require_classification
+    classification_required = classification_request is True
     # Once a material range is confirmed as a Baugruppe, its first question
     # should transparently prepare the shared understanding, even if the user
     # phrases it as a natural question rather than using a classification word.
-    preparation_request = bool(bg_context)
+    # A question focused on one file needs neither the whole-range pre-read
+    # nor the comprehensive dossier, so it costs no extra model calls.
+    preparation_request = bool(bg_context) and not focus
+    if focus:
+        report("reading", ui_message(data, 'progress.focus_file', name=focus["name"]), 62)
     if not coverage_matches_current_selection(data, coverage) and preparation_request:
         report("reading", ui_message(data, 'progress.reading_start'), 12)
         coverage = prepare_coverage(data, progress=report, usage_records=usage_records)
@@ -2761,8 +2787,10 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     elif preparation_request:
         report("reading", ui_message(data, 'progress.reading_reused'), 62)
     coverage_summaries = coverage.get("files", []) if coverage_matches_current_selection(data, coverage) else []
+    if focus:  # Reuse only this file's existing pre-read summary, if any.
+        coverage_summaries = [item for item in coverage_summaries if item.get("id") == focus["id"]]
     dossier = None
-    if coverage_summaries:
+    if coverage_summaries and not focus:
         try:
             report("dossier", ui_message(data, 'progress.dossier'), 70)
             dossier, _, dossier_created = prepare_bg_dossier(data, coverage, usage_records=usage_records)
@@ -2778,7 +2806,8 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
             dossier = None
     model_prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
                               coverage_summaries=[] if dossier else coverage_summaries, bg_dossier=dossier,
-                              response_language=data.get("language", "zh"), require_classification=classification_request)
+                              response_language=data.get("language", "zh"), require_classification=classification_request,
+                              focus_name=focus["name"] if focus else "")
     report("model", ui_message(data, 'progress.connect', model=data["model"]), 86)
     model_started = False
     preview = AnswerPreview()
@@ -2820,7 +2849,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     report("model", ui_message(data, 'progress.waiting'), 90)
     raw = answer_call(model_prompt, 4096)
     raw = require_model_success(raw, ui_message(data, 'model.context_main'))
-    validation = {"required": classification_request, "repairs": 0}
+    validation = {"required": classification_required, "repairs": 0}
     scope = classification_scope(documents, bg_context)
 
     def repair_classification(repair_prompt):
@@ -2860,7 +2889,8 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
         report("complete", ui_message(data, 'model.complete'), 100)
         return {"answer": answer, "reasoning": "".join(reasoning), "notices": notices, "notice_messages": [message_payload(item) for item in notices],
                 "sources": redact_value(evidence, llm.api_key), "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [], "can_export_bg": False,
-                "classification": None, "coverage_summary": coverage_summary_for_answer(coverage) if classification_request else None,
+                "classification": None, "coverage_summary": coverage_summary_for_answer(coverage) if classification_required and not focus else None,
+                "scope": turn_scope,
                 "turn_usage": summarize_usage(usage_records), "model_response": llm.last_response_model or data["model"],
                 "turn_cost": summarize_usage(usage_records)["cost_usd"],
                 "usage": status_data(data)}
@@ -2875,7 +2905,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     if complete:
         model_prompt = prompt_for(state, question, snippets, complete, evidence, bg_context,
                                   [] if dossier else coverage_summaries, dossier, data.get("language", "zh"),
-                                  require_classification=classification_request)
+                                  require_classification=classification_request, focus_name=focus["name"] if focus else "")
         report("model", ui_message(data, 'progress.supplementary'), 93)
         raw = answer_call(model_prompt, 3000)
         raw = require_model_success(raw, ui_message(data, 'model.context_supplementary'))
@@ -2902,7 +2932,8 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
         state.add_turn("user", question)
         state.add_turn("assistant", action.get("answer", ""))
         turn_token_usage = summarize_usage(usage_records)
-        if bg_context:
+        # An explanation turn must not overwrite the exportable classification.
+        if bg_context and (action.get("classification") is not None or not state.data.get("last_bg_analysis")):
             state.data["last_bg_analysis"] = {
                 "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                 "session": state.root.name,
@@ -2925,7 +2956,8 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
             "model_response": llm.last_response_model or data["model"],
             "turn_cost": turn_token_usage["cost_usd"],
             "classification": action.get("classification"),
-            "coverage_summary": coverage_summary_for_answer(coverage) if action.get("classification") is not None else None,
+            "coverage_summary": coverage_summary_for_answer(coverage) if action.get("classification") is not None and not focus else None,
+            "scope": turn_scope,
             "usage": status_data(data)}
 
 
@@ -3902,7 +3934,8 @@ def chat(request: ChatRequest):
     data = begin_model_work()
     try:
         with LOCK:
-            return call_model(data, request.question.strip(), require_classification=request.require_classification)
+            return call_model(data, request.question.strip(), require_classification=request.require_classification,
+                              focus_source_id=request.focus_source_id)
     finally:
         MODEL_WORK_IN_PROGRESS.clear()
 
@@ -3986,7 +4019,8 @@ async def chat_stream(request: ChatRequest, http_request: Request):
         try:
             with LOCK:
                 task["result"] = call_model(data, question, progress=publish,
-                                            require_classification=request.require_classification)
+                                            require_classification=request.require_classification,
+                                            focus_source_id=request.focus_source_id)
         except Exception as exc:
             code = ("cancelled" if isinstance(exc, RequestCancelled) else
                     "timeout" if isinstance(exc, RequestTimedOut) else
@@ -4279,7 +4313,7 @@ function scopeCopy(record){
   let scope=record.scope??record.reading_scope??'';
   return scope==='完整文本预读'?t('material.scope_full'):scope==='Datasheet 前 15 页预读（其余页尚未覆盖）'?t('material.scope_datasheet',{pages:15}):scope==='已读取'?t('coverage.default_scope'):scope;
 }
-function stateCopy(value){let keys={'ok':'state.ok','not_needed':'state.not_needed','partial':'state.partial','unknown':'state.unknown','not_requested':'state.not_requested','not_applicable':'state.not_applicable','not applicable':'state.not_applicable','已完成':'state.complete','部分完成':'state.partial','不需要（原生文字页）':'state.native_text','不适用（无页码文档）':'state.not_applicable'};return keys[value]?t(keys[value]):String(value??'—')}
+function stateCopy(value){let keys={'ok':'state.ok','not_needed':'state.not_needed','partial':'state.partial','unknown':'state.unknown','not_requested':'state.not_requested','not_applicable':'state.not_applicable','not applicable':'state.not_applicable','已完成':'state.complete','部分完成':'state.partial','不需要（原生文字页）':'state.native_text','不适用（无页码文档）':'state.not_applicable','不需要 / 无 PDF 页':'state.no_pdf_pages'};return keys[value]?t(keys[value]):String(value??'—')}
 function roleCopy(value){let keys={'技术图纸':'material.role_drawing','BOM / 装配表':'material.role_bom','数据表 / 目录':'material.role_datasheet','DFC 结构图':'material.role_dfc','CAD 截图':'material.role_cad','派生重复资料':'material.role_derived','Inventor 源图（暂不支持）':'material.role_unsupported','其他资料':'material.role_other'};return keys[value]?t(keys[value]):String(value||t('material.role_other'))}
 function rerenderUIComponents(){
   for(let node of document.querySelectorAll('[data-ui-component]')){
@@ -4417,20 +4451,35 @@ async function pickWorkspace(){try{let path=(await api('/api/pick/folder')).path
 function refreshAppChrome(){let path=$('workspace')?.value.trim();let short=path?path.replace(/\\/g,'/').split('/').filter(Boolean).slice(-2).join(' / '):tr('选择工作区文件夹');if($('workspaceshortcut'))$('workspaceshortcut').textContent=short;if($('topbarstatus'))$('topbarstatus').textContent=path?tr('本地运行 · 工作区已打开'):tr('本地运行')}
 function initVisualAdjustments(){if($('visual-adjustments'))return;let style=document.createElement('style');style.id='visual-adjustments';style.textContent='.composer-tools select{border-radius:8px!important}';document.head.append(style)}
 function initLanguageLayout(){if($('language-layout'))return;let style=document.createElement('style');style.id='language-layout';style.textContent=`.context-shortcut{display:none}@media(max-width:1180px){.context-shortcut{display:inline-grid}}html[lang="zh"] body,html[lang="zh"] button,html[lang="zh"] input,html[lang="zh"] select{font-family:"Microsoft YaHei UI","Microsoft YaHei","Noto Sans SC","Segoe UI",sans-serif;letter-spacing:0}html[lang="en"] body,html[lang="en"] button,html[lang="en"] input,html[lang="en"] select,html[lang="de"] body,html[lang="de"] button,html[lang="de"] input,html[lang="de"] select{font-family:Inter,"Segoe UI",Arial,sans-serif}html[lang="zh"] .chat-subtitle,html[lang="zh"] .muted{line-height:1.55}html[lang="de"] .context-card strong,html[lang="de"] .context-drawer-head h2{letter-spacing:0}html[lang="de"] .context-card strong{padding-right:42px}.row{flex-wrap:wrap;align-items:center}.row input{min-width:min(100%,185px)}.row button{white-space:normal;line-height:1.25;min-height:34px}.context-card{min-height:78px}.context-card strong{position:relative;line-height:1.3;padding-right:50px;overflow-wrap:anywhere}.context-card em{position:absolute;right:0;top:0;float:none;white-space:nowrap}.context-card span{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.context-drawer-head h2,.context-drawer-body label,.classification-card h3{overflow-wrap:anywhere}.context-drawer-body button,.workspace-actions button{max-width:100%;overflow-wrap:anywhere}.composer-tools{flex-wrap:wrap;row-gap:5px}.composer-tools .spacer{min-width:0}.composer-tools select{min-width:170px;max-width:min(330px,100%)}html[lang="de"] .composer-tools select{max-width:285px}@media(max-width:1180px){.shell{grid-template-columns:minmax(220px,var(--left-panel-width)) 8px minmax(360px,1fr) 260px}.right{padding:13px 10px}.context-drawer{right:260px;width:min(640px,calc(100vw - 300px))}.chat-header{padding:0 20px}.composer-wrap{padding-left:20px;padding-right:20px}}@media(max-width:760px){.topbar{gap:8px;padding:0 10px}.app-brand{font-size:13px}.topbar-workspace{max-width:145px}.shell{grid-template-columns:minmax(180px,42vw) 7px minmax(0,1fr)}.chat{padding:20px 14px}.chat-header{padding:0 14px}.composer-wrap{padding:0 14px 14px}.welcome h1{font-size:26px}.composer-tools .spacer{display:none}.composer-tools select{width:100%;max-width:none}.composer-tools #custommodelrow{width:100%;flex-wrap:wrap}.composer-tools #custommodelrow input{width:100%}.context-drawer{left:0;right:0;width:auto;max-width:100vw;border-radius:0;transform:none!important;transition:opacity .18s}.context-drawer-body{min-width:0;overflow-x:hidden}.context-drawer-body input{min-width:0;max-width:100%}#scanbackdrop.open .scan-drawer{left:0!important;right:0;width:auto;max-width:100vw;transform:none}.main{min-width:0}.composer{grid-template-columns:minmax(0,1fr) auto}.composer #cancelchat{grid-column:2}.composer input{min-width:0}.composer-tools{grid-column:1/-1}.context-card{min-height:0}}@media(max-width:900px){.shell{grid-template-columns:minmax(220px,var(--left-panel-width)) 8px minmax(0,1fr)}}@media(max-width:650px){.shell{grid-template-columns:minmax(0,1fr)}.chat-header{gap:6px}.chat-subtitle{display:none}.chat-title{font-size:13px}}`;document.head.append(style)}
-function initComposerControls(){if($('composertools'))return;let composer=$('composer');if(!composer)return;let tools=document.createElement('div');tools.id='composertools';tools.className='composer-tools';let note=document.createElement('span');note.id='composermodelnote';note.className='muted';let spacer=document.createElement('span');spacer.className='spacer';let model=$('model'),custom=$('custommodelrow'),modelmsg=$('modelmsg'),test=document.querySelector('button[onclick="testModel()"]');if(model)tools.append(note,model);if(custom)tools.append(custom);if(test){test.id='modeltestbutton';test.className='model-test';tools.append(test)}if(modelmsg)tools.append(modelmsg);tools.append(spacer);let mode=document.createElement('div');mode.id='answermodecontrol';mode.className='answer-mode';mode.innerHTML='<input type="hidden" id="answermode" value="classification"><span id="answermodestatic" class="answer-mode-static"></span><span id="answermodegroup" class="answer-mode-group" role="radiogroup"><button type="button" role="radio" data-mode="classification" onclick="setAnswerMode(\'classification\')"></button><button type="button" role="radio" data-mode="explanation" onclick="setAnswerMode(\'explanation\')"></button></span><span id="answermodehelp" class="answer-mode-help"></span>';tools.append(mode);composer.append(tools);localizeComposerControls()}
+function initComposerControls(){if($('composertools'))return;let composer=$('composer');if(!composer)return;let tools=document.createElement('div');tools.id='composertools';tools.className='composer-tools';let note=document.createElement('span');note.id='composermodelnote';note.className='muted';let spacer=document.createElement('span');spacer.className='spacer';let model=$('model'),custom=$('custommodelrow'),modelmsg=$('modelmsg'),test=document.querySelector('button[onclick="testModel()"]');if(model)tools.append(note,model);if(custom)tools.append(custom);if(test){test.id='modeltestbutton';test.className='model-test';tools.append(test)}if(modelmsg)tools.append(modelmsg);tools.append(spacer);composer.append(tools);let style=document.createElement('style');style.textContent='.scope-bar{width:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:9px 12px 2px}.scope-bar[hidden]{display:none}.scope-label{font-size:12px;color:#94a3b8;margin-right:2px}.scope-chip{border-radius:999px;padding:4px 11px;font-size:12.5px;background:transparent;border:1px solid #3b4960;color:#cbd5e1;display:inline-flex;gap:6px;align-items:center;max-width:340px;cursor:pointer}.scope-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.scope-chip.on{background:#16324f;border-color:#38bdf8;color:#e0f2fe}.scope-chip b{font-weight:400;padding:0 2px;color:#7dd3fc}.scope-menu{width:100%;margin-top:4px;padding:4px;background:#111c30;border:1px solid #33435e;border-radius:10px;max-height:240px;overflow:auto}.scope-menu button{display:flex;width:100%;justify-content:space-between;gap:10px;background:transparent;color:#e5e7eb;text-align:left;padding:7px 9px;border-radius:7px}.scope-menu button:hover,.scope-menu button.on{background:#263244}.scope-tag{font-size:12px;color:#94a3b8;margin:10px 0 -4px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}.scope-tag .chip{border:1px solid #3b4960;border-radius:6px;padding:1px 7px}.scope-tag button{font-size:12px;padding:2px 8px}';document.head.append(style);let bar=document.createElement('div');bar.id='scopebar';bar.className='scope-bar';bar.hidden=true;composer.prepend(bar);localizeComposerControls()}
 function localizeComposerControls(){setI18nText($('composermodelnote'),'model.current');setI18nText($('modeltestbutton'),'model.test');renderAnswerMode()}
-function answerModeAvailable(){return !lastStatusSnapshot?.context_issue&&!!lastStatusSnapshot?.bg_context}
-function setAnswerMode(value){let input=$('answermode');if(!input||!answerModeAvailable()||!['classification','explanation'].includes(value))return;input.value=value;renderAnswerMode()}
-// Fixed-rule classification and explanation follow-ups are both real modes.
-// Without locked rules and confirmed materials only ordinary questions are
-// possible, so a static label replaces the switch instead of a dead control.
-function renderAnswerMode(){
-  let input=$('answermode'),group=$('answermodegroup'),label=$('answermodestatic'),help=$('answermodehelp');if(!input||!group)return;
-  let available=answerModeAvailable(),value=input.value==='explanation'?'explanation':'classification';
-  group.hidden=!available;group.setAttribute('aria-label',t('answer.mode'));label.hidden=available;
-  for(let button of group.querySelectorAll('button')){let selected=button.dataset.mode===value;button.textContent=t(button.dataset.mode==='classification'?'answer.classification':'answer.explanation');button.setAttribute('aria-checked',String(selected));button.disabled=!available}
-  label.textContent=t('answer.current_mode',{mode:t('answer.normal')});
-  help.textContent=available?t(value==='classification'?'answer.classification_help':'answer.explanation_help'):t('answer.unavailable_help');
+// There is no answer-mode switch: the server decides from the question whether
+// a classification is needed. The only choice is the scope of the question:
+// all confirmed materials (default) or one of them.
+let scopeFocusId='',scopeDocs=[],scopeRevision=null,scopeOpen=false;
+function renderAnswerMode(){renderScopeBar()}
+async function ensureScopeDocs(){let rev=(lastStatusSnapshot?.context_revision||'')+'|'+(lastStatusSnapshot?.documents||0);if(rev===scopeRevision)return;scopeRevision=rev;scopeFocusId='';scopeOpen=false;scopeDocs=[];if(lastStatusSnapshot?.documents){try{scopeDocs=await api('/api/documents')}catch{scopeDocs=[]}}renderScopeBar()}
+function scopeFocusDoc(){return (scopeDocs||[]).find(d=>d.id===scopeFocusId)||null}
+function renderScopeBar(){
+  let bar=$('scopebar');if(!bar)return;ensureScopeDocs();
+  let docs=scopeDocs||[],show=docs.length>1&&!lastStatusSnapshot?.context_issue,focus=show?scopeFocusDoc():null,q=$('question');
+  if(!focus)scopeFocusId='';
+  if(q)q.placeholder=focus?t('scope.placeholder_file',{name:focus.name}):show?t('scope.placeholder_all',{count:docs.length}):t('chat.placeholder');
+  bar.hidden=!show;if(!show){bar.innerHTML='';return}
+  let html='<span class="scope-label">'+esc(t('scope.label'))+'</span><button type="button" class="scope-chip'+(focus?'':' on')+'" aria-pressed="'+!focus+'" onclick="setScopeFocus(\'\')">📁 <span>'+esc(t('scope.all',{count:docs.length}))+'</span></button>';
+  if(focus)html+='<button type="button" class="scope-chip on" aria-pressed="true" title="'+escAttr(focus.name)+'" onclick="toggleScopeMenu()">📄 <span>'+esc(focus.name)+'</span><b role="button" aria-label="'+escAttr(t('scope.clear'))+'" onclick="event.stopPropagation();setScopeFocus(\'\')">×</b></button>';
+  html+='<button type="button" class="scope-chip" aria-expanded="'+scopeOpen+'" onclick="toggleScopeMenu()">🎯 <span>'+esc(t(focus?'scope.change':'scope.one_file'))+'</span> ▾</button>';
+  if(scopeOpen)html+='<div class="scope-menu" role="listbox">'+docs.map(d=>'<button type="button" role="option" class="'+(d.id===scopeFocusId?'on':'')+'" data-id="'+escAttr(d.id)+'" onclick="setScopeFocus(this.dataset.id)"><span>📄 '+esc(d.name)+'</span><span class="muted">'+esc(roleCopy(d.material_role_label))+'</span></button>').join('')+'</div>';
+  bar.innerHTML=html;
+}
+function setScopeFocus(id){scopeFocusId=id||'';scopeOpen=false;renderScopeBar();$('question')?.focus()}
+function toggleScopeMenu(){scopeOpen=!scopeOpen;renderScopeBar()}
+function scopeTag(scope,classified){
+  if(!scope||!lastStatusSnapshot?.bg_context)return null;let tag=document.createElement('div');tag.className='scope-tag';
+  let range=scope.kind==='file'?t('scope.tag_file',{name:scope.name}):t('scope.tag_all',{count:scope.count});
+  tag.innerHTML='<span class="chip">'+esc(range)+'</span><span class="chip">'+esc(t(classified?'scope.kind_classification':'scope.kind_answer'))+'</span>';
+  if(scope.kind==='file'&&scopeDocs.length>1){let again=document.createElement('button');again.className='ghost';again.textContent=t('scope.reask_all');again.onclick=()=>{setScopeFocus('');$('question').value=lastQuestion;chat()};tag.append(again)}
+  return tag;
 }
 async function contextPickWorkspace(){try{let path=(await api('/api/pick/folder')).path||'';if(!path)return;$('workspace').value=path;$('contextworkspacepath').value=path;if(await setup()){refreshAppChrome();closeContextDrawer()}}catch(e){setUIMessage($('contextworkspacemsg'),e.uiMessage||{text:e.message},'error')}}
 async function contextOpenWorkspace(){let path=$('contextworkspacepath').value.trim();if(!path){setUIMessage($('contextworkspacemsg'),{message_key:'workspace.path_required'},'error');return}$('workspace').value=path;if(await setup()){refreshAppChrome();closeContextDrawer()}}
@@ -4453,8 +4502,7 @@ function renderContextGuard(){
   if(!host&&$('composer')){host=document.createElement('div');host.id='contextguard';host.className='muted';$('composer').before(host)}
   if(host)host.textContent=issue?t('context.reconfirm'):'';
   if($('question'))$('question').disabled=issue;
-  let mode=$('answermode'),revision=lastStatusSnapshot?.context_revision||'';
-  if(mode){if(mode.dataset.scope!==revision){mode.value='classification';mode.dataset.scope=revision}renderAnswerMode()}
+  renderScopeBar();
   document.querySelectorAll('button[onclick="chat()"],button[onclick="compareModels()"]').forEach(button=>button.disabled=issue);
   let draft=$('contextcodebookpath')?.value.trim(),prepared=lastCodebookProfile?.source_path||'';
   let rulemsg=$('contextrulemsg');if(rulemsg&&!rulemsg.querySelector('.error'))rulemsg.textContent=draft&&draft!==prepared&&!codebookRunning()?t('rules.pending_path',{path:prepared||'—'}):'';
@@ -4508,7 +4556,7 @@ async function runDiagnostics(){
   catch(e){setUIMessage(host,[{message_key:'audit.diagnostics_failed'},{text:e.message}],'error')}
 }
 function openContextDrawer(kind){
-  closeContextDrawer();activeContextDrawer=kind;let title=$('contextdrawertitle'),body=$('contextdrawerbody');
+  closeScanReport();closeContextDrawer();activeContextDrawer=kind;let title=$('contextdrawertitle'),body=$('contextdrawerbody');
   if(kind==='workspace'){
     title.textContent=t('workspace.title');body.innerHTML='<div class="muted">'+t('workspace.description')+'</div><div class="field"><label>'+t('workspace.path_label')+'</label><div class="row"><input id="contextworkspacepath" placeholder="'+t('workspace.path_label')+'" value="'+escAttr($('workspace').value)+'"><button class="ghost" onclick="contextPickWorkspace()">'+t('workspace.choose')+'</button></div></div><div class="row"><button onclick="contextOpenWorkspace()">'+t('workspace.open')+'</button></div><div id="contextworkspacemsg" class="muted" style="margin-top:10px"></div>';
   }else if(kind==='rules'){
@@ -4820,7 +4868,7 @@ function makeTreeNode(...args){return makeTreeNodeForLanguage(...args)}
 function loadTargetTree(...args){return loadTargetTreeForLanguage(...args)}
 function ensureMaterialFlow(){createMaterialFlow();$('scanbackdrop')?.querySelector('.scan-drawer')?.setAttribute('aria-label',t('scan.report.title'))}
 function selectedTargetPaths(){return [...$('targettree').querySelectorAll('input.tree-file:checked')].map(x=>x.dataset.path)}
-async function analyzeTarget(){if(!allowRuleDraftTransition())return;if($('contexttargetpath'))contextSyncTarget();let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent=rt('scan.reading')}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error(t('materials.selection_required'));setUIMessage($('bgstatus'),{message_key:'materials.scan_started',params:{count:selected.length||1}});let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');materialDraftDirty=false;clearResultPanels();await loadHistory();renderStatus(x.status);$('bgstatus').innerHTML='<span class="ok">'+esc(t('materials.scan_done'))+'</span> '+esc(t(x.classification?'materials.confirmed_bg':'materials.confirmed_normal',{kind:tr(x.target_kind),count:x.sources}));renderScanReport(x);$('coveragestatus').textContent=rt('material.updated');loadDocs();openScanReport()}catch(e){setUIMessage($('bgstatus'),e.uiMessage||{text:e.message},'error')}finally{if(confirm)confirm.textContent=t('materials.confirm_selected');updateMaterialFlowButtons()}}
+async function analyzeTarget(){if(!allowRuleDraftTransition())return;if($('contexttargetpath'))contextSyncTarget();if($('chat').querySelector('.message.user')&&!await appConfirm(t('materials.replace_confirm')))return;let confirm=$('confirmmaterials');if(confirm){confirm.disabled=true;confirm.textContent=rt('scan.reading')}try{let target=$('targetpath').value.trim();let selected=selectedTargetPaths();if($('targettree').querySelector('.tree-file')&&!selected.length)throw Error(t('materials.selection_required'));setUIMessage($('bgstatus'),{message_key:'materials.scan_started',params:{count:selected.length||1}});let x=await api('/api/target',{method:'POST',body:JSON.stringify({target,codebook:$('codebook').value,selected_paths:selected})});scannedSelection=selected.slice().sort().join('|');materialDraftDirty=false;clearResultPanels();await loadHistory();renderStatus(x.status);setUIMessage($('bgstatus'),[{message_key:'materials.scan_done'},{message_key:x.classification?'materials.confirmed_bg':'materials.confirmed_normal',params:{kind:tr(x.target_kind),count:x.sources}}],'ok');renderScanReport(x);$('coveragestatus').textContent=rt('material.updated');loadDocs();openScanReport()}catch(e){setUIMessage($('bgstatus'),e.uiMessage||{text:e.message},'error')}finally{if(confirm)confirm.textContent=t('materials.confirm_selected');updateMaterialFlowButtons()}}
 async function prepareCoverage(full=false){if(busy)return;busy=true;let operation=beginOperation();setUIMessage($('coveragestatus'),{message_key:full?'coverage.preparing_full':'coverage.preparing'});try{let x=await api('/api/coverage',{method:'POST',body:JSON.stringify({full,request_id:operation.id})});renderCoverageReport(x);renderStatus(await api('/api/status'))}catch(e){setUIMessage($('coveragestatus'),{message_key:'error.operation_failed',params:{detail:e.uiMessage||{text:e.message}}},'error')}finally{endOperation(operation);busy=false}}
 async function clearBg(){if(!allowRuleDraftTransition())return;try{renderStatus(await api('/api/bg',{method:'DELETE'}));setUIMessage($('bgstatus'),{message_key:'bg.exited'})}catch(e){$('bgstatus').textContent=e.message}}
 const compareOptions=[['claude-haiku-5-5','Claude Haiku 5.5'],['claude-sonnet-5-5','Claude Sonnet 5.5'],['claude-opus-5','Claude Opus 5'],['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite'],['gemini-2.5-pro','Gemini 2.5 Pro'],['gemini-2.5-flash','Gemini 2.5 Flash'],['deepseek-r1-0528-maas','DeepSeek R1 (0528)'],['llama-3.3-70b-instruct-maas','Llama 3.3 70B'],['glm-5-maas','GLM-5']];
@@ -4836,7 +4884,7 @@ function renderComparisonForLanguage(record){
 async function compareModels(){if(busy)return;if(lastStatusSnapshot?.context_issue){uiMessageNode({message_key:'context.reconfirm'});return;}if(materialDraftDirty){uiMessageNode({message_key:'materials.reconfirm'});return;}let q=$('question').value.trim()||lastQuestion;if(!q){setUIMessage($('comparestatus'),{message_key:'compare.question_required'},'error');return}let models=selectedCompareModels();if(models.length<2||models.length>4||new Set(models).size!==models.length){setUIMessage($('comparestatus'),{message_key:'compare.models_required'},'error');return}busy=true;lastQuestion=q;let operation=beginOperation();setUIMessage($('comparestatus'),{message_key:'compare.running',params:{count:models.length}});let wait=uiMessageNode({message_key:'compare.in_progress',params:{models:models.join(' · ')}});try{let x=await api('/api/compare',{method:'POST',body:JSON.stringify({question:q,models,request_id:operation.id})});wait.remove();lastComparison={question:q,data:x};renderComparisonForLanguage(lastComparison);renderStatus(x.usage);setUIMessage($('comparestatus'),{message_key:'compare.complete'},'ok')}catch(e){wait.uiData={message_key:'error.operation_failed',params:{detail:e.uiMessage||{text:e.message}}};wait.textContent=uiCopy(wait.uiData);wait.classList.add('error');setUIMessage($('comparestatus'),e.uiMessage||{text:e.message},'error')}finally{endOperation(operation);busy=false;$('chat').scrollTop=1e9}}
 function processingCard(){let card=document.createElement('section');card.className='message assistant';card.style.border='1px solid #334155';card.innerHTML='<b data-process-title>'+rt('model.processing')+'</b><div class="muted" data-process-text>'+rt('model.connecting')+'</div><div style="height:7px;background:#0b1220;border-radius:8px;overflow:hidden;margin-top:9px"><div data-process-bar style="height:100%;width:4%;background:#38bdf8;transition:width .25s ease"></div></div>';$('chat').append(card);return registerUI(card,'processing',null)}
 function updateProcessing(card,event){let text=card.querySelector('[data-process-text]'),bar=card.querySelector('[data-process-bar]');card.uiData=event;text.textContent=uiCopy(event)||rt('model.waiting');if(typeof event.percent==='number')bar.style.width=Math.max(4,Math.min(100,event.percent))+'%';if(event.phase==='complete'){card.style.borderColor='#22c55e';bar.style.background='#22c55e'}}
-function showChatResult(x){message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>'+t('model.reasoning')+'</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;registerUI(d,'reasoning',x.reasoning);$('chat').append(d)}if(x.notices?.length){let data=x.notice_messages||x.notices;registerUI(message(data.map(uiCopy).join('\n'),'assistant'),'notices',data)}renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${esc(c.path)}</b><br>${esc(c.reason)}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button data-plan-id="'+escAttr(x.plan_id||'')+'" onclick="apply(this.dataset.planId,this)">'+t('changes.apply')+'</button>':t('changes.none');if(!x.changes?.length)setUIMessage($('changes'),{message_key:'changes.none'});if(x.changes?.length){let review=$('changes').cloneNode(true);review.removeAttribute('id');review.className='message assistant change-plan';$('chat').append(review)}$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">'+t('export.assembly')+'</button>':t('export.assembly_unavailable');if(!x.can_export_bg)setUIMessage($('analysisexport'),{message_key:'export.assembly_unavailable'});renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}
+function showChatResult(x){let tag=scopeTag(x.scope,!!x.classification);if(tag)$('chat').append(tag);message(x.answer);if(x.classification)$('chat').append(classificationCard(x.classification));let summary=coverageSummaryCard(x.coverage_summary);if(summary)$('chat').append(summary);if(x.reasoning){let d=document.createElement('details');d.className='reason';d.innerHTML='<summary>'+t('model.reasoning')+'</summary><pre></pre>';d.querySelector('pre').textContent=x.reasoning;registerUI(d,'reasoning',x.reasoning);$('chat').append(d)}if(x.notices?.length){let data=x.notice_messages||x.notices;registerUI(message(data.map(uiCopy).join('\n'),'assistant'),'notices',data)}renderEvidenceSources(x.sources,x.dfc_evidence);$('changes').innerHTML=x.changes?.length?x.changes.map(c=>`<div class="card"><b>${esc(c.path)}</b><br>${esc(c.reason)}<pre class="diff">${esc(c.diff)}</pre></div>`).join('')+'<button data-plan-id="'+escAttr(x.plan_id||'')+'" onclick="apply(this.dataset.planId,this)">'+t('changes.apply')+'</button>':t('changes.none');if(!x.changes?.length)setUIMessage($('changes'),{message_key:'changes.none'});if(x.changes?.length){let review=$('changes').cloneNode(true);review.removeAttribute('id');review.className='message assistant change-plan';$('chat').append(review)}$('analysisexport').innerHTML=x.can_export_bg?'<button class="ghost" onclick="exportBgAnalysis()">'+t('export.assembly')+'</button>':t('export.assembly_unavailable');if(!x.can_export_bg)setUIMessage($('analysisexport'),{message_key:'export.assembly_unavailable'});renderUsageDetail(x.turn_usage,x.model_response);renderStatus(x.usage)}
 let activeChat=null;
 let activeOperation=null;
 function beginOperation(){let operation={id:crypto.randomUUID().replaceAll('-',''),stopping:false};activeOperation=operation;$('cancelchat').disabled=false;return operation}
@@ -4880,7 +4928,7 @@ async function chat(){
     previewText.appendData(text);
   }
   try{
-    let response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','X-Workbench-Language':uiLanguage,...contextHeaders()},signal:task.controller.signal,body:JSON.stringify({question:q,request_id:task.id,require_classification:!(answerModeAvailable()&&$('answermode')?.value==='explanation')})});
+    let response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','X-Workbench-Language':uiLanguage,...contextHeaders()},signal:task.controller.signal,body:JSON.stringify({question:q,request_id:task.id,focus_source_id:scopeFocusDoc()?.id||''})});
     learnPageContext('/api/chat/stream','POST',response);
     if(!response.ok)await readApiResponse(response);
     let reader=response.body.getReader(),decoder=new TextDecoder();
