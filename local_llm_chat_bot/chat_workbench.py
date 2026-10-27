@@ -567,6 +567,7 @@ def status_data(data: dict[str, Any]) -> dict[str, Any]:
         "known_cost_usd": usage.get("estimated_cost_usd", 0),
         "cost_complete": not usage.get("unpriced_requests"),
         "unpriced_requests": usage.get("unpriced_requests", 0),
+        "unpriced_detail": usage.get("unpriced_detail", {}),
         "bg_context": state.data.get("bg_context"),
         "context_issue": context_issue(data),
         "context_revision": state.data.get("context_revision", ""),
@@ -1001,6 +1002,9 @@ def accounted_model_call(data, connector, *args, usage_records=None, **kwargs):
             usage = normalize_usage(attempt["usage"])
             estimate = data["state"].note_usage(usage, data["pricing"], attempt["model"])
             usage["cost_usd"] = estimate["cost_usd"] if estimate else None
+            if estimate and estimate.get("cost_usd") is None:  # priced only in part
+                usage["known_cost_usd"] = estimate["known_cost_usd"]
+                usage["unpriced_tokens"] = estimate["unpriced_tokens"]
             if usage_records is not None:
                 usage_records.append(usage)
 
@@ -2248,7 +2252,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
     retry_calls = 0
     for file_index, document in enumerate(selected, start=1):
         if progress:
-            progress("reading", ui_message(data, "reading.file", index=file_index, total=total_documents, name=document["name"]),
+            progress("reading", ui_message(data, "reading.check", index=file_index, total=total_documents, name=document["name"]),
                      12 + int((file_index - 1) / max(total_documents, 1) * 48))
         # Complete analysis prepares OCR locally for visual pages. It adds no
         # Farm token cost and lets a scanned page participate in the same
@@ -2691,9 +2695,11 @@ def image_group_notices(data, report):
 
 
 # Answer output limits.  max_tokens is a ceiling, not a charge: only generated
-# tokens cost.  An answer cut at its ceiling is never used; it is asked for
-# once more, explicitly shortened, with a higher ceiling.  That bounded retry
-# is the only extra call, and only for an answer that was actually cut.
+# tokens cost.  Answers start at the full 8192 ceiling.  An answer cut at that
+# ceiling is never used; it is asked for once more, explicitly shortened.
+# That bounded retry is the only extra call, and only for an answer that was
+# actually cut.
+ANSWER_OUTPUT_TOKENS = 8192
 ANSWER_RETRY_OUTPUT_TOKENS = 8192
 ANSWER_SHORTEN_INSTRUCTION = (
     "\n\nIMPORTANT: Your previous reply to this request exceeded the output limit and was discarded. "
@@ -2790,7 +2796,9 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     if focus:  # Reuse only this file's existing pre-read summary, if any.
         coverage_summaries = [item for item in coverage_summaries if item.get("id") == focus["id"]]
     dossier = None
-    if coverage_summaries and not focus:
+    # A dossier only pays off when it combines several files; for a single
+    # file its pre-read summary is used directly (no extra model call).
+    if len(coverage_summaries) > 1 and not focus:
         try:
             report("dossier", ui_message(data, 'progress.dossier'), 70)
             dossier, _, dossier_created = prepare_bg_dossier(data, coverage, usage_records=usage_records)
@@ -2804,8 +2812,12 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
         except Exception as exc:
             notices.append(ui_message(data, 'notice.dossier_failed', detail=error_copy(exc, data)))
             dossier = None
+    elif focus and coverage_matches_current_selection(data, coverage):
+        # Keep the cached prompt start identical to whole-range turns: reuse an
+        # existing dossier as background, never build one for a focused turn.
+        dossier = load_bg_dossier_cache(coverage, data["model"])
     model_prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
-                              coverage_summaries=[] if dossier else coverage_summaries, bg_dossier=dossier,
+                              coverage_summaries=[] if dossier and not focus else coverage_summaries, bg_dossier=dossier,
                               response_language=data.get("language", "zh"), require_classification=classification_request,
                               focus_name=focus["name"] if focus else "")
     report("model", ui_message(data, 'progress.connect', model=data["model"]), 86)
@@ -2823,7 +2835,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
             model_started = True
             report("model", ui_message(data, 'progress.generating'), 92)
 
-    def answer_call(prompt, tokens):
+    def answer_call(prompt, tokens, shortened=False):
         nonlocal preview
         check_request(data)
         limit = data["request_control"].policy.max_answer_chars if data.get("request_control") else 131072
@@ -2835,11 +2847,11 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
                                             event_handler=model_events, usage_records=usage_records)
         failure = connector_failure(raw_response)
         if failure and classify_model_failure(failure)[0] == "output_limit":
-            if tokens >= ANSWER_RETRY_OUTPUT_TOKENS:
+            if shortened:
                 raise UIRequestError(ui_message(data, 'model.answer_too_long', tokens=tokens))
             report("model", ui_message(data, 'progress.answer_shorten'), 92)
             notices.append(ui_message(data, 'notice.answer_shortened'))
-            return answer_call(prompt + ANSWER_SHORTEN_INSTRUCTION, ANSWER_RETRY_OUTPUT_TOKENS)
+            return answer_call(prompt + ANSWER_SHORTEN_INSTRUCTION, ANSWER_RETRY_OUTPUT_TOKENS, shortened=True)
         # Non-streaming providers cannot emit early chunks; still use the same
         # safe answer decoder, without replaying chunks from streaming providers.
         if not preview.started and not preview.disabled:
@@ -2847,14 +2859,14 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
         return raw_response
 
     report("model", ui_message(data, 'progress.waiting'), 90)
-    raw = answer_call(model_prompt, 4096)
+    raw = answer_call(model_prompt, ANSWER_OUTPUT_TOKENS)
     raw = require_model_success(raw, ui_message(data, 'model.context_main'))
     validation = {"required": classification_required, "repairs": 0}
     scope = classification_scope(documents, bg_context)
 
     def repair_classification(repair_prompt):
         report("validation", ui_message(data, 'progress.repair'), 96)
-        repaired = answer_call(repair_prompt, 4096)
+        repaired = answer_call(repair_prompt, ANSWER_OUTPUT_TOKENS)
         repaired = require_model_success(repaired, ui_message(data, 'model.context_repair'))
         return repaired
 
@@ -2904,10 +2916,10 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
             state.refresh_file(relative)
     if complete:
         model_prompt = prompt_for(state, question, snippets, complete, evidence, bg_context,
-                                  [] if dossier else coverage_summaries, dossier, data.get("language", "zh"),
+                                  [] if dossier and not focus else coverage_summaries, dossier, data.get("language", "zh"),
                                   require_classification=classification_request, focus_name=focus["name"] if focus else "")
         report("model", ui_message(data, 'progress.supplementary'), 93)
-        raw = answer_call(model_prompt, 3000)
+        raw = answer_call(model_prompt, ANSWER_OUTPUT_TOKENS)
         raw = require_model_success(raw, ui_message(data, 'model.context_supplementary'))
         try:
             action = validated_action(raw, model_prompt)
@@ -3006,7 +3018,7 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
             connector = LLMConnector(model, data["llm"].api_key,
                                      session_id=f"{state.data['session_id']}-comparison-{index}")
             raw = accounted_model_call(data, connector,
-                visuals, prompt, SYSTEM, {"maxOutputTokens": 4096, "temperature": 0},
+                visuals, prompt, SYSTEM, {"maxOutputTokens": ANSWER_OUTPUT_TOKENS, "temperature": 0},
                 stream=True, event_handler=events, usage_records=usage_records,
             )
             raw = require_model_success(raw, ui_message(data, 'model.context_compare', model=model))
@@ -3015,7 +3027,7 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
 
             def repair_comparison(repair_prompt):
                 repaired = accounted_model_call(data, connector, visuals, repair_prompt, SYSTEM,
-                                                      {"maxOutputTokens": 4096, "temperature": 0},
+                                                      {"maxOutputTokens": ANSWER_OUTPUT_TOKENS, "temperature": 0},
                                                       stream=True, event_handler=events, usage_records=usage_records)
                 repaired = require_model_success(repaired, ui_message(data, 'model.context_compare_repair', model=model))
                 return repaired
@@ -4582,7 +4594,8 @@ function message(text,kind='assistant'){let e=document.createElement('div');e.cl
 function classificationCard(c){let card=document.createElement('section');card.className='classification-card';let alternative=c.alternative_label?'<br>'+t('classification.alternative')+'：'+esc(c.alternative_label):'';let evidence=(c.evidence_labels||[]).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>'+t('classification.none')+'</li>';let uncertainty=(c.uncertainties||[]).filter(Boolean).map(item=>'<li>'+esc(item)+'</li>').join('')||'<li>'+t('classification.not_reported')+'</li>';let rules=(c.codebook_rule_ids||[]).map(esc).join('、')||t('classification.not_returned');let rulePages=(c.codebook_rule_pages||[]).length?t('classification.rule_pages')+' '+c.codebook_rule_pages.map(esc).join('、'):t('classification.rule_refs')+' '+((c.codebook_rule_refs||[]).map(esc).join('、')||t('classification.not_returned'));let bgPages=(c.bg_evidence_pages||[]).map(esc).join('、')||t('classification.not_returned');card.innerHTML='<h3>'+t('classification.title')+'</h3><div class="result">'+t('classification.label')+'：<b>'+esc(c.label||'—')+'</b></div><div>'+t('classification.confidence')+'：'+esc(c.confidence||'—')+alternative+'</div><div><b>'+t('classification.rules')+'</b>：'+rules+'（'+rulePages+'）</div><div><b>'+t('classification.evidence_pages')+'</b>：'+bgPages+'</div><div><b>'+t('classification.evidence')+'</b><ul>'+evidence+'</ul></div><div><b>'+t('classification.uncertainty')+'</b><ul>'+uncertainty+'</ul></div>';return registerUI(card,'classification',c)}
 function coverageSummaryCard(summary){if(!summary?.files?.length)return null;let card=document.createElement('section');card.className='classification-card';card.style.borderColor='#475569';let rows=summary.files.map(f=>{let read=Array.isArray(f.pages_read)?f.pages_read.length:0,unread=Array.isArray(f.pages_unread)?f.pages_unread.length:0;let pages=f.pages_total?(' · '+t('coverage.read')+' '+read+'/'+f.pages_total+' '+t('coverage.pages')+(unread?'；'+t('coverage.unread')+' '+unread+' '+t('coverage.pages'):'')):'';let cache=f.cache_status==='reused'?t('coverage.reused'):t('coverage.created');return '<li><b>'+esc(f.name)+'</b>：'+esc(scopeCopy(f)||t('coverage.default_scope'))+pages+' · '+cache+'</li>'}).join('');card.innerHTML='<h3>'+t('coverage.title')+'</h3><div class="muted">'+t('coverage.summary',{files:summary.files.length,reused:summary.reused_files||0,created:summary.created_files||0,calls:summary.model_calls||0})+'</div><ul>'+rows+'</ul>';return registerUI(card,'coverage',summary)}
 function usageNumber(value){return value==null?t('usage.unknown'):esc(value)}
-function usageCost(u){return u.cost_usd==null?t('usage.unknown')+(u.known_cost_usd!=null?' · '+t('usage.known_subtotal')+': $'+Number(u.known_cost_usd).toFixed(6):''):'$'+Number(u.cost_usd).toFixed(6)}
+function unpricedText(d){if(!d)return '';let parts=[];if(d.cache_write)parts.push(t('usage.unpriced_cache_write',{count:d.cache_write}));if(d.cache_read)parts.push(t('usage.unpriced_cache_read',{count:d.cache_read}));if(d.model_requests)parts.push(t('usage.unpriced_model',{count:d.model_requests}));if(d.usage_missing_requests)parts.push(t('usage.unpriced_usage_missing',{count:d.usage_missing_requests}));return parts.length?' · '+t('usage.unpriced')+'：'+parts.join('、'):''}
+function usageCost(u){return u.cost_usd==null?t('usage.unknown')+(u.known_cost_usd!=null?' · '+t('usage.known_subtotal')+': $'+Number(u.known_cost_usd).toFixed(6):'')+unpricedText(u.unpriced_detail):'$'+Number(u.cost_usd).toFixed(6)}
 function toggleCustomModel(){let custom=$('model').value==='__custom__';$('custommodelrow').style.display=custom?'flex':'none';if(custom)$('custommodel').focus()}
 function setSelectedModel(model){let known=[...$('model').options].some(option=>option.value===model);$('model').value=known?model:'__custom__';$('custommodel').value=known?'':model;toggleCustomModel();loadModelStatus()}
 function selectedModel(){let selected=$('model').value;return selected==='__custom__' ? $('custommodel').value.trim() : selected}
@@ -4744,7 +4757,7 @@ async function rebuildDossier(){if(!confirm(rt('dossier.confirm')))return;let ho
 async function clearSummaryCaches(){if(!confirm(t('cache.clear_confirm')))return;try{let x=await api('/api/cache/clear',{method:'POST',body:JSON.stringify({confirmed:true})});setUIMessage($('coveragestatus'),x);renderCacheAudit(x.audit)}catch(e){setUIMessage($('cacheaudit'),e.uiMessage||{text:e.message},'error')}}
 // These renderers deliberately receive data, never pre-rendered text.  This
 // makes a language switch deterministic even after a scan or cache view is open.
-function renderStatusForLanguage(s){let tokens=usageNumber(s.input_tokens)+' / '+usageNumber(s.output_tokens);if(s.usage_complete===false)tokens+=' · '+t('usage.known_subtotal')+': '+usageNumber(s.known_input_tokens)+' / '+usageNumber(s.known_output_tokens);let cost=usageCost({cost_usd:s.cost,known_cost_usd:s.known_cost_usd});$('status').innerHTML=`<b>${t('status.section_title')}</b><br>${t('status.model')}：<b>${esc(s.model)}</b><br>${t('status.session')}：${esc(s.session_name||'default')}<br>${t('status.code')}：${t('status.files',{count:s.code_files})}<br>${t('status.documents')}：${t('status.items',{count:s.documents})}<br>${t('status.requests')}：${esc(s.requests)}<br>${t('status.tokens')}：${tokens}<br>${t('status.cost')}：${cost}${s.unpriced_requests?' · '+t('usage.partial',{count:s.unpriced_requests}):''}<br>${s.bg_context?'<span class="ok">'+t('status.assembly_mode')+'：'+esc(s.bg_context.codebook_name)+'</span>':t('status.normal_mode')}`;refreshAppChrome();refreshContextPanel()}
+function renderStatusForLanguage(s){let tokens=usageNumber(s.input_tokens)+' / '+usageNumber(s.output_tokens);if(s.usage_complete===false)tokens+=' · '+t('usage.known_subtotal')+': '+usageNumber(s.known_input_tokens)+' / '+usageNumber(s.known_output_tokens);let cost=usageCost({cost_usd:s.cost,known_cost_usd:s.known_cost_usd,unpriced_detail:s.unpriced_detail});$('status').innerHTML=`<b>${t('status.section_title')}</b><br>${t('status.model')}：<b>${esc(s.model)}</b><br>${t('status.session')}：${esc(s.session_name||'default')}<br>${t('status.code')}：${t('status.files',{count:s.code_files})}<br>${t('status.documents')}：${t('status.items',{count:s.documents})}<br>${t('status.requests')}：${esc(s.requests)}<br>${t('status.tokens')}：${tokens}<br>${t('status.cost')}：${cost}${s.unpriced_requests?' · '+t('usage.partial',{count:s.unpriced_requests}):''}<br>${s.bg_context?'<span class="ok">'+t('status.assembly_mode')+'：'+esc(s.bg_context.codebook_name)+'</span>':t('status.normal_mode')}`;refreshAppChrome();refreshContextPanel()}
 function renderUsageDetailForLanguage(u,model){if(!u)return;let gemini=/gemini/i.test(model||'')||Number(u.gemini_thinking)>0;$('usagedetail').innerHTML=`<b>${t('usage.section_title')}</b><br>${t('usage.actual_model')}：<b>${esc(model||'—')}</b><br>${t('usage.input_output_total')}：${usageNumber(u.input)} / ${usageNumber(u.output)} / ${usageNumber(u.total)}${u.usage_complete===false?' · '+t('usage.known_subtotal')+': '+usageNumber(u.known_input)+' / '+usageNumber(u.known_output):''}<br>${t('usage.reasoning')}：${usageNumber(u.reasoning)}${gemini?' ｜ '+t('usage.gemini_thinking')+'：'+usageNumber(u.gemini_thinking):''}<br>${t('usage.claude_cache')}：${usageNumber(u.cache_read)} / ${usageNumber(u.cache_write)}<br>${t('usage.estimate')}：${usageCost(u)}`}
 function renderEvidenceSourcesForLanguage(sources,dfcEvidence){let normal=(sources||[]).map(s=>`<div class="card"><b>${esc(s.label||s.name||t('model.unknown_source'))}</b><br>${s.visual?'<span class="chip">'+t('evidence.visual')+'</span>':''}</div>`).join('');let dfc=(dfcEvidence||[]).map(d=>{let parts=(d.segments_used||[]).join('、')||'—';return `<div class="card"><b>DFC Struktur</b><br>${esc(d.name||'—')}<br><span class="chip">OCR：${esc(stateCopy(d.ocr_status))}</span><span class="chip">${t('dfc.segment_info',{segments:esc(parts),total:esc(d.segments_total||0)})}</span></div>`}).join('');$('sources').innerHTML=(dfc+normal)||t('evidence.none')}
 function renderCompareSlotsForLanguage(){let host=$('comparemodels');host.innerHTML=compareSlots.map((slot,index)=>{let options='<option value="">'+t('compare.select_model')+'</option>'+compareOptions.map(([value,label])=>'<option value="'+escAttr(value)+'" '+(slot.value===value?'selected':'')+'>'+esc(label)+'</option>').join('')+'<option value="__custom__" '+(slot.value==='__custom__'?'selected':'')+'>'+t('model.other')+'</option>';return '<div class="field"><label>'+t('compare.model_number',{index:index+1})+'</label><div class="row"><select id="cmpsel'+index+'" onchange="changeCompareModel('+index+')">'+options+'</select>'+(index>0?'<button class="ghost" onclick="removeCompareModel('+index+')">×</button>':'')+'</div>'+(slot.value==='__custom__'?'<input id="cmpcustom'+index+'" value="'+escAttr(slot.custom||'')+'" placeholder="'+t('model.id_placeholder')+'" oninput="compareSlots['+index+'].custom=this.value">':'')+'</div>'}).join('');let add=$('addcompare');add.disabled=compareSlots.length>=4;add.textContent=compareSlots.length>=4?t('compare.maximum'):t('compare.add');if(compareSlots.length>=4)setUIMessage($('comparestatus'),{message_key:'compare.maximum'})}

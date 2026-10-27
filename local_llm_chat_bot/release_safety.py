@@ -5,6 +5,12 @@ import re
 from typing import Any
 
 
+# Separates the stable start of a prompt (identical across turns: locked rules,
+# dossier) from the per-turn rest.  Claude caches everything before it; other
+# providers receive a plain paragraph break and benefit from the stable prefix.
+PROMPT_CACHE_BREAK = "\n\n<<<WORKBENCH_PROMPT_CACHE_BREAK>>>\n\n"
+
+
 def token_count(value):
     try:
         if value is None or isinstance(value, bool):
@@ -68,11 +74,36 @@ def summarize_usage(records):
             source = detail if name == 'reasoning' and isinstance(detail, dict) else record
             values.append(token_count(source[key]) if key in source else 0)
         summary[name] = sum(values) if all(v is not None for v in values) else None
+    def valid(cost):
+        return isinstance(cost, (int, float)) and not isinstance(cost, bool) and math.isfinite(cost) and cost >= 0
     costs = [record.get('cost_usd') for record in records]
-    summary['known_cost_usd'] = math.fsum(cost for cost in costs if isinstance(cost, (int, float)) and math.isfinite(cost) and cost >= 0)
-    summary['cost_complete'] = all(isinstance(cost, (int, float)) and math.isfinite(cost) and cost >= 0 for cost in costs)
+    # A request priced only in part contributes its priced part to the known
+    # subtotal; the token types without a price are listed, never guessed.
+    summary['known_cost_usd'] = math.fsum(cost if valid(cost) else record.get('known_cost_usd')
+                                          for cost, record in zip(costs, records)
+                                          if valid(cost) or valid(record.get('known_cost_usd')))
+    summary['cost_complete'] = all(valid(cost) for cost in costs)
     summary['cost_usd'] = summary['known_cost_usd'] if summary['cost_complete'] else None
+    summary['unpriced_detail'] = unpriced_detail(records)
     return summary
+
+
+def unpriced_detail(records):
+    """Token types (or requests) that could not be priced, by reason."""
+    detail: dict[str, int] = {}
+    for record in records:
+        cost = record.get('cost_usd')
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+            continue
+        tokens = record.get('unpriced_tokens')
+        if isinstance(tokens, dict) and tokens:
+            for kind, count in tokens.items():
+                detail[kind] = detail.get(kind, 0) + (token_count(count) or 0)
+        elif not record.get('usage_complete'):
+            detail['usage_missing_requests'] = detail.get('usage_missing_requests', 0) + 1
+        else:
+            detail['model_requests'] = detail.get('model_requests', 0) + 1
+    return detail
 
 
 def redact_secrets(value, key=None):

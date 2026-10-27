@@ -72,7 +72,7 @@ class QuestionScope(unittest.TestCase):
         self.assertIn("FOCUS FILE", prompt)
         self.assertIn("drawing.txt", prompt)
         self.assertNotIn("FIXTURE_BG_A", prompt.split("Relevant locally extracted document excerpts:")[1]
-                         .split("BG comprehensive evidence dossier")[0])
+                         .split("Prepared per-file evidence summaries")[0])
         self.assertTrue(all("facts.txt" not in item["name"] for item in payload["sources"]
                             if item.get("name") != self.f.rules.name))
 
