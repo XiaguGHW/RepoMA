@@ -49,7 +49,18 @@ shortcut)*. Options for the shortcut target or the command line:
 To force a specific Python, set the environment variable `WORKBENCH_PYTHON` to
 its full `python.exe` path.
 
-## 3. Files
+## 3. Keeping model prices current
+
+Costs are estimates. To use the current BMF prices, open the Docupedia page
+*Bosch Model Farm → Pricing*, press Ctrl+S and save it as HTML into this
+folder (the `_files` folder Chrome creates next to it can stay or be deleted).
+Restart the Workbench or reopen the workspace. The status card then shows
+"Price list: saved Docupedia page … (date, N models)". Models missing on the
+page keep the bundled prices from `model_pricing.json`; rows priced in EUR are
+ignored. If the page cannot be read, the bundled prices stay in effect and the
+status card says so. To return to the bundled prices, delete the saved page.
+
+## 4. Files
 
 | File | Purpose |
 |---|---|
@@ -62,14 +73,15 @@ its full `python.exe` path.
 | `request_runtime.py` | Time limits and Stop |
 | `release_safety.py` | Usage accounting and safety checks |
 | `workbench_i18n.py`, `workbench_i18n.json` | Interface languages (ZH / EN / DE) |
-| `model_pricing.json` | Prices for the cost estimate |
+| `model_pricing.json` | Bundled prices for the cost estimate |
+| `price_page.py` | Reads a saved Docupedia pricing page |
 | `requirements.txt` | Python packages |
 
 The Workbench creates `AI_Bot_State` in this folder for settings, caches and
 conversations. Keep it out of shared folders and commits; never put `.env`
 into a commit.
 
-## 4. Common problems
+## 5. Common problems
 
 | Problem | Fix |
 |---|---|

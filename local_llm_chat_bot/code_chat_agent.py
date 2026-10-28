@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TypedDict
 from release_safety import PROMPT_CACHE_BREAK, context_state_error, normalize_usage
+from price_page import merge_page_prices
 
 try:
     from dotenv import load_dotenv
@@ -154,6 +155,7 @@ class PricingCatalog:
         self.path = path
         self.entries: list[dict[str, Any]] = []
         self.error: str | None = None
+        self.source: dict[str, Any] = {"kind": "bundled"}
         if not path:
             return
         try:
@@ -164,6 +166,8 @@ class PricingCatalog:
             self.entries = [e for e in self.entries if isinstance(e, dict)]
         except (OSError, json.JSONDecodeError) as exc:
             self.error = str(exc)
+        # A Docupedia pricing page saved next to the program overrides the bundled prices.
+        self.entries, self.source = merge_page_prices(self.entries, path.parent)
 
     def price_for(self, model: str):
         name = model.lower()

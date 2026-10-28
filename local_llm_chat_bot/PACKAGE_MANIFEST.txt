@@ -8,6 +8,7 @@ code_chat_agent.py
 llm_connector_with_prompt_caching.py
 local_document_library.py
 model_pricing.json
+price_page.py
 release_safety.py
 request_runtime.py
 requirements.txt
