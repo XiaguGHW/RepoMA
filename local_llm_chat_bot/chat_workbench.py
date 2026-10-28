@@ -3645,11 +3645,29 @@ def analyze_target(request: TargetRequest):
     state.data, documents.data = candidate, staged.data
     invalidate_pending(data)
     return {"sources": len(sources), "skipped": skipped[:10], "skipped_count": len(skipped), "target_kind": target_kind,
-            "files": [{"name": item["name"], "chunks": len(item.get("chunks", [])), "bytes": item.get("bytes", 0),
-                       "material_role": item.get("material_role", "other"),
-                       "material_role_label": material_role_label(item.get("material_role", "other")),
-                       "index_cache_status": item.get("index_cache_status", "unknown")} for item in sources],
+            "files": [scan_report_file(item) for item in sources],
             "classification": bool(codebook_path), "status": status_data(data)}
+
+
+def scan_report_file(item: dict) -> dict:
+    return {"name": item["name"], "chunks": len(item.get("chunks", [])), "bytes": item.get("bytes", 0),
+            "material_role": item.get("material_role", "other"),
+            "material_role_label": material_role_label(item.get("material_role", "other")),
+            "index_cache_status": item.get("index_cache_status", "unknown")}
+
+
+@app.get("/api/scan/report")
+def current_scan_report():
+    """Rebuild the local scan report of the confirmed materials, e.g. after a page reload.
+
+    Only local index data is used; skipped files of the original scan are not kept."""
+    data = session()
+    active = list(data["state"].data.get("active_source_ids") or [])
+    by_id = {item["id"]: item for item in data["documents"].list()}
+    sources = [by_id[source_id] for source_id in active if source_id in by_id]
+    target = data["state"].data.get("selected_target") or {}
+    return {"sources": len(sources), "skipped": [], "skipped_count": 0, "target_kind": target.get("kind", ""),
+            "files": [scan_report_file(item) for item in sources], "restored": True}
 
 
 @app.get("/api/target-tree")
@@ -4744,7 +4762,11 @@ async function addDoc(){try{let d=await api('/api/document',{method:'POST',body:
 function renderScanReport(x){setScanReportAvailable(x);renderScanDrawer(x)}
 async function loadCoverage(){try{renderCoverageReport(await api('/api/coverage'))}catch{}}
 function createMaterialFlow(){if($('materialactions'))return;let style=document.createElement('style');style.textContent='#materialactions{display:flex;gap:7px;margin:8px 0}.scan-backdrop{position:fixed;inset:0;background:rgba(2,6,23,.28);z-index:60;opacity:0;pointer-events:none;transition:opacity .18s}.scan-backdrop.open{opacity:1;pointer-events:auto}.scan-drawer{position:absolute;left:270px;top:72px;bottom:20px;width:min(680px,calc(100vw - 310px));background:#172033;border:1px solid #3b4960;border-left:3px solid #38bdf8;border-radius:0 12px 12px 0;box-shadow:12px 16px 45px rgba(0,0,0,.45);transform:translateX(-34px);opacity:0;transition:transform .22s ease,opacity .18s;display:flex;flex-direction:column}.scan-backdrop.open .scan-drawer{transform:translateX(0);opacity:1}.scan-drawer-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #334155}.scan-drawer-body{overflow:auto;padding:12px 16px}.scan-drawer .file-card{border:1px solid #334155;border-radius:8px;padding:10px;margin:9px 0;background:#111827;line-height:1.5}.scan-drawer .file-card b{word-break:break-word}@media(max-width:760px){.scan-drawer{left:0;top:0;bottom:0;width:min(94vw,680px);border-radius:0 12px 12px 0}}';document.head.append(style);let tree=$('targettree'),confirm=document.querySelector('button[onclick="analyzeTarget()"]');let actions=document.createElement('div');actions.id='materialactions';confirm.id='confirmmaterials';confirm.textContent=t('materials.confirm_selected');let report=document.createElement('button');report.id='viewscanreport';report.className='ghost';report.disabled=true;report.textContent=t('scan.report');report.onclick=openScanReport;actions.append(confirm,report);tree.insertAdjacentElement('afterend',actions);$('scanreport').style.display='none';let backdrop=document.createElement('div');backdrop.id='scanbackdrop';backdrop.className='scan-backdrop';backdrop.innerHTML='<section class="scan-drawer" role="dialog" aria-modal="true" aria-label="'+escAttr(t('scan.report.title'))+'"><div class="scan-drawer-head"><div><b>'+esc(t('scan.report.title'))+'</b><div class="muted">'+esc(t('scan.report.local'))+'</div></div><button class="ghost" onclick="closeScanReport()">×</button></div><div id="scanreportbody" class="scan-drawer-body"></div></section>';backdrop.addEventListener('click',e=>{if(e.target===backdrop)closeScanReport()});document.body.append(backdrop);document.addEventListener('keydown',e=>{if(e.key==='Escape')closeScanReport()});updateMaterialFlowButtons();localizeMaterialFlowControls()}
-function openScanReport(){if(!lastScanReport)return;renderScanDrawer(lastScanReport);$('scanbackdrop').classList.add('open');loadCacheAudit()}
+async function openScanReport(){ensureMaterialFlow();
+  // The report of the last scan lives only in this page; after a reload rebuild it from the local index.
+  if(!lastScanReport){try{let x=await api('/api/scan/report');if(x?.files?.length)setScanReportAvailable(x)}catch(e){}}
+  if(lastScanReport)renderScanDrawer(lastScanReport);else $('scanreportbody').innerHTML='<div class="muted">'+t('scan.report.none')+'</div>'+cacheAuditSection(true);
+  $('scanbackdrop').classList.add('open');loadCacheAudit()}
 function closeScanReport(){$('scanbackdrop')?.classList.remove('open')}
 async function loadCacheAudit(){let host=$('cacheaudit');if(!host)return;try{renderCacheAudit(await api('/api/cache/audit'))}catch(e){setUIMessage(host,e.uiMessage||{text:e.message},'error')}}
 async function rebuildCachedFile(id){if(!confirm(t('cache.rebuild_file_confirm')))return;try{let x=await api('/api/cache/file/rebuild',{method:'POST',body:JSON.stringify({document_id:id,confirmed:true})});setUIMessage($('coveragestatus'),x);renderCacheAudit(x.audit)}catch(e){setUIMessage($('cacheaudit'),e.uiMessage||{text:e.message},'error')}}
@@ -4818,7 +4840,7 @@ function localizeMaterialFlowControls(){
 function updateMaterialFlowButtonsForLanguage(){
   let confirm=$('confirmmaterials'),report=$('viewscanreport');
   if(confirm)confirm.disabled=treeFileCount()===0&&!singleFileTarget();
-  if(report){report.disabled=!lastScanReport;report.textContent=t('scan.report')}
+  if(report){report.disabled=!lastScanReport&&!lastDocumentsSnapshot?.length;report.textContent=t('scan.report')}
 }
 function setScanReportAvailableForLanguage(report){lastScanReport=report||null;updateMaterialFlowButtonsForLanguage()}
 function clearTargetTreeForLanguage(){
