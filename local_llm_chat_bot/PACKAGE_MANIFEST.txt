@@ -1,8 +1,9 @@
-# Files shipped in the downloadable Workbench ZIP: only what the graphical
-# Workbench needs to run. Terminal/Excel tools, tests, design and translation
-# inventories stay in the repository. One relative path per line, sorted.
-# Do not add tests, runtime state, caches, or .env files.
-WORKBENCH_README.md
+# Files shipped in Baugruppen_Classifier.zip (inside a Baugruppen_Classifier/
+# folder): only what the program needs to run. Terminal/Excel tools, tests,
+# design and translation inventories stay in the repository. One relative
+# path per line, sorted. Do not add tests, runtime state, caches, or .env files.
+Baugruppen_Classifier.bat
+README_Baugruppen_Classifier.md
 chat_workbench.py
 code_chat_agent.py
 llm_connector_with_prompt_caching.py
@@ -12,7 +13,6 @@ price_page.py
 release_safety.py
 request_runtime.py
 requirements.txt
-start_workbench.bat
 workbench_i18n.json
 workbench_i18n.py
 workbench_startup.py

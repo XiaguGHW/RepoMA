@@ -1,4 +1,4 @@
-# Bosch Baugruppen Workbench
+# Baugruppen Classifier
 
 Local web app for classifying a Baugruppe with a locked Codebook and Bosch Farm
 models. It runs only on this computer (`http://127.0.0.1:8765`); source files
@@ -22,26 +22,26 @@ never leave it except the excerpts sent to the selected Farm model.
    ```
 
 4. Recommended for scanned Codebook pages: install Tesseract OCR for Windows
-   with the German (`deu`) language data. Without it the Workbench still works
+   with the German (`deu`) language data. Without it the program still works
    and records that OCR was unavailable.
 
 ## 2. Start
 
-Double-click `start_workbench.bat`. It finds a Python with the packages
+Double-click `Baugruppen_Classifier.bat`. It finds a Python with the packages
 (`.venv`, `python` on PATH, any conda environment — no `conda activate`
-needed), starts the Workbench and opens the browser. The last workspace, model
-and language are restored. Keep the black window open; closing it stops the
-Workbench. Double-clicking again while it runs only opens the page.
+needed), starts the program and opens the browser. There is nothing to
+choose: rules, materials, chats, model and language of the last session are
+restored. Keep the black window open; closing it stops the program.
+Double-clicking again while it runs only opens the page.
 
 If no suitable Python is found, the window offers to create a private `.venv`
 here and install `requirements.txt` once.
 
-Desktop icon: right-click `start_workbench.bat` → *Send to* → *Desktop (create
-shortcut)*. Options for the shortcut target or the command line:
+Desktop icon: right-click `Baugruppen_Classifier.bat` → *Send to* → *Desktop
+(create shortcut)*. Options for the shortcut target or the command line:
 
 | Option | Meaning |
 |---|---|
-| `--workspace "C:\path"` | Open this workspace folder on start (remembered) |
 | `--port 8877` | Use another local port |
 | `--env-file "C:\path\x.env"` | Use another configuration file |
 | `--no-browser` | Do not open the browser |
@@ -49,22 +49,32 @@ shortcut)*. Options for the shortcut target or the command line:
 To force a specific Python, set the environment variable `WORKBENCH_PYTHON` to
 its full `python.exe` path.
 
-## 3. Keeping model prices current
+## 3. Where your data is kept
+
+Settings, locked rules, material caches and chats are stored in the
+`AI_Bot_State` folder inside this program folder, wherever it is unpacked. The
+status card (*Material cache & audit → View*) shows the folder in use.
+
+When updating, unpack the new version over the existing folder (or copy
+`AI_Bot_State` and `.env` into the new folder) to keep everything. To store
+the data elsewhere, set the environment variable `WORKBENCH_STATE_DIR`.
+
+## 4. Keeping model prices current
 
 Costs are estimates. To use the current BMF prices, open the Docupedia page
-*Bosch Model Farm → Pricing*, press Ctrl+S and save it as HTML into this
-folder (the `_files` folder Chrome creates next to it can stay or be deleted).
-Restart the Workbench or reopen the workspace. The status card then shows
+*Bosch Model Farm → Pricing*, press Ctrl+S and save it as HTML directly into
+this folder (next to `chat_workbench.py`; the `_files` folder Chrome creates
+is not needed). Restart the program. *Material cache & audit → View* then shows
 "Price list: saved Docupedia page … (date, N models)". Models missing on the
 page keep the bundled prices from `model_pricing.json`; rows priced in EUR are
 ignored. If the page cannot be read, the bundled prices stay in effect and the
 status card says so. To return to the bundled prices, delete the saved page.
 
-## 4. Files
+## 5. Files
 
 | File | Purpose |
 |---|---|
-| `start_workbench.bat` | One-click start (Windows) |
+| `Baugruppen_Classifier.bat` | One-click start (Windows) |
 | `chat_workbench.py` | Web app and server |
 | `workbench_startup.py` | Start options and checks |
 | `code_chat_agent.py` | Prompts, session state, pricing |
@@ -77,16 +87,14 @@ status card says so. To return to the bundled prices, delete the saved page.
 | `price_page.py` | Reads a saved Docupedia pricing page |
 | `requirements.txt` | Python packages |
 
-The Workbench creates `AI_Bot_State` in this folder for settings, caches and
-conversations. Keep it out of shared folders and commits; never put `.env`
-into a commit.
+Never share or commit `.env`.
 
-## 5. Common problems
+## 6. Common problems
 
 | Problem | Fix |
 |---|---|
 | Missing Python packages | Run `python -m pip install -r requirements.txt` with the Python shown in the black window. |
 | No Farm key | Create `.env` as above, then start again. |
-| Port in use | A Workbench is probably running already: open `http://127.0.0.1:8765`. Otherwise start with `--port 8877`. |
+| Port in use | The program is probably running already: open `http://127.0.0.1:8765`. Otherwise start with `--port 8877`. |
 | Page says it is out of date | Another tab changed the session; press F5. |
 | Slow models | Increase `WORKBENCH_RESPONSE_TIMEOUT_SECONDS` (default 300) in `.env` and restart. |

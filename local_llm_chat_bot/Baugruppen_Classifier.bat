@@ -1,21 +1,22 @@
 @echo off
-rem One-click start for the Bosch Local Workbench.
-rem Finds a Python that has the Workbench packages - also inside conda
+rem One-click start for the Baugruppen Classifier.
+rem Finds a Python that has the required packages - also inside conda
 rem environments, without "conda activate" - remembers it, starts the
-rem Workbench and opens the browser. The last workspace is restored.
+rem program and opens the browser. Rules, materials and chats are kept.
 rem
 rem Optional overrides:
 rem   set WORKBENCH_PYTHON=C:\path\to\python.exe   (use exactly this Python)
-rem   start_workbench.bat --workspace "C:\path\to\folder"
+rem   Baugruppen_Classifier.bat --port 8877
 setlocal
 cd /d "%~dp0"
-title Bosch Local Workbench
+title Baugruppen Classifier
 set "CHECK=import fastapi, uvicorn, fitz"
 set "STATE=%~dp0AI_Bot_State"
+if defined WORKBENCH_STATE_DIR set "STATE=%WORKBENCH_STATE_DIR%"
 set "SAVED=%STATE%\python_path.txt"
 set "PY="
 
-echo Looking for a Python environment with the Workbench packages...
+echo Looking for a Python environment with the required packages...
 
 rem 1) Explicit choice
 if defined WORKBENCH_PYTHON call :try "%WORKBENCH_PYTHON%"
@@ -62,7 +63,7 @@ if exist "%PYDIR%\conda-meta" set "PATH=%PYDIR%;%PYDIR%\Library\mingw-w64\bin;%P
 if not exist "%STATE%" mkdir "%STATE%" >nul 2>nul
 > "%SAVED%" echo %PY%
 echo Using Python: %PY%
-echo The browser opens automatically. Keep this window open; closing it stops the Workbench.
+echo The browser opens automatically. Keep this window open; closing it stops the program.
 echo.
 "%PY%" "%~dp0chat_workbench.py" %*
 if errorlevel 1 goto failed
@@ -70,13 +71,13 @@ exit /b 0
 
 :failed
 echo.
-echo The Workbench could not start. See the message above.
+echo The Baugruppen Classifier could not start. See the message above.
 pause
 exit /b 1
 
 :nopython
 echo.
-echo No Python environment with the Workbench packages was found.
+echo No Python environment with the required packages was found.
 echo.
 echo   A) If you already use an environment, start it once like this from its prompt:
 echo        conda activate NAME
@@ -102,7 +103,7 @@ goto failed
 
 rem ---- helpers ------------------------------------------------------------
 :try
-rem Accept a python.exe only if it exists and imports the Workbench packages.
+rem Accept a python.exe only if it exists and imports the required packages.
 if "%~1"=="" exit /b 1
 if not exist "%~1" exit /b 1
 setlocal

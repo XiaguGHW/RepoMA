@@ -765,23 +765,23 @@ BG CLASSIFICATION MODE (active):
     dossier_block = "" if stable else f"""BG comprehensive evidence dossier (compiled from the selected files' local summaries; citations and limitations must be retained):\n{dossier_text}
 
 """
-    return f"""{stable}Workspace: {state.workspace}
-Project summary: {state.data['summary'] or '(none)'}
+    # Code context only when a code workspace is actually indexed; the
+    # Baugruppen Classifier uses an empty session folder, so nothing is sent.
+    has_code = bool(state.data["files"] or snippets or full_files)
+    workspace_line = f"Workspace: {state.workspace}\n" if has_code else ""
+    code_block = (f"Indexed files and symbols (local metadata only):\n{indexed}\n\n"
+                  f"Relevant code excerpts:\n{shown}\n\n") if has_code else ""
+    complete_block = f"Complete current files supplied in this turn:\n{complete}\n\n" if has_code else ""
+    return f"""{stable}{workspace_line}Project summary: {state.data['summary'] or '(none)'}
 Recent conversation:\n{recent}
 
 Relevant confirmed long-term memory (local, user-confirmed):\n{memory_text}
 
-Indexed files and symbols (local metadata only):\n{indexed}
-
-Relevant code excerpts:\n{shown}
-
-Relevant locally extracted document excerpts:\n{document_text}
+{code_block}Relevant locally extracted document excerpts:\n{document_text}
 
 {dossier_block}Prepared per-file evidence summaries (fallback only when no dossier is available; do not claim unread pages were inspected):\n{coverage_text}
 
-Complete current files supplied in this turn:\n{complete}
-
-Response language: Write the natural-language `answer` primarily in {language_name}.
+{complete_block}Response language: Write the natural-language `answer` primarily in {language_name}.
 Do not translate official Codebook category names, filenames, part numbers, source quotations,
 table labels, or the supplied material evidence; preserve their original spelling verbatim.
 

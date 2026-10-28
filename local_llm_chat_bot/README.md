@@ -1,7 +1,8 @@
 # Bosch Farm Workbench and Terminal Chat
 
-The downloadable `local_llm_chat_bot.zip` contains only the graphical
-Workbench (files listed in `PACKAGE_MANIFEST.txt`; see `WORKBENCH_README.md`).
+The downloadable `Baugruppen_Classifier.zip` (repository root) contains only the
+Baugruppen Classifier web app (files listed in `PACKAGE_MANIFEST.txt`; see
+`README_Baugruppen_Classifier.md`).
 The terminal and Excel tools described below are available in this repository
 folder.
 
@@ -56,16 +57,16 @@ python .\chat_workbench.py
 
 ### One-click start (no VS Code needed)
 
-After the packages are installed once, double-click `start_workbench.bat` in
-the `local_llm_chat_bot` folder. It starts the Workbench, opens
-`http://127.0.0.1:8765` in the default browser and reopens the last workspace,
-model and language. Keep the black window open; closing it stops the
+After the packages are installed once, double-click `Baugruppen_Classifier.bat` in
+the `local_llm_chat_bot` folder. It starts the Baugruppen Classifier,
+opens `http://127.0.0.1:8765` in the default browser and restores rules,
+materials, chats, model and language. Keep the black window open; closing it stops the
 Workbench. Double-clicking again while it runs only opens the browser page.
 
-For a desktop icon: right-click `start_workbench.bat` → *Send to* → *Desktop
-(create shortcut)*. To always open a specific folder, edit the shortcut's
-target and append `--workspace "C:\path\to\folder"`. Other flags: `--port`,
-`--env-file`, `--no-browser`.
+For a desktop icon: right-click `Baugruppen_Classifier.bat` → *Send to* → *Desktop
+(create shortcut)*. Flags: `--port`, `--env-file`, `--no-browser`.
+No workspace needs to be chosen; settings, rules, materials and chats are kept
+in `AI_Bot_State` inside the program folder (override: `WORKBENCH_STATE_DIR`).
 
 The launcher finds a Python that has the Workbench packages by itself, in this
 order: `WORKBENCH_PYTHON` (a full path to `python.exe`), the Python used last

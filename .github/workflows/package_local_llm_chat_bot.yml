@@ -1,4 +1,4 @@
-name: Package local LLM chat bot
+name: Package Baugruppen Classifier
 
 on:
   workflow_dispatch:
@@ -21,18 +21,20 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_*.py'
       - name: Build ZIP
         run: |
-          rm -f local_llm_chat_bot.zip
-          declare -a package_files=()
+          rm -rf Baugruppen_Classifier Baugruppen_Classifier.zip local_llm_chat_bot.zip
+          mkdir Baugruppen_Classifier
           while IFS= read -r path; do
             case "$path" in ''|'#'*) continue ;; esac
             test -f "local_llm_chat_bot/$path"
-            package_files+=("local_llm_chat_bot/$path")
+            cp "local_llm_chat_bot/$path" "Baugruppen_Classifier/$path"
           done < local_llm_chat_bot/PACKAGE_MANIFEST.txt
-          zip -q local_llm_chat_bot.zip "${package_files[@]}"
+          zip -qr Baugruppen_Classifier.zip Baugruppen_Classifier
+          rm -rf Baugruppen_Classifier
       - name: Commit updated ZIP
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f local_llm_chat_bot.zip
-          git diff --cached --quiet || git commit -m "Update downloadable local LLM chat bot package"
+          git rm -q --cached --ignore-unmatch local_llm_chat_bot.zip
+          git add -f Baugruppen_Classifier.zip
+          git diff --cached --quiet || git commit -m "Update downloadable Baugruppen Classifier package"
           git push

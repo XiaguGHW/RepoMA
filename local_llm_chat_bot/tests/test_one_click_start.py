@@ -1,4 +1,4 @@
-"""One-click start: open the browser, remember a --workspace folder, reuse a running Workbench."""
+"""One-click start: open the browser, reuse a running instance, find the right Python."""
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -26,8 +26,6 @@ class Options(unittest.TestCase):
     def test_command_line_opens_the_browser_unless_told_not_to(self):
         self.assertTrue(startup.parse_options([]).open_browser)
         self.assertFalse(startup.parse_options(["--no-browser"]).open_browser)
-        self.assertIsNone(startup.parse_options([]).workspace)
-        self.assertEqual(startup.parse_options(["--workspace", '"C:/BG"']).workspace, Path("C:/BG"))
 
     def test_embedded_config_never_opens_a_browser(self):
         self.assertFalse(startup.StartupConfig().open_browser)
@@ -87,25 +85,12 @@ class RunningWorkbench(unittest.TestCase):
         browser.assert_called_once_with(f"http://127.0.0.1:{port}")
         run.assert_not_called()
 
-    def test_workspace_option_becomes_the_restored_workspace(self):
-        folder = self.f.root / "BG folder"
-        folder.mkdir()
-        w.save_workbench_settings(self.f.workspace, "work", "gemini-2.5-pro", "en")
-        self.assertEqual(w.remember_start_workspace(folder), folder.resolve())
-        settings = w.load_workbench_settings()
-        self.assertEqual(Path(settings["workspace"]), folder.resolve())
-        self.assertEqual((settings["session"], settings["model"], settings["language"]),
-                         ("default", "gemini-2.5-pro", "en"))
-        with self.assertRaises(startup.StartupError) as error:
-            w.remember_start_workspace(self.f.root / "missing")
-        self.assertEqual(error.exception.code, "startup.workspace_missing")
-
 
 class Launcher(unittest.TestCase):
     """The Windows launcher cannot run here; check what it must contain."""
 
     def setUp(self):
-        self.raw = (Path(w.__file__).parent / "start_workbench.bat").read_bytes()
+        self.raw = (Path(w.__file__).parent / "Baugruppen_Classifier.bat").read_bytes()
         self.text = self.raw.decode("ascii")
 
     def test_plain_ascii_with_windows_line_endings(self):

@@ -14,11 +14,11 @@ MANIFEST = APP / "PACKAGE_MANIFEST.txt"
 WORKFLOW = REPOSITORY / ".github" / "workflows" / "package_local_llm_chat_bot.yml"
 
 REQUIRED = {
-    "WORKBENCH_README.md",
+    "README_Baugruppen_Classifier.md",
     "chat_workbench.py",
     "model_pricing.json",
     "requirements.txt",
-    "start_workbench.bat",
+    "Baugruppen_Classifier.bat",
     "workbench_i18n.json",
 }
 ENTRY_POINT = "chat_workbench.py"
