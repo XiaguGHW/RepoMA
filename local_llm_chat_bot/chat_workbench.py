@@ -4837,7 +4837,7 @@ function makeTreeNodeForLanguage(node,depth=0){
   }
   let row=document.createElement('div');row.className='tree-file'+(node.supported?'':' unsupported');let box=document.createElement('input');
   box.type='checkbox';box.className='tree-file';box.dataset.path=node.path;box.checked=!!node.supported&&savedTargetSelection.has(node.relative);box.disabled=!node.supported;box.addEventListener('change',()=>{materialDraftDirty=true;refreshAllFolderStates()});
-  let label=document.createElement('label'),role=node.material_role_label?` · ${tr(node.material_role_label)}`:'',size=(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1);
+  let label=document.createElement('label'),role=node.material_role_label?` · ${roleCopy(node.material_role_label)}`:'',size=(node.bytes/1024/1024).toFixed(node.bytes<1024*1024?2:1);
   label.textContent='📄 '+node.name+(node.supported?` · ${size} MB${role}${node.recommended?'':' · '+t('tree.not_recommended')}`:` · ${t('tree.unsupported')}${role}`);row.append(box,label);return row;
 }
 function renderTargetTreeForLanguage(x){
