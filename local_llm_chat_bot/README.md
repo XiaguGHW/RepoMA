@@ -62,9 +62,14 @@ For a desktop icon: right-click `start_workbench.bat` → *Send to* → *Desktop
 target and append `--workspace "C:\path\to\folder"`. Other flags: `--port`,
 `--env-file`, `--no-browser`.
 
-The launcher uses `.venv\Scripts\python.exe` when a virtual environment exists
-next to or above the folder, otherwise `python` (or `py -3`) from PATH — the
-same Python in which `requirements.txt` was installed.
+The launcher finds a Python that has the Workbench packages by itself, in this
+order: `WORKBENCH_PYTHON` (a full path to `python.exe`), the Python used last
+time, a `.venv` next to or above the folder, `python` on PATH, every conda
+environment registered in `%USERPROFILE%\.conda\environments.txt`, the usual
+Anaconda/Miniconda/Miniforge folders, then `py -3`. A conda environment is used
+directly — no `conda activate` needed. The choice is remembered in
+`AI_Bot_State\python_path.txt`. If nothing suitable exists, the window offers to
+create a private `.venv` in the folder and install `requirements.txt` once.
 
 Put your existing Farm `.env` file in this downloaded tool folder (or provide
 its location with `--env-file`). Do not put its secret into any Python file:

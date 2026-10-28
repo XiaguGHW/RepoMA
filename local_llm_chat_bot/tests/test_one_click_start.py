@@ -101,5 +101,27 @@ class RunningWorkbench(unittest.TestCase):
         self.assertEqual(error.exception.code, "startup.workspace_missing")
 
 
+class Launcher(unittest.TestCase):
+    """The Windows launcher cannot run here; check what it must contain."""
+
+    def setUp(self):
+        self.raw = (Path(w.__file__).parent / "start_workbench.bat").read_bytes()
+        self.text = self.raw.decode("ascii")
+
+    def test_plain_ascii_with_windows_line_endings(self):
+        self.assertNotIn(b"\n", self.raw.replace(b"\r\n", b""))
+        self.assertNotIn("EnableDelayedExpansion", self.text)  # "!" in paths would break
+
+    def test_finds_conda_environments_without_activation(self):
+        for needle in ("WORKBENCH_PYTHON", "python_path.txt", ".venv\\Scripts\\python.exe", "where python",
+                       ".conda\\environments.txt", "conda-meta", "Library\\bin", "py -3",
+                       "import fastapi, uvicorn, fitz", "chat_workbench.py\" %*"):
+            self.assertIn(needle, self.text)
+
+    def test_offers_a_private_environment_when_nothing_is_found(self):
+        self.assertIn("-m venv", self.text)
+        self.assertIn("-m pip install -r", self.text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
