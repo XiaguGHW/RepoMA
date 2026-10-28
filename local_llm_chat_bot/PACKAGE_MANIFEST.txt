@@ -14,6 +14,7 @@ model_pricing.json
 release_safety.py
 request_runtime.py
 requirements.txt
+start_workbench.bat
 ui_copy_inventory.json
 ui_preview.html
 ui_terminology.json

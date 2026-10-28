@@ -6,10 +6,12 @@ files, credentials and session data stay on the computer that starts it.
 from __future__ import annotations
 
 from workbench_startup import (StartupConfig, StartupError, FarmEnvironment, HOST, bootstrap,
-                               check_state_directory, check_port, install_command)
+                               check_state_directory, check_port, install_command, open_browser_when_ready,
+                               running_workbench, workbench_url)
 
 
 import difflib
+import webbrowser
 import asyncio
 import copy
 import hashlib
@@ -5080,14 +5082,41 @@ window.addEventListener('beforeunload',event=>{captureRuleEditor();if(ruleEditSt
 HTML = HTML.replace('__WORKBENCH_I18N_JSON__', catalog_script_json())
 
 
+def remember_start_workspace(workspace: Path) -> Path:
+    """Store a --workspace folder as the last workspace; the page opens it on load."""
+    try:
+        folder = workspace.resolve()
+    except (OSError, RuntimeError):
+        folder = workspace
+    if not folder.is_dir():
+        raise StartupError('startup.workspace_missing', path=workspace)
+    settings = load_workbench_settings()
+    same = settings.get("workspace") and Path(settings["workspace"]) == folder
+    save_workbench_settings(folder, settings.get("session", "default") if same else "default",
+                            settings.get("model", "claude-haiku-5-5"), settings.get("language", "de"))
+    return folder
+
+
 def main() -> None:
     config = STARTUP_CONFIG
     try:
+        # A second double-click on the launcher reuses the running Workbench.
+        if running_workbench(config.port):
+            print(f"Bosch Local Workbench is already running: {workbench_url(config.port)}", flush=True)
+            if config.workspace is not None:
+                print("--workspace was not applied to the running Workbench; choose the folder in the page.", flush=True)
+            if config.open_browser:
+                webbrowser.open(workbench_url(config.port))
+            return
         with FARM_ENVIRONMENT.use(config.env_file, load_dotenv, explicit=config.env_explicit):
             validate_farm_endpoint(config.env_file)
             check_state_directory(app_state_home())
             check_port(config.port)
-        print(f"Bosch Local Workbench: http://{HOST}:{config.port}", flush=True)
+        if config.workspace is not None:
+            remember_start_workspace(config.workspace)
+        print(f"Bosch Local Workbench: {workbench_url(config.port)}", flush=True)
+        if config.open_browser:
+            open_browser_when_ready(config.port)
         uvicorn.run(app, host=HOST, port=config.port)
     except StartupError as exc:
         print(str(exc), file=sys.stderr)

@@ -49,6 +49,23 @@ python -m pip install -r requirements.txt
 python .\chat_workbench.py
 ```
 
+### One-click start (no VS Code needed)
+
+After the packages are installed once, double-click `start_workbench.bat` in
+the `local_llm_chat_bot` folder. It starts the Workbench, opens
+`http://127.0.0.1:8765` in the default browser and reopens the last workspace,
+model and language. Keep the black window open; closing it stops the
+Workbench. Double-clicking again while it runs only opens the browser page.
+
+For a desktop icon: right-click `start_workbench.bat` → *Send to* → *Desktop
+(create shortcut)*. To always open a specific folder, edit the shortcut's
+target and append `--workspace "C:\path\to\folder"`. Other flags: `--port`,
+`--env-file`, `--no-browser`.
+
+The launcher uses `.venv\Scripts\python.exe` when a virtual environment exists
+next to or above the folder, otherwise `python` (or `py -3`) from PATH — the
+same Python in which `requirements.txt` was installed.
+
 Put your existing Farm `.env` file in this downloaded tool folder (or provide
 its location with `--env-file`). Do not put its secret into any Python file:
 
