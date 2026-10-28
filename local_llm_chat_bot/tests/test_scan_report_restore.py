@@ -38,6 +38,23 @@ class ScanReportRestore(unittest.TestCase):
         restored = self.client.get("/api/scan/report").json()
         self.assertEqual(restored["files"], [])
 
+    def test_incomplete_preread_of_current_materials_stays_visible(self):
+        self.post("/api/setup", {"workspace": str(self.f.workspace), "model": "gemini-2.5-pro", "language": "de"})
+        self.post("/api/codebook/prepare", {"path": str(self.f.rules)})
+        self.post("/api/codebook/lock", {})
+        self.post("/api/target", {"target": str(self.f.bg_a), "selected_paths": ["facts.txt", "drawing.txt"]})
+        self.assertEqual(self.client.get("/api/coverage").json(), {})  # nothing is pre-read before a question
+        self.post("/api/chat", {"question": "Classify this Baugruppe"})
+        w.invalidate_current_coverage(w.ACTIVE["state"])  # e.g. a file failed to pre-read
+        report = self.client.get("/api/coverage").json()
+        self.assertFalse(report["complete"])
+        self.assertTrue(report["current_selection"])
+        self.assertEqual(len(report["files"]), 2)
+        self.assertFalse(w.coverage_matches_current_selection(w.session(), report))
+        # A different model makes the report stale.
+        w.ACTIVE["model"] = "claude-haiku-5-5"
+        self.assertFalse(self.client.get("/api/coverage").json()["current_selection"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

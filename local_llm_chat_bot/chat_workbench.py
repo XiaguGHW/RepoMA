@@ -2117,9 +2117,17 @@ def load_coverage(state: ProjectState) -> dict:
 
 
 def coverage_matches_current_selection(data: dict[str, Any], coverage: dict | None = None) -> bool:
-    """A session report is current only for the exact selected material hashes/model."""
+    """A session report is usable only when complete and made for the exact selected material hashes/model."""
     coverage = coverage if coverage is not None else load_coverage(data["state"])
-    if not coverage.get("complete") or coverage.get("model") != data["model"]:
+    return bool(coverage.get("complete")) and coverage_is_for_current_selection(data, coverage)
+
+
+def coverage_is_for_current_selection(data: dict[str, Any], coverage: dict) -> bool:
+    """True when the report belongs to the current materials and model, complete or not.
+
+    An incomplete report of the current selection must still be shown with its
+    per-file failures, not hidden behind a "selection changed" notice."""
+    if coverage.get("model") != data["model"]:
         return False
     if context_issue(data) or coverage.get("context_revision") != data["state"].data.get("context_revision"):
         return False
@@ -2134,8 +2142,8 @@ def coverage_for_ui(data: dict[str, Any]) -> dict:
     coverage = load_coverage(data["state"])
     if coverage:
         coverage = dict(coverage)
-        coverage["current_selection"] = coverage_matches_current_selection(data, coverage)
-        if coverage["current_selection"]:
+        coverage["current_selection"] = coverage_is_for_current_selection(data, coverage)
+        if coverage_matches_current_selection(data, coverage):
             dossier = load_bg_dossier_cache(coverage, data["model"])
             coverage["bg_dossier"] = {"ready": bool(dossier), "created_at": dossier.get("created_at", "") if dossier else ""}
     return coverage
