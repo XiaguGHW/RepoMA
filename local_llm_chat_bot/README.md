@@ -1,5 +1,10 @@
 # Bosch Farm Workbench and Terminal Chat
 
+The downloadable `local_llm_chat_bot.zip` contains only the graphical
+Workbench (files listed in `PACKAGE_MANIFEST.txt`; see `WORKBENCH_README.md`).
+The terminal and Excel tools described below are available in this repository
+folder.
+
 Download the complete `local_llm_chat_bot` folder anywhere on your Bosch computer.
 Use Python 3.10 or newer and keep the complete folder together, including all
 Python/JSON files and requirements.txt. The graphical workbench also needs

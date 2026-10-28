@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from pathlib import PurePosixPath
+import ast
 import unittest
 
 
@@ -13,15 +14,14 @@ MANIFEST = APP / "PACKAGE_MANIFEST.txt"
 WORKFLOW = REPOSITORY / ".github" / "workflows" / "package_local_llm_chat_bot.yml"
 
 REQUIRED = {
-    "CODE_CHAT_AGENT_README.md",
-    "README.md",
-    "requirements.txt",
+    "WORKBENCH_README.md",
     "chat_workbench.py",
     "model_pricing.json",
-    "ui_copy_inventory.json",
-    "ui_terminology.json",
+    "requirements.txt",
+    "start_workbench.bat",
     "workbench_i18n.json",
 }
+ENTRY_POINT = "chat_workbench.py"
 
 
 def package_files() -> list[str]:
@@ -40,7 +40,6 @@ class PackageManifest(unittest.TestCase):
         self.assertEqual(files, sorted(files), "Keep the release payload easy to audit.")
         self.assertEqual(len(files), len(set(files)), "The manifest must not duplicate a file.")
         self.assertTrue(REQUIRED <= set(files), REQUIRED - set(files))
-        self.assertIn("PACKAGE_MANIFEST.txt", files)
         print("Prospective ZIP payload (read-only):")
         for relative in files:
             with self.subTest(relative=relative):
@@ -55,6 +54,23 @@ class PackageManifest(unittest.TestCase):
                 self.assertNotIn("visual_cache", parsed.parts)
                 self.assertFalse(relative.endswith((".env", ".env.local", ".zip")))
                 self.assertNotIn(".env/", relative)
+
+    def test_python_files_are_exactly_what_the_workbench_imports(self):
+        """Every local module the Workbench imports is shipped, and nothing else."""
+        local = {path.stem for path in APP.glob("*.py")}
+        needed, todo = set(), [ENTRY_POINT[:-3]]
+        while todo:
+            module = todo.pop()
+            if module in needed:
+                continue
+            needed.add(module)
+            tree = ast.parse((APP / f"{module}.py").read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                names = ([alias.name for alias in node.names] if isinstance(node, ast.Import)
+                         else [node.module] if isinstance(node, ast.ImportFrom) and node.module else [])
+                todo.extend(name.split(".")[0] for name in names if name.split(".")[0] in local)
+        shipped = {name[:-3] for name in package_files() if name.endswith(".py")}
+        self.assertEqual(shipped, needed)
 
     def test_package_workflow_is_manual_gated_and_uses_the_manifest(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
