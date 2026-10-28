@@ -1057,7 +1057,7 @@ def main():
         stream_handler, streamed = streamed_answer_handler()
         raw = llm.ask_about_files(
             visual_paths, prompt_for(state, question, snippets, document_snippets=document_snippets, bg_context=bg_context), SYSTEM,
-            {"maxOutputTokens": 4096, "temperature": 0},
+            {"maxOutputTokens": 8192, "temperature": 0},
             stream=True, event_handler=stream_handler,
         )
         if streamed["started"]:
@@ -1081,7 +1081,7 @@ def main():
                 stream_handler, streamed = streamed_answer_handler()
                 raw = llm.ask_about_files(
                     visual_paths, prompt_for(state, question, snippets, full_files, document_snippets, bg_context), SYSTEM,
-                    {"maxOutputTokens": 3000, "temperature": 0},
+                    {"maxOutputTokens": 8192, "temperature": 0},
                     stream=True, event_handler=stream_handler,
                 )
                 if streamed["started"]:

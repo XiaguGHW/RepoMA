@@ -115,5 +115,15 @@ class UnpricedTokenTypes(unittest.TestCase):
             self.assertGreater(aggregate["estimated_cost_usd"], 0)
 
 
+class OutputCeilings(unittest.TestCase):
+    """Thinking models count reasoning against the ceiling; small ceilings cut answers."""
+
+    def test_model_calls_use_ceilings_in_the_4k_to_8k_range(self):
+        for name in ("MATERIAL_GROUP_TOKENS", "MATERIAL_MERGE_TOKENS", "BG_DOSSIER_TOKENS",
+                     "MODEL_CHECK_TOKENS", "ANSWER_OUTPUT_TOKENS", "ANSWER_RETRY_OUTPUT_TOKENS"):
+            self.assertGreaterEqual(getattr(w, name), 4000, name)
+            self.assertLessEqual(getattr(w, name), 8192, name)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -268,7 +268,7 @@ class LLMConnector:
         messages.append({"role": "user", "content": content})
         config = generation_config or {}
         reasoning = name.startswith(("gpt-5", "gpt-6", "o1", "o3", "deepseek-r1"))
-        tokens = int(config.get("maxOutputTokens", 4096))
+        tokens = int(config.get("maxOutputTokens", 8192))
         from openai import _base_client
         transport = getattr(_base_client, "httpx2", None) or _base_client.httpx
         control = self._control

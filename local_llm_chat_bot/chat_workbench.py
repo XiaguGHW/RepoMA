@@ -1875,8 +1875,13 @@ def material_summary_cache_path(document: dict, model: str, full: bool, read_pag
 # Material pre-reading prompts.  Output is bounded by form (number and length
 # of bullet points) so a dense group fits its token budget instead of being cut.
 MATERIAL_SUMMARY_SYSTEM = "You are a careful technical evidence extractor. Use only the supplied file content. Write concise Chinese factual notes. Do not classify the Baugruppe and do not invent missing information."
-MATERIAL_GROUP_TOKENS = 900
-MATERIAL_MERGE_TOKENS = 1400
+# Output ceilings are high on purpose: thinking models (e.g. Gemini 2.5 Pro)
+# count their reasoning against maxOutputTokens, so a small ceiling cuts the
+# answer before it starts.  The format rules below keep the notes short.
+MATERIAL_GROUP_TOKENS = 8192
+MATERIAL_MERGE_TOKENS = 8192
+BG_DOSSIER_TOKENS = 8192
+MODEL_CHECK_TOKENS = 4096
 MATERIAL_GROUP_FORMAT = ("输出格式：最多 10 条要点，每条一句，不超过约 50 个汉字，句末用方括号注明来源页面/表格标签；"
                          "只写上述主题的事实，相同事实只写一次；不复述原文，不写引言或总结；表格只摘取关键行。")
 MATERIAL_MERGE_FORMAT = ("输出格式：最多 15 条要点，每条一句；相同事实只写一次；"
@@ -2027,7 +2032,7 @@ def prepare_bg_dossier(data: dict[str, Any], coverage: dict, *, force: bool = Fa
     request = "Create one reusable BG comprehensive evidence dossier with sections: composition/BOM; motion and main functional chain; actuators/transmission; relevant geometry/interfaces; DFC hierarchy; conflicts or limitations; source evidence. Every factual bullet must retain its source file and page/section label.\n\n" + sources
     records_used: list[dict] = []
     try:
-        raw = require_model_success(accounted_model_call(data, data["llm"], [], request, system_prompt, {"maxOutputTokens": 2400, "temperature": 0}, stream=True, usage_records=records_used), ui_message(data, 'model.context_dossier'))
+        raw = require_model_success(accounted_model_call(data, data["llm"], [], request, system_prompt, {"maxOutputTokens": BG_DOSSIER_TOKENS, "temperature": 0}, stream=True, usage_records=records_used), ui_message(data, 'model.context_dossier'))
     finally:
         if usage_records is not None:
             usage_records.extend(records_used)
@@ -3453,7 +3458,7 @@ def run_model_test(request: ModelTestRequest, key: str):
         notices = []
         answer = probe.ask_about_files(
             [], "Reply with exactly OK.", "You are a connection test. Follow the user instruction exactly.",
-            {"maxOutputTokens": 32, "temperature": 0}, stream=True,
+            {"maxOutputTokens": MODEL_CHECK_TOKENS, "temperature": 0}, stream=True,
             event_handler=lambda kind, text: notices.append(text) if kind == "notice" else None,
         )
         answer = require_model_success(answer, ui_message(ACTIVE, 'model.test'))

@@ -113,7 +113,7 @@ class MaterialPrereadCache(unittest.TestCase):
         self.assertEqual(len(self.group_calls()), groups + 2)  # one wasted call, then two halves
         halves = self.part_calls()
         self.assertEqual(len(halves), 2)
-        self.assertTrue(all(call["body"]["generationConfig"]["maxOutputTokens"] == 900 for call in halves))  # no budget increase
+        self.assertTrue(all(call["body"]["generationConfig"]["maxOutputTokens"] == w.MATERIAL_GROUP_TOKENS for call in halves))  # no budget increase
         # Each half keeps an evidence label.
         for call in halves:
             self.assertRegex(json.dumps(call["body"], ensure_ascii=False), r"--- manual\.txt — section \d+/\d+ ---")
@@ -168,10 +168,10 @@ class MaterialPrereadCache(unittest.TestCase):
         self.post("/api/coverage", {})
         group = json.dumps(self.group_calls()[0]["body"], ensure_ascii=False)
         self.assertIn("最多 10 条要点", group)
-        self.assertEqual(self.group_calls()[0]["body"]["generationConfig"]["maxOutputTokens"], 900)
+        self.assertEqual(self.group_calls()[0]["body"]["generationConfig"]["maxOutputTokens"], w.MATERIAL_GROUP_TOKENS)
         merge = self.merge_calls()[0]["body"]
         self.assertIn("最多 15 条要点", json.dumps(merge, ensure_ascii=False))
-        self.assertEqual(merge["generationConfig"]["maxOutputTokens"], 1400)
+        self.assertEqual(merge["generationConfig"]["maxOutputTokens"], w.MATERIAL_MERGE_TOKENS)
         # A stored note from another prompt version is ignored, not reused.
         path = w.material_group_note_path(self.document, "gemini-2.5-pro", "group text")
         w.write_json_atomically(path, {"version": "older-prompt", "model": "gemini-2.5-pro", "note": "old"})

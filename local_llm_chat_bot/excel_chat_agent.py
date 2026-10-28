@@ -564,12 +564,12 @@ def main() -> None:
                 context = {"workbook": session.data.get("workbook"), "results_file": session.data.get("results"), "pending_plan": bool(session.data.get("pending_plan")), "declared_search_roots": [str(item) for item in tools.allowed_roots], "workbook_overview": workbook_overview}
             for round_number in range(1, 4):
                 llm_calls += 1
-                raw, _ = ask_with_progress(llm, controller_prompt(line, context, tool_results), f"等待模型规划（第 {round_number} 轮）", 1800, args, progress)
+                raw, _ = ask_with_progress(llm, controller_prompt(line, context, tool_results), f"等待模型规划（第 {round_number} 轮）", 8192, args, progress)
                 decision = parse_json_reply(raw)
                 if not decision:
                     retry = "上一轮没有返回可执行的 JSON。请严格按要求重新规划；若涉及本地文件，必须先调用 discover_workbooks。"
                     llm_calls += 1
-                    raw, _ = ask_with_progress(llm, retry + "\n\n" + controller_prompt(line, context, tool_results), "等待模型修正规划格式", 1800, args, progress)
+                    raw, _ = ask_with_progress(llm, retry + "\n\n" + controller_prompt(line, context, tool_results), "等待模型修正规划格式", 8192, args, progress)
                     decision = parse_json_reply(raw)
                 if not decision:
                     tool_results.append({"tool": "planner", "result": {"error": "模型没有返回可执行的工具规划。请重试，或切换到更强模型。"}})
@@ -619,7 +619,7 @@ def main() -> None:
                     break
             if answer is None:
                 llm_calls += 1
-                answer, rendered_answer = ask_with_progress(llm, final_prompt(line, context, tool_results), "等待模型整理中文回答", 2200, args, progress, show_answer=True)
+                answer, rendered_answer = ask_with_progress(llm, final_prompt(line, context, tool_results), "等待模型整理中文回答", 8192, args, progress, show_answer=True)
         except KeyboardInterrupt:
             answer = "已中断本轮分析。"
         except Exception as exc:
