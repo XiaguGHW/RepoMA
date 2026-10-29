@@ -170,7 +170,9 @@ class MaterialPrereadCache(unittest.TestCase):
         self.assertIn("最多 10 条要点", group)
         self.assertEqual(self.group_calls()[0]["body"]["generationConfig"]["maxOutputTokens"], w.MATERIAL_GROUP_TOKENS)
         merge = self.merge_calls()[0]["body"]
-        self.assertIn("最多 15 条要点", json.dumps(merge, ensure_ascii=False))
+        merged = json.dumps(merge, ensure_ascii=False)
+        self.assertIn(f"合计不超过约 {w.PREREAD_SUMMARY_CHARS} 字", merged)  # prose is bounded,
+        self.assertIn("型号和参数去重后全部保留", merged)  # part numbers and parameters are not
         self.assertEqual(merge["generationConfig"]["maxOutputTokens"], w.MATERIAL_MERGE_TOKENS)
         # A stored note from another prompt version is ignored, not reused.
         path = w.material_group_note_path(self.document, "gemini-2.5-pro", "group text")

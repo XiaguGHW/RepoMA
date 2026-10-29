@@ -59,7 +59,26 @@ When updating, unpack the new version over the existing folder (or copy
 `AI_Bot_State` and `.env` into the new folder) to keep everything. To store
 the data elsewhere, set the environment variable `WORKBENCH_STATE_DIR`.
 
-## 4. Keeping model prices current
+## 4. How materials are read
+
+Confirming materials only reads and indexes files locally (no model call).
+The first classification question pre-reads each file once with the model and
+caches the summary:
+
+- Text is read together with pictures: CAD screenshots, DFC structure images
+  (with their OCR), and drawing pages. At most 5 pictures / 2.4 MB per call.
+- PDFs up to 20 pages are read completely. Longer PDFs read 15 chosen pages:
+  the first 3, pages with part numbers from the BOM, pages with words from the
+  classification rules, up to 3 graphic pages, then the pages with most text.
+  The file name does not matter. *Read all pages* in the scan status reads the
+  rest.
+- Each summary names the document type and keeps part numbers and parameters
+  with units and page labels.
+
+The scan report and scan status show for every file how many pages it has,
+which pages were read and why, and how many pictures were used.
+
+## 5. Keeping model prices current
 
 Costs are estimates. To use the current BMF prices, open the Docupedia page
 *Bosch Model Farm → Pricing*, press Ctrl+S and save it as HTML directly into
@@ -70,7 +89,7 @@ page keep the bundled prices from `model_pricing.json`; rows priced in EUR are
 ignored. If the page cannot be read, the bundled prices stay in effect and the
 status card says so. To return to the bundled prices, delete the saved page.
 
-## 5. Files
+## 6. Files
 
 | File | Purpose |
 |---|---|
@@ -89,7 +108,7 @@ status card says so. To return to the bundled prices, delete the saved page.
 
 Never share or commit `.env`.
 
-## 6. Common problems
+## 7. Common problems
 
 | Problem | Fix |
 |---|---|

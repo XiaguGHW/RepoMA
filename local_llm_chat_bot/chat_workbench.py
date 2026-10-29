@@ -50,7 +50,7 @@ try:
                                  excerpt, parse_json, prompt_for, safe_name, sha256)
     from local_document_library import (LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS, TextDecodingError,
                                         decode_text_bytes, material_is_recommended, material_role, material_role_label,
-                                        MAX_SHORT_PDF_PAGES, MAX_VISUAL_BYTES_PER_FILE)
+                                        MAX_SHORT_PDF_PAGES, MAX_VISUAL_BYTES_PER_FILE, MAX_CHUNKS_PER_DOCUMENT)
     from llm_connector_with_prompt_caching import LLMConnector, farm_base_url
     from request_runtime import (RequestControl, RequestStopped, RequestCancelled, RequestTimedOut,
                                  ResponseLimitExceeded, AnswerPreview, looks_like_action)
@@ -1879,7 +1879,7 @@ def coverage_path(state: ProjectState) -> Path:
     return state.root / "analysis_coverage.json"
 
 
-MATERIAL_SUMMARY_CACHE_VERSION = "material-summary-v2"  # v2: pictures are read together with the text
+MATERIAL_SUMMARY_CACHE_VERSION = "material-summary-v3"  # v2: pictures read with the text; v3: page choice, kinds, data-keeping format
 BG_DOSSIER_CACHE_VERSION = "bg-dossier-v1"
 
 
@@ -1903,10 +1903,58 @@ MATERIAL_GROUP_TOKENS = 8192
 MATERIAL_MERGE_TOKENS = 8192
 BG_DOSSIER_TOKENS = 8192
 MODEL_CHECK_TOKENS = 4096
-MATERIAL_GROUP_FORMAT = ("输出格式：最多 10 条要点，每条一句，不超过约 50 个汉字，句末用方括号注明来源页面/表格标签；"
-                         "只写上述主题的事实，相同事实只写一次；不复述原文，不写引言或总结；表格只摘取关键行。")
-MATERIAL_MERGE_FORMAT = ("输出格式：最多 15 条要点，每条一句；相同事实只写一次；"
-                         "必须保留冲突、不确定处与证据标签；不写引言或总结。")
+# Summaries keep the data a classification needs: part numbers and
+# parameters are listed in full; only the prose parts are bounded.
+PREREAD_SUMMARY_CHARS = 600
+PREREAD_PARAMETER_LINES = 40
+DOCUMENT_KINDS = {"datasheet": "数据表", "offer": "报价单", "catalog": "目录", "manual": "手册", "drawing": "图纸",
+                  "bom": "BOM", "dfc": "DFC 结构图", "cad": "CAD 截图", "other": "其他"}
+MATERIAL_KIND_LINE = ("第一行必须写：文件类型：<" + "/".join(DOCUMENT_KINDS.values()) + "> — <一句话说明主要内容>。")
+MATERIAL_GROUP_FORMAT = ("输出格式（按以下栏目，没有内容的栏目省略，不写引言或总结）：\n"
+                         "型号/订货号/制造商：原样列出，不翻译。\n"
+                         f"关键参数：每行一项“名称：数值 单位 [来源标签]”，如行程、负载、力、速度、尺寸、电压、压力；不限条数，最多 {PREREAD_PARAMETER_LINES} 行。\n"
+                         "结构与功能：最多 10 条要点，每条一句，句末用方括号注明来源页面/表格/图片标签。\n"
+                         "不确定处：看不清、缺失或互相矛盾的信息。\n"
+                         "只写文件中的事实，相同事实只写一次，表格只摘取关键行。")
+MATERIAL_MERGE_FORMAT = ("输出格式：" + MATERIAL_KIND_LINE + "然后依次为“型号/订货号/制造商”“关键参数”“结构与功能”“不确定处”栏目；"
+                         "型号和参数去重后全部保留，并保留来源标签；"
+                         f"“结构与功能”和“不确定处”合计不超过约 {PREREAD_SUMMARY_CHARS} 字；必须保留冲突与不确定处；不写引言或总结。")
+
+
+def guess_document_kind(document: dict) -> str:
+    """Local first guess from file name, role and the first pages' words."""
+    role = document.get("material_role")
+    if role == "dfc_structure":
+        return "dfc"
+    if role == "cad_screenshot":
+        return "cad"
+    first = " ".join(str(chunk.get("text", "")) for chunk in document.get("chunks", [])
+                     if (chunk.get("visual") or {}).get("page") in (None, 1, 2))[:6000]
+    text = (str(document.get("name", "")) + " " + first).casefold()
+    if role == "bom" or re.search(r"st(ü|ue)ckliste|parts? list|\batb\b", text):
+        return "bom"
+    if re.search(r"angebot|quotation|\boffer\b|offerte", text) or ("menge" in text and "preis" in text):
+        return "offer"
+    if re.search(r"datenblatt|data ?sheet|technische daten|technical data", text):
+        return "datasheet"
+    if re.search(r"katalog|catalog", text):
+        return "catalog"
+    if re.search(r"betriebsanleitung|bedienungsanleitung|manual|handbuch|montageanleitung", text):
+        return "manual"
+    if role == "technical_drawing" or re.search(r"zeichnungsnummer|zeichnungs-nr|ma(ß|ss)stab|drawing no", text):
+        return "drawing"
+    return "other"
+
+
+def model_document_kind(summary: str) -> str | None:
+    match = re.search(r"文件类型\s*[:：]\s*([^\n—]+)", summary or "")
+    if not match:
+        return None
+    value = match.group(1)
+    for key, label in sorted(DOCUMENT_KINDS.items(), key=lambda item: -len(item[1])):
+        if label.casefold() in value.casefold():
+            return key
+    return None
 # Changing a prompt or budget above invalidates cached group notes, never a
 # completed per-file summary (those stay tied to source hash, model and scope).
 MATERIAL_GROUP_NOTE_VERSION = hashlib.sha256(json.dumps(
@@ -2184,23 +2232,131 @@ def document_pages(document: dict) -> list[int]:
     return sorted(pages)
 
 
-def selected_reading_chunks(document: dict, full: bool = False) -> tuple[list[dict], str, list[int], list[int]]:
-    """Use a human-like first pass for large component manuals, not blind full-PDF upload."""
-    name = str(document.get("name", "")).casefold()
-    is_datasheet = document.get("material_role") == "datasheet" or any(term in name for term in ("datenblatt", "datasheet", "catalog", "katalog"))
+# Long PDFs: what decides how much is read is the page count and the content,
+# never the file name (names are often unclear).  Up to LONG_PDF_PAGES pages
+# everything is read; longer files read LONG_PDF_READ_PAGES chosen pages.
+LONG_PDF_PAGES = 20
+LONG_PDF_READ_PAGES = 15
+LONG_PDF_START_PAGES = 3
+LONG_PDF_GRAPHIC_PAGES = 3
+SCOPE_FULL = "完整文本预读"
+SCOPE_SELECTED = "长文件挑页预读"
+_PART_NUMBER = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9./-]{3,}[A-Za-z0-9](?![A-Za-z0-9])")
+_RULE_STOPWORDS = {"baugruppe", "baugruppen", "function", "funktion", "primary", "object", "objekt", "werden",
+                   "wird", "einer", "eines", "diese", "dieser", "durch", "sowie", "assembly", "component", "komponente"}
+
+
+def part_numbers(text: str) -> set[str]:
+    """Order codes and type keys as they appear in a BOM: 8941234567, DSBC-32-100-PPVA, R412010286."""
+    found = set()
+    for token in _PART_NUMBER.findall(text):
+        digits = sum(ch.isdigit() for ch in token)
+        letters = sum(ch.isalpha() for ch in token)
+        if digits >= 6 or (digits >= 2 and letters >= 2 and len(token) >= 6 and any(ch in token for ch in "-./")):
+            if not re.fullmatch(r"(19|20)\d{2}[-./]\d{1,2}[-./]\d{1,2}", token):  # dates are not part numbers
+                found.add(token.casefold())
+    return found
+
+
+def reading_hints(data: dict[str, Any], selected: list[dict]) -> dict[str, Any]:
+    """Local signals for choosing pages of long files: BOM part numbers and rule words."""
+    bom = [item for item in selected if item.get("material_role") == "bom"]
+    bom_terms: set[str] = set()
+    for item in bom:
+        for chunk in item.get("chunks", []):
+            bom_terms |= part_numbers(str(chunk.get("text", "")))
+    rule_terms: set[str] = set()
+    profile = ((data.get("state").data.get("bg_context") or {}).get("locked_profile") if data.get("state") else None) or {}
+    for item in profile.get("classes", []) if isinstance(profile, dict) else []:
+        if not isinstance(item, dict):
+            continue
+        for word in re.findall(r"[A-Za-zÄÖÜäöüß]{4,}", str(item.get("name", ""))):
+            rule_terms.add(word.casefold())
+        texts = [str(item.get("definition", ""))] + [str(rule.get("text", "")) for rule in item.get("decision_rules", []) if isinstance(rule, dict)]
+        for word in re.findall(r"[A-Za-zÄÖÜäöüß]{8,}", " ".join(texts)):
+            rule_terms.add(word.casefold())
+    rule_terms -= _RULE_STOPWORDS
+    return {"bom_terms": bom_terms, "rule_terms": set(sorted(rule_terms)[:300]), "bom_found": bool(bom)}
+
+
+def page_texts(document: dict) -> dict[int, str]:
+    pages: dict[int, str] = {}
+    for chunk in document.get("chunks", []):
+        page = (chunk.get("visual") or {}).get("page")
+        if isinstance(page, int):
+            pages[page] = pages.get(page, "") + "\n" + str(chunk.get("text", ""))
+    return pages
+
+
+def choose_long_pages(document: dict, hints: dict[str, Any] | None) -> tuple[list[int], dict[int, list[str]]]:
+    """Up to LONG_PDF_READ_PAGES pages of a long PDF, each with the reasons it was chosen."""
+    hints = hints or {}
+    texts = page_texts(document)
+    pages = sorted(texts)
+    inventory = {item.get("page"): item for item in document.get("page_inventory", []) if isinstance(item, dict)}
+    reasons: dict[int, list[str]] = {}
+    order: list[int] = []
+
+    def take(page: int, reason: str, limit: int = LONG_PDF_READ_PAGES) -> None:
+        reasons.setdefault(page, [])
+        if reason not in reasons[page]:
+            reasons[page].append(reason)
+        if page not in order and len(order) < limit:
+            order.append(page)
+
+    for page in pages[:LONG_PDF_START_PAGES]:
+        take(page, "start")
+    bom_terms, rule_terms = hints.get("bom_terms") or set(), hints.get("rule_terms") or set()
+    if bom_terms:
+        scored = sorted(((sum(1 for term in bom_terms if term in texts[page].casefold()), page) for page in pages), key=lambda item: (-item[0], item[1]))
+        for score, page in scored:
+            if score:
+                take(page, "bom")
+    if rule_terms:
+        scored = sorted(((sum(1 for term in rule_terms if term in texts[page].casefold()), page) for page in pages), key=lambda item: (-item[0], item[1]))
+        for score, page in scored[:LONG_PDF_READ_PAGES]:
+            if score >= 2:
+                take(page, "rules")
+    graphic = [page for page in pages if (inventory.get(page) or {}).get("page_type") in {"visual", "mixed"}]
+    taken_graphic = 0
+    for page in graphic:
+        if page in order:
+            take(page, "graphic")  # already chosen: only note that it is a graphic page
+            continue
+        if taken_graphic >= LONG_PDF_GRAPHIC_PAGES or len(order) >= LONG_PDF_READ_PAGES:
+            break
+        take(page, "graphic")
+        taken_graphic += 1
+    for page in sorted(pages, key=lambda page: (-len(texts[page].strip()), page)):
+        if len(order) >= LONG_PDF_READ_PAGES:
+            break
+        take(page, "dense")
+    chosen = sorted(order)
+    return chosen, {page: reasons[page] for page in chosen}
+
+
+def reading_plan(document: dict, full: bool = False, hints: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Which chunks/pages of one file are pre-read, and why (local, no model call)."""
     chunks = list(document.get("chunks", []))
     all_pages = document_pages(document)
-    if not is_datasheet or full:
-        return chunks, "完整文本预读", all_pages, []
-    first_pages = []
-    for chunk in chunks:
-        match = re.search(r"page\s+(\d+)", str(chunk.get("label", "")), re.I)
-        if match and int(match.group(1)) <= 15:
-            first_pages.append(chunk)
-    if first_pages and len(first_pages) < len(chunks):
-        read_pages = [page for page in all_pages if page <= 15]
-        return first_pages, "Datasheet 前 15 页预读（其余页尚未覆盖）", read_pages, [page for page in all_pages if page > 15]
-    return chunks, "完整文本预读", all_pages, []
+    if full or len(all_pages) <= LONG_PDF_PAGES:
+        return {"chunks": chunks, "scope": SCOPE_FULL, "read": all_pages, "unread": [], "reasons": {}}
+    chosen, reasons = choose_long_pages(document, hints)
+    picked = set(chosen)
+    selected = [chunk for chunk in chunks if (chunk.get("visual") or {}).get("page") in picked]
+    return {"chunks": selected, "scope": SCOPE_SELECTED, "read": chosen,
+            "unread": [page for page in all_pages if page not in picked], "reasons": reasons}
+
+
+def scope_message(plan: dict[str, Any], total: int) -> dict:
+    if plan["scope"] == SCOPE_SELECTED:
+        return UIMessage("material.scope_selected", read=len(plan["read"]), total=total).payload()
+    return UIMessage("material.scope_full").payload()
+
+
+def selected_reading_chunks(document: dict, full: bool = False, hints: dict[str, Any] | None = None) -> tuple[list[dict], str, list[int], list[int]]:
+    plan = reading_plan(document, full, hints)
+    return plan["chunks"], plan["scope"], plan["read"], plan["unread"]
 
 
 def material_folder(data: dict[str, Any]) -> Path | None:
@@ -2279,6 +2435,8 @@ def pdf_preread_pages(document: dict, read_pages: list[int]) -> list[int]:
         pages = list(read_pages)
     else:
         pages = [page for page in read_pages if (inventory.get(page) or {}).get("page_type") in {"visual", "mixed"}]
+        if total > LONG_PDF_PAGES:
+            return pages[:LONG_PDF_GRAPHIC_PAGES]
     return pages[:PREREAD_PDF_IMAGE_PAGES]
 
 
@@ -2390,7 +2548,8 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
     summary_system = MATERIAL_SUMMARY_SYSTEM
     total_documents = len(selected)
     # The retry allowance is sized from every group this scan may read.
-    planned_groups = sum(len(summary_groups(item, selected_reading_chunks(item, full=full)[0], folder=material_folder(data)))
+    hints = reading_hints(data, selected)
+    planned_groups = sum(len(summary_groups(item, selected_reading_chunks(item, full=full, hints=hints)[0], folder=material_folder(data)))
                          for item in selected)
     retry_limit = material_retry_limit(planned_groups)
     retry_calls = 0
@@ -2401,8 +2560,12 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
         # Complete analysis prepares OCR locally for visual pages. It adds no
         # Farm token cost and lets a scanned page participate in the same
         # auditable page/chunk coverage as native-text pages.
-        documents.ensure_document_ocr(document)
-        read_chunks, reading_scope, read_pages, unread_pages = selected_reading_chunks(document, full=full)
+        plan_of_file = reading_plan(document, full, hints)
+        # OCR only the pages that will be read (scans among them); no token cost.
+        documents.ensure_document_ocr(document, pages=set(plan_of_file["read"]) or None)
+        read_chunks, reading_scope = plan_of_file["chunks"], plan_of_file["scope"]
+        read_pages, unread_pages = plan_of_file["read"], plan_of_file["unread"]
+        page_reasons = {str(page): reasons for page, reasons in plan_of_file["reasons"].items()}
         cached = load_material_summary_cache(document, data["model"], full, read_pages)
         # Migrate a valid summary generated by the immediately preceding
         # version.  This makes the first incremental file addition cheap even
@@ -2421,7 +2584,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
             record.update({"id": document["id"], "name": document["name"], "path": document["path"],
                            "sha256": document.get("sha256"), "pages_total": len(document_pages(document)),
                            "pages_read": read_pages, "pages_unread": unread_pages,
-                           "full_coverage": not unread_pages, "reading_scope": reading_scope, "reading_scope_message": UIMessage("material.scope_full" if reading_scope == "完整文本预读" else "material.scope_datasheet", pages=15).payload(),
+                           "full_coverage": not unread_pages, "reading_scope": reading_scope, "reading_scope_message": scope_message(plan_of_file, len(document_pages(document))), "page_reasons": page_reasons, "bom_found": hints["bom_found"],
                            "dfc_structure": documents.dfc_audit(document), "cache_status": "reused"})
             records.append(record)
             reused_files += 1
@@ -2476,7 +2639,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                 notes.append("\n".join(note for note in half_notes if note))
                 reused_groups += 1
                 continue
-            label = f"这是第 {number}/{len(groups)} 个完整文本片段组。"
+            label = f"这是第 {number}/{len(groups)} 个完整文本片段组。" + (MATERIAL_KIND_LINE if number == 1 else "")
             try:
                 # A cached half means this whole group was cut before: go
                 # straight to the missing half instead of paying for it again.
@@ -2552,12 +2715,13 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                   "pages_read": read_pages, "pages_unread": unread_pages,
                   "full_coverage": not unread_pages,
                   "text_chunks_total": len(document.get("chunks", [])), "text_chunks_selected": len(read_chunks),
-                  "reading_scope": reading_scope, "reading_scope_message": UIMessage("material.scope_full" if reading_scope == "完整文本预读" else "material.scope_datasheet", pages=15).payload(), "text_groups_total": len(groups),
+                  "reading_scope": reading_scope, "reading_scope_message": scope_message(plan_of_file, len(document_pages(document))), "page_reasons": page_reasons, "bom_found": hints["bom_found"], "text_groups_total": len(groups),
                   "text_groups_processed": len(notes), "text_groups_reused": reused_groups,
                   "retry_calls": file_retry_calls,
                   "complete": bool(notes) and not failures,
                   "failures": failures, "failure_messages": [message_payload(item) for item in failures], "dfc_structure": documents.dfc_audit(document), "summary": summary,
                   "images_read": visual_labels, "images_skipped": visual_skipped, "images_fallback": visual_fallback,
+                  "kind_guess": guess_document_kind(document), "kind_model": model_document_kind(summary or (notes[0] if notes else "")),
                   "preread_version": MATERIAL_SUMMARY_CACHE_VERSION,
                   "cache_status": "created"}
         records.append(record)
@@ -2901,15 +3065,32 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     preferred = ([bg_context.get("codebook_id")] + material_ids) if bg_context else material_ids
     allowed = material_ids + [bg_context.get("codebook_id")] if bg_context else material_ids
     report("search", ui_message(data, 'progress.search'), 10)
+    plans = {}
+    search_terms = set()
+    if bg_context:
+        chosen_docs = [item for item in documents.list() if item.get("id") in material_ids]
+        hints = reading_hints(data, [item for item in documents.list() if item.get("id") in (state.data.get("active_source_ids") or [])])
+        plans = {item["id"]: reading_plan(item, False, hints) for item in chosen_docs}
+        search_terms = set(hints["bom_terms"]) | set(hints["rule_terms"])
     evidence = traceable_evidence(data, documents.search(question, preferred_ids=preferred,
-                                                         classification=bool(bg_context), allowed_ids=allowed))
+                                                         classification=bool(bg_context), allowed_ids=allowed,
+                                                         extra_terms=search_terms,
+                                                         preferred_pages={key: plan["read"] for key, plan in plans.items()}))
+    # Mark excerpts from pages the pre-read did not cover, for the model and the audit.
+    for item in evidence:
+        plan = plans.get(item.get("id"))
+        page = (item.get("visual") or {}).get("page")
+        if plan and page in plan["unread"] and "[not pre-read]" not in str(item.get("label", "")):
+            item["label"] = f"{item.get('label', '')} [not pre-read]"
+            item["unread_page"] = True
     if bg_context:
         existing = {(item.get("visual") or {}).get("page") for item in evidence if item.get("name") == bg_context.get("codebook_name")}
         evidence.extend(item for item in relevant_codebook_page_evidence(question, bg_context) if (item.get("visual") or {}).get("page") not in existing)
     report("search", ui_message(data, 'progress.visual'), 12)
     evidence = documents.ensure_ocr_for_snippets(evidence, question, classification=bool(bg_context))
     visuals = documents.visual_paths(evidence, state.root / "visual_cache",
-                                     bilder_images=documents.bilder_image_paths(allowed))
+                                     bilder_images=documents.bilder_image_paths(allowed),
+                                     first_per_file_ids=set(material_ids) if bg_context else None)
     reasoning, notices = [], []
     turn_scope = ({"kind": "file", "id": focus["id"], "name": focus["name"]} if focus
                   else {"kind": "all", "count": len(material_ids)})
@@ -3860,15 +4041,22 @@ def analyze_target(request: TargetRequest):
     state.data, documents.data = candidate, staged.data
     invalidate_pending(data)
     return {"sources": len(sources), "skipped": skipped[:10], "skipped_count": len(skipped), "target_kind": target_kind,
-            "files": [scan_report_file(item) for item in sources],
+            "files": [scan_report_file(item, reading_hints(data, sources)) for item in sources],
             "classification": bool(codebook_path), "status": status_data(data)}
 
 
-def scan_report_file(item: dict) -> dict:
+def scan_report_file(item: dict, hints: dict | None = None) -> dict:
+    pages = document_pages(item)
+    plan = reading_plan(item, False, hints or {})
+    no_text = sum(1 for record in item.get("page_inventory", []) if isinstance(record, dict) and record.get("page_type") == "visual")
     return {"name": item["name"], "chunks": len(item.get("chunks", [])), "bytes": item.get("bytes", 0),
             "material_role": item.get("material_role", "other"),
             "material_role_label": material_role_label(item.get("material_role", "other")),
-            "index_cache_status": item.get("index_cache_status", "unknown")}
+            "index_cache_status": item.get("index_cache_status", "unknown"),
+            "pages_total": len(pages), "pages_no_text": no_text, "plan_read": len(plan["read"]),
+            "plan_scope": plan["scope"], "kind_guess": guess_document_kind(item),
+            "chunk_limit_reached": len(item.get("chunks", [])) >= MAX_CHUNKS_PER_DOCUMENT,
+            "bom_found": bool((hints or {}).get("bom_found"))}
 
 
 @app.get("/api/scan/report")
@@ -3882,7 +4070,7 @@ def current_scan_report():
     sources = [by_id[source_id] for source_id in active if source_id in by_id]
     target = data["state"].data.get("selected_target") or {}
     return {"sources": len(sources), "skipped": [], "skipped_count": 0, "target_kind": target.get("kind", ""),
-            "files": [scan_report_file(item) for item in sources], "restored": True}
+            "files": [scan_report_file(item, reading_hints(data, sources)) for item in sources], "restored": True}
 
 
 @app.get("/api/target-tree")
@@ -4574,6 +4762,9 @@ function pricingSourceText(source){
   source=source||{};let text=source.kind==='page'?t('status.pricing_page',{file:esc(source.file||''),date:esc(source.date||''),count:source.models||0}):t('status.pricing_bundled');
   if(source.page_error)text+=' · <span class="error">'+t('status.pricing_page_error',{detail:esc(source.page_error)})+'</span>';
   return '<span class="muted">'+t('status.pricing')+P('：')+text+'</span>'}
+function kindCopy(key){let keys={datasheet:'doc.kind.datasheet',offer:'doc.kind.offer',catalog:'doc.kind.catalog',manual:'doc.kind.manual',drawing:'doc.kind.drawing',bom:'doc.kind.bom',dfc:'doc.kind.dfc',cad:'doc.kind.cad',other:'doc.kind.other'};return keys[key]?t(keys[key]):''}
+function pageList(pages){pages=[...pages].map(Number).sort((a,b)=>a-b);let out=[],i=0;while(i<pages.length){let j=i;while(j+1<pages.length&&pages[j+1]===pages[j]+1)j++;out.push(j>i?pages[i]+'–'+pages[j]:String(pages[i]));i=j+1}return out.join(P('、'))}
+function reasonsCopy(reasons){let by={};Object.entries(reasons||{}).forEach(([page,list])=>(list||[]).forEach(reason=>{(by[reason]=by[reason]||[]).push(page)}));let names={start:'reason.start',bom:'reason.bom',rules:'reason.rules',graphic:'reason.graphic',dense:'reason.dense'};return Object.keys(names).filter(key=>by[key]).map(key=>t(names[key])+' '+pageList(by[key])).join(P('；'))}
 function rt(key,values={}){return t(key,values)}
 function bindInitialStaticI18n(){
   if(initialStaticI18nBound)return;
@@ -5005,12 +5196,12 @@ function renderCoverageReportForLanguage(x){
   if(!x||!x.files){setUIMessage($('coveragestatus'),{message_key:'coverage.auto_hint'});return}
   if(x.current_selection===false){setUIMessage($('coveragestatus'),{message_key:'coverage.selection_changed'},'muted');return}
   let done=x.files.filter(f=>f.complete).length;
-  let details=x.files.map(f=>{let pages=f.pages_total?t('coverage.pages')+P(''+P('：')+'')+t('coverage.read_pages',{pages:(f.pages_read||[]).join(P(''+P('、')+''))||'—'})+((f.pages_unread||[]).length?P(''+P('；')+'')+t('coverage.unread_pages',{pages:f.pages_unread.join(P(''+P('、')+''))}):''):t('coverage.no_pages');let dfc=f.dfc_structure?' · <span class="chip">'+t('coverage.dfc',{status:esc(stateCopy(f.dfc_structure.ocr_status)),count:esc(f.dfc_structure.segments_total||0)})+'</span>':'';let images=(f.images_read||[]).length?' · <span class="chip">'+t('coverage.images',{count:f.images_read.length})+'</span>':'';if(f.images_fallback)images+=' · <span class="chip">'+t('coverage.images_fallback')+'</span>';if((f.images_skipped||[]).length)images+=' · <span class="chip">'+t('coverage.images_skipped',{count:f.images_skipped.length})+'</span>';let cache=f.cache_status==='reused'?' · <span class="chip">'+t('coverage.reused_summary')+'</span>':f.cache_status==='created'?' · <span class="chip">'+t('coverage.new_pre_read')+'</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}${P(''+P('：')+'')}${t('coverage.text_groups',{done:f.text_groups_processed,total:f.text_groups_total})} · ${esc(scopeCopy(f))} · ${esc(pages)}${images}${cache}${dfc}${f.failures?.length?P(''+P('（')+'')+esc((f.failure_messages||f.failures).map(uiCopy).join('; '))+P(''+P('）')+''):''}`}).join('');
+  let details=x.files.map(f=>{let pages=f.pages_total?t('coverage.pages')+P(''+P('：')+'')+t('coverage.read_pages',{pages:(f.pages_read||[]).join(P(''+P('、')+''))||'—'})+((f.pages_unread||[]).length?P(''+P('；')+'')+t('coverage.unread_pages',{pages:f.pages_unread.join(P(''+P('、')+''))}):''):t('coverage.no_pages');let dfc=f.dfc_structure?' · <span class="chip">'+t('coverage.dfc',{status:esc(stateCopy(f.dfc_structure.ocr_status)),count:esc(f.dfc_structure.segments_total||0)})+'</span>':'';let kind=f.kind_model||f.kind_guess?' · <span class="chip">'+t('coverage.kind',{kind:kindCopy(f.kind_model||f.kind_guess)})+' '+t(f.kind_model?'coverage.kind_model':'coverage.kind_local')+'</span>':'';let reasons=Object.keys(f.page_reasons||{}).length?'<br><span class="muted">'+t('coverage.page_reasons')+P('：')+esc(reasonsCopy(f.page_reasons))+(f.bom_found===false?' · '+t('coverage.no_bom'):'')+'</span>':'';let images=(f.images_read||[]).length?' · <span class="chip">'+t('coverage.images',{count:f.images_read.length})+'</span>':'';if(f.images_fallback)images+=' · <span class="chip">'+t('coverage.images_fallback')+'</span>';if((f.images_skipped||[]).length)images+=' · <span class="chip">'+t('coverage.images_skipped',{count:f.images_skipped.length})+'</span>';let cache=f.cache_status==='reused'?' · <span class="chip">'+t('coverage.reused_summary')+'</span>':f.cache_status==='created'?' · <span class="chip">'+t('coverage.new_pre_read')+'</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}${P(''+P('：')+'')}${t('coverage.text_groups',{done:f.text_groups_processed,total:f.text_groups_total})} · ${esc(scopeCopy(f))} · ${esc(pages)}${kind}${images}${cache}${dfc}${f.failures?.length?P(''+P('（')+'')+esc((f.failure_messages||f.failures).map(uiCopy).join('; '))+P(''+P('）')+''):''}${reasons}`}).join('');
   let dossier=x.bg_dossier?.ready?' · <span class="chip">'+t('coverage.dossier_ready')+'</span>':' · <span class="chip">'+t('coverage.dossier_pending')+'</span>';
   $('coveragestatus').innerHTML=(x.complete?'<span class="ok">'+t('coverage.ready')+P(''+P('：')+'').trimEnd()+'</span>':'<span class="error">'+t('coverage.incomplete')+P(''+P('：')+'').trimEnd()+'</span>')+' '+t('coverage.overview',{done,total:x.files.length,reused:x.reused_files||0,created:x.created_files||0,calls:x.model_calls||0})+(x.retry_calls?' · <span class="chip">'+t('coverage.retries',{calls:x.retry_calls,limit:x.retry_limit})+'</span>':'')+dossier+details;
 }
 function renderScanDrawerForLanguage(x){
-  let files=(x.files||[]).map(f=>{let index=f.index_cache_status==='reused'?t('scan.index.reused'):f.index_cache_status==='changed'?t('scan.index.changed'):f.index_cache_status==='new'?t('scan.index.created'):'—';return `<article class="file-card"><b>${esc(f.name)}</b><br><span class="muted">${esc(roleCopy(f.material_role_label))} · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB<br>${t('scan.report.chunks',{count:f.chunks})} · ${index}</span></article>`}).join('')||'<div class="muted">'+t('scan.report.none')+'</div>';
+  let files=(x.files||[]).map(f=>{let index=f.index_cache_status==='reused'?t('scan.index.reused'):f.index_cache_status==='changed'?t('scan.index.changed'):f.index_cache_status==='new'?t('scan.index.created'):'—';return `<article class="file-card"><b>${esc(f.name)}</b><br><span class="muted">${esc(roleCopy(f.material_role_label))} · ${(Number(f.bytes)/1024/1024).toFixed(1)} MB<br>${t('scan.report.chunks',{count:f.chunks})} · ${index}${f.pages_total?'<br>'+t('scan.report.pages',{pages:f.pages_total,no_text:f.pages_no_text||0})+' · '+(f.plan_scope==='长文件挑页预读'?t('scan.report.plan_selected',{read:f.plan_read,total:f.pages_total})+(f.bom_found?'':' · '+t('coverage.no_bom')):t('scan.report.plan_full')):''}${f.kind_guess?'<br>'+t('coverage.kind',{kind:kindCopy(f.kind_guess)})+' '+t('coverage.kind_local'):''}${f.chunk_limit_reached?'<br><span class="error">'+t('scan.report.chunk_limit')+'</span>':''}</span></article>`}).join('')||'<div class="muted">'+t('scan.report.none')+'</div>';
   let skipped=x.skipped_count?`<article class="file-card error"><b>${t('scan.report.skipped',{count:x.skipped_count})}</b><br><span class="muted">${x.skipped.map(esc).join('<br>')}${x.skipped_count>x.skipped.length?'<br>'+t('scan.report.more_failures'):''}</span></article>`:'';
   $('scanreportbody').innerHTML='<div class="muted">'+t('scan.report.added',{count:x.sources||0})+'</div>'+files+skipped+cacheAuditSection();
 }
