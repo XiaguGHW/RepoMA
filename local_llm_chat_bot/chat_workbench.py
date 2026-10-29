@@ -49,7 +49,8 @@ try:
     from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative, classification_manifest,
                                  excerpt, parse_json, prompt_for, safe_name, sha256)
     from local_document_library import (LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS, TextDecodingError,
-                                        decode_text_bytes, material_is_recommended, material_role, material_role_label)
+                                        decode_text_bytes, material_is_recommended, material_role, material_role_label,
+                                        MAX_SHORT_PDF_PAGES, MAX_VISUAL_BYTES_PER_FILE)
     from llm_connector_with_prompt_caching import LLMConnector, farm_base_url
     from request_runtime import (RequestControl, RequestStopped, RequestCancelled, RequestTimedOut,
                                  ResponseLimitExceeded, AnswerPreview, looks_like_action)
@@ -1878,7 +1879,7 @@ def coverage_path(state: ProjectState) -> Path:
     return state.root / "analysis_coverage.json"
 
 
-MATERIAL_SUMMARY_CACHE_VERSION = "material-summary-v1"
+MATERIAL_SUMMARY_CACHE_VERSION = "material-summary-v2"  # v2: pictures are read together with the text
 BG_DOSSIER_CACHE_VERSION = "bg-dossier-v1"
 
 
@@ -1909,7 +1910,7 @@ MATERIAL_MERGE_FORMAT = ("输出格式：最多 15 条要点，每条一句；�
 # Changing a prompt or budget above invalidates cached group notes, never a
 # completed per-file summary (those stay tied to source hash, model and scope).
 MATERIAL_GROUP_NOTE_VERSION = hashlib.sha256(json.dumps(
-    ["material-group-v1", MATERIAL_SUMMARY_SYSTEM, MATERIAL_GROUP_FORMAT, MATERIAL_GROUP_TOKENS],
+    ["material-group-v2-visual", MATERIAL_SUMMARY_SYSTEM, MATERIAL_GROUP_FORMAT, MATERIAL_GROUP_TOKENS],
     ensure_ascii=False).encode("utf-8")).hexdigest()[:12]
 
 
@@ -2256,6 +2257,124 @@ def summary_groups(document: dict, chunks: list[dict], limit: int = 24_000, fold
     return groups
 
 
+# Pictures read together with the text during pre-reading.  The same
+# per-request budget as an answer (count and bytes) keeps Farm uploads safe.
+PREREAD_IMAGES_PER_CALL = 5
+PREREAD_IMAGE_BYTES_PER_CALL = 2_400_000
+PREREAD_PDF_IMAGE_PAGES = 5
+PREREAD_DFC_SEGMENTS_PER_CALL = 4
+PREREAD_VISUAL_INSTRUCTION = ("本组随附 {count} 张图片（清单见文本开头）。请同时描述图中可见的视图、零件、结构层级、"
+                              "标题栏信息（图号、名称、版本）和关键尺寸；来自图片的要点请标注对应的图片标签。")
+
+
+def pdf_preread_pages(document: dict, read_pages: list[int]) -> list[int]:
+    """Which read pages of a PDF are also looked at as pictures.
+
+    A short PDF or a technical drawing: every page (its views, title block
+    and BOM can sit on different sheets).  Otherwise the pages whose local
+    inventory says they are mostly graphics (drawings, scans, mixed pages)."""
+    inventory = {item.get("page"): item for item in document.get("page_inventory", []) if isinstance(item, dict)}
+    total = len(document_pages(document))
+    if total <= MAX_SHORT_PDF_PAGES or document.get("material_role") == "technical_drawing":
+        pages = list(read_pages)
+    else:
+        pages = [page for page in read_pages if (inventory.get(page) or {}).get("page_type") in {"visual", "mixed"}]
+    return pages[:PREREAD_PDF_IMAGE_PAGES]
+
+
+def preread_groups(documents: "LocalDocumentLibrary", document: dict, read_chunks: list[dict],
+                   folder: Path | None, cache_dir: Path) -> tuple[list[dict], list[str]]:
+    """Pre-read groups of one file: text plus the pictures that belong to it.
+
+    Returns ([{"text", "images": [path], "labels": [str]}], skipped labels).
+    Text is grouped exactly as before; a PDF page picture rides with the
+    group that holds that page, an image file or DFC crop forms its own
+    group.  The picture list is written into the group text, so a cached
+    note is only reused for the same text and the same pictures."""
+    skipped: list[str] = []
+    suffix = Path(str(document.get("path", ""))).suffix.casefold()
+    name = document.get("name", "file")
+
+    def prepared(make, label, max_bytes=MAX_VISUAL_BYTES_PER_FILE) -> str | None:
+        try:
+            output = make()
+        except Exception:
+            output = None
+        if not output or not Path(output).is_file() or Path(output).stat().st_size > max(max_bytes, PREREAD_IMAGE_BYTES_PER_CALL):
+            skipped.append(label)
+            return None
+        return str(output)
+
+    def finish(text: str, images: list[str], labels: list[str]) -> dict:
+        kept, kept_labels, used = [], [], 0
+        for path, label in zip(images, labels):
+            size = Path(path).stat().st_size
+            if len(kept) >= PREREAD_IMAGES_PER_CALL or used + size > PREREAD_IMAGE_BYTES_PER_CALL:
+                skipped.append(label)
+                continue
+            kept.append(path)
+            kept_labels.append(label)
+            used += size
+        if kept:
+            listing = "; ".join(f"图{i} = {label}" for i, label in enumerate(kept_labels, start=1))
+            text = f"[随附图片：{listing}]\n{text}"
+        return {"text": text, "images": kept, "labels": kept_labels}
+
+    if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+        source = Path(str(document.get("path", "")))
+        manifest = document.get("dfc_structure") if isinstance(document.get("dfc_structure"), dict) else {}
+        segments = [item for item in manifest.get("segments", []) if isinstance(item, dict) and item.get("path")]
+        base = "\n".join(f"--- {traceable_label(document, chunk.get('label', name), folder)} ---\n{chunk.get('text', '')}"
+                         for chunk in read_chunks)
+        if not segments:
+            image = prepared(lambda: documents._prepare_image(source, cache_dir), name)
+            return [finish(base, [image] if image else [], [name] if image else [])], skipped
+        groups = []
+        for start in range(0, len(segments), PREREAD_DFC_SEGMENTS_PER_CALL):
+            batch = segments[start:start + PREREAD_DFC_SEGMENTS_PER_CALL]
+            images, labels, texts = [], [], [base]
+            for segment in batch:
+                label = f"{name} DFC Abschnitt {segment.get('part')}"
+                image = prepared(lambda: documents._prepare_image(Path(str(segment["path"])), cache_dir,
+                                                                 max_bytes=520_000, max_edge=2600), label, 520_000)
+                if image:
+                    images.append(image)
+                    labels.append(label)
+                ocr = str(segment.get("ocr_text", "")).strip()
+                if ocr:  # the DFC OCR now reaches the pre-read, not only answers
+                    texts.append(f"[DFC Struktur OCR, Abschnitt {segment.get('part')}]\n{ocr}")
+            groups.append(finish("\n\n".join(texts), images, labels))
+        return groups, skipped
+
+    texts = summary_groups(document, read_chunks, folder=folder)
+    pages_of = [set() for _ in texts]
+    # Same grouping walk as summary_groups, recording which pages each group holds.
+    index, current = 0, ""
+    for chunk in read_chunks:
+        part = f"--- {traceable_label(document, chunk.get('label', name), folder)} ---\n{chunk.get('text', '')}\n"
+        if current and len(current) + len(part) > 24_000:
+            index, current = index + 1, part
+        else:
+            current += part
+        page = (chunk.get("visual") or {}).get("page")
+        if isinstance(page, int) and index < len(pages_of):
+            pages_of[index].add(page)
+    images_of: list[list[str]] = [[] for _ in texts]
+    labels_of: list[list[str]] = [[] for _ in texts]
+    if suffix == ".pdf":
+        read_pages = sorted(set().union(*pages_of)) if pages_of else []
+        for page in pdf_preread_pages(document, read_pages):
+            label = f"{name} — page {page}"
+            image = prepared(lambda: documents._render_pdf_page(Path(str(document["path"])), page, cache_dir), label)
+            if not image:
+                continue
+            target = next((i for i, pages in enumerate(pages_of) if page in pages), None)
+            if target is not None:
+                images_of[target].append(image)
+                labels_of[target].append(label)
+    return [finish(text, images_of[i], labels_of[i]) for i, text in enumerate(texts)], skipped
+
+
 def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, usage_records=None) -> dict:
     """Prepare auditable, document-aware evidence before a BG classification question."""
     ensure_current_sources(data)
@@ -2290,7 +2409,8 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
         # when the user prepared its original selection before this update.
         if not cached:
             old = previous_records.get((document.get("id"), document.get("sha256")))
-            if old and old.get("complete") and old.get("pages_read") == read_pages and old.get("pages_unread") == unread_pages:
+            if (old and old.get("complete") and old.get("preread_version") == MATERIAL_SUMMARY_CACHE_VERSION
+                    and old.get("pages_read") == read_pages and old.get("pages_unread") == unread_pages):
                 cached = dict(old)
                 save_material_summary_cache(document, data["model"], full, read_pages, cached)
         if cached:
@@ -2309,21 +2429,38 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                 progress("reading", ui_message(data, "reading.reused", index=file_index, total=total_documents, name=document["name"]),
                          12 + int(file_index / max(total_documents, 1) * 48))
             continue
-        groups = summary_groups(document, read_chunks, folder=material_folder(data))
+        plan, visual_skipped = preread_groups(documents, document, read_chunks, material_folder(data), state.root / "visual_cache")
+        groups = [item["text"] for item in plan]
+        images_for = {item["text"]: item["images"] for item in plan}
         notes, failures = [], []
         reused_groups = 0
         file_retry_calls = 0
+        visual_labels = [label for item in plan for label in item["labels"]]
+        visual_fallback = False
 
-        def group_call(text: str, label: str) -> str:
-            nonlocal total_calls
-            attempts: list[dict] = []
-            try:
-                return accounted_model_call(data, llm, [], f"文件：{document['name']}。{label}提取结构、部件、驱动、运动、接口、尺寸和不确定处，并保留页面/表格标签。{MATERIAL_GROUP_FORMAT}\n\n{text}",
-                                            summary_system, {"maxOutputTokens": MATERIAL_GROUP_TOKENS, "temperature": 0}, stream=True, usage_records=attempts)
-            finally:
-                total_calls += len(attempts)
-                if usage_records is not None:
-                    usage_records.extend(attempts)
+        def group_call(text: str, label: str, images: list[str] | None = None) -> str:
+            nonlocal total_calls, visual_fallback
+            images = list(images or [])
+
+            def call(attached: list[str]) -> str:
+                nonlocal total_calls
+                attempts: list[dict] = []
+                hint = PREREAD_VISUAL_INSTRUCTION.format(count=len(attached)) if attached else ""
+                try:
+                    return accounted_model_call(data, llm, attached, f"文件：{document['name']}。{label}提取结构、部件、驱动、运动、接口、尺寸和不确定处，并保留页面/表格标签。{hint}{MATERIAL_GROUP_FORMAT}\n\n{text}",
+                                                summary_system, {"maxOutputTokens": MATERIAL_GROUP_TOKENS, "temperature": 0}, stream=True, usage_records=attempts)
+                finally:
+                    total_calls += len(attempts)
+                    if usage_records is not None:
+                        usage_records.extend(attempts)
+
+            raw = call(images)
+            failure = connector_failure(raw) if images else None
+            if failure and classify_model_failure(failure)[0] not in {"output_limit", "timeout"}:
+                # A model or endpoint that refuses pictures still gets the text.
+                visual_fallback = True
+                raw = call([])
+            return raw
 
         for number, group in enumerate(groups, start=1):
             # A group that succeeded before (e.g. in a scan where another group
@@ -2348,7 +2485,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                     if progress:
                         progress("reading", ui_message(data, "reading.group", name=document["name"], index=number, total=len(groups)),
                                  12 + int((file_index - 1 + number / max(len(groups), 1)) / max(total_documents, 1) * 48))
-                    raw = group_call(group, label)
+                    raw = group_call(group, label, images_for.get(group))
                     failure = connector_failure(raw)
                     if failure and classify_model_failure(failure)[0] == "output_limit" and halves:
                         split = True
@@ -2371,7 +2508,9 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                                                        total=len(groups), part=part), None)
                     retry_calls += 1
                     file_retry_calls += 1
-                    raw = group_call(half, label + f"本次只处理该组的第 {part}/2 部分。")
+                    # Pictures ride with the first half of a split group.
+                    raw = group_call(half, label + f"本次只处理该组的第 {part}/2 部分。",
+                                     images_for.get(group) if part == 1 else None)
                     try:
                         note = require_model_success(raw, ui_message(data, 'model.context_group', name=document["name"])).strip()
                     except RequestStopped:
@@ -2418,6 +2557,8 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
                   "retry_calls": file_retry_calls,
                   "complete": bool(notes) and not failures,
                   "failures": failures, "failure_messages": [message_payload(item) for item in failures], "dfc_structure": documents.dfc_audit(document), "summary": summary,
+                  "images_read": visual_labels, "images_skipped": visual_skipped, "images_fallback": visual_fallback,
+                  "preread_version": MATERIAL_SUMMARY_CACHE_VERSION,
                   "cache_status": "created"}
         records.append(record)
         if record["complete"]:
@@ -4864,7 +5005,7 @@ function renderCoverageReportForLanguage(x){
   if(!x||!x.files){setUIMessage($('coveragestatus'),{message_key:'coverage.auto_hint'});return}
   if(x.current_selection===false){setUIMessage($('coveragestatus'),{message_key:'coverage.selection_changed'},'muted');return}
   let done=x.files.filter(f=>f.complete).length;
-  let details=x.files.map(f=>{let pages=f.pages_total?t('coverage.pages')+P(''+P('：')+'')+t('coverage.read_pages',{pages:(f.pages_read||[]).join(P(''+P('、')+''))||'—'})+((f.pages_unread||[]).length?P(''+P('；')+'')+t('coverage.unread_pages',{pages:f.pages_unread.join(P(''+P('、')+''))}):''):t('coverage.no_pages');let dfc=f.dfc_structure?' · <span class="chip">'+t('coverage.dfc',{status:esc(stateCopy(f.dfc_structure.ocr_status)),count:esc(f.dfc_structure.segments_total||0)})+'</span>':'';let cache=f.cache_status==='reused'?' · <span class="chip">'+t('coverage.reused_summary')+'</span>':f.cache_status==='created'?' · <span class="chip">'+t('coverage.new_pre_read')+'</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}${P(''+P('：')+'')}${t('coverage.text_groups',{done:f.text_groups_processed,total:f.text_groups_total})} · ${esc(scopeCopy(f))} · ${esc(pages)}${cache}${dfc}${f.failures?.length?P(''+P('（')+'')+esc((f.failure_messages||f.failures).map(uiCopy).join('; '))+P(''+P('）')+''):''}`}).join('');
+  let details=x.files.map(f=>{let pages=f.pages_total?t('coverage.pages')+P(''+P('：')+'')+t('coverage.read_pages',{pages:(f.pages_read||[]).join(P(''+P('、')+''))||'—'})+((f.pages_unread||[]).length?P(''+P('；')+'')+t('coverage.unread_pages',{pages:f.pages_unread.join(P(''+P('、')+''))}):''):t('coverage.no_pages');let dfc=f.dfc_structure?' · <span class="chip">'+t('coverage.dfc',{status:esc(stateCopy(f.dfc_structure.ocr_status)),count:esc(f.dfc_structure.segments_total||0)})+'</span>':'';let images=(f.images_read||[]).length?' · <span class="chip">'+t('coverage.images',{count:f.images_read.length})+'</span>':'';if(f.images_fallback)images+=' · <span class="chip">'+t('coverage.images_fallback')+'</span>';if((f.images_skipped||[]).length)images+=' · <span class="chip">'+t('coverage.images_skipped',{count:f.images_skipped.length})+'</span>';let cache=f.cache_status==='reused'?' · <span class="chip">'+t('coverage.reused_summary')+'</span>':f.cache_status==='created'?' · <span class="chip">'+t('coverage.new_pre_read')+'</span>':'';return `<br>${f.complete?'✓':'✕'} ${esc(f.name)}${P(''+P('：')+'')}${t('coverage.text_groups',{done:f.text_groups_processed,total:f.text_groups_total})} · ${esc(scopeCopy(f))} · ${esc(pages)}${images}${cache}${dfc}${f.failures?.length?P(''+P('（')+'')+esc((f.failure_messages||f.failures).map(uiCopy).join('; '))+P(''+P('）')+''):''}`}).join('');
   let dossier=x.bg_dossier?.ready?' · <span class="chip">'+t('coverage.dossier_ready')+'</span>':' · <span class="chip">'+t('coverage.dossier_pending')+'</span>';
   $('coveragestatus').innerHTML=(x.complete?'<span class="ok">'+t('coverage.ready')+P(''+P('：')+'').trimEnd()+'</span>':'<span class="error">'+t('coverage.incomplete')+P(''+P('：')+'').trimEnd()+'</span>')+' '+t('coverage.overview',{done,total:x.files.length,reused:x.reused_files||0,created:x.created_files||0,calls:x.model_calls||0})+(x.retry_calls?' · <span class="chip">'+t('coverage.retries',{calls:x.retry_calls,limit:x.retry_limit})+'</span>':'')+dossier+details;
 }
