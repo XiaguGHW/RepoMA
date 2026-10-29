@@ -5100,7 +5100,13 @@ function renderRuleJobPanel(){
     let technical=failure.technical?'<b>'+t('rulejob.details.technical')+'</b><pre>'+esc(failure.technical)+'</pre>':'';
     body+='<details id="rulejobdetails"'+(open?' open':'')+'><summary>'+t('rulejob.details.title')+'</summary><ol class="rulejob-log">'+log+'</ol>'+technical+'<pre id="rulejobdiagnostics">'+esc(codebookDiagnostics(task))+'</pre></details><div class="rulejob-actions"><button class="ghost" onclick="copyCodebookDiagnostics()">'+t('rulejob.action.copy_diagnostics')+'</button><span id="rulejobcopymsg" class="muted"></span></div>';
     if(codebookStatusError)body+='<div class="error">'+esc(uiCopy(codebookStatusError))+'</div>';
+    // Each refresh replaces the panel; keep where the reader is in the log and
+    // the diagnostics: at the bottom it follows new entries, elsewhere it stays.
+    let keep=['.rulejob-log','#rulejobdiagnostics'].map(selector=>{let node=host.querySelector(selector);return node?{selector,top:node.scrollTop,bottom:node.scrollHeight-node.scrollTop-node.clientHeight<8}:null}).filter(Boolean);
+    let drawer=$('contextdrawerbody'),drawerTop=drawer?drawer.scrollTop:0;
     host.innerHTML='<div class="rulejob-head"><b>'+t('rulejob.panel.title')+'</b>'+chip+'</div><dl>'+rows+'</dl>'+body;
+    for(let item of keep){let node=host.querySelector(item.selector);if(node)node.scrollTop=item.bottom?node.scrollHeight:item.top}
+    if(drawer)drawer.scrollTop=drawerTop;
   }}
   applyCodebookBusyState();refreshContextPanel();
 }
