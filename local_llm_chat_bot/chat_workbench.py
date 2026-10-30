@@ -5036,19 +5036,22 @@ function readyCardHtml(data){
     (questions?'<div class="ready-questions">'+questions+'</div>':'')+'</div>';
 }
 let emptyChatToken=0;
+// Only an empty chat (nothing but this placeholder) may be replaced; never the
+// rule workspace or a conversation that started while documents were loading.
+function chatIsEmpty(chat){return !ruleEditState&&!chat.classList.contains('codebook-workspace')&&[...chat.children].every(node=>node.dataset.emptyChat)}
 async function renderEmptyChat(){
-  let chat=$('chat'),snap=lastStatusSnapshot,token=++emptyChatToken;if(!chat)return;
+  let chat=$('chat'),snap=lastStatusSnapshot,token=++emptyChatToken;if(!chat||!chatIsEmpty(chat))return;
   let bg=snap?.bg_context;
   if(!bg||snap.context_issue){chat.innerHTML='';uiMessageNode({message_key:'session.new_hint'}).dataset.emptyChat='1';return}
   let docs=[];try{docs=await api('/api/documents')}catch{}
-  if(token!==emptyChatToken||chat.querySelector('.message,.classify-request,.classification-card'))return;
+  if(token!==emptyChatToken||!chatIsEmpty(chat))return;
   let name=String(bg.folder||'').split(/[\\/]/).filter(Boolean).pop()||'';
   let data={docs:docs.map(d=>({name:d.name,material_role:d.material_role})),rules:bg.codebook_name||'',name};
   let card=document.createElement('section');card.className='ready-card';card.dataset.emptyChat='1';card.innerHTML=readyCardHtml(data);
   registerUI(card,'ready',data);chat.innerHTML='';chat.append(card);
 }
 // Status arrives after the history on confirm/reload: refresh an empty chat only.
-function refreshEmptyChat(){let chat=$('chat');if(chat&&chat.children.length===1&&chat.firstElementChild.dataset.emptyChat)renderEmptyChat()}
+function refreshEmptyChat(){let chat=$('chat');if(chat&&chat.children.length===1&&chat.firstElementChild.dataset.emptyChat&&chatIsEmpty(chat))renderEmptyChat()}
 function askSuggested(question){if(busy||!question)return;let input=$('question');if(!input||input.disabled)return;input.value=question;chat()}
 function setScopeFocus(id){scopeFocusId=id||'';scopeOpen=false;renderScopeBar();$('question')?.focus()}
 function toggleScopeMenu(){scopeOpen=!scopeOpen;renderScopeBar()}
