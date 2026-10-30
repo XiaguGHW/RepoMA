@@ -1079,8 +1079,10 @@ class BrowserRelease(unittest.TestCase):
             self.assertLess(time.monotonic() - started, 3, language)
             self.page.wait_for_function("(f)=>document.getElementById('rulejobpanel').innerText.includes(f)", arg=fragment)
             self.assertEqual(self.page.evaluate("lastCodebookTask.state"), "running")
-        for selector in ["#ruleprepare", "#rulefilepick", "#contextcodebookpath", "#rulemodel", "#ruleview", "#rulereplace"]:
+        for selector in ["#ruleprepare", "#rulefilepick", "#contextcodebookpath", "#rulemodel"]:
             self.assertTrue(self.page.locator(selector).is_disabled(), selector)
+        for selector in ["#ruleview", "#rulereplace", "#ruledelete"]:  # only for prepared rules
+            self.assertEqual(self.page.locator(selector).count(), 0, selector)
         self.close_drawer()
         self.page.wait_for_function("/^Preparing: page [123] of 3$/.test(document.getElementById('context-rule-summary').innerText)")
         # A reload while the job runs resumes the same server-side status.
@@ -1098,7 +1100,7 @@ class BrowserRelease(unittest.TestCase):
             self.assertIn(text, panel)
         self.assertEqual(self.page.locator("#rulejobpanel dt:text-is('Pages') + dd").inner_text(), "3")
         self.assertFalse(self.page.locator("#ruleprepare").is_disabled())
-        self.page.locator("#rulejobview").click()
+        self.page.locator("#ruleview").click()
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
         self.close_drawer()
         self.lock_rules()
@@ -1133,12 +1135,10 @@ class BrowserRelease(unittest.TestCase):
         self.assertTrue(self.page.locator("#ruleprepare").is_enabled())
         self.assertNotIn("incomplete Claude response", panel.split(self.page.evaluate("t('rulejob.details.title')"))[0])
         self.page.locator("#rulejobdetails summary").click()
-        self.assertIn("incomplete Claude response (max_tokens)", self.page.locator("#rulejobdiagnostics").inner_text())
+        self.assertIn("incomplete Claude response (max_tokens)", self.page.locator("#rulejobdetails").inner_text())
         self.assertIn("retrying in smaller parts", self.page.locator(".rulejob-log").inner_text())
-        self.page.locator("button[onclick='copyCodebookDiagnostics()']").click()
-        self.page.wait_for_function("document.getElementById('rulejobcopymsg').innerText.length > 0")
-        self.assertEqual(self.page.locator("#rulejobcopymsg").inner_text(), "Copied")
-        self.assertIn("max_tokens", self.page.evaluate("navigator.clipboard.readText()"))
+        self.assertEqual(self.page.locator("#rulejobdiagnostics").count(), 0)  # log only, no diagnostics dump
+        self.assertTrue(self.page.locator("#rulereplace").is_visible())  # the kept locked rules stay manageable
         self.close_drawer()
         expected = ("Preparation failed: Page 3: output limit reached\n"
                     f"Rules in effect: {self.f.rules.name} (Locked and in use for classification)")

@@ -589,8 +589,8 @@ class CodebookPreparation(unittest.TestCase):
         prepare = source[source.index("async function prepareCodebook()"):source.index("function retryCodebookPreparation()")]
         self.assertNotIn("prompt(", prepare)
         self.assertNotIn("alert(", prepare)
-        for name in ["lockCodebook", "changeCodebook"]:
-            body = source[source.index(f"async function {name}()"):]
+        for name in ["lockCodebook", "removeCodebook"]:
+            body = source[source.index(f"async function {name}("):]
             body = body[:body.index("\n")]
             self.assertNotIn("confirm(t(", body.replace("appConfirm(t(", ""))
         # No answer-mode switch any more; the composer offers a question-scope bar.
