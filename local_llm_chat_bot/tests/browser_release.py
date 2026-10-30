@@ -159,6 +159,7 @@ class BrowserRelease(unittest.TestCase):
             return
         self.page.select_option("#rulemodelselect", "__custom__")
         self.page.locator("#rulemodel").fill(model)
+        self.page.locator("#rulemodelconfirm").click()
 
     def prepare_rules(self, path=None, model="gemini-2.5-pro"):
         self.open_drawer("rules")
@@ -1282,6 +1283,26 @@ class BrowserRelease(unittest.TestCase):
         self.assertIn(self.page.evaluate("t('classify.request_tag')"),
                       self.page.locator("#chat .classify-request").first.inner_text())
         self.assertEqual(self.page.locator("#classifybutton").inner_text().strip(), "Erneut klassifizieren")
+
+    def test_typed_rule_model_needs_confirmation_before_preparing(self):
+        self.language("en")
+        self.open_drawer("rules")
+        self.page.locator("#contextcodebookpath").fill(str(self.f.rules))
+        self.page.select_option("#rulemodelselect", "__custom__")
+        self.page.locator("#rulemodel").fill("gemini-3.5-flash")
+        # Typed but not confirmed: no "this run will use" yet, and preparing is refused.
+        self.assertEqual(self.page.locator("#rulemodelhint").inner_text(), self.page.evaluate("t('rulejob.model_confirm_needed')"))
+        calls = len(self.f.calls)
+        self.button("contextSyncRule();prepareCodebook()").click()
+        self.assertEqual(self.page.locator("#contextrulemsg").inner_text(), self.page.evaluate("t('rulejob.model_confirm_first')"))
+        self.assertIsNone(self.page.evaluate("lastCodebookTask"))
+        self.assertEqual(len(self.f.calls), calls)
+        # Enter confirms as well as the button.
+        self.page.locator("#rulemodel").press("Enter")
+        self.assertEqual(self.page.locator("#rulemodelhint").inner_text(), "This run will use: gemini-3.5-flash")
+        # Without prepared rules the status panel says so; there is no second box.
+        self.assertEqual(self.page.locator("#ruleeffective").count(), 0)
+        self.assertIn(self.page.evaluate("t('rulews.not_prepared')"), self.page.locator("#rulejobpanel").inner_text())
 
     def test_txt_rules_prepare_and_show_text_block_references(self):
         self.language("de")
