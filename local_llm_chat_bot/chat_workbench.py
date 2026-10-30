@@ -592,7 +592,19 @@ def status_data(data: dict[str, Any]) -> dict[str, Any]:
         "bg_context": state.data.get("bg_context"),
         "context_issue": context_issue(data),
         "context_revision": state.data.get("context_revision", ""),
+        "last_classification": last_classification_summary(state),
     }
+
+
+def last_classification_summary(state: ProjectState) -> dict[str, Any] | None:
+    """The latest validated classification of the current material range, if any."""
+    record = state.data.get("last_bg_analysis")
+    classification = record.get("classification") if isinstance(record, dict) else None
+    if not isinstance(classification, dict) or not classification.get("label"):
+        return None
+    return {"label": str(classification["label"]), "confidence": str(classification.get("confidence") or ""),
+            "created_at": str(record.get("created_at", "")),
+            "current": record.get("context_revision") == state.data.get("context_revision", "")}
 
 
 def session_list_item(root: Path) -> dict[str, Any]:
@@ -3303,6 +3315,10 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
                 "dfc_evidence": visual_report.get("dfc", []),
                 "bg_context": dict(bg_context),
                 "token_usage": turn_token_usage,
+                # The validated result and the context it was made in drive the
+                # "classified" state of the classify button in the composer.
+                "classification": action.get("classification"),
+                "context_revision": state.data.get("context_revision", ""),
             }
             state.save()
     if auto_prepared:
@@ -4751,6 +4767,7 @@ function rerenderUIComponents(){
     if(node.dataset.uiComponent==='classification')node.innerHTML=classificationCard(data).innerHTML;
     else if(node.dataset.uiComponent==='coverage')node.innerHTML=coverageSummaryCard(data).innerHTML;
     else if(node.dataset.uiComponent==='message')node.textContent=uiCopy(data);
+    else if(node.dataset.uiComponent==='classify_request')node.innerHTML='<span>'+CLASSIFY_ICON+esc(t('classify.request_tag'))+'</span>';
     else if(node.dataset.uiComponent==='notices')node.textContent=data.map(uiCopy).join('\n');
     else if(node.dataset.uiComponent==='processing'){
       node.querySelector('[data-process-title]').textContent=t('model.processing');
@@ -4895,7 +4912,7 @@ async function pickWorkspace(){try{let path=(await api('/api/pick/folder')).path
 function refreshAppChrome(){let path=$('workspace')?.value.trim();let short=path?path.replace(/\\/g,'/').split('/').filter(Boolean).slice(-2).join(' / '):tr('选择工作区文件夹');if($('workspaceshortcut'))$('workspaceshortcut').textContent=short;if($('topbarstatus'))$('topbarstatus').textContent=(path||lastStatusSnapshot)?t('app.workspace_open'):tr('本地运行')}
 function initVisualAdjustments(){if($('visual-adjustments'))return;let style=document.createElement('style');style.id='visual-adjustments';style.textContent='.composer-tools select{border-radius:8px!important}';document.head.append(style)}
 function initLanguageLayout(){if($('language-layout'))return;let style=document.createElement('style');style.id='language-layout';style.textContent=`.context-shortcut{display:none}@media(max-width:1180px){.context-shortcut{display:inline-grid}}html[lang="zh"] body,html[lang="zh"] button,html[lang="zh"] input,html[lang="zh"] select{font-family:"Microsoft YaHei UI","Microsoft YaHei","Noto Sans SC","Segoe UI",sans-serif;letter-spacing:0}html[lang="en"] body,html[lang="en"] button,html[lang="en"] input,html[lang="en"] select,html[lang="de"] body,html[lang="de"] button,html[lang="de"] input,html[lang="de"] select{font-family:Inter,"Segoe UI",Arial,sans-serif}html[lang="zh"] .chat-subtitle,html[lang="zh"] .muted{line-height:1.55}html[lang="de"] .context-card strong,html[lang="de"] .context-drawer-head h2{letter-spacing:0}html[lang="de"] .context-card strong{padding-right:42px}.row{flex-wrap:wrap;align-items:center}.row input{min-width:min(100%,185px)}.row button{white-space:normal;line-height:1.25;min-height:34px}.context-card{min-height:78px}.context-card strong{position:relative;line-height:1.3;padding-right:50px;overflow-wrap:anywhere}.context-card em{position:absolute;right:0;top:0;float:none;white-space:nowrap}.context-card span{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.context-drawer-head h2,.context-drawer-body label,.classification-card h3{overflow-wrap:anywhere}.context-drawer-body button,.workspace-actions button{max-width:100%;overflow-wrap:anywhere}.composer-tools{flex-wrap:wrap;row-gap:5px}.composer-tools .spacer{min-width:0}.composer-tools select{min-width:170px;max-width:min(330px,100%)}html[lang="de"] .composer-tools select{max-width:285px}@media(max-width:1180px){.shell{grid-template-columns:minmax(220px,var(--left-panel-width)) 8px minmax(360px,1fr) 260px}.right{padding:13px 10px}.context-drawer{right:260px;width:min(640px,calc(100vw - 300px))}.chat-header{padding:0 20px}.composer-wrap{padding-left:20px;padding-right:20px}}@media(max-width:760px){.topbar{gap:8px;padding:0 10px}.app-brand{font-size:13px}.topbar-workspace{max-width:145px}.shell{grid-template-columns:minmax(180px,42vw) 7px minmax(0,1fr)}.chat{padding:20px 14px}.chat-header{padding:0 14px}.composer-wrap{padding:0 14px 14px}.welcome h1{font-size:26px}.composer-tools .spacer{display:none}.composer-tools select{width:100%;max-width:none}.composer-tools #custommodelrow{width:100%;flex-wrap:wrap}.composer-tools #custommodelrow input{width:100%}.context-drawer{left:0;right:0;width:auto;max-width:100vw;border-radius:0;transform:none!important;transition:opacity .18s}.context-drawer-body{min-width:0;overflow-x:hidden}.context-drawer-body input{min-width:0;max-width:100%}#scanbackdrop.open .scan-drawer{left:0!important;right:0;width:auto;max-width:100vw;transform:none}.main{min-width:0}.composer{grid-template-columns:minmax(0,1fr) auto}.composer #cancelchat{grid-column:2}.composer input{min-width:0}.composer-tools{grid-column:1/-1}.context-card{min-height:0}}@media(max-width:900px){.shell{grid-template-columns:minmax(220px,var(--left-panel-width)) 8px minmax(0,1fr)}}@media(max-width:650px){.shell{grid-template-columns:minmax(0,1fr)}.chat-header{gap:6px}.chat-subtitle{display:none}.chat-title{font-size:13px}}`;document.head.append(style)}
-function initComposerControls(){if($('composertools'))return;let composer=$('composer');if(!composer)return;let tools=document.createElement('div');tools.id='composertools';tools.className='composer-tools';let note=document.createElement('span');note.id='composermodelnote';note.className='muted';let spacer=document.createElement('span');spacer.className='spacer';let model=$('model'),custom=$('custommodelrow'),modelmsg=$('modelmsg'),test=document.querySelector('button[onclick="testModel()"]');if(model)tools.append(note,model);if(custom)tools.append(custom);if(test){test.id='modeltestbutton';test.className='model-test';tools.append(test)}if(modelmsg)tools.append(modelmsg);tools.append(spacer);composer.append(tools);let style=document.createElement('style');style.textContent='.scope-bar{width:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:9px 12px 2px}.scope-bar[hidden]{display:none}.scope-label{font-size:12px;color:#94a3b8;margin-right:2px}.scope-chip{border-radius:999px;padding:4px 11px;font-size:12.5px;background:transparent;border:1px solid #3b4960;color:#cbd5e1;display:inline-flex;gap:6px;align-items:center;max-width:340px;cursor:pointer}.scope-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.scope-chip.on{background:#16324f;border-color:#38bdf8;color:#e0f2fe}.scope-chip b{font-weight:400;padding:0 2px;color:#7dd3fc}.scope-menu{width:100%;margin-top:4px;padding:4px;background:#111c30;border:1px solid #33435e;border-radius:10px;max-height:240px;overflow:auto}.scope-menu button{display:flex;width:100%;justify-content:space-between;gap:10px;background:transparent;color:#e5e7eb;text-align:left;padding:7px 9px;border-radius:7px}.scope-menu button:hover,.scope-menu button.on{background:#263244}.scope-tag{font-size:12px;color:#94a3b8;margin:10px 0 -4px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}.scope-tag .chip{border:1px solid #3b4960;border-radius:6px;padding:1px 7px}.scope-tag button{font-size:12px;padding:2px 8px}';document.head.append(style);let bar=document.createElement('div');bar.id='scopebar';bar.className='scope-bar';bar.hidden=true;composer.prepend(bar);localizeComposerControls()}
+function initComposerControls(){if($('composertools'))return;let composer=$('composer');if(!composer)return;let tools=document.createElement('div');tools.id='composertools';tools.className='composer-tools';let note=document.createElement('span');note.id='composermodelnote';note.className='muted';let spacer=document.createElement('span');spacer.className='spacer';let model=$('model'),custom=$('custommodelrow'),modelmsg=$('modelmsg'),test=document.querySelector('button[onclick="testModel()"]');if(model)tools.append(note,model);if(custom)tools.append(custom);if(test){test.id='modeltestbutton';test.className='model-test';tools.append(test)}if(modelmsg)tools.append(modelmsg);tools.append(spacer);composer.append(tools);let style=document.createElement('style');style.textContent='.scope-bar{width:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:9px 12px 2px}.scope-bar[hidden]{display:none}.scope-label{font-size:12px;color:#94a3b8;margin-right:2px}.scope-chip{border-radius:999px;padding:4px 11px;font-size:12.5px;background:transparent;border:1px solid #3b4960;color:#cbd5e1;display:inline-flex;gap:6px;align-items:center;max-width:340px;cursor:pointer}.scope-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.scope-chip.on{background:#16324f;border-color:#38bdf8;color:#e0f2fe}.scope-chip b{font-weight:400;padding:0 2px;color:#7dd3fc}.scope-menu{width:100%;margin-top:4px;padding:4px;background:#111c30;border:1px solid #33435e;border-radius:10px;max-height:240px;overflow:auto}.scope-menu button{display:flex;width:100%;justify-content:space-between;gap:10px;background:transparent;color:#e5e7eb;text-align:left;padding:7px 9px;border-radius:7px}.scope-menu button:hover,.scope-menu button.on{background:#263244}.scope-tag{font-size:12px;color:#94a3b8;margin:10px 0 -4px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}.scope-tag .chip{border:1px solid #3b4960;border-radius:6px;padding:1px 7px}.scope-tag button{font-size:12px;padding:2px 8px}.classify-control{margin-left:auto;display:inline-flex;align-items:center;gap:8px;min-width:0}.classify-result{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:#cbd5e1;min-width:0}.classify-result b{color:#f8fafc;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}.classify-result.stale{opacity:.55;text-decoration:line-through}.classify-arrow{color:#64748b}.classify-confidence{font-size:11.5px;padding:2px 8px;border-radius:999px;background:rgba(62,194,143,.14);color:#86efac;white-space:nowrap}.classify-button{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:8px;font-size:12.5px;font-weight:500;cursor:pointer;white-space:nowrap}.classify-button.start{background:#3b82f6;color:#fff;border:1px solid #3b82f6;box-shadow:0 2px 10px rgba(59,130,246,.35)}.classify-button.again{background:transparent;color:#cbd5e1;border:1px solid #3b4960}.classify-button.again:hover{border-color:#38bdf8;color:#fff}.classify-button.warn{background:#c98a2e;color:#fff;border:1px solid #c98a2e}.classify-button:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}.classify-request{display:flex;justify-content:center;margin:0 auto 14px}.classify-request span{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#bfdbfe;background:rgba(59,130,246,.14);border:1px solid rgba(59,130,246,.3);border-radius:999px;padding:4px 12px}';document.head.append(style);let bar=document.createElement('div');bar.id='scopebar';bar.className='scope-bar';bar.hidden=true;composer.prepend(bar);localizeComposerControls()}
 function localizeComposerControls(){setI18nText($('composermodelnote'),'model.current');setI18nText($('modeltestbutton'),'model.test');renderAnswerMode()}
 // There is no answer-mode switch: the server decides from the question whether
 // a classification is needed. The only choice is the scope of the question:
@@ -4906,16 +4923,34 @@ async function ensureScopeDocs(){let rev=(lastStatusSnapshot?.context_revision||
 function scopeFocusDoc(){return (scopeDocs||[]).find(d=>d.id===scopeFocusId)||null}
 function renderScopeBar(){
   let bar=$('scopebar');if(!bar)return;ensureScopeDocs();
-  let docs=scopeDocs||[],show=docs.length>1&&!lastStatusSnapshot?.context_issue,focus=show?scopeFocusDoc():null,q=$('question');
+  let snap=lastStatusSnapshot||{},docs=scopeDocs||[],issue=!!snap.context_issue,bg=!!snap.bg_context;
+  let choose=docs.length>1&&!issue,focus=choose?scopeFocusDoc():null,q=$('question');
   if(!focus)scopeFocusId='';
-  if(q)q.placeholder=focus?t('scope.placeholder_file',{name:focus.name}):show?t('scope.placeholder_all',{count:docs.length}):t('chat.placeholder');
-  bar.hidden=!show;if(!show){bar.innerHTML='';return}
-  let html='<span class="scope-label">'+esc(t('scope.label'))+'</span><button type="button" class="scope-chip'+(focus?'':' on')+'" aria-pressed="'+!focus+'" onclick="setScopeFocus(\'\')">📁 <span>'+esc(t('scope.all',{count:docs.length}))+'</span></button>';
+  if(q)q.placeholder=focus?t('scope.placeholder_file',{name:focus.name}):choose?t('scope.placeholder_all',{count:docs.length}):t('chat.placeholder');
+  // The bar carries the scope choice (several files) and the classify button
+  // (any confirmed assembly, also a single file).
+  let show=choose||bg;bar.hidden=!show;if(!show){bar.innerHTML='';return}
+  let html='',menu='';
+  if(choose){html+='<span class="scope-label">'+esc(t('scope.label'))+'</span><button type="button" class="scope-chip'+(focus?'':' on')+'" aria-pressed="'+!focus+'" onclick="setScopeFocus(\'\')">📁 <span>'+esc(t('scope.all',{count:docs.length}))+'</span></button>';
   if(focus)html+='<button type="button" class="scope-chip on" aria-pressed="true" title="'+escAttr(focus.name)+'" onclick="toggleScopeMenu()">📄 <span>'+esc(focus.name)+'</span><b role="button" aria-label="'+escAttr(t('scope.clear'))+'" onclick="event.stopPropagation();setScopeFocus(\'\')">×</b></button>';
-  html+='<button type="button" class="scope-chip" aria-expanded="'+scopeOpen+'" onclick="toggleScopeMenu()">🎯 <span>'+esc(t(focus?'scope.change':'scope.one_file'))+'</span> ▾</button>';
-  if(scopeOpen)html+='<div class="scope-menu" role="listbox">'+docs.map(d=>'<button type="button" role="option" class="'+(d.id===scopeFocusId?'on':'')+'" data-id="'+escAttr(d.id)+'" onclick="setScopeFocus(this.dataset.id)"><span>📄 '+esc(d.name)+'</span><span class="muted">'+esc(roleCopy(d.material_role_label))+'</span></button>').join('')+'</div>';
-  bar.innerHTML=html;
+  html+='<button type="button" class="scope-chip" aria-expanded="'+scopeOpen+'" onclick="toggleScopeMenu()">🎯 <span>'+esc(t(focus?'scope.change':'scope.one_file'))+'</span> ▾</button>';}
+  if(scopeOpen)menu='<div class="scope-menu" role="listbox">'+docs.map(d=>'<button type="button" role="option" class="'+(d.id===scopeFocusId?'on':'')+'" data-id="'+escAttr(d.id)+'" onclick="setScopeFocus(this.dataset.id)"><span>📄 '+esc(d.name)+'</span><span class="muted">'+esc(roleCopy(d.material_role_label))+'</span></button>').join('')+'</div>';
+  if(bg)html+=classifyControlHtml(snap,issue);
+  bar.innerHTML=html+menu;
 }
+// Classification runs only from this button; every typed question is an
+// explanation turn (the model still classifies when explicitly asked to).
+const CLASSIFY_ICON='<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="5.6"/><circle cx="8" cy="8" r="2.2"/></svg>';
+function classifyControlHtml(snap,issue){
+  let last=snap.last_classification,done=!!(last&&last.current&&!issue),result='';
+  if(last&&last.current)result='<span class="classify-result'+(issue?' stale':'')+'"><span class="classify-arrow">→</span><b>'+esc(last.label)+'</b>'+(last.confidence&&!issue?'<span class="classify-confidence">'+esc(t('classification.confidence'))+' '+esc(last.confidence)+'</span>':'')+'</span>';
+  let kind=issue?'warn':done?'again':'start',label=t(issue?'classify.reconfirm':done?'classify.again':'classify.start');
+  let action=issue?"openContextDrawer('materials')":'startClassification()',help=t(issue?'context.reconfirm':'classify.help');
+  return '<span class="classify-control">'+result+'<button type="button" id="classifybutton" class="classify-button '+kind+'" title="'+escAttr(help)+'" onclick="'+action+'"'+(busy&&!issue?' disabled':'')+'>'+CLASSIFY_ICON+'<span>'+esc(label)+'</span></button></span>';
+}
+function startClassification(){if(busy||!lastStatusSnapshot?.bg_context)return;scopeFocusId='';scopeOpen=false;chat({classify:true})}
+function isClassifyRequest(text){return Object.values(I18N).some(messages=>messages['classify.request']===text)}
+function classifyRequestTag(){let tag=document.createElement('div');tag.className='classify-request';tag.innerHTML='<span>'+CLASSIFY_ICON+esc(t('classify.request_tag'))+'</span>';registerUI(tag,'classify_request',null);$('chat').append(tag);$('chat').scrollTop=1e9;return tag}
 function setScopeFocus(id){scopeFocusId=id||'';scopeOpen=false;renderScopeBar();$('question')?.focus()}
 function toggleScopeMenu(){scopeOpen=!scopeOpen;renderScopeBar()}
 function scopeTag(scope,classified){
@@ -5183,7 +5218,7 @@ async function newSession(){if(!await allowRuleDraftTransition())return;try{let 
 async function renameSession(name){let value=await appPrompt(t('session.rename_prompt'),name);if(!value?.trim())return;try{let s=await api('/api/session/rename',{method:'POST',body:JSON.stringify({name:value.trim(),source:name})});renderStatus(s);await loadSessions(true)}catch(e){appNotice(e.message)}}
 async function pinSession(item){try{await api('/api/session/pin',{method:'POST',body:JSON.stringify({name:item.name,pinned:!item.pinned})});await loadSessions(true)}catch(e){appNotice(e.message)}}
 async function deleteSession(name){if(name===currentSessionName&&!await allowRuleDraftTransition())return;if(!await appConfirm(t('session.delete_confirm')))return;try{let wasCurrent=name===currentSessionName;let s=await api('/api/session/delete',{method:'POST',body:JSON.stringify({confirmed:true,name})});renderStatus(s);if(wasCurrent){await restoreSessionContext();await loadHistory()}await loadSessions(true)}catch(e){appNotice(e.message)}}
-async function loadHistory(){if(ruleEditState)return;try{let x=await api('/api/history');if(ruleEditState)return;$('chat').innerHTML='';if(!x.history.length){uiMessageNode({message_key:'session.new_hint'});return}for(let item of x.history)message(item.content,item.role==='user'?'user':'assistant')}catch{}}
+async function loadHistory(){if(ruleEditState)return;try{let x=await api('/api/history');if(ruleEditState)return;$('chat').innerHTML='';if(!x.history.length){uiMessageNode({message_key:'session.new_hint'});return}for(let item of x.history){if(item.role==='user'&&isClassifyRequest(item.content))classifyRequestTag();else message(item.content,item.role==='user'?'user':'assistant')}}catch{}}
 async function setup(){if(!await allowRuleDraftTransition())return false;try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));let s=await api('/api/setup',{method:'POST',body:JSON.stringify({workspace:'',state_dir:'',env_file:'',model:model,session:$('session').value.trim()||'default',language:uiLanguage})});if($('workspace'))$('workspace').value=s.workspace||'';renderStatus(s);await restoreSessionContext();await Promise.all([loadDocs(),loadSessions(),loadHistory(),loadCodebookStatus()]);setUIMessage($('setupmsg'),{message_key:'workspace.opened'});refreshAppChrome();$('startupnotice')?.remove();return true}catch(e){let detail=e.uiMessage||{text:e.message};setUIMessage($('setupmsg'),detail,'error');setUIMessage($('contextworkspacemsg'),detail,'error');showStartupNotice(detail);return false}}
 async function openLegacySession(){if(!$('session').value)return;await setup()}
 async function switchModel(){if(!await allowRuleDraftTransition())return;try{let model=selectedModel();if(!model)throw Error(t('model.id_required'));let s=await api('/api/model',{method:'POST',body:JSON.stringify({model})});renderStatus(s);clearResultPanels();await loadHistory();setUIMessage($('modelmsg'),[{message_key:'model.switched_prefix'},{text:model},{message_key:'model.context_unchanged'}],'ok')}catch(e){setUIMessage($('modelmsg'),e.uiMessage||{text:e.message},'error')}}
@@ -5258,7 +5293,7 @@ function renderCacheAuditForLanguage(x){
 function renderCoverageReport(x){lastCoverageReport=x;return renderCoverageReportForLanguage(x)}
 function renderScanDrawer(x){return renderScanDrawerForLanguage(x)}
 function renderCacheAudit(x){lastCacheAudit=x;return renderCacheAuditForLanguage(x)}
-function renderStatus(s){lastStatusSnapshot=s;return renderStatusForLanguage(s)}
+function renderStatus(s){lastStatusSnapshot=s;let result=renderStatusForLanguage(s);renderScopeBar();return result}
 function renderUsageDetail(u,model){if(u)lastUsageSnapshot={usage:u,model};return renderUsageDetailForLanguage(u,model)}
 let lastSourcesSnapshot=null;
 function renderEvidenceSources(sources,dfcEvidence){lastSourcesSnapshot={sources,dfc:dfcEvidence};return renderEvidenceSourcesForLanguage(sources,dfcEvidence)}
@@ -5393,12 +5428,15 @@ async function settleChat(task,wait){
     await new Promise(resolve=>setTimeout(resolve,100));
   }
 }
-async function chat(){
-  if(busy||!$('question').value.trim())return;
+async function chat(options={}){
+  let classify=!!options.classify&&!!lastStatusSnapshot?.bg_context;
+  if(busy||(!classify&&!$('question').value.trim()))return;
   if(lastStatusSnapshot?.context_issue){message(t('context.reconfirm'));return}
   if(materialDraftDirty){message(t('materials.reconfirm'));return}
   busy=true;let task={controller:new AbortController(),id:crypto.randomUUID().replaceAll('-',''),stopping:false};activeChat=task;$('cancelchat').disabled=false;
-  let q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user');
+  // The classify button sends a fixed request and keeps any draft in the input.
+  let q;if(classify){q=t('classify.request');classifyRequestTag()}else{q=$('question').value;lastQuestion=q;$('question').value='';message(q,'user')}
+  renderScopeBar();
   let wait=processingCard(),buffer='',result=null,error=null,preview=null,previewText=null,failureText='';
   function resetPreview(){preview?.remove();preview=null;previewText=null}
   function appendPreview(text){
@@ -5406,7 +5444,7 @@ async function chat(){
     previewText.appendData(text);
   }
   try{
-    let response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','X-Workbench-Language':uiLanguage,...contextHeaders()},signal:task.controller.signal,body:JSON.stringify({question:q,request_id:task.id,focus_source_id:scopeFocusDoc()?.id||''})});
+    let response=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','X-Workbench-Language':uiLanguage,...contextHeaders()},signal:task.controller.signal,body:JSON.stringify({question:q,request_id:task.id,require_classification:classify,focus_source_id:classify?'':scopeFocusDoc()?.id||''})});
     learnPageContext('/api/chat/stream','POST',response);
     if(!response.ok)await readApiResponse(response);
     let reader=response.body.getReader(),decoder=new TextDecoder();
@@ -5439,7 +5477,7 @@ async function chat(){
     resetPreview();let status=await settleChat(task,wait);
     if(task.stopping)updateProcessing(wait,{message_key:status?.state==='completed'?'stream.completed':'stream.cancelled'});
     else if(failureText)wait.querySelector('[data-process-text]').textContent=failureText;
-    activeChat=null;busy=false;$('cancelchat').disabled=true;$('chat').scrollTop=1e9;
+    activeChat=null;busy=false;$('cancelchat').disabled=true;renderScopeBar();$('chat').scrollTop=1e9;
   }
 }
 async function exportSession(){try{let x=await api('/api/export/session',{method:'POST'});setUIMessage($('sessionexport'),{message_key:'export.complete',params:{path:x.path}},'ok')}catch(e){setUIMessage($('sessionexport'),e.uiMessage||{text:e.message},'error')}}

@@ -375,7 +375,8 @@ class BrowserRelease(unittest.TestCase):
         ) as response:
             self.ask("Erläutere die Motorfunktion")
         payload = response.value.request.post_data_json
-        self.assertNotIn("require_classification", payload)
+        # A typed question is always an explanation turn; only the button classifies.
+        self.assertIs(payload["require_classification"], False)
         self.assertEqual(payload["focus_source_id"], "")
         # A follow-up explanation adds no second classification card.
         self.assertEqual(self.page.locator('.classification-card').filter(
@@ -1189,9 +1190,61 @@ class BrowserRelease(unittest.TestCase):
         self.prepare_rules()
         self.lock_rules()
         self.select_bg(self.f.bg_a)
-        # One confirmed file: nothing to choose, so the bar stays hidden.
-        self.assertFalse(self.page.locator("#scopebar").is_visible())
+        # One confirmed file: no scope to choose, but the bar carries the classify button.
+        self.assertTrue(self.page.locator("#scopebar").is_visible())
+        self.assertEqual(self.page.locator("#scopebar .scope-chip").count(), 0)
+        self.assertTrue(self.page.locator("#classifybutton").is_visible())
         self.assertEqual(dialogs, [])
+
+    def test_classify_button_is_the_only_classification_trigger(self):
+        self.language("en")
+        # Without a confirmed assembly there is no classify button.
+        self.assertEqual(self.page.locator("#classifybutton").count(), 0)
+        self.prepare_rules()
+        self.lock_rules()
+        self.select_bg(self.f.bg_a)
+        button = self.page.locator("#classifybutton")
+        self.assertEqual(button.inner_text().strip(), self.page.evaluate("t('classify.start')"))
+        self.assertIn("start", button.get_attribute("class"))
+        # A typed first question no longer classifies by itself.
+        with self.page.expect_response(lambda r: r.url.endswith("/api/chat/stream")) as response:
+            self.ask("Explain the motor evidence")
+        self.assertIs(response.value.request.post_data_json["require_classification"], False)
+        self.assertEqual(self.page.locator(".classification-card").count(), 0)
+        self.assertEqual(button.inner_text().strip(), self.page.evaluate("t('classify.start')"))
+        # The button sends a fixed request for all files and keeps a typed draft.
+        self.page.locator("#question").fill("draft stays")
+        with self.page.expect_response(lambda r: r.url.endswith("/api/chat/stream")) as response:
+            button.click()
+            self.page.wait_for_function("!busy")
+        payload = response.value.request.post_data_json
+        self.assertIs(payload["require_classification"], True)
+        self.assertEqual(payload["focus_source_id"], "")
+        self.assertEqual(payload["question"], self.page.evaluate("t('classify.request')"))
+        self.assertEqual(self.page.input_value("#question"), "draft stays")
+        self.assertEqual(self.page.locator("#chat .classify-request").count(), 1)
+        self.assertNotIn(payload["question"], self.page.locator("#chat .message.user").all_inner_texts())
+        self.assertIn("Rotationseinheit", self.page.locator(".classification-card").first.inner_text())
+        # Classified: the result stays beside the button, which becomes secondary.
+        self.page.wait_for_function("lastStatusSnapshot.last_classification?.label==='Rotationseinheit'")
+        self.assertIn("Rotationseinheit", self.page.locator("#scopebar .classify-result").inner_text())
+        self.assertEqual(button.inner_text().strip(), self.page.evaluate("t('classify.again')"))
+        self.assertIn("again", button.get_attribute("class"))
+        cards = self.page.locator(".classification-card").count()
+        self.page.locator("#question").fill("")
+        self.ask("Explain the motor evidence again")
+        self.assertEqual(self.page.locator(".classification-card").count(), cards)
+        self.assertIn("Rotationseinheit", self.page.locator("#scopebar .classify-result").inner_text())
+        # Reload and language switch keep the request as a tag, not a user message.
+        self.page.reload()
+        self.page.wait_for_function("lastStatusSnapshot?.last_classification?.label==='Rotationseinheit'")
+        self.page.locator("#chat .classify-request").first.wait_for()
+        self.assertEqual(self.page.locator("#chat .message.user").filter(
+            has_text=self.page.evaluate("t('classify.request')")).count(), 0)
+        self.language("de")
+        self.assertIn(self.page.evaluate("t('classify.request_tag')"),
+                      self.page.locator("#chat .classify-request").first.inner_text())
+        self.assertEqual(self.page.locator("#classifybutton").inner_text().strip(), "Erneut klassifizieren")
 
     def test_txt_rules_prepare_and_show_text_block_references(self):
         self.language("de")

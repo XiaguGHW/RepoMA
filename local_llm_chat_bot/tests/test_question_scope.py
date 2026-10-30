@@ -93,6 +93,28 @@ class QuestionScope(unittest.TestCase):
         _, prompts = self.ask_capturing({"question": "Explain", "require_classification": False})
         self.assertIn("- EXPLANATION MODE:", prompts[-1])
 
+    def test_frontend_explanation_flag_does_not_classify_the_first_question(self):
+        result, prompts = self.ask_capturing({"question": "Explain the motor",
+                                              "require_classification": False})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertIsNone(result.json()["classification"])
+        self.assertIn("- EXPLANATION MODE:", prompts[-1])
+        self.assertIsNone(self.client.get("/api/status").json()["last_classification"])
+
+    def test_status_reports_the_last_classification_until_the_context_changes(self):
+        self.assertIsNone(self.client.get("/api/status").json()["last_classification"])
+        first = self.post("/api/chat", {"question": "Classify", "require_classification": True})
+        label = first["classification"]["label"]
+        last = self.client.get("/api/status").json()["last_classification"]
+        self.assertEqual((last["label"], last["current"]), (label, True))
+        self.assertEqual(first["usage"]["last_classification"]["label"], label)
+        # An explanation turn keeps the result shown beside the classify button.
+        result, _ = self.ask_capturing({"question": "Explain", "require_classification": False})
+        self.assertEqual(result.json()["usage"]["last_classification"]["label"], label)
+        # Re-confirming the materials starts a new conversation without a result.
+        self.post("/api/target", {"target": str(self.f.bg_a), "selected_paths": ["facts.txt"]})
+        self.assertIsNone(self.client.get("/api/status").json()["last_classification"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

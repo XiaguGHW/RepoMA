@@ -87,11 +87,12 @@ class FixtureEnvironment:
                             'codebook_rule_pages':[] if references.get('codebook_source_kind')=='nonpaged' else [1],
                             'codebook_rule_refs':rule_labels[:1],
                             'evidence_labels':bg_labels[:1], 'bg_evidence_pages':bg_labels[:1], 'uncertainties':[]}
-                        # AUTO MODE: like a real model, classify only when the request asks for it.
+                        # AUTO and EXPLANATION MODE: like a real model, classify only when the
+                        # request explicitly asks for it; CLASSIFICATION REQUIRED always classifies.
                         request_match=re.search(r'User request: (.*)',prompt)
                         asks_class=bool(re.search(r'classif|klassifi|分类|类别|判断',request_match.group(1) if request_match else '',re.I))
-                        wants=('BG CLASSIFICATION MODE' in prompt and '- EXPLANATION MODE:' not in prompt
-                               and ('- AUTO MODE:' not in prompt or asks_class))
+                        optional=('- AUTO MODE:' in prompt or '- EXPLANATION MODE:' in prompt)
+                        wants=('BG CLASSIFICATION MODE' in prompt and (not optional or asks_class))
                         text=json.dumps({'answer':answer,'classification':classification if wants else None,
                                          'changes':[],'read_files':[]},ensure_ascii=False)
                 else:
