@@ -25,6 +25,38 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_*.py' > ../backend.log 2>&1 || echo "backend failed"
       - name: Browser tests
         run: timeout 1500 python tests/browser_release.py > ../browser.log 2>&1 || echo "browser failed"
+      - name: Debug failing browser tests
+        run: |
+          cat > ../debug_browser.py <<'EOF2'
+          import sys, json, unittest, functools
+          sys.path.insert(0, 'tests'); sys.path.insert(0, '.')
+          import browser_release as br
+          NAMES = sys.argv[1:]
+          def esc(t): return t.replace('%','%25').replace('\r','').replace('\n','%0A')
+          def wrap(name):
+              original = getattr(br.BrowserRelease, name)
+              @functools.wraps(original)
+              def run(self):
+                  try:
+                      original(self)
+                  except Exception as exc:
+                      try:
+                          state = self.page.evaluate("""() => ({busy, chatClass: document.getElementById('chat').className,
+                            chat: document.getElementById('chat').innerHTML.slice(-2500),
+                            processTexts: [...document.querySelectorAll('[data-process-text]')].map(e=>e.textContent),
+                            cancelDisabled: document.getElementById('cancelchat')?.disabled,
+                            profile: lastCodebookProfile?.status, ruleEdit: !!ruleEditState, drawer: activeContextDrawer,
+                            errors: window.__errs||[]})""")
+                      except Exception as inner:
+                          state = {'evaluate_failed': str(inner)}
+                      print('::error title=DEBUG ' + name + '::' + esc(str(exc)[:600] + '\n' + json.dumps(state, ensure_ascii=False)[:5000] + '\nPAGE ERRORS: ' + json.dumps(self.errors)[:800]))
+                      raise
+              setattr(br.BrowserRelease, name, run)
+          for n in NAMES: wrap(n)
+          suite = unittest.TestSuite(br.BrowserRelease(n) for n in NAMES)
+          unittest.TextTestRunner(verbosity=2).run(suite)
+          EOF2
+          timeout 600 python ../debug_browser.py test_answer_preview_stop_keeps_busy_until_worker_exits_then_retry test_rule_preparation_shows_live_progress_without_native_dialogs_and_restores || true
       - name: Report
         run: |
           python - <<'EOF'
