@@ -1,0 +1,51 @@
+name: Temporary branch tests (feat/classify-button)
+
+# Temporary: runs backend + browser tests and reports failures as annotations.
+# Remove before merging.
+on:
+  push:
+    branches: [feat/classify-button]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: local_llm_chat_bot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+      - name: Backend tests
+        run: python -m unittest discover -s tests -p 'test_*.py' > ../backend.log 2>&1 || echo "backend failed"
+      - name: Browser tests
+        run: timeout 1500 python tests/browser_release.py > ../browser.log 2>&1 || echo "browser failed"
+      - name: Report
+        run: |
+          python - <<'EOF'
+          import re
+          from pathlib import Path
+          def esc(text):
+              return text.replace('%', '%25').replace('\r', '').replace('\n', '%0A')
+          failed = False
+          for name in ('backend', 'browser'):
+              log = Path('..', name + '.log').read_text(encoding='utf-8', errors='replace')
+              tail = [l for l in log.splitlines() if re.match(r'^(Ran \d+|OK|FAILED)', l)]
+              print(f'::notice title={name} summary::' + esc(' | '.join(tail) or log[-1500:]))
+              blocks = re.split(r'\n={20,}\n', log)
+              found = [b for b in blocks if re.match(r'(FAIL|ERROR): ', b)]
+              if found or 'FAILED' in log or not tail:
+                  failed = True
+              for block in found[:20]:
+                  head = block.splitlines()[0]
+                  body = block.split('\n----', 1)[0] if False else block
+                  print(f'::error title={name}: {esc(head[:150])}::' + esc(body[-3500:]))
+              if not tail:
+                  print(f'::error title={name} log tail::' + esc(log[-3500:]))
+          raise SystemExit(1 if failed else 0)
+          EOF
