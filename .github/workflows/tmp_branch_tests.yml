@@ -1,0 +1,84 @@
+name: Temporary branch tests (feat/classify-button)
+
+# Temporary: runs backend + browser tests and reports failures as annotations.
+# Remove before merging.
+on:
+  push:
+    branches: [feat/classify-button]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: local_llm_chat_bot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+      - name: Backend tests
+        run: python -m unittest discover -s tests -p 'test_*.py' > ../backend.log 2>&1 || echo "backend failed"
+      - name: Browser tests
+        run: timeout 1500 python tests/browser_release.py > ../browser.log 2>&1 || echo "browser failed"
+      - name: Debug failing browser tests
+        run: |
+          cat > ../debug_browser.py <<'EOF2'
+          import sys, json, unittest, functools
+          sys.path.insert(0, 'tests'); sys.path.insert(0, '.')
+          import browser_release as br
+          NAMES = sys.argv[1:]
+          def esc(t): return t.replace('%','%25').replace('\r','').replace('\n','%0A')
+          def wrap(name):
+              original = getattr(br.BrowserRelease, name)
+              @functools.wraps(original)
+              def run(self):
+                  try:
+                      original(self)
+                  except Exception as exc:
+                      try:
+                          state = self.page.evaluate("""() => ({busy, chatClass: document.getElementById('chat').className,
+                            chat: document.getElementById('chat').innerHTML.slice(-2500),
+                            processTexts: [...document.querySelectorAll('[data-process-text]')].map(e=>e.textContent),
+                            cancelDisabled: document.getElementById('cancelchat')?.disabled,
+                            profile: lastCodebookProfile?.status, ruleEdit: !!ruleEditState, drawer: activeContextDrawer, codebookstatus: document.getElementById('codebookstatus')?.textContent, rulemsg: document.getElementById('contextrulemsg')?.textContent, setupmsg: document.getElementById('setupmsg')?.textContent, task: lastCodebookTask?.state,
+                            errors: window.__errs||[]})""")
+                      except Exception as inner:
+                          state = {'evaluate_failed': str(inner)}
+                      state.pop('chat', None)
+                      print('::error title=DEBUG ' + name + '::' + esc(str(exc)[:600] + '\n' + json.dumps(state, ensure_ascii=False)[:5000] + '\nPAGE ERRORS: ' + json.dumps(self.errors)[:800]))
+                      raise
+              setattr(br.BrowserRelease, name, run)
+          for n in NAMES: wrap(n)
+          suite = unittest.TestSuite(br.BrowserRelease(n) for n in NAMES)
+          unittest.TextTestRunner(verbosity=2).run(suite)
+          EOF2
+          timeout 600 python ../debug_browser.py test_typed_rule_model_needs_confirmation_before_preparing test_rule_model_validation_and_scope_bar_are_in_page_controls || true
+      - name: Report
+        run: |
+          python - <<'EOF'
+          import re
+          from pathlib import Path
+          def esc(text):
+              return text.replace('%', '%25').replace('\r', '').replace('\n', '%0A')
+          failed = False
+          for name in ('backend', 'browser'):
+              log = Path('..', name + '.log').read_text(encoding='utf-8', errors='replace')
+              tail = [l for l in log.splitlines() if re.match(r'^(Ran \d+|OK|FAILED)', l)]
+              print(f'::notice title={name} summary::' + esc(' | '.join(tail) or log[-1500:]))
+              blocks = re.split(r'\n={20,}\n', log)
+              found = [b for b in blocks if re.match(r'(FAIL|ERROR): ', b)]
+              if found or 'FAILED' in log or not tail:
+                  failed = True
+              for block in found[:20]:
+                  head = block.splitlines()[0]
+                  body = block.split('\n----', 1)[0] if False else block
+                  print(f'::error title={name}: {esc(head[:150])}::' + esc(body[-3500:]))
+              if not tail:
+                  print(f'::error title={name} log tail::' + esc(log[-3500:]))
+          raise SystemExit(1 if failed else 0)
+          EOF
