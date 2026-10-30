@@ -1058,9 +1058,13 @@ class BrowserRelease(unittest.TestCase):
         self.button("contextSyncRule();prepareCodebook()").click()
         self.page.wait_for_function("document.getElementById('rulejobpanel')?.innerText.includes('Parsing page')")
         panel = self.page.locator("#rulejobpanel").inner_text()
-        for text in ["Preparing", "gemini-2.5-pro", "Codebook 3 pages.pdf", "PDF", " of 3"]:
+        for text in ["Preparing", "gemini-2.5-pro", "Codebook 3 pages.pdf", " of 3", "Parse rules", "Elapsed"]:
             self.assertIn(text, panel)
         self.assertNotIn("%", panel)  # no invented percentage
+        # While running only what the user follows: no start time, file type or call count rows.
+        self.assertEqual(self.page.locator("#rulejobpanel dl").count(), 0)
+        self.assertIn("Parse rules", self.page.locator("#rulejobpanel .rulejob-steps li.current").inner_text())
+        self.assertEqual(self.page.locator("#rulejobpanel .rulejob-steps li.done").count(), 1)
         # Switching the GUI language during the job is immediate (the language
         # save must not wait for the job's lock) and redraws the live panel.
         for language, fragment in [("de", "Seite"), ("zh", "页"), ("en", "Parsing page")]:
