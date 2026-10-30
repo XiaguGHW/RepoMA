@@ -1,4 +1,4 @@
-name: Package Baugruppen Classifier
+name: Package Bosch Assembly Assistant
 
 on:
   workflow_dispatch:
@@ -21,20 +21,20 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_*.py'
       - name: Build ZIP
         run: |
-          rm -rf Baugruppen_Classifier Baugruppen_Classifier.zip local_llm_chat_bot.zip
-          mkdir Baugruppen_Classifier
+          rm -rf Bosch_Assembly_Assistant Bosch_Assembly_Assistant.zip local_llm_chat_bot.zip
+          mkdir Bosch_Assembly_Assistant
           while IFS= read -r path; do
             case "$path" in ''|'#'*) continue ;; esac
             test -f "local_llm_chat_bot/$path"
-            cp "local_llm_chat_bot/$path" "Baugruppen_Classifier/$path"
+            cp "local_llm_chat_bot/$path" "Bosch_Assembly_Assistant/$path"
           done < local_llm_chat_bot/PACKAGE_MANIFEST.txt
-          zip -qr Baugruppen_Classifier.zip Baugruppen_Classifier
-          rm -rf Baugruppen_Classifier
+          zip -qr Bosch_Assembly_Assistant.zip Bosch_Assembly_Assistant
+          rm -rf Bosch_Assembly_Assistant
       - name: Commit updated ZIP
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm -q --cached --ignore-unmatch local_llm_chat_bot.zip
-          git add -f Baugruppen_Classifier.zip
-          git diff --cached --quiet || git commit -m "Update downloadable Baugruppen Classifier package"
+          git add -f Bosch_Assembly_Assistant.zip
+          git diff --cached --quiet || git commit -m "Update downloadable Bosch Assembly Assistant package"
           git push

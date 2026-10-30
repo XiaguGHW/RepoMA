@@ -1,9 +1,9 @@
-# Files shipped in Baugruppen_Classifier.zip (inside a Baugruppen_Classifier/
+# Files shipped in Bosch_Assembly_Assistant.zip (inside a Bosch_Assembly_Assistant/
 # folder): only what the program needs to run. Terminal/Excel tools, tests,
 # design and translation inventories stay in the repository. One relative
 # path per line, sorted. Do not add tests, runtime state, caches, or .env files.
-Baugruppen_Classifier.bat
-README_Baugruppen_Classifier.md
+Bosch_Assembly_Assistant.bat
+README_Bosch_Assembly_Assistant.md
 chat_workbench.py
 code_chat_agent.py
 llm_connector_with_prompt_caching.py

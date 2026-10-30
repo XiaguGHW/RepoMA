@@ -908,7 +908,7 @@ class BrowserRelease(unittest.TestCase):
         control.dispatch_event("pointerover")
         self.assertFalse(self.page.evaluate("window.__attributeProbe===1"))
 
-    @unittest.skip("Code change plans need a code workspace; the Baugruppen Classifier has none "
+    @unittest.skip("Code change plans need a code workspace; the Bosch Assembly Assistant has none "
                    "(its automatic session folder is private state, so writes there are refused).")
     def test_two_pages_confirm_only_their_displayed_plan(self):
         other = self.browser.new_page(viewport={"width": 1440, "height": 1000})

@@ -1,4 +1,4 @@
-# Baugruppen Classifier
+# Bosch Assembly Assistant
 
 Local web app for classifying a Baugruppe with a locked Codebook and Bosch Farm
 models. It runs only on this computer (`http://127.0.0.1:8765`); source files
@@ -27,7 +27,7 @@ never leave it except the excerpts sent to the selected Farm model.
 
 ## 2. Start
 
-Double-click `Baugruppen_Classifier.bat`. It finds a Python with the packages
+Double-click `Bosch_Assembly_Assistant.bat`. It finds a Python with the packages
 (`.venv`, `python` on PATH, any conda environment — no `conda activate`
 needed), starts the program and opens the browser. There is nothing to
 choose: rules, materials, chats, model and language of the last session are
@@ -37,7 +37,7 @@ Double-clicking again while it runs only opens the page.
 If no suitable Python is found, the window offers to create a private `.venv`
 here and install `requirements.txt` once.
 
-Desktop icon: right-click `Baugruppen_Classifier.bat` → *Send to* → *Desktop
+Desktop icon: right-click `Bosch_Assembly_Assistant.bat` → *Send to* → *Desktop
 (create shortcut)*. Options for the shortcut target or the command line:
 
 | Option | Meaning |
@@ -56,7 +56,9 @@ Settings, locked rules, material caches and chats are stored in the
 status card (*Material cache & audit → View*) shows the folder in use.
 
 When updating, unpack the new version over the existing folder (or copy
-`AI_Bot_State` and `.env` into the new folder) to keep everything. To store
+`AI_Bot_State` and `.env` into the new folder) to keep everything.
+Coming from the earlier *Baugruppen_Classifier* folder: copy its `AI_Bot_State`
+folder and `.env` into the new `Bosch_Assembly_Assistant` folder. To store
 the data elsewhere, set the environment variable `WORKBENCH_STATE_DIR`.
 
 ## 4. How materials are read
@@ -93,7 +95,7 @@ status card says so. To return to the bundled prices, delete the saved page.
 
 | File | Purpose |
 |---|---|
-| `Baugruppen_Classifier.bat` | One-click start (Windows) |
+| `Bosch_Assembly_Assistant.bat` | One-click start (Windows) |
 | `chat_workbench.py` | Web app and server |
 | `workbench_startup.py` | Start options and checks |
 | `code_chat_agent.py` | Prompts, session state, pricing |

@@ -90,7 +90,7 @@ class Launcher(unittest.TestCase):
     """The Windows launcher cannot run here; check what it must contain."""
 
     def setUp(self):
-        self.raw = (Path(w.__file__).parent / "Baugruppen_Classifier.bat").read_bytes()
+        self.raw = (Path(w.__file__).parent / "Bosch_Assembly_Assistant.bat").read_bytes()
         self.text = self.raw.decode("ascii")
 
     def test_plain_ascii_with_windows_line_endings(self):

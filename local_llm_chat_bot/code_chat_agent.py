@@ -766,7 +766,7 @@ BG CLASSIFICATION MODE (active):
 
 """
     # Code context only when a code workspace is actually indexed; the
-    # Baugruppen Classifier uses an empty session folder, so nothing is sent.
+    # Bosch Assembly Assistant uses an empty session folder, so nothing is sent.
     has_code = bool(state.data["files"] or snippets or full_files)
     workspace_line = f"Workspace: {state.workspace}\n" if has_code else ""
     code_block = (f"Indexed files and symbols (local metadata only):\n{indexed}\n\n"

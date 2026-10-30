@@ -1,15 +1,15 @@
 @echo off
-rem One-click start for the Baugruppen Classifier.
+rem One-click start for the Bosch Assembly Assistant.
 rem Finds a Python that has the required packages - also inside conda
 rem environments, without "conda activate" - remembers it, starts the
 rem program and opens the browser. Rules, materials and chats are kept.
 rem
 rem Optional overrides:
 rem   set WORKBENCH_PYTHON=C:\path\to\python.exe   (use exactly this Python)
-rem   Baugruppen_Classifier.bat --port 8877
+rem   Bosch_Assembly_Assistant.bat --port 8877
 setlocal
 cd /d "%~dp0"
-title Baugruppen Classifier
+title Bosch Assembly Assistant
 set "CHECK=import fastapi, uvicorn, fitz"
 set "STATE=%~dp0AI_Bot_State"
 if defined WORKBENCH_STATE_DIR set "STATE=%WORKBENCH_STATE_DIR%"
@@ -71,7 +71,7 @@ exit /b 0
 
 :failed
 echo.
-echo The Baugruppen Classifier could not start. See the message above.
+echo The Bosch Assembly Assistant could not start. See the message above.
 pause
 exit /b 1
 
