@@ -1196,6 +1196,39 @@ class BrowserRelease(unittest.TestCase):
         self.assertTrue(self.page.locator("#classifybutton").is_visible())
         self.assertEqual(dialogs, [])
 
+    def test_ready_card_guides_to_the_classify_button_and_suggests_questions(self):
+        self.language("en")
+        self.prepare_rules()
+        self.lock_rules()
+        self.select_bg(self.f.bg_a)
+        card = self.page.locator("#chat .ready-card")
+        card.wait_for()
+        self.assertIn("facts.txt", card.locator("h3").inner_text())
+        # The card only points to the one classify button above the input.
+        self.assertEqual(self.page.locator("#classifybutton").count(), 1)
+        self.assertEqual(card.locator(".ready-classify").inner_text().strip(),
+                         self.page.evaluate("t('classify.start')"))
+        questions = card.locator(".ready-question")
+        self.assertGreaterEqual(questions.count(), 1)
+        self.language("de")
+        self.assertIn("ist bereit", card.locator("h3").inner_text())
+        self.language("en")
+        # A suggested question is an ordinary explanation turn.
+        question = questions.first.inner_text().strip()
+        with self.page.expect_response(lambda r: r.url.endswith("/api/chat/stream")) as response:
+            questions.first.click()
+            self.page.wait_for_function("!busy")
+        payload = response.value.request.post_data_json
+        self.assertEqual(payload["question"], question)
+        self.assertIs(payload["require_classification"], False)
+        self.assertEqual(self.page.locator(".classification-card").count(), 0)
+        # The inline chip starts the same classification as the button.
+        with self.page.expect_response(lambda r: r.url.endswith("/api/chat/stream")) as response:
+            card.locator(".ready-classify").click()
+            self.page.wait_for_function("!busy")
+        self.assertIs(response.value.request.post_data_json["require_classification"], True)
+        self.page.locator(".classification-card").first.wait_for()
+
     def test_classify_button_is_the_only_classification_trigger(self):
         self.language("en")
         # Without a confirmed assembly there is no classify button.
