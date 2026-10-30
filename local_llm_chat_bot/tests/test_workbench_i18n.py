@@ -23,7 +23,7 @@ class CatalogTests(unittest.TestCase):
         handler = source.split('function contextSyncTarget(){', 1)[1].split('\nfunction ', 1)[0]
         handler = 'function contextSyncTarget(){' + handler
         # Confirming in the materials drawer syncs the drawer's path before analysing.
-        self.assertIn("async function analyzeTarget(){if(!allowRuleDraftTransition())return;if($('contexttargetpath'))contextSyncTarget();", source)
+        self.assertIn("async function analyzeTarget(){if(!await allowRuleDraftTransition())return;if($('contexttargetpath'))contextSyncTarget();", source)
         assertions = r'''
 const assert=require('node:assert/strict');
 const fields={contexttargetpath:{value:' C:\\BG A '},targetpath:{value:'C:\\BG A'}};

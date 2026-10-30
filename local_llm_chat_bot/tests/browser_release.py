@@ -24,6 +24,26 @@ OUTPUT = Path(
 CHECKS = []
 
 
+# The page asks with in-page dialogs (#appconfirm), never native ones. Like the
+# native handler, tests answer them automatically: window.__appDialogAuto is
+# 'accept' (default), 'dismiss', or '' to answer by hand.
+AUTO_APP_DIALOGS = """
+window.__appDialogAuto = 'accept';
+new MutationObserver(() => {
+  const box = document.getElementById('appconfirm');
+  if (!box || !window.__appDialogAuto || box.dataset.answered) return;
+  box.dataset.answered = '1';
+  const button = box.querySelector(window.__appDialogAuto === 'accept' ? '#appconfirmok' : '#appconfirmcancel')
+    || box.querySelector('#appconfirmok');
+  setTimeout(() => button && button.click(), 0);
+}).observe(document, {childList: true, subtree: true});
+"""
+
+
+def auto_app_dialogs(page):
+    page.add_init_script(AUTO_APP_DIALOGS)
+
+
 class BrowserRelease(unittest.TestCase):
     def setUp(self):
         self.stage = self._testMethodName
@@ -67,6 +87,7 @@ class BrowserRelease(unittest.TestCase):
                 else dialog.accept()
             )
         self.page.on('dialog', self.handle_dialog)
+        auto_app_dialogs(self.page)
         self.page.goto(f"http://127.0.0.1:{port}")
         self.page.wait_for_function('typeof materialDraftDirty !== "undefined"')
         self.open_workspace()
@@ -151,8 +172,8 @@ class BrowserRelease(unittest.TestCase):
     def lock_rules(self):
         label = self.page.evaluate("t('rulews.lock_action')")
         self.page.get_by_role("button", name=label, exact=True).click()
-        # Locking asks for confirmation in the page itself, not a browser dialog.
-        self.page.locator("#appconfirmok").click()
+        # Locking asks for confirmation in the page itself, not a browser dialog;
+        # the test watcher answers it (see AUTO_APP_DIALOGS).
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
 
     def select_bg(self, folder):
@@ -689,28 +710,28 @@ class BrowserRelease(unittest.TestCase):
         # A rejected discard leaves the same editing context intact.
         self.page.remove_listener('dialog', self.handle_dialog)
         session = self.page.evaluate('lastStatusSnapshot.session_name')
-        self.page.once('dialog', lambda dialog: dialog.dismiss())
+        self.page.evaluate("window.__appDialogAuto='dismiss'")
         self.page.locator('#newsessionbutton').click()
         self.assertEqual(self.page.evaluate('lastStatusSnapshot.session_name'), session)
         self.assertEqual(self.page.input_value('#ruleeditor'), raw)
         self.open_drawer('workspace')
         self.page.locator('#contextworkspacepath').fill(str(self.f.root))
-        self.page.once('dialog', lambda dialog: dialog.dismiss())
+        self.page.evaluate("window.__appDialogAuto='dismiss'")
         self.button('contextOpenWorkspace()').click()
         self.assertEqual(self.page.evaluate('lastStatusSnapshot.workspace'), str(self.auto_workspace))
         self.assertEqual(self.page.input_value('#ruleeditor'), raw)
         self.close_drawer()
         self.open_drawer('rules')
-        self.page.once('dialog', lambda dialog: dialog.dismiss())
+        self.page.evaluate("window.__appDialogAuto='dismiss'")
         self.button('contextSyncRule();prepareCodebook()').click()
         self.close_drawer()
         self.assertEqual(self.page.input_value('#ruleeditor'), raw)
-        self.page.once('dialog', lambda dialog: dialog.dismiss())
+        self.page.evaluate("window.__appDialogAuto='dismiss'")
         self.button('cancelRuleDraft()').click()
         self.assertEqual(self.page.input_value('#ruleeditor'), raw)
-        self.page.once('dialog', lambda dialog: dialog.accept())
+        self.page.evaluate("window.__appDialogAuto='accept'")
         self.button('cancelRuleDraft()').click()
-        self.assertEqual(self.page.locator('#ruleeditor').count(), 0)
+        self.page.wait_for_function("!document.getElementById('ruleeditor')")
         self.assertEqual(self.f.rules.read_bytes(), original)
 
     def test_draft_save_confirmation_and_stale_context_preserve_raw_input(self):
@@ -722,10 +743,10 @@ class BrowserRelease(unittest.TestCase):
         raw = json.dumps(draft, ensure_ascii=False, indent=3)
         self.page.locator('#ruleeditor').fill(raw)
         self.page.remove_listener('dialog', self.handle_dialog)
-        self.page.once('dialog', lambda dialog: dialog.dismiss())
+        self.page.evaluate("window.__appDialogAuto='dismiss'")
         self.button('saveCodebookDraft()').click()
         self.assertEqual(self.page.input_value('#ruleeditor'), raw)
-        self.page.once('dialog', lambda dialog: dialog.accept())
+        self.page.evaluate("window.__appDialogAuto='accept'")
         self.button('saveCodebookDraft()').click()
         self.page.wait_for_function('ruleEditState===null')
         self.assertEqual(self.page.evaluate('lastCodebookWorkspaceProfile.draft.classes[0].definition'), draft['classes'][0]['definition'])
@@ -739,7 +760,7 @@ class BrowserRelease(unittest.TestCase):
             'profile_version': self.page.evaluate('lastCodebookWorkspaceProfile.version'),
         })
         self.assertEqual(response.status, 200)
-        self.page.once('dialog', lambda dialog: dialog.accept())
+        self.page.evaluate("window.__appDialogAuto='accept'")
         self.button('saveCodebookDraft()').click()
         self.page.wait_for_function('ruleEditState?.error?.message_key === "rules.version_changed"')
         self.language('de')
@@ -903,6 +924,7 @@ class BrowserRelease(unittest.TestCase):
         other = self.browser.new_page(viewport={"width": 1440, "height": 1000})
         self.addCleanup(other.close)
         other.on("dialog", lambda dialog: dialog.accept())
+        auto_app_dialogs(other)
         other.on("pageerror", lambda error: self.errors.append(str(error)))
         other.goto(self.page.url)
         other.wait_for_function(
@@ -963,6 +985,7 @@ class BrowserRelease(unittest.TestCase):
         other = self.browser.new_page(viewport={"width": 1440, "height": 1000})
         self.addCleanup(other.close)
         other.on("dialog", self.handle_dialog)
+        auto_app_dialogs(other)
         other.on("pageerror", lambda error: self.errors.append(str(error)))
         other.goto(self.page.url)
         other.wait_for_function(
