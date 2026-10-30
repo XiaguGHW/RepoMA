@@ -118,7 +118,7 @@ class BrowserRelease(unittest.TestCase):
             pass
 
     def close_drawer(self):
-        self.button("closeContextDrawer()", ".context-drawer-head").click()
+        self.button("dismissContextDrawer()", ".context-drawer-head").click()
 
     def open_drawer(self, kind):
         if kind == "workspace":
@@ -166,15 +166,17 @@ class BrowserRelease(unittest.TestCase):
         # The rule-parsing model is an in-page list with "other" for a typed ID.
         self.rule_model(model)
         self.button("contextSyncRule();prepareCodebook()").click()
+        # The review opens beside the rules drawer, which stays open.
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
-        self.close_drawer()
 
     def lock_rules(self):
         label = self.page.evaluate("t('rulews.lock_action')")
         self.page.get_by_role("button", name=label, exact=True).click()
         # Locking asks for confirmation in the page itself, not a browser dialog;
         # the test watcher answers it (see AUTO_APP_DIALOGS).
-        self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
+        # The review closes after locking; the rules drawer stays.
+        self.page.wait_for_function('lastCodebookProfile?.status === "locked" && !document.getElementById("chat").classList.contains("codebook-workspace")')
+        self.close_drawer()
 
     def select_bg(self, folder):
         self.open_drawer("materials")
@@ -225,7 +227,6 @@ class BrowserRelease(unittest.TestCase):
         self.stage = "prepare lock select classify follow-up"
         self.prepare_rules()
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         self.select_bg(self.f.bg_a)
         self.ask("Classify this Baugruppe")
         # Coverage and classification share a CSS class; identify them by their own heading.
@@ -252,7 +253,6 @@ class BrowserRelease(unittest.TestCase):
         self.open_drawer("rules")
         self.button("viewCodebook()", "#contextdrawerbody").click()
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
-        self.close_drawer()
         self.button("editCodebookDraft()").click()
         draft = json.loads(self.page.input_value("#ruleeditor"))
         draft["classes"][0]["name"] = "Fixture Class B"
@@ -260,7 +260,6 @@ class BrowserRelease(unittest.TestCase):
         self.button("saveCodebookDraft()").click()
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         self.select_bg(self.f.bg_b)
         self.ask("Classify this Baugruppe again")
         self.assertIn("Fixture Class B", card.inner_text())
@@ -285,7 +284,6 @@ class BrowserRelease(unittest.TestCase):
         self.page.wait_for_function('lastStatusSnapshot.model === "gemini-2.5-pro"')
         self.prepare_rules()
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         self.select_bg(self.f.bg_a)
         self.ask("Classify this Baugruppe")
         self.open_drawer("rules")
@@ -304,7 +302,6 @@ class BrowserRelease(unittest.TestCase):
         self.assertTrue(self.page.locator("#rulereplace").is_enabled())
         self.button("viewCodebook()", "#contextdrawerbody").click()
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
-        self.close_drawer()
         self.button("editCodebookDraft()").click()
         draft = json.loads(self.page.input_value("#ruleeditor"))
         draft["classes"][0]["name"] = "New same-BG fixture class"
@@ -312,7 +309,6 @@ class BrowserRelease(unittest.TestCase):
         self.button("saveCodebookDraft()").click()
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         self.page.wait_for_function("document.getElementById('question').disabled")
         self.assertIn("Confirm", self.page.locator("#contextguard").inner_text())
         count = len(self.f.calls)
@@ -362,7 +358,6 @@ class BrowserRelease(unittest.TestCase):
         self.page.wait_for_function('lastStatusSnapshot.model === "gemini-2.5-pro"')
         self.prepare_rules()
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         self.select_bg(self.f.bg_a)
         # There is no answer-mode switch; the server decides per question.
         self.assertEqual(self.page.locator("#answermodegroup").count(), 0)
@@ -492,9 +487,8 @@ class BrowserRelease(unittest.TestCase):
             key: value for key, value in response.items() if key != 'usageMetadata'
         }
         self.prepare_rules()
-        self.lock_rules()
         self.assertIn('Unknown', self.page.locator('.codebook-workspace').inner_text())
-        self.button('leaveCodebookWorkspace()').click()
+        self.lock_rules()
         self.select_bg(self.f.bg_a)
         self.page.locator('#question').fill('classify')
         self.button('openCompareDrawer()').click()
@@ -511,7 +505,6 @@ class BrowserRelease(unittest.TestCase):
         self.language("en")
         self.prepare_rules()
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         for width in [1440, 800, 390]:
             with self.subTest(width=width):
                 self.stage = f"materials drawer geometry and clicks at {width}px"
@@ -615,7 +608,6 @@ class BrowserRelease(unittest.TestCase):
                 if index == 0:
                     self.prepare_rules()
                     self.lock_rules()
-                    self.button("leaveCodebookWorkspace()").click()
                     self.select_bg(self.f.bg_a)
                 self.ask("Classify this Baugruppe")
                 self.assertEqual(self.visible_han_text(), [], "after classification")
@@ -707,24 +699,15 @@ class BrowserRelease(unittest.TestCase):
             self.assertEqual(self.page.eval_on_selector('#ruleeditor', '(n)=>[n.selectionStart,n.selectionEnd,n.selectionDirection,n.scrollTop]'), state)
             self.assertIn(self.page.evaluate("t('rules.invalid_json',{detail:''})").strip(), self.page.locator('#ruleediterror').inner_text())
             self.assertEqual(self.page.locator('#ruledirty').inner_text(), self.page.evaluate("t('rules.unsaved')"))
-        # A rejected discard leaves the same editing context intact.
+        # A rejected discard leaves the same editing context intact: closing the
+        # rules drawer (which would close the editor too) and preparing again.
         self.page.remove_listener('dialog', self.handle_dialog)
-        session = self.page.evaluate('lastStatusSnapshot.session_name')
         self.page.evaluate("window.__appDialogAuto='dismiss'")
-        self.page.locator('#newsessionbutton').click()
-        self.assertEqual(self.page.evaluate('lastStatusSnapshot.session_name'), session)
-        self.assertEqual(self.page.input_value('#ruleeditor'), raw)
-        self.open_drawer('workspace')
-        self.page.locator('#contextworkspacepath').fill(str(self.f.root))
-        self.page.evaluate("window.__appDialogAuto='dismiss'")
-        self.button('contextOpenWorkspace()').click()
-        self.assertEqual(self.page.evaluate('lastStatusSnapshot.workspace'), str(self.auto_workspace))
-        self.assertEqual(self.page.input_value('#ruleeditor'), raw)
         self.close_drawer()
-        self.open_drawer('rules')
+        self.assertTrue(self.page.evaluate("$('contextbackdrop').classList.contains('open') && activeContextDrawer==='rules'"))
+        self.assertEqual(self.page.input_value('#ruleeditor'), raw)
         self.page.evaluate("window.__appDialogAuto='dismiss'")
         self.button('contextSyncRule();prepareCodebook()').click()
-        self.close_drawer()
         self.assertEqual(self.page.input_value('#ruleeditor'), raw)
         self.page.evaluate("window.__appDialogAuto='dismiss'")
         self.button('cancelRuleDraft()').click()
@@ -733,6 +716,13 @@ class BrowserRelease(unittest.TestCase):
         self.button('cancelRuleDraft()').click()
         self.page.wait_for_function("!document.getElementById('ruleeditor')")
         self.assertEqual(self.f.rules.read_bytes(), original)
+        # Accepting the discard while closing the drawer closes editor and review with it.
+        self.button('editCodebookDraft()').click()
+        self.page.locator('#ruleeditor').fill(raw + ' ')
+        self.page.evaluate("window.__appDialogAuto='accept'")
+        self.close_drawer()
+        self.page.wait_for_function("!document.getElementById('ruleeditor') && !$('chat').classList.contains('codebook-workspace') && !$('contextbackdrop').classList.contains('open')")
+        self.assertTrue(self.page.locator('#composer').is_visible())
 
     def test_draft_save_confirmation_and_stale_context_preserve_raw_input(self):
         self.prepare_rules()
@@ -792,7 +782,7 @@ class BrowserRelease(unittest.TestCase):
     def test_german_mobile_drawer_long_error_folder_selection_and_close(self):
         self.language('de')
         self.prepare_rules()
-        self.button('leaveCodebookWorkspace()').click()
+        self.close_drawer()  # closing the rules drawer also closes the review
         nested = self.f.bg_a / ('Unterlagen_' + 'lang_' * 18)
         nested.mkdir()
         (nested / ('Zeichnung_' + 'x' * 110 + '.txt')).write_text('Fixture material', encoding='utf-8')
@@ -979,7 +969,6 @@ class BrowserRelease(unittest.TestCase):
         self.page.wait_for_function('lastStatusSnapshot.model === "gemini-2.5-pro"')
         self.prepare_rules()
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         self.select_bg(self.f.bg_a)
         session_a = self.page.evaluate("lastStatusSnapshot.session_name")
         other = self.browser.new_page(viewport={"width": 1440, "height": 1000})
@@ -1102,7 +1091,6 @@ class BrowserRelease(unittest.TestCase):
         self.assertFalse(self.page.locator("#ruleprepare").is_disabled())
         self.page.locator("#ruleview").click()
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
-        self.close_drawer()
         self.lock_rules()
         self.assertEqual(self.card(), "Locked and in use for classification · Codebook 3 pages.pdf")
         # A second reload shows the last final state.
@@ -1115,7 +1103,6 @@ class BrowserRelease(unittest.TestCase):
         self.page.context.grant_permissions(["clipboard-read", "clipboard-write"])
         self.prepare_rules()
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         dialogs = self.record_dialogs()
         long_text = "Page three table: " + " ".join(f"Rule{index} Rotationseinheit Drehung" for index in range(260))
         path = self.make_pdf("Codebook_Baugruppenklassifikation_v2_3.pdf", ["Rotationseinheit.", "Gantry.", long_text])
@@ -1201,7 +1188,6 @@ class BrowserRelease(unittest.TestCase):
         self.close_drawer()
         self.prepare_rules()
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         self.select_bg(self.f.bg_a)
         # One confirmed file: nothing to choose, so the bar stays hidden.
         self.assertFalse(self.page.locator("#scopebar").is_visible())
