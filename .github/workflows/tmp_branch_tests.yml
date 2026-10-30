@@ -45,10 +45,11 @@ jobs:
                             chat: document.getElementById('chat').innerHTML.slice(-2500),
                             processTexts: [...document.querySelectorAll('[data-process-text]')].map(e=>e.textContent),
                             cancelDisabled: document.getElementById('cancelchat')?.disabled,
-                            profile: lastCodebookProfile?.status, ruleEdit: !!ruleEditState, drawer: activeContextDrawer,
+                            profile: lastCodebookProfile?.status, ruleEdit: !!ruleEditState, drawer: activeContextDrawer, codebookstatus: document.getElementById('codebookstatus')?.textContent, rulemsg: document.getElementById('contextrulemsg')?.textContent, setupmsg: document.getElementById('setupmsg')?.textContent, task: lastCodebookTask?.state,
                             errors: window.__errs||[]})""")
                       except Exception as inner:
                           state = {'evaluate_failed': str(inner)}
+                      state.pop('chat', None)
                       print('::error title=DEBUG ' + name + '::' + esc(str(exc)[:600] + '\n' + json.dumps(state, ensure_ascii=False)[:5000] + '\nPAGE ERRORS: ' + json.dumps(self.errors)[:800]))
                       raise
               setattr(br.BrowserRelease, name, run)
@@ -56,7 +57,7 @@ jobs:
           suite = unittest.TestSuite(br.BrowserRelease(n) for n in NAMES)
           unittest.TextTestRunner(verbosity=2).run(suite)
           EOF2
-          timeout 600 python ../debug_browser.py test_answer_preview_stop_keeps_busy_until_worker_exits_then_retry test_rule_preparation_shows_live_progress_without_native_dialogs_and_restores || true
+          timeout 600 python ../debug_browser.py test_rule_preparation_shows_live_progress_without_native_dialogs_and_restores test_workspace_attribute_input_cannot_create_event_handler test_answer_preview_stop_keeps_busy_until_worker_exits_then_retry || true
       - name: Report
         run: |
           python - <<'EOF'
