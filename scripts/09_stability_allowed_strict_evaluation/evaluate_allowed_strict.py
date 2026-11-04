@@ -285,6 +285,96 @@ def ci(arr):
         return np.nanpercentile(arr, CI, axis=0)
 
 
+def boot_p(d):
+    """Zweiseitiger Bootstrap-p-Wert für H0: Δ = 0."""
+    d = d[~np.isnan(d)]
+    if len(d) == 0:
+        return np.nan
+    return min(1.0, 2 * min(np.mean(d <= 0), np.mean(d >= 0)))
+
+
+def holm(pvals):
+    """Holm-Bonferroni-adjustierte p-Werte (gleiche Reihenfolge wie Eingabe)."""
+    p = np.asarray(pvals, float)
+    m = len(p)
+    order = np.argsort(p)
+    adj = np.empty(m)
+    running = 0.0
+    for rank, i in enumerate(order):
+        running = max(running, min(1.0, (m - rank) * p[i]))
+        adj[i] = running
+    return adj
+
+
+def pfmt(p):
+    if np.isnan(p):
+        return "–"
+    if p < 1.0 / N_BOOT:
+        return f"<{1.0 / N_BOOT:.4f}".replace(".", ",")
+    return f"{p:.4f}".replace(".", ",")
+
+
+# ----------------------------------------------------------------------------
+# Excel-Formatierung (Blautöne wie bisherige Auswertungstabellen)
+# ----------------------------------------------------------------------------
+TITLE_FILL = "1F3864"
+HEADER_FILL = "2F5597"
+ROW_FILLS = ("DCE6F1", "EEF3FA")
+HIGHLIGHT_FILL = "BDD7EE"
+SECTION_FILL = "D9D9D9"
+
+
+def write_styled(xw, df, sheet, title, highlight=(), section=()):
+    """Schreibt df mit Titelzeile, blauem Kopf und abwechselnd hellblauen Zeilen.
+    highlight: Zeilenindizes (0-basiert) fett hervorheben; section: Trennzeilen grau."""
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    df.to_excel(xw, sheet_name=sheet, index=False, startrow=1)
+    ws = xw.book[sheet]
+    ncol = max(1, df.shape[1])
+    white = Side(style="thin", color="FFFFFF")
+    border = Border(left=white, right=white, top=white, bottom=white)
+
+    ws.cell(row=1, column=1, value=title)
+    if ncol > 1:
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
+    tc = ws.cell(row=1, column=1)
+    tc.font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
+    tc.fill = PatternFill("solid", fgColor=TITLE_FILL)
+    tc.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 26
+
+    for c in range(1, ncol + 1):
+        h = ws.cell(row=2, column=c)
+        h.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        h.fill = PatternFill("solid", fgColor=HEADER_FILL)
+        h.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        h.border = border
+    ws.row_dimensions[2].height = 30
+
+    for i in range(len(df)):
+        r = i + 3
+        if i in section:
+            fill, bold = SECTION_FILL, True
+        elif i in highlight:
+            fill, bold = HIGHLIGHT_FILL, True
+        else:
+            fill, bold = ROW_FILLS[i % 2], False
+        for c in range(1, ncol + 1):
+            cell = ws.cell(row=r, column=c)
+            cell.fill = PatternFill("solid", fgColor=fill)
+            cell.font = Font(name="Calibri", size=11, bold=bold)
+            cell.border = border
+            cell.alignment = Alignment(horizontal="left" if c == 1 else "center", vertical="center")
+
+    for c in range(1, ncol + 1):
+        vals = [ws.cell(row=r, column=c).value for r in range(2, len(df) + 3)]
+        width = max((len(str(v)) for v in vals if v is not None), default=8)
+        ws.column_dimensions[ws.cell(row=2, column=c).column_letter].width = min(max(12, width + 3), 70)
+    ws.freeze_panes = "B3"
+    ws.sheet_view.showGridLines = False
+
+
 # ----------------------------------------------------------------------------
 # Hauptprogramm
 # ----------------------------------------------------------------------------
@@ -404,7 +494,16 @@ def main():
             dp = point[a][k] - point[b][k]
             pair_rows.append({"Modell A": a, "Modell B": b, "Metrik": name,
                               "Δ (A−B)": pct(dp), "95%-CI": f"[{pct(lo,1)}; {pct(hi,1)}]",
+                              "_p": boot_p(d),
                               "Signifikant (CI ohne 0)": "ja" if (lo > 0 or hi < 0) else "nein"})
+    p_adj = holm([r["_p"] for r in pair_rows]) if pair_rows else []
+    for r, pa in zip(pair_rows, p_adj):
+        p_raw = r.pop("_p")
+        sig_raw = r.pop("Signifikant (CI ohne 0)")
+        r["p (roh)"] = pfmt(p_raw)
+        r["Signifikant (roh, CI ohne 0)"] = sig_raw
+        r["p (Holm)"] = pfmt(pa)
+        r["Signifikant (Holm, α=0,05)"] = "ja" if pa < 0.05 else "nein"
 
     # ---- Robustheit: gemeinsame Stichprobe -----------------------------------
     robust = overall_table(point_c, boot_c)
@@ -469,30 +568,37 @@ def main():
         "EXCLUDED (HTTP-Fehler, keine Ausgabe) wird je Lauf nicht gewertet.",
         "Robustheit: gleiche Auswertung nur auf Baugruppen, die in allen Läufen aller Modelle eine Ausgabe haben.",
         "Run-to-run SD: Standardabweichung über die 10 Läufe (ddof=1), misst Stabilität, nicht Unsicherheit.",
+        "Paarvergleich: zweiseitiger Bootstrap-p-Wert = 2·min(P(Δ≤0), P(Δ≥0)); Holm-Bonferroni-Korrektur "
+        "über alle Vergleiche der Tabelle (Holm, 1979). Kleinster darstellbarer p-Wert: 1/B.",
     ]})
 
     # ---- Schreiben -----------------------------------------------------------
+    n_main = len(main_tab)
+    tag = f"95%-CI, Bootstrap B={N_BOOT}"
     with pd.ExcelWriter(OUTPUT_FILE, engine="openpyxl") as xw:
-        main_tab.to_excel(xw, sheet_name="Hauptergebnis", index=False)
-        cls["Allowed Recall"].to_excel(xw, sheet_name="Klassen_Allowed_Recall", index=False)
-        cls["Allowed Precision"].to_excel(xw, sheet_name="Klassen_Allowed_Precision", index=False)
-        cls["Strict F1"].to_excel(xw, sheet_name="Klassen_Strict_F1", index=False)
-        cls["Strict Precision"].to_excel(xw, sheet_name="Klassen_Strict_Precision", index=False)
-        cls["Strict Recall"].to_excel(xw, sheet_name="Klassen_Strict_Recall", index=False)
-        pd.DataFrame(pair_rows).to_excel(xw, sheet_name="Paarvergleich", index=False)
-        robust.to_excel(xw, sheet_name="Robustheit_gemeinsam", index=False)
-        pd.DataFrame(clt_rows).to_excel(xw, sheet_name="Accuracy_CLT", index=False)
-        sd_tab.to_excel(xw, sheet_name="Run_to_run_SD", index=False)
-        pd.DataFrame(run_rows).to_excel(xw, sheet_name="Pro_Lauf", index=False)
-        exc_run.to_excel(xw, sheet_name="Ausfaelle_pro_Lauf", index=False)
-        exc_key.to_excel(xw, sheet_name="Ausfaelle_pro_SAP", index=False)
-        pd.DataFrame(stab_rows).to_excel(xw, sheet_name="Stabilitaet", index=False)
-        checks.to_excel(xw, sheet_name="Pruefungen", index=False)
-        notes.to_excel(xw, sheet_name="Hinweise", index=False)
-        for ws in xw.book.worksheets:
-            for col in ws.columns:
-                width = max(len(str(c.value)) if c.value is not None else 0 for c in col)
-                ws.column_dimensions[col[0].column_letter].width = min(max(10, width + 2), 60)
+        write_styled(xw, main_tab, "Hauptergebnis",
+                     f"Hauptergebnis – Allowed (Hauptmetrik) und Strict (Primärlabel) ({tag})",
+                     highlight=(0,), section=())
+        write_styled(xw, cls["Allowed Recall"], "Klassen_Allowed_Recall",
+                     f"Allowed Recall je Klasse (nach Primärlabel) ({tag})")
+        write_styled(xw, cls["Allowed Precision"], "Klassen_Allowed_Precision",
+                     f"Allowed Precision je Klasse (nach Vorhersage) ({tag})")
+        write_styled(xw, cls["Strict F1"], "Klassen_Strict_F1", f"Strict F1 je Klasse ({tag})")
+        write_styled(xw, cls["Strict Precision"], "Klassen_Strict_Precision", f"Strict Precision je Klasse ({tag})")
+        write_styled(xw, cls["Strict Recall"], "Klassen_Strict_Recall", f"Strict Recall je Klasse ({tag})")
+        write_styled(xw, pd.DataFrame(pair_rows), "Paarvergleich",
+                     f"Paarweiser Modellvergleich – gepaarter Bootstrap, Holm-Korrektur über {len(pair_rows)} Vergleiche")
+        write_styled(xw, robust, "Robustheit_gemeinsam",
+                     f"Robustheit – nur Baugruppen mit Ausgabe in allen Läufen aller Modelle ({tag})", highlight=(0,))
+        write_styled(xw, pd.DataFrame(clt_rows), "Accuracy_CLT", "Accuracy – analytisches 95%-CI (CLT, Baugruppe als Einheit)")
+        write_styled(xw, sd_tab, "Run_to_run_SD", "Run-to-run-Standardabweichung über 10 Läufe (Stabilität)")
+        write_styled(xw, pd.DataFrame(run_rows), "Pro_Lauf", "Metriken je Lauf")
+        write_styled(xw, exc_run, "Ausfaelle_pro_Lauf", "EXCLUDED (keine Ausgabe) je Modell und Lauf")
+        write_styled(xw, exc_key if len(exc_key) else pd.DataFrame([{"SAP-Nummer": "keine Ausfälle"}]),
+                     "Ausfaelle_pro_SAP", "EXCLUDED je Baugruppe (über alle Läufe aller Modelle)")
+        write_styled(xw, pd.DataFrame(stab_rows), "Stabilitaet", "Baugruppen mit wechselnder Vorhersage über die Läufe")
+        write_styled(xw, checks, "Pruefungen", "Datenprüfungen")
+        write_styled(xw, notes, "Hinweise", "Hinweise und Definitionen")
 
     print("\nHauptergebnis:")
     print(main_tab.to_string(index=False))
