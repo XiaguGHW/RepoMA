@@ -55,6 +55,7 @@ Run in this order. The first step excludes the 14 BGs marked
 - `evaluate_classification.py`
 - `batch_evaluate_experiments.py` — offline recalculation only; does not call models
 - `workshop_annotation_auswertung.py`
+- `09_stability_allowed_strict_evaluation/evaluate_allowed_strict.py` — Allowed/Strict-Metriken mit Bootstrap-CI über 10 Läufe je Modell; offline
 
 ## 05 — Current shared connectors and reference material
 
