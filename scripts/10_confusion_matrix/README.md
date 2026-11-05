@@ -30,7 +30,8 @@ Modell, Prompt und Eingabeformat werden aus Datei- und Ordnernamen erkannt
 - `konfusionsmatrizen_png/`: je Matrix ein PNG sowie `Konfusionsmatrizen_gesamt.png` mit allen Matrizen
   (zwei nebeneinander); nur wenn `matplotlib` installiert ist.
 - Unter den Matrizen steht jeweils die Legende
-  „Klassencode: A = Lineareinheit | B = Greifer | C = Roboter | D = Rotationseinheit | E = Gantry |
-  F = Kombinierte Einheit | G = Keine der verfügbaren Klassen“ (anpassbar über `LEGEND_NAMES`).
+  „Klassencode: A = Gantry | B = Rotationseinheit | C = Roboter | D = Greifer | E = Lineareinheit |
+  F = Kombinierte Einheit | G = Keine der verfügbaren Klassen“ (Reihenfolge über `CLASSES`,
+  Kurznamen über `LEGEND_NAMES`).
 
 Benötigt: `pandas`, `numpy`, `openpyxl` (optional `matplotlib`).

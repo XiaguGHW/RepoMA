@@ -44,18 +44,19 @@ PE_YES = {"yes", "ja", "y", "x", "1", "true", "wahr"}
 
 SKIP_PREFIX = ("~$", "PPT_", "Evaluation_Summary", "Evaluation_Allowed_Strict", "Konfusionsmatrizen")
 
+# Reihenfolge = Codes A–G (wie in der Konfusionsmatrix-Vorlage)
 CLASSES = [
-    "Lineareinheit",
-    "Greifer",
-    "Roboter",
-    "Rotationseinheit",
     "Multi-Achs-System (Gantry)",
+    "Rotationseinheit",
+    "Roboter",
+    "Greifer",
+    "Lineareinheit",
     "Kombinierte Einheit",
     "Keine der verfügbaren Klassen",
 ]
 CODES = list("ABCDEFG")
 # Kurznamen für die Legende unter den Matrizen
-LEGEND_NAMES = ["Lineareinheit", "Greifer", "Roboter", "Rotationseinheit", "Gantry",
+LEGEND_NAMES = ["Gantry", "Rotationseinheit", "Roboter", "Greifer", "Lineareinheit",
                 "Kombinierte Einheit", "Keine der verfügbaren Klassen"]
 LEGEND_TEXT = "Klassencode: " + " | ".join(f"{c} = {n}" for c, n in zip(CODES, LEGEND_NAMES))
 K = len(CLASSES)
@@ -246,7 +247,7 @@ def write_matrix(ws, top, left, title, cm):
     c.font = Font(name="Calibri", size=12, bold=True, color="FFFFFF")
     c.fill = PatternFill("solid", fgColor=NAVY)
     c.alignment = center
-    ws.row_dimensions[top].height = 20
+    ws.row_dimensions[top].height = 22
 
     hdr = ["GT \\ Pred"] + CODES
     for j, h in enumerate(hdr):
@@ -256,10 +257,10 @@ def write_matrix(ws, top, left, title, cm):
         cell.alignment = center
         cell.border = Border(left=white, right=white, top=white, bottom=white)
 
-    ws.row_dimensions[top + 1].height = 17
+    ws.row_dimensions[top + 1].height = 18.7
     for i in range(K):
         r = top + 2 + i
-        ws.row_dimensions[r].height = 15
+        ws.row_dimensions[r].height = 16.5
         lab = ws.cell(row=r, column=left, value=CODES[i])
         lab.font = Font(name="Calibri", size=11, bold=True, color=NAVY)
         lab.fill = PatternFill("solid", fgColor=LABEL_FILL)
@@ -343,7 +344,7 @@ def write_excel(out, summaries, issues, matrices):
 # Ausgabe PNG (optional)
 # ----------------------------------------------------------------------------
 # Zeilenhöhen der PNG-Grafik (Zellbreite = 1)
-TITLE_H, HEADER_H, ROW_H = 0.8, 0.65, 0.6
+TITLE_H, HEADER_H, ROW_H = 0.88, 0.72, 0.66
 CELL_W, LABEL_W = 0.9, 1.26   # Spaltenbreiten (Zahlenspalte, Beschriftungsspalte)
 
 
