@@ -79,9 +79,11 @@ MODEL_NAMES = {
 INPUT_NAMES = {"pdf": "PDF", "image": "Bild", "bild": "Bild", "text": "Text"}
 
 # Farben (wie bisherige Tabellen)
-NAVY, BLUE = "1F3864", "2F5597"
-DIAG_FILL, ERR_FILL = "DCE6F1", "F8DCDC"
-ERR_FONT, ZERO_FONT = "C00000", "A6A6A6"
+# per Farbpipette aus der Vorlage (PPT) übernommen
+NAVY, BLUE = "123D63", "2F75A7"          # Titelzeile, Kopfzeile
+DIAG_FILL, ERR_FILL = "D4EBF8", "FCE8E6"  # Diagonale (richtig), Fehlklassifikation
+ERR_FONT, ZERO_FONT = "BE2535", "A6A6A6"  # Schrift Fehler, Schrift Nullen
+LABEL_FILL, GRID = "F2F7FB", "EAEDF0"     # Zeilenbeschriftung A–G, Gitterlinien
 
 
 # ----------------------------------------------------------------------------
@@ -236,7 +238,7 @@ def write_matrix(ws, top, left, title, cm):
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
     white = Side(style="thin", color="FFFFFF")
-    grid = Side(style="thin", color="E3E3E3")
+    grid = Side(style="thin", color=GRID)
     center = Alignment(horizontal="center", vertical="center")
 
     ws.merge_cells(start_row=top, start_column=left, end_row=top, end_column=left + K)
@@ -258,8 +260,9 @@ def write_matrix(ws, top, left, title, cm):
         r = top + 2 + i
         lab = ws.cell(row=r, column=left, value=CODES[i])
         lab.font = Font(name="Calibri", size=11, bold=True)
+        lab.fill = PatternFill("solid", fgColor=LABEL_FILL)
         lab.alignment = center
-        lab.border = Border(bottom=grid)
+        lab.border = Border(left=grid, right=grid, top=grid, bottom=grid)
         for j in range(K):
             v = int(cm[i, j])
             cell = ws.cell(row=r, column=left + 1 + j, value=v)
@@ -350,6 +353,8 @@ def _draw(ax, x0, y0, title, cm):
         ax.text(x0 + W + j + 0.5, y0 - 1.5, CODES[j], ha="center", va="center", color="white", fontsize=11, fontweight="bold")
     for i in range(K):
         y = y0 - 3 - i
+        ax.add_patch(Rectangle((x0, y), W, 1, color=col(LABEL_FILL)))
+        ax.add_patch(Rectangle((x0, y), W, 1, fill=False, edgecolor=col(GRID), lw=0.8))
         ax.text(x0 + W / 2, y + 0.5, CODES[i], ha="center", va="center", fontsize=11, fontweight="bold")
         for j in range(K):
             v = int(cm[i, j])
@@ -361,7 +366,7 @@ def _draw(ax, x0, y0, title, cm):
                 kw = dict(color=col(ERR_FONT), fontweight="bold")
             else:
                 kw = dict(color=col(ZERO_FONT))
-            ax.add_patch(Rectangle((x0 + W + j, y), 1, 1, fill=False, edgecolor="#E3E3E3", lw=0.6))
+            ax.add_patch(Rectangle((x0 + W + j, y), 1, 1, fill=False, edgecolor=col(GRID), lw=0.8))
             ax.text(x0 + W + j + 0.5, y + 0.5, str(v), ha="center", va="center", fontsize=11, **kw)
     return K + W
 
