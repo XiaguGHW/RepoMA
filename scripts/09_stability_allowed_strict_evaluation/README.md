@@ -42,7 +42,7 @@ Verwendete Spalten: `SAP-Nummer`, `Ground Truth`, `Weitere zulässige Ground Tru
 | Hauptergebnis | Allowed/Strict Accuracy, Macro-P/R, Strict Macro-F1 mit 95%-CI |
 | Klassen_Allowed_Recall / _Precision | Klassenweise Allowed-Metriken mit n |
 | Klassen_Strict_F1 / _Precision / _Recall | Strict-Vergleich |
-| Paarvergleich | Gepaarter Bootstrap zwischen Modellen, p-Werte roh und Holm-korrigiert |
+| Paarvergleich | Gepaarter Bootstrap zwischen Modellen für Allowed Accuracy, Allowed Macro-Precision, Allowed Macro-Recall und Strict Macro-F1; p-Werte roh und Holm-korrigiert je Metrik (`HOLM_FAMILY`) |
 | Robustheit_gemeinsam | Nur Baugruppen mit Ausgabe in allen Läufen aller Modelle |
 | Accuracy_CLT | Analytisches CI für Accuracy |
 | Run_to_run_SD, Pro_Lauf | Stabilität über Läufe |

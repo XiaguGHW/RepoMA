@@ -37,6 +37,15 @@ SHEET_NAME = "Sheet1"
 N_BOOT = 2000
 SEED = 42
 CI = (2.5, 97.5)
+# Holm-Korrektur: "per_metric" = je Metrik über die paarweisen Vergleiche (Standard),
+# "all" = über alle Vergleiche der Tabelle gemeinsam
+HOLM_FAMILY = "per_metric"
+PAIR_METRICS = [
+    ("Allowed Accuracy", "allowed_acc"),          # Primärmetrik
+    ("Allowed Macro-Precision", "allowed_macroP"),
+    ("Allowed Macro-Recall", "allowed_macroR"),
+    ("Strict Macro-F1", "strict_macroF1"),
+]
 SKIP_PREFIX = ("~$", "PPT_", "Evaluation_Summary", "Evaluation_Allowed_Strict")
 
 CLASSES = [
@@ -487,8 +496,7 @@ def main():
     # ---- Paarweise Vergleiche (gepaarter Bootstrap) --------------------------
     pair_rows = []
     for a, b in itertools.combinations(models, 2):
-        for name, k in [("Allowed Accuracy", "allowed_acc"), ("Allowed Macro-Recall", "allowed_macroR"),
-                        ("Strict Macro-F1", "strict_macroF1")]:
+        for name, k in PAIR_METRICS:
             d = boot[a][k] - boot[b][k]
             lo, hi = ci(d)
             dp = point[a][k] - point[b][k]
@@ -496,7 +504,19 @@ def main():
                               "Δ (A−B)": pct(dp), "95%-CI": f"[{pct(lo,1)}; {pct(hi,1)}]",
                               "_p": boot_p(d),
                               "Signifikant (CI ohne 0)": "ja" if (lo > 0 or hi < 0) else "nein"})
-    p_adj = holm([r["_p"] for r in pair_rows]) if pair_rows else []
+    if HOLM_FAMILY == "all":
+        groups = [list(range(len(pair_rows)))]
+    else:
+        groups = [[i for i, r in enumerate(pair_rows) if r["Metrik"] == name] for name, _ in PAIR_METRICS]
+    p_adj = [np.nan] * len(pair_rows)
+    for g in groups:
+        if g:
+            for i, pa in zip(g, holm([pair_rows[i]["_p"] for i in g])):
+                p_adj[i] = pa
+    order = {name: j for j, (name, _) in enumerate(PAIR_METRICS)}
+    idx = sorted(range(len(pair_rows)), key=lambda i: (order[pair_rows[i]["Metrik"]], i))
+    pair_rows = [pair_rows[i] for i in idx]
+    p_adj = [p_adj[i] for i in idx]
     for r, pa in zip(pair_rows, p_adj):
         p_raw = r.pop("_p")
         sig_raw = r.pop("Signifikant (CI ohne 0)")
@@ -568,8 +588,10 @@ def main():
         "EXCLUDED (HTTP-Fehler, keine Ausgabe) wird je Lauf nicht gewertet.",
         "Robustheit: gleiche Auswertung nur auf Baugruppen, die in allen Läufen aller Modelle eine Ausgabe haben.",
         "Run-to-run SD: Standardabweichung über die 10 Läufe (ddof=1), misst Stabilität, nicht Unsicherheit.",
-        "Paarvergleich: zweiseitiger Bootstrap-p-Wert = 2·min(P(Δ≤0), P(Δ≥0)); Holm-Bonferroni-Korrektur "
-        "über alle Vergleiche der Tabelle (Holm, 1979). Kleinster darstellbarer p-Wert: 1/B.",
+        "Paarvergleich: zweiseitiger Bootstrap-p-Wert = 2·min(P(Δ≤0), P(Δ≥0)); Holm-Bonferroni-Korrektur (Holm, 1979) "
+        + ("getrennt je Metrik über die paarweisen Modellvergleiche (Bender & Lange, 2001). "
+           if HOLM_FAMILY != "all" else "über alle Vergleiche der Tabelle. ")
+        + "Primärmetrik: Allowed Accuracy. Kleinster darstellbarer p-Wert: 1/B.",
     ]})
 
     # ---- Schreiben -----------------------------------------------------------
@@ -587,7 +609,8 @@ def main():
         write_styled(xw, cls["Strict Precision"], "Klassen_Strict_Precision", f"Strict Precision je Klasse ({tag})")
         write_styled(xw, cls["Strict Recall"], "Klassen_Strict_Recall", f"Strict Recall je Klasse ({tag})")
         write_styled(xw, pd.DataFrame(pair_rows), "Paarvergleich",
-                     f"Paarweiser Modellvergleich – gepaarter Bootstrap, Holm-Korrektur über {len(pair_rows)} Vergleiche")
+                     "Paarweiser Modellvergleich – gepaarter Bootstrap, Holm-Korrektur "
+                     + ("je Metrik" if HOLM_FAMILY != "all" else f"über alle {len(pair_rows)} Vergleiche"))
         write_styled(xw, robust, "Robustheit_gemeinsam",
                      f"Robustheit – nur Baugruppen mit Ausgabe in allen Läufen aller Modelle ({tag})", highlight=(0,))
         write_styled(xw, pd.DataFrame(clt_rows), "Accuracy_CLT", "Accuracy – analytisches 95%-CI (CLT, Baugruppe als Einheit)")
