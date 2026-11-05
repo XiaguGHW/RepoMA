@@ -324,9 +324,9 @@ def write_excel(out, summaries, issues, matrices):
             left = 1 + (n % MATRICES_PER_ROW) * block_w
             write_matrix(ws, top, left, title, cm)
         for col in range(1, MATRICES_PER_ROW * block_w + 1):
-            ws.column_dimensions[get_column_letter(col)].width = 7.5
+            ws.column_dimensions[get_column_letter(col)].width = 6.75
         for b in range(MATRICES_PER_ROW):
-            ws.column_dimensions[get_column_letter(1 + b * block_w)].width = 11
+            ws.column_dimensions[get_column_letter(1 + b * block_w)].width = 9.9
         if matrices:
             from openpyxl.styles import Font
             n_rows = (len(matrices) + MATRICES_PER_ROW - 1) // MATRICES_PER_ROW
@@ -344,20 +344,21 @@ def write_excel(out, summaries, issues, matrices):
 # ----------------------------------------------------------------------------
 # Zeilenhöhen der PNG-Grafik (Zellbreite = 1)
 TITLE_H, HEADER_H, ROW_H = 0.8, 0.65, 0.6
+CELL_W, LABEL_W = 0.9, 1.26   # Spaltenbreiten (Zahlenspalte, Beschriftungsspalte)
 
 
 def _draw(ax, x0, y0, title, cm):
     """Zeichnet eine Matrix mit linker oberer Ecke (x0, y0) in Datenkoordinaten."""
     from matplotlib.patches import Rectangle
     col = lambda h: "#" + h
-    W = 1.4
+    W, C = LABEL_W, CELL_W
     yt, yh = y0 - TITLE_H, y0 - TITLE_H - HEADER_H
-    ax.add_patch(Rectangle((x0, yt), K + W, TITLE_H, color=col(NAVY)))
-    ax.text(x0 + (K + W) / 2, yt + TITLE_H / 2, title, ha="center", va="center", color="white", fontsize=12, fontweight="bold")
-    ax.add_patch(Rectangle((x0, yh), K + W, HEADER_H, color=col(BLUE)))
+    ax.add_patch(Rectangle((x0, yt), K * C + W, TITLE_H, color=col(NAVY)))
+    ax.text(x0 + (K * C + W) / 2, yt + TITLE_H / 2, title, ha="center", va="center", color="white", fontsize=12, fontweight="bold")
+    ax.add_patch(Rectangle((x0, yh), K * C + W, HEADER_H, color=col(BLUE)))
     ax.text(x0 + W / 2, yh + HEADER_H / 2, "GT \\ Pred", ha="center", va="center", color="white", fontsize=10, fontweight="bold")
     for j in range(K):
-        ax.text(x0 + W + j + 0.5, yh + HEADER_H / 2, CODES[j], ha="center", va="center", color="white", fontsize=11, fontweight="bold")
+        ax.text(x0 + W + (j + 0.5) * C, yh + HEADER_H / 2, CODES[j], ha="center", va="center", color="white", fontsize=11, fontweight="bold")
     for i in range(K):
         y = yh - (i + 1) * ROW_H
         ax.add_patch(Rectangle((x0, y), W, ROW_H, color=col(LABEL_FILL)))
@@ -367,16 +368,16 @@ def _draw(ax, x0, y0, title, cm):
         for j in range(K):
             v = int(cm[i, j])
             if i == j:
-                ax.add_patch(Rectangle((x0 + W + j, y), 1, ROW_H, color=col(DIAG_FILL)))
+                ax.add_patch(Rectangle((x0 + W + j * C, y), C, ROW_H, color=col(DIAG_FILL)))
                 kw = dict(color="black", fontweight="bold")
             elif v > 0:
-                ax.add_patch(Rectangle((x0 + W + j, y), 1, ROW_H, color=col(ERR_FILL)))
+                ax.add_patch(Rectangle((x0 + W + j * C, y), C, ROW_H, color=col(ERR_FILL)))
                 kw = dict(color=col(ERR_FONT), fontweight="bold")
             else:
                 kw = dict(color=col(ZERO_FONT))
-            ax.add_patch(Rectangle((x0 + W + j, y), 1, ROW_H, fill=False, edgecolor=col(GRID), lw=0.8))
-            ax.text(x0 + W + j + 0.5, y + ROW_H / 2, str(v), ha="center", va="center", fontsize=11, **kw)
-    return K + W
+            ax.add_patch(Rectangle((x0 + W + j * C, y), C, ROW_H, fill=False, edgecolor=col(GRID), lw=0.8))
+            ax.text(x0 + W + (j + 0.5) * C, y + ROW_H / 2, str(v), ha="center", va="center", fontsize=11, **kw)
+    return K * C + W
 
 
 def write_png(outdir, matrices):
@@ -388,7 +389,7 @@ def write_png(outdir, matrices):
     except ImportError:
         return False
     outdir.mkdir(exist_ok=True)
-    bw, bh, gap = K + 1.4, TITLE_H + HEADER_H + K * ROW_H, 0.8
+    bw, bh, gap = K * CELL_W + LABEL_W, TITLE_H + HEADER_H + K * ROW_H, 0.8
 
     def save(items, cols, name):
         rows = (len(items) + cols - 1) // cols
