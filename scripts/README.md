@@ -57,6 +57,7 @@ Run in this order. The first step excludes the 14 BGs marked
 - `workshop_annotation_auswertung.py`
 - `09_stability_allowed_strict_evaluation/evaluate_allowed_strict.py` — Allowed/Strict-Metriken mit Bootstrap-CI über 10 Läufe je Modell; offline
 - `10_confusion_matrix/check_allowed_and_confusion_matrix.py` — prüft `Allowed_Set_Status` und erstellt Konfusionsmatrizen (A–G); offline
+- `11_merge_nachlauf/merge_nachlauf.py` — führt Nachlauf-Dateien (erneut ausgeführte EXCLUDED-Baugruppen) mit den 10 Lauf-Dateien zusammen; offline
 
 ## 05 — Current shared connectors and reference material
 

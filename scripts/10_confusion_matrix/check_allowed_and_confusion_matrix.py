@@ -153,7 +153,7 @@ def collect_files(args):
         if t.is_file() and t.suffix.lower() == ".xlsx":
             files.append(t)
         elif t.is_dir():
-            files += sorted(p for p in t.rglob("*.xlsx"))
+            files += sorted(p for p in t.rglob("*.xlsx") if not any(x.startswith("_backup") for x in p.parts))
     return [f for f in dict.fromkeys(files) if not f.name.startswith(SKIP_PREFIX)]
 
 
