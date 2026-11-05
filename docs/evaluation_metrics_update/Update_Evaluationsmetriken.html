@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8">
+<title>Update Evaluationsmetriken</title>
+<style>
+@page { size: A4; margin: 15mm 16mm 14mm 16mm; }
+:root { --navy:#1F3864; --blue:#2F5597; --light:#DCE6F1; --lighter:#EEF3FA; --ink:#1a1a1a; --muted:#555; }
+body { font-family: "Calibri","Carlito","Liberation Sans",Arial,sans-serif; font-size:10pt; line-height:1.4; color:var(--ink); margin:0; }
+.header { background:var(--navy); color:#fff; padding:12px 16px; border-radius:3px; }
+.header h1 { font-size:16pt; margin:0 0 2px 0; }
+.header p { margin:0; font-size:10pt; opacity:.9; }
+h2 { color:#fff; background:var(--blue); font-size:11.5pt; padding:5px 10px; margin:12px 0 5px 0; border-radius:2px; break-after:avoid; }
+.sec { break-inside:auto; }
+.row { margin:4px 0 6px 0; }
+.lbl { font-weight:bold; color:var(--navy); }
+ul { margin:3px 0 3px 18px; padding:0; } li { margin:2px 0; }
+.box { background:var(--lighter); border-left:3px solid var(--blue); padding:6px 10px; margin:6px 0; break-inside:avoid; }
+table { border-collapse:collapse; margin:6px 0; font-size:10pt; }
+th { background:var(--blue); color:#fff; padding:3px 10px; border:1px solid #fff; }
+td { padding:1px 10px; text-align:center; border:1px solid #fff; }
+tr:nth-child(odd) td { background:var(--light); } tr:nth-child(even) td { background:var(--lighter); }
+td:first-child { font-weight:bold; }
+.ok { color:#1e7b34; font-weight:bold; } .no { color:#b3261e; font-weight:bold; }
+.refs { font-size:9.5pt; } .refs li { margin:3px 0; list-style:none; text-indent:-14px; padding-left:14px; }
+.refs ul { margin-left:0; }
+em { font-style:italic; }
+</style></head><body>
+
+<div class="header">
+  <h1>Update: Evaluationsmetriken der LLM-Experimente</h1>
+  <p>Änderungen an Metriken und statistischer Auswertung · November 2026</p>
+</div>
+
+<div class="sec">
+<h2>1. Precision und Recall: dieselbe Bewertungsregel wie die Accuracy</h2>
+<div class="row"><span class="lbl">Was:</span> Bisher wurden Precision und Recall streng gegen das Primärlabel berechnet, die Accuracy dagegen mit zulässigen Alternativlabels.</div>
+<div class="row"><span class="lbl">Warum:</span> Beispiel: Eine Baugruppe hat das Primärlabel <em>Lineareinheit</em>, zulässig ist auch <em>Kombinierte Einheit</em>. Das Modell sagt <em>Kombinierte Einheit</em>.
+<ul>
+<li>Accuracy: zulässig, also <b>richtig</b>.</li>
+<li>Strict Precision von <em>Kombinierte Einheit</em>: Das Modell hat <em>Kombinierte Einheit</em> vorhergesagt, das Primärlabel ist aber ein anderes, also ein <b>Fehlalarm</b> (FP).</li>
+<li>Strict Recall von <em>Lineareinheit</em>: Die Baugruppe gehört laut Primärlabel zu <em>Lineareinheit</em>, wurde aber nicht so erkannt, also ein <b>Verfehlen</b> (FN).</li>
+</ul>
+Dieselbe fachlich richtige Antwort wurde also einmal als richtig und zweimal als Fehler gezählt. Die Metriken widersprachen sich.</div>
+<div class="row"><span class="lbl">Wie:</span>
+<ul>
+<li><b>Allowed Precision</b> für Klasse c: Von allen Baugruppen, die das Modell als c vorhersagt, wird gezählt, bei wie vielen c zulässig ist.</li>
+<li><b>Allowed Recall</b> für Klasse c: Von allen Baugruppen mit Primärlabel c wird gezählt, wie viele eine zulässige Vorhersage erhalten.</li>
+<li>Macro-Werte: Mittelwert über die 7 Klassen, jede Klasse gleich gewichtet.</li>
+</ul>
+Grundlage sind die Standarddefinitionen von Precision und Recall (Sokolova &amp; Lapalme, 2009), übertragen auf das Zulässigkeitskriterium. Das ist eine eigene methodische Erweiterung.</div>
+<div class="row"><span class="lbl">Effekt:</span> Im Beispiel zählt die Antwort jetzt auch bei Precision und Recall als richtig. Dadurch steigen Precision und Recall leicht, vor allem bei Klassen mit vielen mehrdeutigen Baugruppen; Accuracy, Precision und Recall sind jetzt widerspruchsfrei.</div>
+</div>
+
+<div class="sec">
+<h2>2. F1 nur noch streng</h2>
+<div class="row"><span class="lbl">Warum:</span> F1 kombiniert Precision und Recall derselben Klasse und setzt voraus, dass beide dieselben richtigen Fälle zählen (Sokolova &amp; Lapalme, 2009). Bei zulässigen Alternativlabels ist das nicht gegeben: Im Beispiel oben zählt die richtige Antwort bei der Precision für <em>Kombinierte Einheit</em>, beim Recall aber für <em>Lineareinheit</em>. Ein F1 daraus wäre nicht sinnvoll interpretierbar.</div>
+<div class="row"><span class="lbl">Wie:</span> F1 je Klasse aus Strict Precision und Strict Recall; Macro-F1 als Mittelwert der 7 Klassen-F1. Diese Definition wird ausdrücklich angegeben, da die zwei gängigen Macro-F1-Varianten unterschiedliche Werte und sogar unterschiedliche Rangfolgen liefern können (Opitz &amp; Burst, 2019).</div>
+<div class="row"><span class="lbl">Effekt:</span> Strict F1 bleibt als Vergleichswert. Es zeigt, wie oft genau das Primärlabel getroffen wird, ist mit Studien mit nur einem richtigen Label vergleichbar und zeigt, dass die Ergebnisse nicht nur durch die Alternativlabels zustande kommen.</div>
+</div>
+
+<div class="sec">
+<h2>3. 95%-Konfidenzintervalle für alle Werte</h2>
+<div class="row"><span class="lbl">Warum:</span> Mit 115 Baugruppen hängt das Ergebnis stark davon ab, welche Baugruppen zufällig im Datensatz sind.</div>
+<div class="row"><span class="lbl">Wie (Bootstrap):</span> Aus den 115 Baugruppen werden zufällig 115 gezogen, mit Zurücklegen; manche kommen also doppelt vor, andere gar nicht. Gezogen wird jeweils die ganze Baugruppe mit ihren Vorhersagen aus allen 10 Läufen. Auf diesem neuen Datensatz werden alle Metriken neu berechnet. Das wird 2000-mal wiederholt. Die mittleren 95&nbsp;% der 2000 Werte bilden das Intervall (Efron &amp; Tibshirani, 1993; Miller, 2024).</div>
+<div class="box">
+<b>Beispiel (vereinfacht: 5 Baugruppen, 3 Läufe)</b><br>
+<span class="ok">✓</span> = Vorhersage richtig, <span class="no">✗</span> = Vorhersage falsch
+<table>
+<tr><th>Baugruppe</th><th>Lauf 1</th><th>Lauf 2</th><th>Lauf 3</th></tr>
+<tr><td>A</td><td class="ok">✓</td><td class="ok">✓</td><td class="ok">✓</td></tr>
+<tr><td>B</td><td class="no">✗</td><td class="ok">✓</td><td class="no">✗</td></tr>
+<tr><td>C</td><td class="ok">✓</td><td class="ok">✓</td><td class="ok">✓</td></tr>
+<tr><td>D</td><td class="ok">✓</td><td class="ok">✓</td><td class="ok">✓</td></tr>
+<tr><td>E</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
+</table>
+Originale Accuracy: Lauf 1 = 3/5, Lauf 2 = 4/5, Lauf 3 = 3/5, Mittelwert <b>66,7&nbsp;%</b>.<br>
+<b>Ziehung 1:</b> A, A, C, D, E (B fehlt, A kommt doppelt vor; jede gezogene Baugruppe bringt ihre ganze Zeile mit). Accuracy: Lauf 1 = 4/5, Lauf 2 = 4/5, Lauf 3 = 4/5, Mittelwert <b>80&nbsp;%</b>.<br>
+<b>Ziehung 2:</b> B, B, C, E, E. Accuracy: Lauf 1 = 1/5, Lauf 2 = 3/5, Lauf 3 = 1/5, Mittelwert <b>33,3&nbsp;%</b>.<br>
+… insgesamt 2000 Ziehungen. Die 2000 Werte werden sortiert; der 50. und der 1950. Wert bilden das 95%-Konfidenzintervall.
+</div>
+<div class="row"><span class="lbl">Effekt:</span> Jeder Wert hat jetzt ein Intervall. Bei einem anderen, vergleichbaren Datensatz läge der Wert sehr wahrscheinlich in diesem Bereich. Die Intervalle sind etwa ±5 Prozentpunkte breit.</div>
+</div>
+
+<div class="sec">
+<h2>4. Prüfung, ob Modellunterschiede echt sind</h2>
+<div class="row"><span class="lbl">Warum:</span> Wegen dieser Unsicherheit kann ein Unterschied von wenigen Punkten Zufall sein.</div>
+<div class="row"><span class="lbl">Wie (gepaarter Bootstrap):</span> In jeder der 2000 Ziehungen werden beide Modelle auf denselben gezogenen Baugruppen bewertet und die Differenz berechnet (Koehn, 2004; Berg-Kirkpatrick et al., 2012). Enthält das 95%-Intervall dieser Differenzen die 0 nicht, ist der Unterschied signifikant. Geprüft werden vier Metriken: Allowed Accuracy (Hauptmetrik), Allowed Macro-Precision, Allowed Macro-Recall und Strict Macro-F1.</div>
+<div class="row"><span class="lbl">Wie (Holm-Korrektur):</span> Je Metrik werden 10 Modellpaare verglichen; dadurch steigt die Gefahr zufälliger „Treffer“. Die Holm-Korrektur verschärft deshalb die Signifikanzschwelle schrittweise: Der kleinste p-Wert muss unter 0,05/10 liegen, der zweitkleinste unter 0,05/9 usw. (Holm, 1979). Die Korrektur erfolgt getrennt je Metrik, da die Metriken unterschiedliche Fragen beantworten (Bender &amp; Lange, 2001).</div>
+<div class="row"><span class="lbl">Effekt:</span> Liegt das Intervall der Differenz ganz auf einer Seite der 0, z.&nbsp;B. [−12; −1], ist der Unterschied belegbar. Enthält es die 0, z.&nbsp;B. [−4; +2], kann der Unterschied auch Zufall sein.</div>
+</div>
+
+<div class="sec refs">
+<h2>Literatur</h2>
+<ul>
+<li>Bender, R. &amp; Lange, S. (2001). Adjusting for multiple testing—when and how? <em>Journal of Clinical Epidemiology</em>, 54(4), 343–349.</li>
+<li>Berg-Kirkpatrick, T., Burkett, D. &amp; Klein, D. (2012). An Empirical Investigation of Statistical Significance in NLP. <em>Proceedings of EMNLP-CoNLL 2012</em>, 995–1005.</li>
+<li>Efron, B. &amp; Tibshirani, R. J. (1993). <em>An Introduction to the Bootstrap</em>. New York: Chapman &amp; Hall.</li>
+<li>Holm, S. (1979). A Simple Sequentially Rejective Multiple Test Procedure. <em>Scandinavian Journal of Statistics</em>, 6(2), 65–70.</li>
+<li>Koehn, P. (2004). Statistical Significance Tests for Machine Translation Evaluation. <em>Proceedings of EMNLP 2004</em>, 388–395.</li>
+<li>Miller, E. (2024). Adding Error Bars to Evals: A Statistical Approach to Language Model Evaluations. arXiv:2411.00640.</li>
+<li>Opitz, J. &amp; Burst, S. (2019). Macro F1 and Macro F1. arXiv:1911.03347.</li>
+<li>Sokolova, M. &amp; Lapalme, G. (2009). A systematic analysis of performance measures for classification tasks. <em>Information Processing &amp; Management</em>, 45(4), 427–437.</li>
+</ul>
+</div>
+</body></html>
