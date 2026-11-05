@@ -54,6 +54,10 @@ CLASSES = [
     "Keine der verfügbaren Klassen",
 ]
 CODES = list("ABCDEFG")
+# Kurznamen für die Legende unter den Matrizen
+LEGEND_NAMES = ["Lineareinheit", "Greifer", "Roboter", "Rotationseinheit", "Gantry",
+                "Kombinierte Einheit", "Keine der verfügbaren Klassen"]
+LEGEND_TEXT = "Klassencode: " + " | ".join(f"{c} = {n}" for c, n in zip(CODES, LEGEND_NAMES))
 K = len(CLASSES)
 
 # Synonyme laut Codebook (Schlüssel in Kleinbuchstaben)
@@ -299,7 +303,7 @@ def write_excel(out, summaries, issues, matrices):
     for c in ("Allowed Accuracy", "Strict Accuracy"):
         sm[c] = sm[c].map(lambda x: "–" if pd.isna(x) else f"{x*100:.2f}%".replace(".", ","))
     iss = pd.DataFrame(issues) if issues else pd.DataFrame([{"Typ": "Keine Abweichungen"}])
-    legend = pd.DataFrame({"Code": CODES, "Klasse": CLASSES})
+    legend = pd.DataFrame({"Code": CODES, "Klasse": CLASSES, "Kurzname (Legende)": LEGEND_NAMES})
 
     with pd.ExcelWriter(out, engine="openpyxl") as xw:
         sm.to_excel(xw, sheet_name="Pruefung", index=False, startrow=1)
@@ -318,7 +322,12 @@ def write_excel(out, summaries, issues, matrices):
             ws.column_dimensions[get_column_letter(col)].width = 7.5
         for b in range(MATRICES_PER_ROW):
             ws.column_dimensions[get_column_letter(1 + b * block_w)].width = 11
-        if not matrices:
+        if matrices:
+            from openpyxl.styles import Font
+            n_rows = (len(matrices) + MATRICES_PER_ROW - 1) // MATRICES_PER_ROW
+            lr = 1 + n_rows * block_h - 1
+            ws.cell(row=lr, column=1, value=LEGEND_TEXT).font = Font(name="Calibri", size=11)
+        else:
             ws.cell(row=1, column=1, value="Keine Matrix erzeugt (Abweichungen vorhanden, siehe Blatt 'Abweichungen').")
 
         legend.to_excel(xw, sheet_name="Legende", index=False, startrow=1)
@@ -328,45 +337,70 @@ def write_excel(out, summaries, issues, matrices):
 # ----------------------------------------------------------------------------
 # Ausgabe PNG (optional)
 # ----------------------------------------------------------------------------
-def write_png(outdir, title, cm):
+def _draw(ax, x0, y0, title, cm):
+    """Zeichnet eine Matrix mit linker oberer Ecke (x0, y0) in Datenkoordinaten."""
+    from matplotlib.patches import Rectangle
+    col = lambda h: "#" + h
+    W = 1.4
+    ax.add_patch(Rectangle((x0, y0 - 1), K + W, 1, color=col(NAVY)))
+    ax.text(x0 + (K + W) / 2, y0 - 0.5, title, ha="center", va="center", color="white", fontsize=12, fontweight="bold")
+    ax.add_patch(Rectangle((x0, y0 - 2), K + W, 1, color=col(BLUE)))
+    ax.text(x0 + W / 2, y0 - 1.5, "GT \\ Pred", ha="center", va="center", color="white", fontsize=10, fontweight="bold")
+    for j in range(K):
+        ax.text(x0 + W + j + 0.5, y0 - 1.5, CODES[j], ha="center", va="center", color="white", fontsize=11, fontweight="bold")
+    for i in range(K):
+        y = y0 - 3 - i
+        ax.text(x0 + W / 2, y + 0.5, CODES[i], ha="center", va="center", fontsize=11, fontweight="bold")
+        for j in range(K):
+            v = int(cm[i, j])
+            if i == j:
+                ax.add_patch(Rectangle((x0 + W + j, y), 1, 1, color=col(DIAG_FILL)))
+                kw = dict(color="black", fontweight="bold")
+            elif v > 0:
+                ax.add_patch(Rectangle((x0 + W + j, y), 1, 1, color=col(ERR_FILL)))
+                kw = dict(color=col(ERR_FONT), fontweight="bold")
+            else:
+                kw = dict(color=col(ZERO_FONT))
+            ax.add_patch(Rectangle((x0 + W + j, y), 1, 1, fill=False, edgecolor="#E3E3E3", lw=0.6))
+            ax.text(x0 + W + j + 0.5, y + 0.5, str(v), ha="center", va="center", fontsize=11, **kw)
+    return K + W
+
+
+def write_png(outdir, matrices):
+    """Je Matrix ein PNG sowie eine Gesamtgrafik (MATRICES_PER_ROW nebeneinander), jeweils mit Legende."""
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        from matplotlib.patches import Rectangle
     except ImportError:
         return False
     outdir.mkdir(exist_ok=True)
-    col = lambda h: "#" + h
-    fig, ax = plt.subplots(figsize=(6.2, 4.6), dpi=200)
-    ax.set_xlim(0, K + 1.4)
-    ax.set_ylim(-(K + 2), 0)
-    ax.axis("off")
-    W = 1.4
-    ax.add_patch(Rectangle((0, -1), K + W, 1, color=col(NAVY)))
-    ax.text((K + W) / 2, -0.5, title, ha="center", va="center", color="white", fontsize=12, fontweight="bold")
-    ax.add_patch(Rectangle((0, -2), K + W, 1, color=col(BLUE)))
-    ax.text(W / 2, -1.5, "GT \\ Pred", ha="center", va="center", color="white", fontsize=10, fontweight="bold")
-    for j in range(K):
-        ax.text(W + j + 0.5, -1.5, CODES[j], ha="center", va="center", color="white", fontsize=11, fontweight="bold")
-    for i in range(K):
-        y = -3 - i
-        ax.text(W / 2, y + 0.5, CODES[i], ha="center", va="center", fontsize=11, fontweight="bold")
-        for j in range(K):
-            v = int(cm[i, j])
-            if i == j:
-                ax.add_patch(Rectangle((W + j, y), 1, 1, color=col(DIAG_FILL)))
-                kw = dict(color="black", fontweight="bold")
-            elif v > 0:
-                ax.add_patch(Rectangle((W + j, y), 1, 1, color=col(ERR_FILL)))
-                kw = dict(color=col(ERR_FONT), fontweight="bold")
-            else:
-                kw = dict(color=col(ZERO_FONT))
-            ax.add_patch(Rectangle((W + j, y), 1, 1, fill=False, edgecolor="#E3E3E3", lw=0.6))
-            ax.text(W + j + 0.5, y + 0.5, str(v), ha="center", va="center", fontsize=11, **kw)
-    safe = re.sub(r"[^\w.\-]+", "_", title).strip("_")
-    fig.savefig(outdir / f"{safe}.png", bbox_inches="tight", facecolor="white")
-    plt.close(fig)
+    bw, bh, gap = K + 1.4, K + 2, 0.8
+
+    def save(items, cols, name):
+        rows = (len(items) + cols - 1) // cols
+        width = cols * bw + (cols - 1) * gap
+        height = rows * bh + (rows - 1) * gap + (1.4 if cols == 1 else 1.0)
+        fig, ax = plt.subplots(figsize=(width * 0.75, height * 0.62), dpi=200)
+        ax.set_xlim(0, width)
+        ax.set_ylim(-height, 0)
+        ax.axis("off")
+        for n, (title, cm) in enumerate(items):
+            r, c = divmod(n, cols)
+            _draw(ax, c * (bw + gap), -r * (bh + gap), title, cm)
+        if cols == 1:  # Einzelmatrix: Legende zweizeilig, damit sie nicht breiter als die Matrix ist
+            parts = [f"{c} = {n}" for c, n in zip(CODES, LEGEND_NAMES)]
+            legend = "Klassencode: " + " | ".join(parts[:4]) + "\n" + " | ".join(parts[4:])
+            ax.text(0, -height + 0.2, legend, ha="left", va="center", fontsize=8.5, linespacing=1.5)
+        else:
+            ax.text(0, -height + 0.35, LEGEND_TEXT, ha="left", va="center", fontsize=11)
+        fig.savefig(outdir / name, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+
+    for title, cm in matrices:
+        save([(title, cm)], 1, re.sub(r"[^\w.\-]+", "_", title).strip("_") + ".png")
+    if len(matrices) > 1:
+        save(matrices, MATRICES_PER_ROW, "Konfusionsmatrizen_gesamt.png")
     return True
 
 
@@ -399,10 +433,10 @@ def main():
         sys.exit("Keine auswertbaren Dateien.")
     out = Path.cwd() / OUTPUT_XLSX
     write_excel(out, summaries, issues, matrices)
-    png = [write_png(Path.cwd() / OUTPUT_PNG_DIR, t, cm) for t, cm in matrices]
+    png_ok = write_png(Path.cwd() / OUTPUT_PNG_DIR, matrices) if matrices else False
     print(f"\n{len(summaries)} Dateien geprüft, {sum(s['Abweichungen'] == 0 for s in summaries)} ohne Abweichungen.")
     print(f"Gespeichert: {out}")
-    if matrices and all(png):
+    if png_ok:
         print(f"PNG-Dateien: {Path.cwd() / OUTPUT_PNG_DIR}")
     elif matrices:
         print("Hinweis: matplotlib nicht installiert, daher keine PNG-Dateien.")
