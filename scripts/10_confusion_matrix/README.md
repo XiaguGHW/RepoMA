@@ -35,3 +35,14 @@ Modell, Prompt und Eingabeformat werden aus Datei- und Ordnernamen erkannt
   Kurznamen über `LEGEND_NAMES`).
 
 Benötigt: `pandas`, `numpy`, `openpyxl` (optional `matplotlib`).
+
+## Kompakte Heatmap-Tabelle mit Summen (`heatmap_table_png.py`)
+
+Zeichnet eine einzelne Konfusionsmatrix als kompakte Tabelle (Kopf „GT \ Pred“, Spalten A–G, Summe):
+Diagonale grün, Fehlklassifikationen rot nach Anzahl, Nullen weiß. Matrix im Skript (`CM`) eintragen:
+
+```
+python heatmap_table_png.py [ausgabe.png]
+```
+
+Beispielausgabe: `konfusionsmatrix_heatmap.png` (n = 895).
