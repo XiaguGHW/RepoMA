@@ -261,7 +261,7 @@ def write_matrix(ws, top, left, title, cm):
         r = top + 2 + i
         ws.row_dimensions[r].height = 15
         lab = ws.cell(row=r, column=left, value=CODES[i])
-        lab.font = Font(name="Calibri", size=11, bold=True)
+        lab.font = Font(name="Calibri", size=11, bold=True, color=NAVY)
         lab.fill = PatternFill("solid", fgColor=LABEL_FILL)
         lab.alignment = center
         lab.border = Border(left=grid, right=grid, top=grid, bottom=grid)
@@ -362,7 +362,8 @@ def _draw(ax, x0, y0, title, cm):
         y = yh - (i + 1) * ROW_H
         ax.add_patch(Rectangle((x0, y), W, ROW_H, color=col(LABEL_FILL)))
         ax.add_patch(Rectangle((x0, y), W, ROW_H, fill=False, edgecolor=col(GRID), lw=0.8))
-        ax.text(x0 + W / 2, y + ROW_H / 2, CODES[i], ha="center", va="center", fontsize=11, fontweight="bold")
+        ax.text(x0 + W / 2, y + ROW_H / 2, CODES[i], ha="center", va="center", fontsize=11, fontweight="bold",
+                color=col(NAVY))
         for j in range(K):
             v = int(cm[i, j])
             if i == j:
