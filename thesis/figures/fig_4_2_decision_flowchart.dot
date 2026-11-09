@@ -13,10 +13,10 @@ digraph G {
   table [shape=plaintext, label=<
     <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="10" COLOR="#9FB3CF">
       <TR><TD BORDER="0" COLSPAN="4"><B>Step 3</B>  Determine class from R and T</TD></TR>
-      <TR><TD BGCOLOR="#F4F6F9"></TD><TD BGCOLOR="#F4F6F9"><B>T = 0</B></TD><TD BGCOLOR="#F4F6F9"><B>T = 1</B></TD><TD BGCOLOR="#F4F6F9"><B>T ≥ 2</B></TD></TR>
-      <TR><TD BGCOLOR="#F4F6F9"><B>R ≥ 2</B></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Robot</B></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Combined Unit</B></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Combined Unit</B></FONT></TD></TR>
-      <TR><TD BGCOLOR="#F4F6F9"><B>R = 1</B></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Rotary Unit</B></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Combined Unit</B></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Combined Unit</B></FONT></TD></TR>
-      <TR><TD BGCOLOR="#F4F6F9"><B>R = 0</B></TD><TD PORT="a" BGCOLOR="white"><FONT COLOR="#555555"><I>Case A</I></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Linear Unit</B></FONT></TD><TD PORT="b" BGCOLOR="white"><FONT COLOR="#555555"><I>Case B</I></FONT></TD></TR>
+      <TR><TD BGCOLOR="#F4F6F9"></TD><TD BGCOLOR="#F4F6F9"><B>T ≥ 2</B></TD><TD BGCOLOR="#F4F6F9"><B>T = 1</B></TD><TD BGCOLOR="#F4F6F9"><B>T = 0</B></TD></TR>
+      <TR><TD BGCOLOR="#F4F6F9"><B>R ≥ 2</B></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Combined Unit</B></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Combined Unit</B></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Robot</B></FONT></TD></TR>
+      <TR><TD BGCOLOR="#F4F6F9"><B>R = 1</B></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Combined Unit</B></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Combined Unit</B></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Rotary Unit</B></FONT></TD></TR>
+      <TR><TD BGCOLOR="#F4F6F9"><B>R = 0</B></TD><TD PORT="b" BGCOLOR="white"><FONT COLOR="#555555"><I>Case B</I></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Linear Unit</B></FONT></TD><TD PORT="a" BGCOLOR="white"><FONT COLOR="#555555"><I>Case A</I></FONT></TD></TR>
     </TABLE>>];
 
   qa [shape=diamond, margin="0.03,0.03", label="Case A\nGripping function?"];
@@ -39,5 +39,6 @@ digraph G {
   qb -> gantry [label=" all yes"];
   qb -> comb [label=" any no"];
   {rank=same; d1; none1}
-  {rank=same; grip; none2; gantry; comb}
+  {rank=same; gantry; comb; grip; none2}
+  edge [style=invis]; gantry -> comb -> grip -> none2;
 }
