@@ -1,0 +1,43 @@
+digraph G {
+  graph [rankdir=TB, fontname="Liberation Sans", nodesep=0.4, ranksep=0.4, pad=0.25, bgcolor="white"];
+  node  [fontname="Liberation Sans", fontsize=14, penwidth=1.2, color="#1F4E8C", fontcolor="#222222"];
+  edge  [fontname="Liberation Sans", fontsize=13, arrowsize=0.75, penwidth=1.1, color="#555555", fontcolor="#555555"];
+
+  start [shape=box, style="rounded,filled", fillcolor="#1F4E8C", color="#1F4E8C", fontcolor="white", label=<<B>Assembly</B>>];
+  s1 [shape=box, style="rounded", margin="0.2,0.1",
+      label=<<B>Step 1</B>  Identify motion sequence and main function<BR/><FONT POINT-SIZE="12" COLOR="#555555">designation + at least one source (3D view, drawing or BOM)</FONT>>];
+  s2 [shape=box, style="rounded", margin="0.2,0.1",
+      label=<<B>Step 2</B>  Count actuators realising the main function<BR/><FONT POINT-SIZE="12" COLOR="#555555">R = rotary, T = translational; auxiliary functions, end effectors and<BR/>manual axes excluded; actuators in the same direction count as one</FONT>>];
+  d1 [shape=diamond, margin="0.03,0.03", label="Main function a\nhandling function?"];
+
+  table [shape=plaintext, label=<
+    <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="10" COLOR="#9FB3CF">
+      <TR><TD BORDER="0" COLSPAN="4"><B>Step 3</B>  Determine class from R and T</TD></TR>
+      <TR><TD BGCOLOR="#F4F6F9"></TD><TD BGCOLOR="#F4F6F9"><B>T = 0</B></TD><TD BGCOLOR="#F4F6F9"><B>T = 1</B></TD><TD BGCOLOR="#F4F6F9"><B>T ≥ 2</B></TD></TR>
+      <TR><TD BGCOLOR="#F4F6F9"><B>R ≥ 2</B></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Robot</B></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Combined Unit</B></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Combined Unit</B></FONT></TD></TR>
+      <TR><TD BGCOLOR="#F4F6F9"><B>R = 1</B></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Rotary Unit</B></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Combined Unit</B></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Combined Unit</B></FONT></TD></TR>
+      <TR><TD BGCOLOR="#F4F6F9"><B>R = 0</B></TD><TD PORT="a" BGCOLOR="white"><FONT COLOR="#555555"><I>Case A</I></FONT></TD><TD BGCOLOR="#DCE6F2"><FONT COLOR="#1F4E8C"><B>Linear Unit</B></FONT></TD><TD PORT="b" BGCOLOR="white"><FONT COLOR="#555555"><I>Case B</I></FONT></TD></TR>
+    </TABLE>>];
+
+  qa [shape=diamond, margin="0.03,0.03", label="Case A\nGripping function?"];
+  qb [shape=diamond, margin="0.02,0.02", fontsize=13, label="Case B  Gantry test\n(a) orthogonal axes\n(b) ≥ 2 horizontal axes\n(c) X-axis guided\non both sides"];
+
+  node [shape=box, style="filled", fillcolor="#DCE6F2", color="#9FB3CF", fontcolor="#1F4E8C", margin="0.18,0.1", width=1.9, height=0.65];
+  none1  [label=<<B>None of the<BR/>Available Classes</B>>];
+  grip   [label=<<B>Gripper</B>>];
+  none2  [label=<<B>None of the<BR/>Available Classes</B>>];
+  gantry [label=<<B>Multi-Axis System<BR/>(Gantry)</B>>];
+  comb   [label=<<B>Combined Unit</B>>];
+
+  start -> s1 -> s2 -> d1;
+  d1 -> none1 [label="  no"];
+  d1 -> table [label=" yes"];
+  table:a:s -> qa;
+  table:b:s -> qb;
+  qa -> grip [label=" yes"];
+  qa -> none2 [label=" no"];
+  qb -> gantry [label=" all yes"];
+  qb -> comb [label=" any no"];
+  {rank=same; d1; none1}
+  {rank=same; grip; none2; gantry; comb}
+}
