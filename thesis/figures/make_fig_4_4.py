@@ -28,7 +28,7 @@ examples = [
     {"name": "Articulated robot", "initial": "Robot", "votes": ["Robot (3/3)"],
      "finding": "Unanimous classification; label consistent with the codebook",
      "allowed": "{Robot}", "regime": "E1"},
-    {"name": "Machine frame", "initial": "None of the Available Classes",
+    {"name": "Mounting part", "initial": "None of the Available Classes",
      "votes": ["None of the Available Classes (2/3)", "Gripper (1/3)"],
      "finding": "Dissenting vote not supported: no gripping function (R = 0, T = 0)",
      "allowed": "{None of the Available Classes}", "regime": "E2"},
