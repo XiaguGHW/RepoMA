@@ -171,9 +171,13 @@ For each assembly, the participants' classifications were compared with the init
 
 **③ Ambiguity regime 的定义**
 
-The review was used to assign each assembly to one of three ambiguity regimes according to how clearly a single class could be determined (Figure 4.4). In regime E1, all participants chose the same class, and the review confirmed that this class complies with the codebook. In regime E2, some participants selected a different class, but the review confirmed that applying the codebook rules yielded a single class and that the documentation did not support the alternative classifications. In regime M, participants disagreed, and the review showed that the documentation and the codebook support more than one class. Participants disagreed in both E2 and M, but the codebook resolved the disagreement only in E2.
+The review was used to assign each assembly to one of three ambiguity regimes according to how clearly a single class could be determined. In regime E1, all participants chose the same class, and the review confirmed that this class complies with the codebook. In regime E2, some participants selected a different class, but the review confirmed that applying the codebook rules yielded a single class and that the documentation did not support the alternative classifications. In regime M, participants disagreed, and the review showed that the documentation and the codebook support more than one class. Participants disagreed in both E2 and M, but the codebook resolved the disagreement only in E2.
 
-根据复核结果，每个装配体被归入三个歧义类别之一，具体取决于能否明确判定唯一的功能类别（图 4.4）。在 E1 中，所有参与者都选择了同一类别，复核确认该类别符合 Codebook。在 E2 中，部分参与者选择了其他类别，但复核确认，按 Codebook 的规则只能得出一个类别，且资料不支持其他分类结果。在 M 中，参与者意见不一致，复核表明资料和 Codebook 支持不止一个类别。E2 和 M 都存在分歧，但只有在 E2 中，Codebook 能够解决这种分歧。
+根据复核结果，每个装配体被归入三个歧义类别之一，具体取决于能否明确判定唯一的功能类别。在 E1 中，所有参与者都选择了同一类别，复核确认该类别符合 Codebook。在 E2 中，部分参与者选择了其他类别，但复核确认，按 Codebook 的规则只能得出一个类别，且资料不支持其他分类结果。在 M 中，参与者意见不一致，复核表明资料和 Codebook 支持不止一个类别。E2 和 M 都存在分歧，但只有在 E2 中，Codebook 能够解决这种分歧。
+
+Figure 4.4 illustrates the three regimes with one example each. All participants assigned the articulated robot to the same class, and the review confirmed that classification. For the mounting part, one participant chose Gripper, but the assembly has no gripping function, so the codebook leads to None of the Available Classes. A secondary rotary component in the lifting unit contributes indirectly to the lifting motion, which allows the assembly to be interpreted as either a Linear Unit or a Combined Unit. Both classes were therefore allowed.
+
+图 4.4 为每种 regime 各举了一个例子。关节机器人的分类完全一致，复核确认了该标签。固定件有一名参与者选了夹爪，但它没有夹持功能，因此按 Codebook 应归为“不属于任何可用类别”。升降单元中，一个次要的旋转部件间接参与了升降运动，因此它既可以理解为直线单元，也可以理解为组合单元，两个类别都被允许。
 
 **[Insert Figure 4.4 here / 在此插入图 4.4]**
 
