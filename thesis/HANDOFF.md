@@ -149,10 +149,11 @@
   - Prompt 比较：P1 基础（类名）/ P2 + 类别定义 / P3 + 决策逻辑 / P4 + 例子和例外，在 115 个上比较，模型为 Claude Haiku 4.5、Claude Opus 4.8、Gemini 2.5 Flash、Gemini 2.5 Pro → 选定 P3
   - 输入形式比较（P3）：PDF（全部 PDF 文件）/ 图片（CAD 截图、DFC 结构、PDF 转成的页面）/ 文本（从 PDF 和图片中提取的原始文本），同样 4 个模型；图片中的文本用开源 OCR 工具 Tesseract 提取
   - 稳定性：P3，各 10 次：Claude Haiku 4.5 PDF、Gemini 2.5 Pro PDF、GPT-5.5 图片、DeepSeek V4 Flash 文本（Gemini 2.5 Flash PDF 也跑了，用户不打算写）
+  - 模型接入（Bosch 内部模型目录）：GPT-5.5 和 DeepSeek-V4-Flash 通过 Azure OpenAI 端点调用；Claude 和 Gemini 通过 Vertex AI 调用。GPT-5.5 用图片输入的理由：Azure OpenAI 上 PDF 输入在服务器端被转成提取文本 + 页面图片，处理过程不透明（且部分端点会忽略 PDF），所以在本地把 PDF 页面转成图片；DeepSeek 用文本（是否因为不支持图片，待确认）
   - 补充数据集验证：上述 4 种配置在 70 个上各运行一次；合并结果为 `185BG_Ergebnisse/PPT_Ready_185BG_4_Models.xlsx`
   - 章节顺序：Prompt → 输入形式 → 总体表现与稳定性 → E1/E2/M → 错误分析 → 70 个验证 → 成本 → 小结
   - 中期报告 PPT 中的准确率基于旧 GT，论文中要用最终版 GT 重新计算的结果（可能是 `Evaluation_Allowed_Strict.xlsx`）
-- [ ] 第 5 章待确认：Gemini 2.5 Flash 是整章不写还是只在稳定性中不写，以及理由；GPT-5.5 只用图片、DeepSeek 只用文本的理由；稳定性 10 次运行用的是哪批装配体
+- [ ] 第 5 章待确认：Gemini 2.5 Flash 是整章不写还是只在稳定性中不写，以及理由；DeepSeek-V4-Flash 是否不支持图片 / PDF 输入；GPT-5.5 当时是否实际试过 PDF 输入；稳定性 10 次运行用的是哪批装配体
 - [ ] 第 5 章：实验是否在 Bosch Assembly Assistant 中运行（影响第 6 章的位置和写法）
 - [x] 第三阶段 GT 修正的数量（见 `thesis/classification_data_and_revision_statistics.md`）：B → C 有 2 个主标签改类别（Excel 行 8、43），7 个 regime 变为 M（5 个 E1 → M，2 个 E2 → M，均在主数据集），另有几行 M 的其他允许类别有变化（如行 113、125、129）
 - [x] Excel 行 112（0804EN7325）：原表在 B 和 C 中都标为 M，但没有其他允许类别（原表就是空白）。决定：按 E2 处理，GT 为 Kombinierte Einheit。调整后 B 阶段为 E1 122 / E2 49 / M 28，C 阶段为 E1 117 / E2 47 / M 35
