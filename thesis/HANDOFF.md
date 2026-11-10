@@ -104,9 +104,9 @@
 - 英文用词要统一，建议用 “ambiguity regime” 或 “agreement category”，并在第一次出现时定义；要说清 E2 和 M 的区别
 - M 类的多个允许标签：对意见不一致的装配体，人工对照资料和 Codebook 分析得出
 
-### 结果数据（中期报告，基于 129 个，需要按 199 个重新计算）
-- Krippendorff's α（E1+E2）= 0.806；M 类的 α 没有解释意义
-- 平均用时：工程师 31 秒/个，学生 42 秒/个（重新计算后学生组会变化，因为第四次全是学生）
+### 结果数据
+- Krippendorff's α 基于全部 199 个装配体（中期报告 PPT 标注为 129 个是错的）：E1+E2 = 0.806；E1+E2+M = 0.751；M 单独 = 0.463（不一定写进论文）
+- 平均用时：工程师 31 秒/个，学生 42 秒/个（是否已包含第四次研讨会、即是否基于 199 个，待确认）
 - 典型歧义案例：**Hubeinheit**（不是 Codebook 里的例子，是复核时遇到的）——名称暗示 Linear Unit，但有一个次要旋转部件间接实现升降，所以是 M，允许 Linear Unit 和 Combined Unit → 放在 4.5.1
 
 ## 5 写作规则与风格决定
@@ -139,8 +139,9 @@
 - [ ] 4.2 是否写“Codebook 由作者与导师共同制定”，问 Jonas
 - [x] 表 4.1 保留复核前的原始分布，不修改；4.5.1 不报告复核后的类别分布范围。类别 × regime 的表只在第 5 章放一次（最终版 GT）
 - [x] 每个装配体由 5–10 人标注（已核实）
-- [ ] 按 199 个重新计算 α、Regime 分布和用时
-- [ ] 4.4：α 是在 Excel 中用公式手动搭建计算的（名义尺度，按 Krippendorff 的方法）。按 199 个重新计算时，用 Python（如 `krippendorff` 包）独立复核一次，确认两边结果一致；正文写 “calculated in Excel following Krippendorff's procedure for nominal data”，复核后可补 “verified with …”
+- [x] α 和 Regime 分布已基于 199 个（α 见第 5 节“结果数据”，Regime 分布见 `thesis/classification_data_and_revision_statistics.md`）
+- [ ] 用时 31 秒 / 42 秒是否基于 199 个，待确认
+- [ ] 4.4：α 是在 Excel 中用公式手动搭建计算的（名义尺度，按 Krippendorff 的方法）。用 Python（如 `krippendorff` 包）独立复核一次，确认两边结果一致；正文写 “calculated in Excel following Krippendorff's procedure for nominal data”，复核后可补 “verified with …”
 - [ ] 讨论点（4.6 只简短提对 LLM 评价的意义，展开放第 7 章 Role of Rules and Ambiguity）：组合单元 27 个中有 20 个是 E2（个别参与者选了其他类别，但复核后按 Codebook 仍归为组合单元）。4.5.1 只报告数字；另一个可讨论的点：M 有 27 个在主数据集，补充数据集只有 1 个
 - [ ] 4.4 ⑦ / 4.5.3：工程师只标注了主数据集中的 32 个装配体。是否在比较工程师与学生用时时说明这一点（或只在同一批装配体上比较），看过重新计算的数据后再定；按 regime 比较用时暂不写
 - [ ] 第 5 章：5 种配置的具体组合（模型、P1–P4、输入形式 PDF / 图片 / 文本），每种配置运行 10 次，主指标 Allowed-Label-Set Accuracy
