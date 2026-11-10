@@ -245,6 +245,32 @@ The engineers required a mean of 31 s per assembly and the students 42 s. Sectio
 
 工程师平均每个装配体用时 31 秒，学生平均用时 42 秒。第 4.6 节对这些用时进行讨论，第 5 章则将其作为效率比较的人工基准。
 
+## 4.6 Implications for the LLM Evaluation | 对 LLM 评价的意义
+
+**① 概述**
+
+The evaluation of LLM-based classification in Chapter 5 is guided by the workshop results. They provide the reference labels, the basis for distinguishing between unambiguous and ambiguous assemblies and a human baseline for the time required.
+
+第 5 章以研讨会结果为依据，评价基于 LLM 的分类。研讨会结果提供了参考标签、区分分类明确与存在歧义的装配体的依据，以及分类用时的人工基准。
+
+**② 按 regime 分别评价**
+
+Since the regimes differ in how unambiguously an assembly can be classified, the LLM results are reported separately for E1, E2 and M in addition to the overall result. An error in E1 represents a departure from a clear human judgement, since all participants assigned the same class to the assembly. Regime E2 shows whether the LLM applies the codebook rules correctly in cases where individual participants deviated. Because the documentation and the codebook support multiple classes in regime M, the results for this regime are interpreted differently.
+
+各个 regime 的分类明确程度不同，因此除了总体结果外，LLM 的结果还按 E1、E2 和 M 分别报告。在 E1 中，所有参与者都为同一个装配体选了相同的类别，因此模型分类出错就意味着偏离了明确的人工判断。E2 用于检验在个别参与者的分类出现偏差时，LLM 是否正确运用了 Codebook 的规则。由于在 M 中，资料和 Codebook 支持多个类别，因此需要用不同的方式解读这一 regime 的结果。
+
+**③ Allowed-Label-Set Accuracy**
+
+Allowed-Label-Set Accuracy is therefore used as the primary evaluation metric. A classification counts as correct if the predicted class is contained in the set of allowed labels of the assembly (Section 4.4). Each assembly in regimes E1 and E2 has exactly one allowed class, so the metric is equivalent to conventional accuracy for these assemblies. For assemblies in regime M, a prediction of any allowed class counts as correct, even if it differs from the primary label.
+
+因此，采用 Allowed-Label-Set Accuracy 作为主要评价指标。如果预测类别属于该装配体的允许标签集合（第 4.4 节），则该次分类计为正确。E1 和 E2 中的每个装配体都只有一个允许类别，因此对于这些装配体，该指标等同于常规准确率。对于 M 中的装配体，只要预测的是任一允许类别，即使与主标签不同，也计为正确。
+
+**④ 过渡到第 5 章**
+
+Chapter 5 builds on these results. After describing the experimental setup and configurations, the chapter evaluates LLM-based classification against the reviewed ground truth and includes a comparison with human processing times in Section 5.9.
+
+第 5 章在这些结果的基础上展开。该章先介绍实验设置和配置，再以复核后的 Ground Truth 为参考，评价基于 LLM 的分类，并在第 5.9 节与人工处理时间进行比较。
+
 ## 待处理
 
 - 第 ④ 段的 DFC 官方文件引用，以及 Teamcenter 和 Autodesk Vault 的关系（BMG 如果两者都在用，加一句说明）。
@@ -259,3 +285,8 @@ The engineers required a mean of 31 s per assembly and the students 42 s. Sectio
 ### 4.5 待办
 
 - [ ] 4.5.1 ③ 的 [reason]：补充机器人那几个例子为什么也允许组合单元。行 32、35、40、42、99、127 都是这种情况，如果原因不一样，写最常见的那种。
+
+### 4.6 待办
+
+- [ ] **④ 引用的第 5.9 节**：第 5 章定稿后核对编号。
+- [ ] **是否提主数据集和补充数据集的差别**：M 类有 27 个在主数据集，补充数据集只有 1 个，可能影响 5.8 的验证结果。可以留到第 5 章或第 7 章再说。
