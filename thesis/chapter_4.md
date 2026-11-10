@@ -131,6 +131,30 @@ Finally, the result is cross-checked against the class definitions and eight doc
 
 最后，对照类别定义和八个已记录的边界案例核对分类结果。例如，安装在升降气缸上的夹爪归为直线单元，因为夹爪被视为末端执行器，仅统计升降轴。相比之下，安装在附加直线轴上的关节机器人归为组合单元，因为它的运动学同时涉及旋转和平移。附录 A 收录了完整的 Codebook 及全部边界案例。
 
+## 4.3 Workshop Design and Implementation | Workshop 设计与实施
+
+**① Workshop 目标**
+
+The labeling workshop aimed both to validate the classification scheme using real assemblies and to record the classifications made by participants and the time they took for each assembly. The recorded classifications serve as the basis for correcting the preliminary ground truth, which consisted of the initial labels assigned before the workshop.
+
+标注研讨会旨在用实际装配体验证分类体系，同时记录参与者的分类结果及其对每个装配体进行分类所用的时间。记录的分类结果用于修正初步的 Ground Truth。该初步 Ground Truth 由研讨会前分配的初始标签组成。
+
+**② 分类模板**
+
+Classifications were recorded in an Excel template with one row per assembly (Figure 4.3). For each assembly, participants were required to record a class and rate their confidence on a four-level scale from certain to uncertain. If a second class was plausible, it was entered as a second choice. When participants based a decision on documentation beyond the information in the template, they noted the decisive source, such as the 3D view, the drawing or the bill of materials. A short note was required for uncertain classifications, for the class None of the Available Classes and whenever a second choice was given. The confidence rating therefore indicates how certain participants were about their classification, while the second choice records ambiguity between classes. A timestamp was recorded automatically for each entry, from which the processing time per assembly was derived.
+
+分类结果记录在 Excel 模板中，每个装配体占一行（图 4.3）。对于每个装配体，参与者必须填写类别，并按从“确定”到“不确定”的四级量表评定置信度。如果另一个类别也合理，则将其填为第二选择。如果参与者依据模板所提供信息之外的资料作出判断，则需注明起决定作用的资料来源，例如三维视图、图纸或物料清单。分类不确定、归入“不属于任何可用类别”或填写了第二选择时，都需要附上一条简短备注。因此，置信度反映参与者对分类结果的确定程度，第二选择记录类别之间的歧义。每条记录都会自动生成时间戳，并据此计算每个装配体的处理时间。
+
+**[Insert Figure 4.3 here / 在此插入图 4.3]**
+
+*Figure 4.3. Simplified structure of the classification template used in the labeling workshop / 图 4.3 标注研讨会所用分类模板的简化结构*
+
+**③ 实施过程**
+
+The workshop took place over four sessions and involved 16 participants, including four engineers and 12 students. All sessions followed the same procedure. To establish a common basis for classification, participants began by spending approximately ten minutes reading the codebook. They then classified the assemblies individually, using Teamcenter and DFC for further research where required, with a time budget of approximately two minutes per assembly. Participants each classified a subset of the assemblies, with five to ten participants independently classifying each assembly.
+
+研讨会分四次举行，共有 16 人参加，其中 4 名工程师、12 名学生。每次研讨会都采用相同的流程。为建立统一的分类基础，参与者首先花约 10 分钟阅读 Codebook。随后，参与者各自对装配体进行分类，必要时通过 Teamcenter 和 DFC 查阅补充资料。每个装配体的分类时间预算约为 2 分钟。每名参与者负责其中一部分装配体，每个装配体均由 5 至 10 名参与者独立分类。
+
 ## 待处理
 
 - 第 ④ 段的 DFC 官方文件引用，以及 Teamcenter 和 Autodesk Vault 的关系（BMG 如果两者都在用，加一句说明）。
