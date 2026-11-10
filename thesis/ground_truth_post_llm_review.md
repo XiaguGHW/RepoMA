@@ -131,3 +131,36 @@
 | 53 | 0804LC3026 | AS00234653 | gripper unit | Greifereinheit | — | Greifer | E1 | — |
 
 本部分共 24 行：E1 为 19 行、E2 为 3 行、M 为 2 行。所有 Baugruppenebene 均为空；第 82、88 行 Teamcenter 为空。第 73、77、78、87 行的 Ground Truth 可见 `Keine der verfügbaren Klasse`，末尾可能被列宽截断，待与原表核对。
+
+## 第五部分
+
+来源：Excel 第 96–119 行的两张照片，按共同列及行顺序对应。空白单元格记为“—”。
+
+| ID | SAP-Nummer | Teamcenter | Benennung (E) | Benennung (D) | Baugruppenebene | Ground Truth | Register | Weitere zulässige Ground Truth |
+|---:|---|---|---|---|---|---|---|---|
+| 38 | 0804FL5283 | AS90000589/00 | robot | Roboter | — | Roboter | E1 | — |
+| 10 | 0804FT6844 | AS90412772 | handling | Handling | — | Kombinierte Einheit | E2 | — |
+| 11 | 0804EZ0597 | AS90254883 | handling | Handling | — | Kombinierte Einheit | E2 | — |
+| 15 | 0804KX4663 | AS00210838/01 | robot | Roboter | — | Roboter | M | Kombinierte Einheit |
+| 44 | 0804JX5476 | AS00060502 | rotation unit | Rotationseinheit | — | Rotationseinheit | M | Keine der verfügbaren Klassen |
+| 3 | 0804KV0861 | AS00185760 | gripper unit | Greifereinheit | — | Greifer | M | Rotationseinheit |
+| 19 | 0804HL3088 | AS90196761 | rotate unit | Dreheinheit | — | Rotationseinheit | E2 | — |
+| 69 | 0804HH8872 | AS90105353 | handling unit | Handlingseinheit | — | Kombinierte Einheit | E2 | — |
+| 51 | 0804JX8777 | AS00071851 | control panel | Bedienungstafel | — | Keine der verfügbaren Klasse（末尾待核对） | E2 | — |
+| 30 | 0804LM2565 | AS00324657 | sensor | Sensor | — | Keine der verfügbaren Klasse（末尾待核对） | E2 | — |
+| 32 | 0804LW3879 | AS00365660 | Lifting Unit | Hubeinheit | — | Lineareinheit | M | Kombinierte Einheit |
+| 45 | 0804HK2005 | AS90238554 | gripper unit | Greifereinheit | — | Greifer | M | Rotationseinheit |
+| 60 | 0804LM8093 | AS00324179 | rotate unit | Dreheinheit | — | Rotationseinheit | E2 | — |
+| 50 | 0804KY7178 | AS00217781 | Lifter | Ausheber | — | Lineareinheit | M | Kombinierte Einheit |
+| 14 | 0804LA7293 | AS00242009 | handling unit | Handlingseinheit | — | Kombinierte Einheit | E2 | — |
+| 36 | 0804CM8667 | AS90308571/00 | rotation unit | Rotationseinheit | — | Rotationseinheit | M | Kombinierte Einheit |
+| 37 | 0804EN7325 | AS90118452/01 | gantry | Portal | — | Kombinierte Einheit | M | — |
+| 41 | 0804LK3617 | AS00295735 | rotate unit | Dreheinheit | — | Rotationseinheit | M | Kombinierte Einheit |
+| 17 | 0804GT0312 | AS90082305 | handling unit | Handlingseinheit | — | Kombinierte Einheit | E2 | — |
+| 54 | 0804MB2849 | AS00394314 | Lifting Unit | Hubeinheit | — | Lineareinheit | M | Kombinierte Einheit |
+| 48 | 0804KU1528 | AS00184530 | gripper unit | Greifereinheit | — | Greifer | M | Lineareinheit |
+| 57 | 3842998383 | PT00412992 | conveyor track | Förderbahn | — | Keine der verfügbaren Klasse（末尾待核对） | E2 | — |
+| 56 | 0804KV2157 | AS00190354 | handling unit | Handlingseinheit | — | Kombinierte Einheit | E2 | — |
+| 47 | 0804GT5112 | AS90282232 | handling unit | Handlingseinheit | — | Kombinierte Einheit | E1 | — |
+
+本部分共 24 行：E1 为 2 行、E2 为 11 行、M 为 11 行。Baugruppenebene 在照片中均为空。第 104、105、117 行的 Ground Truth 可见 `Keine der verfügbaren Klasse`，末尾可能被列宽截断，待与原表核对。第 112 行（0804EN7325）为 M，但其他允许类别在照片中为空，按原样保留。
