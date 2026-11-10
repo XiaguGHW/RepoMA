@@ -137,7 +137,7 @@
 - [ ] DFC 官方文件的引用格式；Teamcenter 与 Autodesk Vault 的关系（BMG 是否两者都在用）
 - [ ] 4.1 中“操作类装配体是 BMG 非标设备的核心组成部分”这一理由，向 Jonas 确认
 - [ ] 4.2 是否写“Codebook 由作者与导师共同制定”，问 Jonas
-- [ ] 表 4.1 最终分布（复核后可能变化，同时更新“22 至 31”）
+- [x] 表 4.1 保留复核前的原始分布，不修改；4.5.1 不报告复核后的类别分布范围。类别 × regime 的表只在第 5 章放一次（最终版 GT）
 - [x] 每个装配体由 5–10 人标注（已核实）
 - [ ] 按 199 个重新计算 α、Regime 分布和用时
 - [ ] 4.4：α 是在 Excel 中用公式手动搭建计算的（名义尺度，按 Krippendorff 的方法）。按 199 个重新计算时，用 Python（如 `krippendorff` 包）独立复核一次，确认两边结果一致；正文写 “calculated in Excel following Krippendorff's procedure for nominal data”，复核后可补 “verified with …”
