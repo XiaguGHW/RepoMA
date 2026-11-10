@@ -33,6 +33,77 @@ Six models from four providers were used: Claude Haiku 4.5 and Claude Opus 4.8 (
 
 实验使用了来自四家厂商的六个模型，包括 Claude Haiku 4.5 和 Claude Opus 4.8（Anthropic）、Gemini 2.5 Flash 和 Gemini 2.5 Pro（Google）、GPT-5.5（OpenAI），以及 DeepSeek-V4-Flash（DeepSeek）（接入方式和模型版本见附录 [Y]）。每个装配体通过单独的请求进行分类，不带入此前请求的信息。所有模型的 temperature 均设为 0。由于这一决策任务按 Codebook 规则只有一个正确类别，因此目标是获得最可能的输出并避免输出之间的变化，同时 temperature 为 0 也有助于提高可复现性。每轮运行后，找出输出为空的请求并单独重新运行。重新运行后，每个装配体均有有效输出，且每个输出都包含七个类别名称之一。每次请求的 token 用量均被记录，用于成本分析。
 
+## 5.2 Ground Truth Revision and Evaluation Metrics | Ground Truth 修订与评价指标
+
+This section first describes the final revision of the ground truth and then the metrics and statistical methods used in the following sections.
+
+本节首先介绍 Ground Truth 的最终修订，然后介绍后续各节使用的评价指标和统计方法。
+
+**① 修订的触发**
+
+The LLM experiments led to a final review of the ground truth. All assemblies for which a configuration predicted a class outside the allowed label set were reviewed again following the procedure in Section 4.4.
+
+LLM 实验之后，对 Ground Truth 进行了最终复核。凡是有配置预测出允许标签集合以外类别的装配体，都按第 4.4 节的流程重新复核。
+
+**② 修订结果**
+
+The review changed the primary label of two assemblies: one assembly previously labelled Linear Unit was reassigned to Combined Unit and one previously labelled Combined Unit to Rotary Unit, with the previous label retained as an allowed label in both cases. Seven assemblies were moved to regime M, five from E1 and two from E2, and for three further assemblies in regime M the set of allowed labels was changed. All changes concern the primary set. Across all 199 assemblies, the final ground truth comprises 117 assemblies in regime E1, 47 in E2 and 35 in M. It was applied to all configurations and experimental stages.
+
+复核修改了两个装配体的主标签：一个原为直线单元的装配体改为组合单元，一个原为组合单元的装配体改为旋转单元，两者都保留原标签作为允许标签。有七个装配体改为 M，其中五个原属 E1，两个原属 E2；另有三个 M 类装配体的允许标签集合发生了变化。所有修改都在主数据集中。在全部 199 个装配体中，最终版 Ground Truth 有 117 个属于 E1、47 个属于 E2、35 个属于 M。最终版 Ground Truth 统一用于所有配置和实验阶段。
+
+**③ 评价数据集的分布**
+
+Table 5.2 shows the distribution of the 185 evaluated assemblies across classes and ambiguity regimes according to the final ground truth.
+
+表 5.2 列出了 185 个参与评价的装配体按最终版 Ground Truth 在各类别和歧义类别中的分布。
+
+**Table 5.2. Evaluated assemblies by class and ambiguity regime (final ground truth) / 表 5.2 参与评价的装配体按类别和歧义类别的分布（最终版 Ground Truth）**
+
+| Class / 类别 | Primary (115) E1 / E2 / M | Supplementary (70) E1 / E2 / M | Total / 合计 |
+| --- | --- | --- | ---: |
+| Gripper / 夹爪 | 9 / 3 / 6 | 7 / 3 / 0 | 28 |
+| Linear Unit / 直线单元 | 11 / 3 / 5 | 7 / 2 / 1 | 29 |
+| Rotary Unit / 旋转单元 | 5 / 5 / 7 | 9 / 1 / 0 | 27 |
+| Robot / 机器人 | 13 / 0 / 5 | 10 / 0 / 0 | 28 |
+| Multi-Axis System (Gantry) / 多轴系统（龙门） | 8 / 3 / 5 | 4 / 1 / 0 | 21 |
+| Combined Unit / 组合单元 | 1 / 17 / 2 | 3 / 2 / 0 | 25 |
+| None of the Available Classes / 不属于任何可用类别 | 4 / 3 / 0 | 19 / 1 / 0 | 27 |
+| **Total / 合计** | **51 / 34 / 30** | **59 / 10 / 1** | **185** |
+
+*Note: Classes refer to the primary label.*
+
+注：类别指主标签。
+
+**④ 指标**
+
+For assembly $i$ ($i = 1, \dots, N$), let $\hat{y}_i$ denote the predicted class, $y_i$ the primary label and $A_i$ the set of allowed labels, with $y_i \in A_i$; $C$ denotes the set of the seven classes. The main metric is the Allowed Accuracy defined in Section 4.6, which follows evaluation practice for datasets with several valid labels per item (Shankar et al., 2020; Beyer et al., 2020):
+
+$$\text{Allowed Accuracy} = \frac{1}{N} \sum_{i=1}^{N} \mathbb{1}\left[\hat{y}_i \in A_i\right] \tag{5.1}$$
+
+对于装配体 $i$（$i = 1, \dots, N$），$\hat{y}_i$ 表示预测类别，$y_i$ 表示主标签，$A_i$ 表示允许标签集合，且 $y_i \in A_i$；$C$ 表示七个类别的集合。主要指标是第 4.6 节定义的 Allowed Accuracy，它沿用了每个样本有多个有效标签时的评价做法（Shankar et al., 2020; Beyer et al., 2020）。
+
+Class-specific performance is described by Allowed Precision and Allowed Recall, which apply the standard definitions (Sokolova & Lapalme, 2009) to the allowed label sets:
+
+$$\text{AP}_c = \frac{\left|\{\, i : \hat{y}_i = c \,\wedge\, c \in A_i \,\}\right|}{\left|\{\, i : \hat{y}_i = c \,\}\right|} \qquad \text{AR}_c = \frac{\left|\{\, i : y_i = c \,\wedge\, \hat{y}_i \in A_i \,\}\right|}{\left|\{\, i : y_i = c \,\}\right|} \tag{5.2}$$
+
+Both are averaged over the seven classes with equal weight to obtain Allowed Macro-Precision and Allowed Macro-Recall. This extension ensures that a prediction counted as correct by the Allowed Accuracy is not counted as an error in precision or recall.
+
+各类别的表现用 Allowed Precision 和 Allowed Recall 描述，即把标准定义（Sokolova & Lapalme, 2009）应用到允许标签集合上。两者在七个类别上等权平均，得到 Allowed Macro-Precision 和 Allowed Macro-Recall。这一扩展保证了被 Allowed Accuracy 计为正确的预测，在 Precision 和 Recall 中不会被计为错误。
+
+F1 is reported only in its strict form, since under the allowed criterion precision and recall can refer to different classes for the same prediction. Strict Macro-F1 is the mean of the class-wise F1 values (Opitz & Burst, 2019):
+
+$$\text{Strict Macro-F1} = \frac{1}{|C|} \sum_{c \in C} \frac{2\, \text{P}_c\, \text{R}_c}{\text{P}_c + \text{R}_c} \tag{5.3}$$
+
+where $\text{P}_c$ and $\text{R}_c$ follow from Equation 5.2 with $A_i$ replaced by $\{y_i\}$. It indicates how often the primary label itself is predicted and allows comparison with studies that use a single correct label. For configurations with ten runs, each metric is calculated per run and averaged across the runs.
+
+F1 只报告严格形式，因为在允许标签准则下，同一个预测在 Precision 和 Recall 中可能分别对应不同的类别。Strict Macro-F1 是各类别 F1 的平均值（Opitz & Burst, 2019）。其中 $\text{P}_c$ 和 $\text{R}_c$ 由公式 5.2 将 $A_i$ 替换为 $\{y_i\}$ 得到。它反映模型预测出主标签本身的频率，并可与只使用一个正确标签的研究进行比较。对于运行十次的配置，每个指标按每次运行分别计算，再在各次运行之间取平均。
+
+**⑤ 统计方法**
+
+Given the size of the dataset, the results depend on which assemblies it contains. All values are therefore reported with 95 % confidence intervals obtained by bootstrapping (Efron & Tibshirani, 1993; Miller, 2024). In each of 2,000 resamples, the assemblies were drawn with replacement, each together with its predictions from all runs, and all metrics were recalculated; the 2.5th and 97.5th percentiles of the resulting values form the interval. Differences between the final configurations were tested with a paired bootstrap, in which both configurations are evaluated on the same resampled assemblies (Koehn, 2004; Berg-Kirkpatrick et al., 2012). The test covers Allowed Accuracy, Allowed Macro-Precision, Allowed Macro-Recall and Strict Macro-F1. Since each metric involves six pairwise comparisons, the p-values were adjusted with the Holm procedure (Holm, 1979), separately for each metric because the metrics address different questions (Bender & Lange, 2001).
+
+由于数据集规模有限，结果取决于数据集中包含哪些装配体。因此，所有数值都附有通过 Bootstrap 得到的 95% 置信区间（Efron & Tibshirani, 1993; Miller, 2024）。在 2000 次重抽样中，每次都有放回地抽取装配体，每个装配体带上它在所有运行中的预测，并重新计算所有指标；所得数值的第 2.5 和第 97.5 百分位数构成置信区间。最终配置之间的差异用配对 Bootstrap 检验，即两种配置在同一批重抽样的装配体上评价（Koehn, 2004; Berg-Kirkpatrick et al., 2012）。检验涵盖 Allowed Accuracy、Allowed Macro-Precision、Allowed Macro-Recall 和 Strict Macro-F1。由于每个指标涉及六对比较，p 值采用 Holm 方法校正（Holm, 1979）。由于各指标回答的是不同的问题，校正按指标分别进行（Bender & Lange, 2001）。
+
 ## 待处理
 
 ### 5.1 待办
@@ -40,6 +111,11 @@ Six models from four providers were used: Claude Haiku 4.5 and Claude Opus 4.8 (
 - [ ] **附录 [X]**：L1–L4 的结果，按最终版 GT 重算。
 - [ ] **附录 [Y]**：接入方式、模型版本号、输入转换设置、生成参数。
 - [ ] **GPT-5.5 的 temperature**：查请求日志确认确实是 0。
+
+### 5.2 待办
+
+- [ ] **p 值的算法**：对照 `evaluate_allowed_strict.py` 确认配对 Bootstrap 的 p 值如何得出。
+- [ ] **偏向说明**：只复核了预测错误的装配体，修订可能使 LLM 结果偏好。问过 Jonas 后决定写在 5.2 还是第 7 章，以及是否做修订前 GT 的敏感性分析（附录 [Z]）。
 
 ### 章节安排
 
