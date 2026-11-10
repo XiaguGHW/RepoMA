@@ -207,6 +207,44 @@ The timestamps were used to determine processing times and calculate the mean ti
 
 根据时间戳确定处理时间，并分别计算工程师和学生处理每个装配体的平均用时。
 
+## 4.5 Results | 结果
+
+The workshop results are organized into three parts covering the outcome of the ground truth review and the resulting distribution of ambiguity regimes, agreement among participants, and the time required for classification. All results refer to the ground truth before the LLM experiments; its final revision is described in Chapter 5.
+
+研讨会结果分三部分呈现：Ground Truth 的复核结果及由此得出的歧义类别（ambiguity regime）分布、参与者之间的一致性，以及分类所需的时间。所有结果均基于 LLM 实验前的 Ground Truth，其最终修订见第 5 章。
+
+### 4.5.1 GT Review and Regime Distribution | Ground Truth 复核与 Regime 分布
+
+**① 复核结果概述**
+
+The review described in Section 4.4 assigned 122 of the 199 assemblies (61.3 %) to regime E1, 49 (24.6 %) to E2 and 28 (14.1 %) to M. The review therefore yielded an unambiguous classification for 85.9 % of the assemblies. In the course of the review, two labels were corrected because they did not comply with the codebook: in both cases, an assembly initially labelled as Combined Unit was reassigned, once to Linear Unit and once to Multi-Axis System (Gantry). Both assemblies fell into regime M, and Combined Unit remained an additional allowed label for each. For the other assemblies in regime M, the initial label was likewise retained as the primary label and supplemented by the further classes that the review found to be consistent with the documentation and the codebook.
+
+经过第 4.4 节所述的复核，199 个装配体中有 122 个（61.3%）归入 E1，49 个（24.6%）归入 E2，28 个（14.1%）归入 M。因此，85.9% 的装配体可以明确分类。复核过程中，有两个标签因不符合 Codebook 而被修正。两个装配体的初始标签均为组合单元，复核后一个改为直线单元，另一个改为多轴系统（龙门）。这两个装配体均归入 M，并各自保留组合单元作为额外的允许标签。其余 M 类装配体同样保留初始标签作为主标签，并补充复核认定符合资料和 Codebook 的其他类别。
+
+**② 各类别的情况**
+
+The highest counts in regime M were recorded for Gripper (7 assemblies), Robot and Rotary Unit (6 each), while no assembly classified as None of the Available Classes fell into regime M.
+
+归入 M 的装配体以夹爪最多（7 个），其次是机器人和旋转单元（各 6 个）。归为“不属于任何可用类别”的装配体均未归入 M。
+
+**③ M 类的标签组合**
+
+Combined Unit was among the allowed labels for 17 of the 28 assemblies in regime M. Robot and Combined Unit formed the most common pair of allowed labels (6 assemblies), followed by Multi-Axis System (Gantry) and Combined Unit (4 assemblies). In the robot cases, [reason].
+
+在 28 个归入 M 的装配体中，有 17 个的允许标签包含组合单元。最常见的允许标签组合是机器人与组合单元（6 个装配体），其次是多轴系统（龙门）与组合单元（4 个装配体）。在涉及机器人的这些案例中，[原因]。
+
+### 4.5.2 Inter-Annotator Agreement | 标注者间一致性
+
+Krippendorff's α was 0.806 when calculated for the assemblies in regimes E1 and E2. This value exceeds the threshold of 0.800 and thus indicates reliable agreement (Section 2.5). Including regime M in the analysis of the full dataset yielded an α of 0.751, which falls between 0.667 and 0.800 and supports only tentative conclusions. The difference between the two values reflects the exclusion of the assemblies whose classification remained ambiguous after the review. The level of agreement for assemblies with an unambiguous classification indicates that the codebook supports consistent classification and that the reviewed ground truth provides a suitable reference for the LLM experiments in Chapter 5.
+
+基于 E1 和 E2 的装配体计算，Krippendorff's α 为 0.806。这一数值高于 0.800 的阈值，表明参与者之间的一致性可靠（第 2.5 节）。纳入全部装配体（包括 M）后，α 为 0.751，介于 0.667 和 0.800 之间，因此只能据此得出初步结论。两个数值的差异反映了排除复核后仍有分类歧义的装配体所产生的影响。对于能够明确分类的装配体，一致性结果表明 Codebook 能够支持一致的分类，复核后的 Ground Truth 也适合作为第 5 章 LLM 实验的参考。
+
+### 4.5.3 Annotation Time | 标注用时
+
+The engineers required a mean of 31 s per assembly and the students 42 s. Section 4.6 discusses these times, which provide the human baseline for the efficiency comparison in Chapter 5.
+
+工程师平均每个装配体用时 31 秒，学生平均用时 42 秒。第 4.6 节对这些用时进行讨论，第 5 章则将其作为效率比较的人工基准。
+
 ## 待处理
 
 - 第 ④ 段的 DFC 官方文件引用，以及 Teamcenter 和 Autodesk Vault 的关系（BMG 如果两者都在用，加一句说明）。
@@ -217,3 +255,7 @@ The timestamps were used to determine processing times and calculate the mean ti
 - [ ] 复核 α：按 199 个装配体重新计算时，用 Python（例如 krippendorff 包）独立算一次，确认和 Excel 的结果一致。如果一致，在⑥最后一句补上 “and verified with …”。
 - [ ] ② 的复核范围：确认是所有装配体都复核，还是只复核有分歧或与初始标签不一致的装配体。如果只复核一部分，修改第一句。
 - [ ] ⑦ 工程师的比较基础：工程师只标注了主数据集中的 32 个装配体。如果工程师和学生的用时在同一批装配体上比较，在⑦中说明。
+
+### 4.5 待办
+
+- [ ] 4.5.1 ③ 的 [reason]：补充机器人那几个例子为什么也允许组合单元。行 32、35、40、42、99、127 都是这种情况，如果原因不一样，写最常见的那种。
