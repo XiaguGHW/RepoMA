@@ -1,6 +1,6 @@
 # LLM 实验后修订的 Ground Truth
 
-> 根据用户提供的 Excel 照片转录，属于 LLM 实验后修订的版本，与实验前版本分别保存。照片分批提供，本文档尚不完整。
+> 根据用户提供的 Excel 照片转录，属于 LLM 实验后修订的版本，与实验前版本分别保存。照片分批提供，目前已转录第 2–200 行；部分字段仍待核对。
 
 ## 第一部分
 
@@ -263,3 +263,23 @@
 | — | 0804LM0799 | AS00323299 | lifting unit | Hubeinheit | — | Lineareinheit | E1 | — |
 
 本部分共 24 行：E1 为 21 行、E2 为 3 行。ID、Baugruppenebene 和其他允许类别均为空。第 169、172、180 行的 Ground Truth 可见 `Keine der verfügbaren Klasse`，末尾可能被列宽截断，待与原表核对。
+
+## 第九部分
+
+来源：Excel 第 192–200 行的两张照片，按共同列与行顺序对应。空白单元格记为“—”。
+
+| ID | SAP-Nummer | Teamcenter | Benennung (E) | Benennung (D) | Baugruppenebene | Ground Truth | Register | Weitere zulässige Ground Truth |
+|---:|---|---|---|---|---|---|---|---|
+| — | 0804LH2249 | AS00293172 | control box | STEUERSCHRANK | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 0804LK3474 | AS00310188 | rotate unit | Dreheinheit | — | Rotationseinheit | E1 | — |
+| — | 0804HD4595 | AS90011576 | rotate unit | Dreheinheit | — | Rotationseinheit | E1 | — |
+| — | 0804JR9924 | AS00047619 | control box | BEDIENUNGSTAFEL | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | — | AX01253877 | control box | BEDIENUNGSKASTEN | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 1800257200 | AS90074111 | machine frame | Maschinengestell | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 0804KX6885 | AS00220520 | gantry module | PORTALMODUL | — | Multi-Achs-System (Gantry) | E1 | — |
+| — | 0804JW4969 | AS00058246 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 0804AH9298 | AS90166730 | lift-turning unit | Hub-Dreheinheit | — | Kombinierte Einheit | E2 | — |
+
+本部分共 9 行：E1 为 8 行、E2 为 1 行。ID、Baugruppenebene 和其他允许类别均为空，第 196 行 SAP-Nummer 为空。第 192、195、196、197 行的 Ground Truth 可见 `Keine der verfügbaren Klasse`，末尾可能被列宽截断，待与原表核对。
+
+照片中的第 2–200 行共转录 199 条记录；部分文字及编号尾部仍需按各部分注释核对。
