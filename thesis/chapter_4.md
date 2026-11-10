@@ -261,9 +261,9 @@ Since the regimes differ in how unambiguously an assembly can be classified, the
 
 **③ Allowed-Label-Set Accuracy**
 
-Allowed-Label-Set Accuracy is therefore used as the primary evaluation metric. A classification counts as correct if the predicted class is contained in the set of allowed labels of the assembly (Section 4.4). Each assembly in regimes E1 and E2 has exactly one allowed class, so the metric is equivalent to conventional accuracy for these assemblies. For assemblies in regime M, a prediction of any allowed class counts as correct, even if it differs from the primary label.
+The main metric is therefore the Allowed-Label-Set Accuracy (hereafter Allowed Accuracy). A classification counts as correct if the predicted class is contained in the set of allowed labels of the assembly (Section 4.4). Each assembly in regimes E1 and E2 has exactly one allowed class, so the metric is equivalent to conventional accuracy for these assemblies. For assemblies in regime M, a prediction of any allowed class counts as correct, even if it differs from the primary label.
 
-因此，采用 Allowed-Label-Set Accuracy 作为主要评价指标。如果预测类别属于该装配体的允许标签集合（第 4.4 节），则该次分类计为正确。E1 和 E2 中的每个装配体都只有一个允许类别，因此对于这些装配体，该指标等同于常规准确率。对于 M 中的装配体，只要预测的是任一允许类别，即使与主标签不同，也计为正确。
+因此，采用 Allowed-Label-Set Accuracy（下文简称 Allowed Accuracy）作为主要评价指标。如果预测类别属于该装配体的允许标签集合（第 4.4 节），则该次分类计为正确。E1 和 E2 中的每个装配体都只有一个允许类别，因此对于这些装配体，该指标等同于常规准确率。对于 M 中的装配体，只要预测的是任一允许类别，即使与主标签不同，也计为正确。
 
 **④ 过渡到第 5 章**
 
