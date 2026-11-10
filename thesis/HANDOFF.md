@@ -151,6 +151,8 @@
   - 稳定性：P3，在 115 个上各 10 次：Claude Haiku 4.5 PDF、Gemini 2.5 Pro PDF、GPT-5.5 图片、DeepSeek V4 Flash 文本。Gemini 2.5 Flash PDF 也跑了，但不写：选择原则是每个厂商一个模型 + 一个开源模型，Google 选了在前面比较中更好的 2.5 Pro。GPT-5.5 试过 PDF 输入，但无法确认 PDF 内容实际如何被处理
   - 模型接入（Bosch 内部模型目录）：GPT-5.5 和 DeepSeek-V4-Flash 通过 Azure OpenAI 端点调用；Claude 和 Gemini 通过 Vertex AI 调用。GPT-5.5 用图片输入的理由：Azure OpenAI 上 PDF 输入在服务器端被转成提取文本 + 页面图片，处理过程不透明（且部分端点会忽略 PDF），所以在本地把 PDF 页面转成图片；DeepSeek-V4-Flash 是导师要求纳入的开源（open-weight，MIT 许可）模型，只支持文本输入和输出，所以用文本输入。实验用的版本是 2026-04-23 的（文件名 deepseek-v4-flash-2026-04-23，即 4 月发布的版本，不是 7 月的 0731 正式版）
   - 补充数据集验证：上述 4 种配置在 70 个上各运行一次；合并结果为 `185BG_Ergebnisse/PPT_Ready_185BG_4_Models.xlsx`
+  - 指标与统计（见 `docs/evaluation_metrics_update/Update_Evaluationsmetriken.html` 和 `Notizen_Literatur_und_Mail.md`）：主指标 Allowed Accuracy；Allowed Precision / Recall（按 7 类 Macro 平均，自定义扩展，依据 Sokolova & Lapalme 2009）；F1 只算 Strict（Macro-F1 定义按 Opitz & Burst 2019 说明）；所有值给 95% Bootstrap 置信区间（115 个装配体有放回抽样 2000 次，每次带上该装配体的全部 10 次运行；Efron & Tibshirani 1993，Miller 2024）；模型差异用配对 Bootstrap（Koehn 2004，Berg-Kirkpatrick et al. 2012）+ 每个指标单独做 Holm 校正（Holm 1979，Bender & Lange 2001）
+  - 注意：原分析是 5 个模型、10 对比较；不写 Gemini 2.5 Flash 后只剩 4 个模型、6 对，Holm 校正要按 6 对重新算。指标名称要统一：第 4 章用的是 “Allowed-Label-Set Accuracy”，docs 里是 “Allowed Accuracy”
   - 章节顺序：Prompt → 输入形式 → 总体表现与稳定性 → E1/E2/M → 错误分析 → 70 个验证 → 成本 → 小结
   - 中期报告 PPT 中的准确率基于旧 GT，论文中要用最终版 GT 重新计算的结果（可能是 `Evaluation_Allowed_Strict.xlsx`）
 - [x] 最终配置里 Anthropic 选 Haiku 而不是 Opus：Opus 成本太高，不适合重复运行（Opus 在 Prompt 和输入比较中的结果照常报告）
