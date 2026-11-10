@@ -1,6 +1,6 @@
 """Generate Figure 4.4: examples of the three ambiguity regimes (E1, E2, M).
 
-Image cells are left as empty placeholders; the CAD screenshots are inserted later.
+Image cells are left blank (space for portrait images); the CAD screenshots are inserted later.
 """
 from xml.sax.saxutils import escape
 
@@ -35,7 +35,7 @@ rows = [
      "regime": "M"},
 ]
 
-X0 = 20; Y0 = 20; HEAD_H = 58; ROW_H = 150; LH = 19
+X0 = 20; Y0 = 20; HEAD_H = 58; ROW_H = 200; LH = 19
 out = []
 
 def rect(x, y, w, h, fill, stroke=LINE, sw=1.2, rx=0):
@@ -67,12 +67,8 @@ for r, row in enumerate(rows):
     for ci, (name, w) in enumerate(cols):
         rect(x, y, w, ROW_H, "white")
         cx = x + w / 2
-        if ci == 0:  # empty image placeholder + name
-            pw, ph = w - 40, 92
-            px, py = x + 20, y + 14
-            out.append(f'<rect x="{px}" y="{py}" width="{pw}" height="{ph}" fill="white" '
-                       f'stroke="#B8BEC6" stroke-width="1" stroke-dasharray="5,4"/>')
-            lines(cx, py + ph + 22, [row["name"]], 13.5, color=TXT, style="italic")
+        if ci == 0:  # blank space for a portrait image, name at the bottom
+            lines(cx, y + ROW_H - 18, [row["name"]], 13.5, color=TXT, style="italic")
         elif ci == 1:
             lines(cx, cy, row["initial"])
         elif ci == 2:
