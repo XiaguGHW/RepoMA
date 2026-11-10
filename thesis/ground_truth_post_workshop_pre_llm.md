@@ -189,3 +189,57 @@
 | 40 | 0804BD5654 | AS90338060 | lift turning unit | Hub-Dreheinheit | — | Kombinierte Einheit | E2 | — |
 
 本部分共 18 行：E1 为 4 行、E2 为 6 行、M 为 8 行。Baugruppenebene 在照片中均为空。Excel 第 112 行（SAP 0804EN7325）为 M，但其他允许类别一栏在照片中为空，按原样记录。
+
+## 第八部分
+
+来源：Excel 第 127–144 行的两张照片，按行顺序对应。空白单元格记为“—”。
+
+| ID | SAP-Nummer | Teamcenter | Benennung (E) | Benennung (D) | Baugruppenebene | Ground Truth | Register | Weitere zulässige Ground Truth (nur bei M) |
+|---:|---|---|---|---|---|---|---|---|
+| 39 | 0804CC2134 | AS90419212/01 | robot | Roboter | — | Roboter | M | Kombinierte Einheit |
+| 58 | 0804JX6656 | AS00057035 | axis system | Achssystem | — | Multi-Achs-System (Gantry) | E2 | — |
+| 46 | 0804KW8391 | AS00202949 | axis system | Achssystem | — | Multi-Achs-System (Gantry) | M | Kombinierte Einheit |
+| 13 | 0804FT0436 | AS90143556 | handling | Handling | — | Lineareinheit | E1 | — |
+| — | 0804JK3979 | AS00010335 | lifting unit | Hubeinheit | — | Lineareinheit | E1 | — |
+| — | 0804AG8297 | AS90104129 | lifting unit | Hubeinheit | — | Lineareinheit | E1 | — |
+| — | 0804LM7661 | AS00326025 | gantry module | PORTALMODUL | — | Multi-Achs-System (Gantry) | E1 | — |
+| — | 0804KE6397 | AS00114947 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 0804KV5835 | AS00189642 | lifting unit | Hubeinheit | — | Lineareinheit | E2 | — |
+| — | 0804LC5647 | AS00253628 | lift-turning unit | Hub-Dreheinheit | — | Kombinierte Einheit | E2 | — |
+| — | 0804LW4010 | AS00365833 | rotate unit | Dreheinheit | — | Rotationseinheit | E1 | — |
+| — | — | AS00235507 | control box | BEDIENUNGSKASTEN | — | Keine der verfügbaren Klassen | E1 | — |
+| — | 0804358312 | AS90057078 | sensor | SENSOR | — | Keine der verfügbaren Klassen | E2 | — |
+| — | 0804LR7381 | AS00335256 | gripper | GREIFER | — | Greifer | E1 | — |
+| — | 0804LW5713 | AS00366888 | control box | BEDIENUNGSTAFEL | — | Keine der verfügbaren Klassen | E1 | — |
+| — | 0804KC4801 | AS00099579 | base frame | GRUNDGESTELL | — | Keine der verfügbaren Klassen | E1 | — |
+| — | 0804LD6387 | AS00258437 | base frame | GRUNDGESTELL | — | Keine der verfügbaren Klassen | E1 | — |
+| — | 0804LS4641 | AS00129566 | rotate unit | Dreheinheit | — | Rotationseinheit | E1 | — |
+
+本部分共 18 行：E1 为 12 行、E2 为 4 行、M 为 2 行。第 131–144 行的 ID、全部行的 Baugruppenebene，以及第 138 行的 SAP-Nummer 在照片中为空。第 130 与 131 行之间有一条横线，按原表行顺序记录，不据此推断其含义。
+
+## 第九部分
+
+来源：Excel 第 145–162 行的两张照片，按行顺序对应。空白单元格记为“—”。
+
+| ID | SAP-Nummer | Teamcenter | Benennung (E) | Benennung (D) | Baugruppenebene | Ground Truth | Register | Weitere zulässige Ground Truth (nur bei M) |
+|---:|---|---|---|---|---|---|---|---|
+| — | 0804KL2297 | AS00131203 | control box | BEDIENUNGSKASTEN | — | Keine der verfügbaren Klassen | E1 | — |
+| — | 0804MA1736 | AS00394604 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 0804MA6689 | AS00395784 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 0804LN1286 | AS00326573 | gripper | GREIFER | — | Greifer | E1 | — |
+| — | 0804LN1294 | AS00327751 | gripper | GREIFER | — | Greifer | E1 | — |
+| — | 0804LN1297 | AS00327933 | gripper | GREIFER | — | Greifer | E1 | — |
+| — | 0804FE3750 | AS90229004 | lifting unit | Hubeinheit | — | Lineareinheit | E2 | — |
+| — | — | AS00215660 | control box | Bedienungskasten | — | Keine der verfügbaren Klassen | E1 | — |
+| — | 1800257228 | AS90039077 | base frame | Gestellunterbau | — | Keine der verfügbaren Klassen | E1 | — |
+| — | 0804LK4678 | AS00309775 | lift-turning unit | Hub-Dreheinheit | — | Kombinierte Einheit | E1 | — |
+| — | 0804MB2648 | AS00397363 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 0804LG2192 | AS00275275 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 1800257479 | AS90101074 | control box | BEDIENUNGSKASTEN | — | Keine der verfügbaren Klassen | E1 | — |
+| — | 3843AV9602 | PT90876568 | sensor | SENSOR | — | Keine der verfügbaren Klassen | E1 | — |
+| — | 3843AB4237 | PT91921631 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 1800257202 | AS90130333 | top frame | Gestellunterbau | — | Keine der verfügbaren Klassen | E1 | — |
+| — | 0804JS9252 | AS00040582 | control box | BEDIENUNGSKASTEN | — | Keine der verfügbaren Klassen | E1 | — |
+| — | 1800257521 | AS90283097 | base frame | Gestellunterbau | — | Keine der verfügbaren Klassen | E1 | — |
+
+本部分共 18 行：E1 为 17 行、E2 为 1 行。所有行的 ID、Baugruppenebene 以及第 152 行的 SAP-Nummer 在照片中为空，按原样记录。
