@@ -21,19 +21,19 @@ PAD = 16           # horizontal padding inside a cell
 IMG_H = 230        # blank space reserved for a portrait image
 X0 = Y0 = 10
 
-cols = [("Example", 225), ("Initial label", 210), ("Participant classifications", 255),
-        ("Review finding", 295), ("Allowed labels after review", 260), ("Regime", 125)]
+cols = [("Example", 225), ("Initial label", 210), ("Participant classifications (votes)", 275),
+        ("Review finding", 285), ("Allowed labels after review", 250), ("Regime", 125)]
 
 examples = [
-    {"name": "Articulated robot", "initial": "Robot", "votes": ["Robot ×3"],
+    {"name": "Articulated robot", "initial": "Robot", "votes": ["Robot (3/3)"],
      "finding": "Unanimous classification; label consistent with the codebook",
      "allowed": "{Robot}", "regime": "E1"},
     {"name": "Machine frame", "initial": "None of the Available Classes",
-     "votes": ["None of the Available Classes ×2", "Gripper ×1"],
+     "votes": ["None of the Available Classes (2/3)", "Gripper (1/3)"],
      "finding": "Dissenting vote not supported: no gripping function (R = 0, T = 0)",
      "allowed": "{None of the Available Classes}", "regime": "E2"},
     {"name": "Lifting unit", "initial": "Linear Unit",
-     "votes": ["Linear Unit ×2", "Combined\u00a0Unit ×1"],
+     "votes": ["Linear Unit (2/3)", "Combined\u00a0Unit (1/3)"],
      "finding": "Secondary rotary component; both classes consistent with the codebook",
      "allowed": "{Linear Unit, Combined\u00a0Unit}", "regime": "M"},
 ]
