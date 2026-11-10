@@ -142,7 +142,7 @@
 - [x] α 和 Regime 分布已基于 199 个（α 见第 5 节“结果数据”，Regime 分布见 `thesis/classification_data_and_revision_statistics.md`）
 - [x] 用时 31 秒 / 42 秒已基于 199 个
 - [ ] 4.4：α 是在 Excel 中用公式手动搭建计算的（名义尺度，按 Krippendorff 的方法）。用 Python（如 `krippendorff` 包）独立复核一次，确认两边结果一致；正文写 “calculated in Excel following Krippendorff's procedure for nominal data”，复核后可补 “verified with …”
-- [ ] 讨论点（4.6 只简短提对 LLM 评价的意义，展开放第 7 章 Role of Rules and Ambiguity）：组合单元 27 个中有 20 个是 E2（个别参与者选了其他类别，但复核后按 Codebook 仍归为组合单元）。4.5.1 只报告数字；另一个可讨论的点：M 有 27 个在主数据集，补充数据集只有 1 个
+- [ ] 讨论点（4.6 不写，放第 7 章 Role of Rules and Ambiguity）：组合单元 27 个中有 20 个是 E2（个别参与者选了其他类别，但复核后按 Codebook 仍归为组合单元）。4.5.1 只报告数字；另一个可讨论的点：M 有 27 个在主数据集，补充数据集只有 1 个
 - [x] 4.4 ⑦ / 4.5.3：工程师只标注了主数据集中的 32 个装配体。决定：正文不说明；按 regime 比较用时也不写
 - [ ] 第 5 章：5 种配置的具体组合（模型、P1–P4、输入形式 PDF / 图片 / 文本），每种配置运行 10 次，主指标 Allowed-Label-Set Accuracy
 - [ ] 第 5 章：实验是否在 Bosch Assembly Assistant 中运行（影响第 6 章的位置和写法）
