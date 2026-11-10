@@ -153,7 +153,7 @@
   - 补充数据集验证：上述 4 种配置在 70 个上各运行一次；合并结果为 `185BG_Ergebnisse/PPT_Ready_185BG_4_Models.xlsx`
   - 章节顺序：Prompt → 输入形式 → 总体表现与稳定性 → E1/E2/M → 错误分析 → 70 个验证 → 成本 → 小结
   - 中期报告 PPT 中的准确率基于旧 GT，论文中要用最终版 GT 重新计算的结果（可能是 `Evaluation_Allowed_Strict.xlsx`）
-- [ ] 第 5 章待确认：最终配置里 Anthropic 为什么选 Haiku 而不是 Opus（Opus 在 Prompt 和输入比较中都更好）
+- [x] 最终配置里 Anthropic 选 Haiku 而不是 Opus：Opus 成本太高，不适合重复运行（Opus 在 Prompt 和输入比较中的结果照常报告）
 - [ ] 第 5 章：实验是否在 Bosch Assembly Assistant 中运行（影响第 6 章的位置和写法）
 - [x] 第三阶段 GT 修正的数量（见 `thesis/classification_data_and_revision_statistics.md`）：B → C 有 2 个主标签改类别（Excel 行 8、43），7 个 regime 变为 M（5 个 E1 → M，2 个 E2 → M，均在主数据集），另有几行 M 的其他允许类别有变化（如行 113、125、129）
 - [x] Excel 行 112（0804EN7325）：原表在 B 和 C 中都标为 M，但没有其他允许类别（原表就是空白）。决定：按 E2 处理，GT 为 Kombinierte Einheit。调整后 B 阶段为 E1 122 / E2 49 / M 28，C 阶段为 E1 117 / E2 47 / M 35
