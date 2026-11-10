@@ -108,3 +108,30 @@
 | 24 | 0804KU2401 | AS00177443 | Lifting Device | Hubeinrichtung | — | Lineareinheit | E1 | — |
 
 本部分共 18 行：E1 为 11 行、E2 为 5 行、M 为 2 行。Excel 行 57、58、60 的 Benennung (D) 分别显示为 `14`、`124`、`51`，Baugruppenebene 为空，均按照片原样记录。本部分及前面部分存在相同 ID 对应不同 SAP 编号的情况，保留原表数据，不以 ID 单独去重。
+
+## 第五部分
+
+来源：第五组照片中的 Excel 第 73–90 行；两张照片按行顺序及可见的 Ground Truth 内容对应。空白单元格记为“—”。
+
+| ID | SAP-Nummer | Teamcenter | Benennung (E) | Benennung (D) | Baugruppenebene | Ground Truth | Register | Weitere zulässige Ground Truth (nur bei M) |
+|---:|---|---|---|---|---|---|---|---|
+| 1 | 0804LH9239 | AS00306708 | control panel | Steuertafel | — | Keine der verfügbaren Klassen | E1 | — |
+| 6 | 0804LB3626 | AS00245227 | Lifter | Ausheber | — | Lineareinheit | E1 | — |
+| 8 | 0804KW6429 | AS00243076 | axis system | Achssystem | — | Multi-Achs-System (Gantry) | E1 | — |
+| 22 | 0804KB9919 | AS00084317 | gripper unit | Greifereinheit | — | Greifer | E1 | — |
+| 18 | 0804KU7061 | AS00199717 | supporting frame | Gestell | — | Keine der verfügbaren Klassen | E1 | — |
+| 12 | 0804JT7787 | AS00046110 | supporting frame | Gestell | — | Keine der verfügbaren Klassen | E1 | — |
+| 33 | 0804EA6409 | AS90439710/01 | robot | Roboter | — | Roboter | E1 | — |
+| 55 | 0804FR8437 | AS90092024/01 | robot | Roboter | — | Roboter | E1 | — |
+| 63 | 0804CC3075 | AS90234041/00 | robot | Roboter | — | Roboter | E1 | — |
+| 64 | 0804KU9472 | — | gripper unit | Greifereinheit | — | Greifer | E1 | — |
+| 43 | 0804LY4947 | AS00378575 | Lifting Unit | Hubeinheit | — | Lineareinheit | E1 | — |
+| 35 | 0804KT8575 | AS00185495/01 | robot | Roboter | — | Roboter | E1 | — |
+| 31 | 0804MA9380 | AS00397895 | Lifting Unit | Hubeinheit | — | Lineareinheit | E2 | — |
+| 21 | 0804LY8514 | AS00378154 | rotate unit | Dreheinheit | — | Rotationseinheit | E2 | — |
+| 5 | 0804MA7037 | AS00391134 | holder | Befestigung | — | Keine der verfügbaren Klassen | E2 | — |
+| 23 | 0804KV4964 | — | gripper unit | Greifereinheit | — | Greifer | M | Keine der verfügbaren Klassen |
+| 26 | 0804JK8878 | AS00037979 | gripper unit | Greifereinheit | — | Greifer | M | Lineareinheit |
+| 61 | 0804LZ1241 | AS00379611 | rotate unit | Dreheinheit | — | Rotationseinheit | E1 | — |
+
+本部分共 18 行：E1 为 13 行、E2 为 3 行、M 为 2 行。全部行的 Baugruppenebene 以及 Excel 第 82、88 行的 Teamcenter 单元格在照片中为空，按原样记录。
