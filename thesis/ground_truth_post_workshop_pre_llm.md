@@ -28,3 +28,29 @@
 | 44 | 0804KW1502 | AS00198389 | Lifting Device | Hubvorrichtung | Hauptbaugruppe | Lineareinheit | E1 | — |
 
 本部分共 18 行，全部显示为 E1，附加允许类别列均为空。ID 不连续是照片原表显示的顺序。
+
+## 第二部分
+
+来源：第二组照片中的 Excel 第 20–36 行；两张照片通过共同的 Baugruppenebene 列和行顺序对应。空白单元格记为“—”。
+
+| ID | SAP-Nummer | Teamcenter | Benennung (E) | Benennung (D) | Baugruppenebene | Ground Truth | Register | Weitere zulässige Ground Truth (nur bei M) |
+|---:|---|---|---|---|---|---|---|---|
+| 45 | 0804KY7179 | AS00221603 | Lifter | Hubgerät | Unterbaugruppe | Lineareinheit | E1 | — |
+| 47 | 0804FF2025 | AS90027990 | robot | Roboter | Hauptbaugruppe | Roboter | E1 | — |
+| 48 | 0804KM8175 | AS00145823 | Lifting Device | Hubvorrichtung | Unterbaugruppe | Lineareinheit | E1 | — |
+| 50 | 0804KR0143 | AS00159812 | axis system | Achssystem | Hauptbaugruppe | Multi-Achs-System (Gantry) | E1 | — |
+| 52 | 0804KY3585 | AS00228511/03 | axis system | 4461 | — | Multi-Achs-System (Gantry) | E1 | — |
+| 53 | 0804DT6452 | AS90466020 | gantry | Portal | Hauptbaugruppe | Multi-Achs-System (Gantry) | E1 | — |
+| 54 | 0804FR1463 | AS90280706 | rotation unit | Rotationseinheit | Unterbaugruppe | Rotationseinheit | E1 | — |
+| 56 | 0804EC1049 | AS90040285 | robot | Roboter | Unterbaugruppe | Roboter | E1 | — |
+| 58 | 0804LG8766 | AS00287914 | suction gripper | Sauggreifer | Unterbaugruppe | Greifer | E1 | — |
+| 59 | 0804GD6171 | AS90191800 | robot | Roboter | Hauptbaugruppe | Roboter | E1 | — |
+| 5 | 0804JD0275 | AS90202403 | gripper | Greifer | Unterbaugruppe | Greifer | E2 | — |
+| 6 | 0804FK2694 | AS90037183 | gantry | Portal | Hauptbaugruppe | Multi-Achs-System (Gantry) | E2 | — |
+| 12 | 0804JL8434 | AS00026831 | robot | Roboter | Hauptbaugruppe | Roboter | M | Kombinierte Einheit |
+| 13 | 0804KB2225 | AS00092334 | rotation unit | Rotationseinheit | Hauptbaugruppe | Rotationseinheit | M | Keine der verfügbaren Klassen |
+| 15 | 0804KY5559 | AS00221429 | Gripper Unit | Greifeinheit | Unterbaugruppe | Greifer | E2 | — |
+| 17 | 0804HK5576 | AS90212293 | robot | Roboter | Hauptbaugruppe | Roboter | M | Kombinierte Einheit |
+| 21 | 0804KR6993 | AS00156452 | Lifter | Hubgerät | Hauptbaugruppe | Lineareinheit | E2 | — |
+
+本部分共 17 行：E1 为 10 行、E2 为 4 行、M 为 3 行。ID 52 的 Benennung (D) 在照片中显示为 `4461`，Baugruppenebene 单元格为空，均按照片原样记录。
