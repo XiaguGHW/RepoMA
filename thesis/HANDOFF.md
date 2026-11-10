@@ -141,6 +141,7 @@
 - [x] 每个装配体由 5–10 人标注（已核实）
 - [ ] 按 199 个重新计算 α、Regime 分布和用时
 - [ ] 4.4：α 是在 Excel 中用公式手动搭建计算的（名义尺度，按 Krippendorff 的方法）。按 199 个重新计算时，用 Python（如 `krippendorff` 包）独立复核一次，确认两边结果一致；正文写 “calculated in Excel following Krippendorff's procedure for nominal data”，复核后可补 “verified with …”
+- [ ] 4.4 ⑦ / 4.5.3：工程师只标注了主数据集中的 32 个装配体。是否在比较工程师与学生用时时说明这一点（或只在同一批装配体上比较），看过重新计算的数据后再定；按 regime 比较用时暂不写
 - [ ] 第 5 章：5 种配置的具体组合（模型、P1–P4、输入形式 PDF / 图片 / 文本），每种配置运行 10 次，主指标 Allowed-Label-Set Accuracy
 - [ ] 第 5 章：实验是否在 Bosch Assembly Assistant 中运行（影响第 6 章的位置和写法）
 - [ ] 第三阶段 GT 修正的数量
