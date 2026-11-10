@@ -241,9 +241,9 @@ Krippendorff's α was 0.806 when calculated for the assemblies in regimes E1 and
 
 ### 4.5.3 Annotation Time | 标注用时
 
-The engineers required a mean of 31 s per assembly and the students 42 s. Section 4.6 discusses these times, which provide the human baseline for the efficiency comparison in Chapter 5.
+The engineers required a mean of 31 s per assembly and the students 42 s. These times include the research in Teamcenter and DFC that participants carried out where required.
 
-工程师平均每个装配体用时 31 秒，学生平均用时 42 秒。第 4.6 节对这些用时进行讨论，第 5 章则将其作为效率比较的人工基准。
+工程师平均每个装配体用时 31 秒，学生平均用时 42 秒。这些用时包含了参与者在需要时到 Teamcenter 和 DFC 中查阅资料的时间。
 
 ## 4.6 Implications for the LLM Evaluation | 对 LLM 评价的意义
 
@@ -279,8 +279,6 @@ Chapter 5 builds on these results. After describing the experimental setup and c
 ### 4.4 待办
 
 - [ ] 复核 α：按 199 个装配体重新计算时，用 Python（例如 krippendorff 包）独立算一次，确认和 Excel 的结果一致。如果一致，在⑥最后一句补上 “and verified with …”。
-- [ ] ② 的复核范围：确认是所有装配体都复核，还是只复核有分歧或与初始标签不一致的装配体。如果只复核一部分，修改第一句。
-- [ ] ⑦ 工程师的比较基础：工程师只标注了主数据集中的 32 个装配体。如果工程师和学生的用时在同一批装配体上比较，在⑦中说明。
 
 ### 4.5 待办
 
