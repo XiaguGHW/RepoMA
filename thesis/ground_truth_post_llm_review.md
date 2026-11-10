@@ -32,3 +32,36 @@
 | 50 | 0804KR0143 | AS00159812 | axis system | Achssystem | Hauptbaugruppe | Multi-Achs-System (Gantry) | E1 | — |
 
 本部分共 22 行：E1 为 20 行，M 为 2 行。
+
+## 第二部分
+
+来源：Excel 第 24–47 行的两张照片，按共同列与行顺序对应。空白单元格记为“—”。第 24、44 行的 Teamcenter 编号尾部在本组照片中被列宽截断；下表沿用实验前照片转录的编号，待与原表核对。
+
+| ID | SAP-Nummer | Teamcenter | Benennung (E) | Benennung (D) | Baugruppenebene | Ground Truth | Register | Weitere zulässige Ground Truth |
+|---:|---|---|---|---|---|---|---|---|
+| 52 | 0804KY3585 | AS00228511/03 | axis system | 4461 | — | Multi-Achs-System (Gantry) | E1 | — |
+| 53 | 0804DT6452 | AS90466020 | gantry | Portal | Hauptbaugruppe | Multi-Achs-System (Gantry) | M | Keine der verfügbaren Klassen |
+| 54 | 0804FR1463 | AS90280706 | rotation unit | Rotationseinheit | Unterbaugruppe | Rotationseinheit | E1 | — |
+| 56 | 0804EC1049 | AS90040285 | robot | Roboter | Unterbaugruppe | Roboter | E1 | — |
+| 58 | 0804LG8766 | AS00287914 | suction gripper | Sauggreifer | Unterbaugruppe | Greifer | E1 | — |
+| 59 | 0804GD6171 | AS90191800 | robot | Roboter | Hauptbaugruppe | Roboter | E1 | — |
+| 5 | 0804JD0275 | AS90202403 | gripper | Greifer | Unterbaugruppe | Greifer | E2 | — |
+| 6 | 0804FK2694 | AS90037183 | gantry | Portal | Hauptbaugruppe | Multi-Achs-System (Gantry) | E2 | — |
+| 12 | 0804JL8434 | AS00026831 | robot | Roboter | Hauptbaugruppe | Roboter | M | Kombinierte Einheit |
+| 13 | 0804KB2225 | AS00092334 | rotation unit | Rotationseinheit | Hauptbaugruppe | Rotationseinheit | M | Keine der verfügbaren Klassen |
+| 15 | 0804KY5559 | AS00221429 | Gripper Unit | Greifeinheit | Unterbaugruppe | Greifer | E2 | — |
+| 17 | 0804HK5576 | AS90212293 | robot | Roboter | Hauptbaugruppe | Roboter | M | Kombinierte Einheit |
+| 21 | 0804KR6993 | AS00156452 | Lifter | Hubgerät | Hauptbaugruppe | Lineareinheit | E2 | — |
+| 23 | 0804LH5422 | AS00289859 | handling device | Handhabungsgerät | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 26 | 0804KZ5637 | AS00212374 | gripper | Greifer | Unterbaugruppe | Greifer | E2 | — |
+| 32 | 0804KR9668 | AS00199755 | gripper module | Greifermodul | Unterbaugruppe | Greifer | M | Keine der verfügbaren Klassen |
+| 34 | 0804JU56371 | AS00049479 | robot unit | Roboter-Einheit | Unterbaugruppe | Roboter | M | Kombinierte Einheit |
+| 35 | 0804AY8008 | AS90102714 | handling | Handhabung | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 37 | 0804EU0861 | AS90247946 | robot | Roboter | Hauptbaugruppe | Roboter | M | Kombinierte Einheit |
+| 40 | 0804GE7738 | AS90109419 | rotation unit | Rotationseinheit | Hauptbaugruppe | Rotationseinheit | M | Kombinierte Einheit |
+| 41 | 0804DU5323 | AS90495989/00 | axis system | 52 | — | Multi-Achs-System (Gantry) | E2 | — |
+| 43 | 0804GV7647 | AS90294354 | handling | Handhabung | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 46 | 0804EB6690 | AS90347860 | rotation unit | Rotationseinheit | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 49 | 0804306221 | AS90101734 | gantry | Portal | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+
+本部分共 24 行：E1 为 5 行、E2 为 11 行、M 为 8 行。第 24、44 行的 Benennung (D) 分别显示为 `4461`、`52`，Baugruppenebene 为空，按照片原样记录。
