@@ -36,13 +36,13 @@ C 中的 Kombinierte Einheit 与 B 同为 27 条，其中一条转入、一条�
 
 ## E1、E2、M 数量
 
-A 阶段的原始文件夹记录没有 Register。B 和 C 的 Register 取自各自的表格。
+A 阶段的原始文件夹记录没有 Register。B 和 C 的 Register 取自各自的表格，其中 Excel 行 112 按处理决定改为 E2（见“字段与转录备注”）。
 
 | Register | A | B（199 条） | C（199 条） | B → C 变化 | 主数据集（B → C） | 补充数据集（B → C） |
 | --- | --- | --- | --- | --- | --- | --- |
 | E1 | 无记录 | 122 | 117 | −5 | 63 → 58 | 59 → 59 |
-| E2 | 无记录 | 48 | 46 | −2 | 38 → 36 | 10 → 10 |
-| M | 无记录 | 29 | 36 | +7 | 28 → 35 | 1 → 1 |
+| E2 | 无记录 | 49 | 47 | −2 | 39 → 37 | 10 → 10 |
+| M | 无记录 | 28 | 35 | +7 | 27 → 34 | 1 → 1 |
 | **合计** | 无记录 | 199 | 199 | 0 | 129 → 129 | 70 → 70 |
 
 B → C 共有 7 条 Register 变化，均在主数据集中。
@@ -60,7 +60,9 @@ B → C 共有 7 条 Register 变化，均在主数据集中。
 - C 的 Ground Truth 列有 29 行在照片中只显示到 `Keine der verfügbaren Klasse`，明细和统计统一写作类别名 `Keine der verfügbaren Klassen`。涉及 Excel 行 68、73、77、78、87、104、105、117、120、138、139、141、142、143、145、152、153、157、158、160、161、162、169、172、180、192、195、196、197。
 - C 的照片中，第 24、44、57、58、60、64、67、70 行的 Teamcenter 编号尾部，以及第 77、78、94、124 行的英文名称被列宽遮挡，明细沿用 B 的转录。
 - **德文名称栏的复制粘贴错误**。表中的 `4461`、`52`、`14`、`124`、`51` 是 Excel 复制粘贴造成的错误，原值照录，分析时可忽略。
-- 处理决定：Excel 行 112（0804EN7325）在原表的 B、C 中都标为 M，但没有其他允许类别。论文统计中按 E2 处理，Ground Truth 为 Kombinierte Einheit。上方 Register 表和明细保留原表记录；按此调整后，B 为 E1 122 / E2 49 / M 28，C 为 E1 117 / E2 47 / M 35。
+- **处理决定**：
+  - Excel 行 112（0804EN7325）在原表的 B、C 中都标为 M，但没有其他允许类别。论文中按 E2 处理，Ground Truth 为 Kombinierte Einheit。上方 Register 表和明细已按此更新（原表记录：B、C 均为 M）。
+  - Excel 行 43（0804GE7738）在原表的 B 中标为 M，同样没有其他允许类别。B 阶段保持 M，因为 C 阶段的复核确认它有歧义（C：Rotationseinheit，其他允许类别 Kombinierte Einheit）。
 - 三阶段以 SAP 编号对应。SAP 为空的三条以 Teamcenter 编号对应。核对结果为 199 条一一匹配，各阶段类别合计均为 199，B、C 的 Register 合计也均为 199。各类别和 Register 的数量变化与逐条转入、转出结果一致。
 
 ## 199 条装配体明细
@@ -177,7 +179,7 @@ B → C 共有 7 条 Register 变化，均在主数据集中。
 | 109 | 主数据集 | 50 | 0804KY7178 | AS00217781 | Lifter | Ausheber | — | Lineareinheit | Lineareinheit | E1 | — | Lineareinheit | M | Kombinierte Einheit |
 | 110 | 主数据集 | 14 | 0804LA7293 | AS00242009 | handling unit | Handlingseinheit | — | Kombinierte Einheit | Kombinierte Einheit | E2 | — | Kombinierte Einheit | E2 | — |
 | 111 | 主数据集 | 36 | 0804CM8667 | AS90308571/00 | rotation unit | Rotationseinheit | — | Rotationseinheit | Rotationseinheit | M | Kombinierte Einheit | Rotationseinheit | M | Kombinierte Einheit |
-| 112 | 主数据集 | 37 | 0804EN7325 | AS90118452/01 | gantry | Portal | — | Kombinierte Einheit | Kombinierte Einheit | M | — | Kombinierte Einheit | M | — |
+| 112 | 主数据集 | 37 | 0804EN7325 | AS90118452/01 | gantry | Portal | — | Kombinierte Einheit | Kombinierte Einheit | E2 | — | Kombinierte Einheit | E2 | — |
 | 113 | 主数据集 | 41 | 0804LK3617 | AS00295735 | rotate unit | Dreheinheit | — | Rotationseinheit | Rotationseinheit | M | Lineareinheit | Rotationseinheit | M | Kombinierte Einheit |
 | 114 | 主数据集 | 17 | 0804GT0312 | AS90082305 | handling unit | Handlingseinheit | — | Kombinierte Einheit | Kombinierte Einheit | E2 | — | Kombinierte Einheit | E2 | — |
 | 115 | 主数据集 | 54 | 0804MB2849 | AS00394314 | Lifting Unit | Hubeinheit | — | Lineareinheit | Lineareinheit | E1 | — | Lineareinheit | M | Kombinierte Einheit |

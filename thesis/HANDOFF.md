@@ -146,7 +146,7 @@
 - [ ] 第 5 章：实验是否在 Bosch Assembly Assistant 中运行（影响第 6 章的位置和写法）
 - [x] 第三阶段 GT 修正的数量（见 `thesis/classification_data_and_revision_statistics.md`）：B → C 有 2 个主标签改类别（Excel 行 8、43），7 个 regime 变为 M（5 个 E1 → M，2 个 E2 → M，均在主数据集），另有几行 M 的其他允许类别有变化（如行 113、125、129）
 - [x] Excel 行 112（0804EN7325）：原表在 B 和 C 中都标为 M，但没有其他允许类别（原表就是空白）。决定：按 E2 处理，GT 为 Kombinierte Einheit。调整后 B 阶段为 E1 122 / E2 49 / M 28，C 阶段为 E1 117 / E2 47 / M 35
-- [ ] Excel 行 43（0804GE7738）在 B 阶段也是 M 且没有其他允许类别（C 阶段已改为 Rotationseinheit，并补充 Kombinierte Einheit）。B 阶段的统计里怎么处理，待定
+- [x] Excel 行 43（0804GE7738）在 B 阶段也是 M 且没有其他允许类别。决定：B 阶段保持 M，因为 C 阶段确认它有歧义（C：Rotationseinheit + Kombinierte Einheit）
 - [ ] 德文名称栏显示为数字的行（24、44、57、58、60）：确认研讨会模板和 LLM 输入里这一栏是否也是数字；如果是，第 5 章说明输入信息不完整
 - [ ] 研究问题（RQ）还没定，可以根据实验拟 2–3 个
 - [ ] Jonas 的 2-Pager 用了用户的实验结果，论文中如何引用，问 Jonas
