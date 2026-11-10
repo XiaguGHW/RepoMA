@@ -197,3 +197,36 @@
 | — | 0804LD6387 | AS00258437 | base frame | GRUNDGESTELL | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
 
 本部分共 24 行：E1 为 12 行、E2 为 4 行、M 为 8 行。Baugruppenebene 均为空；第 131–143 行 ID 为空，第 138 行 SAP-Nummer 为空。第 120、138、139、141、142、143 行的 Ground Truth 可见 `Keine der verfügbaren Klasse`，末尾可能被列宽截断，待与原表核对。
+
+## 第七部分
+
+来源：Excel 第 144–167 行的两张照片，按共同列与行顺序对应。空白单元格记为“—”。
+
+| ID | SAP-Nummer | Teamcenter | Benennung (E) | Benennung (D) | Baugruppenebene | Ground Truth | Register | Weitere zulässige Ground Truth |
+|---:|---|---|---|---|---|---|---|---|
+| — | 0804LS4641 | AS00129566 | rotate unit | Dreheinheit | — | Rotationseinheit | E1 | — |
+| — | 0804KL2297 | AS00131203 | control box | BEDIENUNGSKASTEN | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 0804MA1736 | AS00394604 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 0804MA6689 | AS00395784 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 0804LN1286 | AS00326573 | gripper | GREIFER | — | Greifer | E1 | — |
+| — | 0804LN1294 | AS00327751 | gripper | GREIFER | — | Greifer | E1 | — |
+| — | 0804LN1297 | AS00327933 | gripper | GREIFER | — | Greifer | E1 | — |
+| — | 0804FE3750 | AS90229004 | lifting unit | Hubeinheit | — | Lineareinheit | E2 | — |
+| — | — | AS00215660 | control box | Bedienungskasten | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 1800257228 | AS90039077 | base frame | Gestellunterbau | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 0804LK4678 | AS00309775 | lift-turning unit | Hub-Dreheinheit | — | Kombinierte Einheit | E1 | — |
+| — | 0804MB2648 | AS00397363 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 0804LG2192 | AS00275275 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 1800257479 | AS90101074 | control box | BEDIENUNGSKASTEN | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 3843AV9602 | PT90876568 | sensor | SENSOR | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 3843AB4237 | PT91921631 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 1800257202 | AS90130333 | top frame | Gestellunterbau | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 0804JS9252 | AS00040582 | control box | BEDIENUNGSKASTEN | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 1800257521 | AS90283097 | base frame | Gestellunterbau | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 0804LE7880 | AS00261423 | gantry module | PORTALMODUL | — | Multi-Achs-System (Gantry) | E2 | — |
+| — | 0804KU1103 | AS00184388 | gripper | GREIFER | — | Greifer | E2 | — |
+| — | 0804AT5037 | AS90418491 | lift-turning unit | Hub-Dreheinheit | — | Kombinierte Einheit | E1 | — |
+| — | 0804LB4468 | AS00237554 | rotate unit | Dreheinheit | — | Rotationseinheit | E1 | — |
+| — | 0804LU7693 | AS00361757 | lifting unit | Hubeinheit | — | Lineareinheit | M | Kombinierte Einheit |
+
+本部分共 24 行：E1 为 20 行、E2 为 3 行、M 为 1 行。ID 与 Baugruppenebene 均为空；第 152 行的 SAP-Nummer 为空。第 145、152、153、157、158、160、161、162 行的 Ground Truth 可见 `Keine der verfügbaren Klasse`，末尾可能被列宽截断，待与原表核对。
