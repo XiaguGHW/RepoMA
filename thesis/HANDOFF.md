@@ -1,7 +1,7 @@
 # 论文写作交接文档
 
 > 用途：新对话开始时先读这份文档，再读 `thesis/chapter_4.md`，然后从 4.3 继续写。
-> 更新日期：2026-11-10
+> 更新日期：2026-11-10（含 4.3 草稿）
 
 ---
 
@@ -38,7 +38,7 @@
 | 章节导语 | 目的 + 内容顺序，Anja 风格（一段 3–6 句，用 first / subsequently / concludes，不列小节编号），提到 GT 迭代形成、最终复核在第 5 章 | – | ✅ 已写 |
 | 4.1 Assembly Dataset | ①概述 ②领域范围 ③选样标准 ④数据来源 ⑤类别分布（表 4.1）⑥初始标签 | 1.5 | ✅ 已写 |
 | 4.2 Classification Scheme and Codebook | 4.2.1 Classes（图 4.1 七类示意图、表 4.2）/ 4.2.2 Decision Logic（图 4.2 流程图） | 2 | ✅ 已写 |
-| 4.3 Workshop Design and Implementation | 设计：目标、Excel 模板（五个字段）、用时记录；实施：四次 Workshop、16 名参与者、流程 | 1.5 | ⏳ 下一步 |
+| 4.3 Workshop Design and Implementation | 设计：目标、Excel 模板（五个字段）、用时记录；实施：四次 Workshop、16 名参与者、流程 | 1.5 | 📝 草稿见第 8 节（尚未放入 chapter_4.md） |
 | 4.4 Evaluation Procedure | 两人复核流程、E1/E2/M 判定规则、Krippendorff's α 的选用理由和计算范围 | 1.5 | ⏳ |
 | 4.5 Results | 4.5.1 GT Review and Regime Distribution / 4.5.2 Inter-Annotator Agreement / 4.5.3 Annotation Time | 2.5 | ⏳ |
 | 4.6 Implications for the LLM Evaluation | 按 Regime 分别评价、Allowed-Label-Set Accuracy、人工用时作基准、过渡到第 5 章 | 1 | ⏳ |
@@ -87,7 +87,9 @@
 - 论文整体描述 16 人，不单独强调第四次（流程、Codebook、模板都相同）
 - 每个装配体由 5–10 人独立标注（已核实；正文只写这一句，不展开分组。工程师只标注了主数据集中的 32 个装配体，比较工程师和学生用时时注意这一点）
 - 先用约 10 分钟阅读 Codebook，再分类；可以在 Teamcenter 和 DFC 中查资料
-- 用时由 Excel 模板自动记录时间戳（需要说明计算方式和异常值处理）
+- 用时由 Excel 模板自动记录时间戳；没有剔除异常值，也没有计算中位数。4.3 只写“由时间戳得出处理时间”，不写计算细节；4.5.3 暂定只报告平均值，用户之后审阅数据再决定是否补充
+- Excel 模板实际有备注（Notiz）列；PPT 里的模板图没有这一列，图 4.3 需补一列或在图题中注明是简化示意
+- 正文用 “individually” 即可，不用强调参与者之间不讨论
 - Workshop 目标：验证分类体系 + 记录人工分类结果和用时
 
 ### Ground Truth（三阶段迭代）
@@ -137,10 +139,27 @@
 - [ ] 4.2 是否写“Codebook 由作者与导师共同制定”，问 Jonas
 - [ ] 表 4.1 最终分布（复核后可能变化，同时更新“22 至 31”）
 - [x] 每个装配体由 5–10 人标注（已核实）
-- [ ] 用时的计算方式（相邻时间戳之差？）和异常值处理
 - [ ] 按 199 个重新计算 α、Regime 分布和用时
 - [ ] 第 5 章：5 种配置的具体组合（模型、P1–P4、输入形式 PDF / 图片 / 文本），每种配置运行 10 次，主指标 Allowed-Label-Set Accuracy
 - [ ] 第 5 章：实验是否在 Bosch Assembly Assistant 中运行（影响第 6 章的位置和写法）
 - [ ] 第三阶段 GT 修正的数量
 - [ ] 研究问题（RQ）还没定，可以根据实验拟 2–3 个
 - [ ] Jonas 的 2-Pager 用了用户的实验结果，论文中如何引用，问 Jonas
+
+## 8 4.3 草稿（已与用户讨论确认）
+
+**4.3 Workshop Design and Implementation**
+
+The labeling workshop pursued two objectives: to validate the classification scheme on real assemblies and to record human classifications together with the time required for each assembly. The recorded classifications form the basis of the ground truth, while the processing times serve as a reference for assessing the efficiency of the LLM-based classification in Chapter 5.
+
+标注 Workshop 有两个目标：用真实装配体验证分类体系，以及记录人工分类结果和每个装配体所需的时间。记录的分类结果是参考标签的基础，用时则作为第 5 章评价 LLM 分类效率的参照。
+
+Classifications were recorded in an Excel template with one row per assembly (Figure 4.3). For each assembly, participants had to enter the class and their confidence on a four-level scale ranging from *certain* to *uncertain*. If a second class was also plausible, it was entered as a second choice; if the decision was based on documents beyond the information provided in the template, the decisive source, such as the 3D view, the drawing or the bill of materials, was noted. A short note was required for uncertain classifications, for the class *None of the Available Classes* and whenever a second choice was given. The confidence thus captures uncertainty, whereas the second choice captures ambiguity between classes. A timestamp was recorded automatically for each entry, from which the processing time per assembly was derived.
+
+分类结果记录在 Excel 模板中，每个装配体一行（图 4.3）。参与者必须为每个装配体填写类别和置信度，置信度分为从“确定”到“不确定”四个等级。如果另一个类别也合理，就填入“第二选择”；如果判断依据超出了模板中提供的信息，就注明起决定作用的资料来源，例如 3D 视图、图纸或物料清单。对于不确定的分类、归入“不属于任何可用类别”的装配体，以及填写了第二选择的情况，还需写一条简短备注。因此，置信度记录的是不确定性，第二选择记录的是类别之间的歧义。每条记录都会自动生成时间戳，由此得出每个装配体的处理时间。
+
+The workshop was conducted in four sessions with a total of 16 participants, comprising four engineers and 12 students. All sessions followed the same procedure. Participants first read the codebook for approximately ten minutes to establish a common basis for the classification. They then classified the assemblies individually, using Teamcenter and DFC for further research where required, with a time budget of approximately two minutes per assembly. Each participant classified a subset of the assemblies, so that each assembly was classified independently by five to ten participants.
+
+Workshop 分四次进行，共 16 名参与者，其中 4 名工程师、12 名学生。各次 Workshop 采用相同的流程。参与者先用约 10 分钟阅读 Codebook，为分类建立统一基础；随后独立对装配体分类，必要时可在 Teamcenter 和 DFC 中查阅资料，每个装配体的时间预算约为 2 分钟。每名参与者分类一部分装配体，每个装配体由 5 至 10 名参与者独立分类。
+
+*Figure 4.3: Simplified structure of the classification template used in the labeling workshop*（用 PPT 中的模板示意图，去掉 BMG 页眉页脚；补上 Note 列或保留“Simplified”）
