@@ -230,3 +230,36 @@
 | — | 0804LU7693 | AS00361757 | lifting unit | Hubeinheit | — | Lineareinheit | M | Kombinierte Einheit |
 
 本部分共 24 行：E1 为 20 行、E2 为 3 行、M 为 1 行。ID 与 Baugruppenebene 均为空；第 152 行的 SAP-Nummer 为空。第 145、152、153、157、158、160、161、162 行的 Ground Truth 可见 `Keine der verfügbaren Klasse`，末尾可能被列宽截断，待与原表核对。
+
+## 第八部分
+
+来源：Excel 第 168–191 行的两张照片，按共同列与行顺序对应。空白单元格记为“—”。
+
+| ID | SAP-Nummer | Teamcenter | Benennung (E) | Benennung (D) | Baugruppenebene | Ground Truth | Register | Weitere zulässige Ground Truth |
+|---:|---|---|---|---|---|---|---|---|
+| — | 0804BN2123 | AS90387128 | lifting unit | Hubeinheit | — | Lineareinheit | E1 | — |
+| — | 3843106114 | AS90124618 | holder | Befestigung | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 0804LL3638 | AS00309641 | gantry module | PORTALMODUL | — | Multi-Achs-System (Gantry) | E1 | — |
+| — | 0804EM7937 | AS90316069 | lifting unit | Hubeinheit | — | Lineareinheit | E1 | — |
+| — | 3843CD1070 | PT00465587 | sensor | SENSOR | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 0804LZ1881 | AS00384097 | rotate unit | Dreheinheit | — | Rotationseinheit | E1 | — |
+| — | 0804LL8077 | AS00321604 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 0804KA8953 | AS00088214 | rotate unit | Dreheinheit | — | Rotationseinheit | E2 | — |
+| — | 0804KF8538 | AS00103837 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 0804LF6209 | AS00279564 | gripper | GREIFER | — | Greifer | E1 | — |
+| — | 0804MB8153 | AS00407159 | gripper | GREIFER | — | Greifer | E2 | — |
+| — | 0804LX7355 | AS00371228 | gantry module | PORTALMODUL | — | Multi-Achs-System (Gantry) | E1 | — |
+| — | 3843AZ5880 | PT90997121 | sensor | SENSOR | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 0804GR4842 | AS90210608 | gripper | GREIFER | — | Greifer | E2 | — |
+| — | 0804KB9727 | AS00089987 | rotate unit | Dreheinheit | — | Rotationseinheit | E1 | — |
+| — | 0804MC3545 | AS00400675 | lifting unit | HUBEINRICHTUNG | — | Lineareinheit | E1 | — |
+| — | 0804JF2622 | AX90412617 | lifting unit | Hubeinheit | — | Lineareinheit | E1 | — |
+| — | 0804LS3667 | AS00338083 | rotate unit | Dreheinheit | — | Rotationseinheit | E1 | — |
+| — | 0804LN1289 | AS00327503 | gripper | GREIFER | — | Greifer | E1 | — |
+| — | 0804KD4277 | AS00108129 | rotate unit | Dreheinheit | — | Rotationseinheit | E1 | — |
+| — | 0804LN1287 | AS00326685 | gripper | GREIFER | — | Greifer | E1 | — |
+| — | 0804AF6207 | AS90316722 | lift-turning unit | Hub-Dreheinheit | — | Kombinierte Einheit | E1 | — |
+| — | 0804JC9184 | AS00106958 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 0804LM0799 | AS00323299 | lifting unit | Hubeinheit | — | Lineareinheit | E1 | — |
+
+本部分共 24 行：E1 为 21 行、E2 为 3 行。ID、Baugruppenebene 和其他允许类别均为空。第 169、172、180 行的 Ground Truth 可见 `Keine der verfügbaren Klasse`，末尾可能被列宽截断，待与原表核对。
