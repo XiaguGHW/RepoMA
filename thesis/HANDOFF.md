@@ -10,11 +10,11 @@
 - **题目**：LLM-based functional classification of engineering assemblies（Bosch Baugruppe 功能分类），硕士论文，英文撰写
 - **研究所**：IKTD（Institut für Konstruktionstechnik und Technisches Design），与 BMG（Bosch Manufacturing Solutions）合作项目
 - **导师（Betreuer）**：Jonas，互称 du
-- **篇幅**：研究所一般规定 80 页，Jonas 认为少一些没关系；方法部分不用写太多，实验可以多一些。目标正文约 65–70 页
+- **篇幅**：研究所一般规定 80 页，Jonas 认为少一些没关系；方法部分不用写太多，实验可以多一些。目标正文约 60–62 页（第 5 章从 24 页压缩到 16–18 页）
 - **参考论文**：Anja 的硕士论文（同一导师、同一复用项目，研究 Handhabungsbaugruppen 的参数提取，用 Gemini 2.5 Pro）。她的写法是研究所认可的风格，可以引用她的论文作为前序工作（具体怎么引用问 Jonas）
 - **研究流程（中期报告的五步）**：Testbasis & Codebook → Labeling-Workshop → Workshop-Auswertung → LLM-Experimente → Ergebnisbewertung
 
-## 2 最终目录（正文约 68 页）
+## 2 最终目录（正文约 60–62 页）
 
 | 章 | 标题 | 页数 |
 |---|---|---|
@@ -22,11 +22,12 @@
 | 2 | State of Research（2.1 Functional Classification and Reuse / 2.2 Technical Documentation / 2.3 LLMs and Multimodal Models / 2.4 Prompt Design / 2.5 Human Annotation and Reference Labels / 2.6 Related Work and Research Gap） | 13 |
 | 3 | Methodology（3.1 Research Design，可简要对应 DRM / 3.2 Comparison Strategy / 3.3 Validity and Reproducibility） | 3 |
 | 4 | Labeling Workshop and Ground Truth | 10 |
-| 5 | Experimental Evaluation（5.1 Setup and Configurations / 5.2 Metrics and Output Processing / 5.3 Overall Performance and Stability / 5.4 Prompt Design and Model Selection / 5.5 Input Representation / 5.6 Performance Across E1, E2, M / 5.7 Error Analysis / 5.8 Validation on 70 Additional Assemblies / 5.9 Cost and Efficiency / 5.10 Summary） | 24 |
+| 5 | Experimental Evaluation（5.1 Setup and Configurations / 5.2 Ground Truth Revision and Evaluation Metrics / 5.3 Prompt Design / 5.4 Input Representation / 5.5 Overall Performance and Stability / 5.6 Performance Across E1, E2, M / 5.7 Error Analysis / 5.8 Validation on 70 Additional Assemblies / 5.9 Cost and Efficiency / 5.10 Summary） | 16–18 |
 | 6 | Prototype: Bosch Assembly Assistant（Requirements / Architecture and Workflow / Core Functions / Verification and Scope） | 5 |
 | 7 | Discussion（Answers to RQs / Role of Rules and Ambiguity / Comparison with State of Research / Implications for Practice / Limitations） | 7 |
 | 8 | Conclusion and Outlook | 2 |
 
+- 第 5 章页数分配：5.1 约 1 / 5.2 约 2 / 5.3 约 1.5 / 5.4 约 1.5 / 5.5 约 2.5 / 5.6 约 1.5 / 5.7 约 2.5 / 5.8 约 1 / 5.9 约 1 / 5.10 约 0.5；按类别的 P/R、完整 CI、全部配对检验、Prompt 原文放附录
 - 不写 BMG 现状调查（Jonas 说 Anja 写得太多了，这次不用）
 - Workshop 单独一章（第 4 章），实验评价单独一章（第 5 章），这是 Jonas 的要求
 - 研究所要求的论文结构是 DRM（RC / DS I / PS / DS II），但不按 DRM 重排目录，只在 3.1 用一两句话说明对应关系
