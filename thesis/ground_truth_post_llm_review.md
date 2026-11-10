@@ -92,9 +92,42 @@
 | 4 | 0804KS8037 | AS00164441 | axis system | Achssystem | — | Multi-Achs-System (Gantry) | E1 | — |
 | 2 | 0804KR9943 | AS00156329 | handling unit | Handlingseinheit | — | Kombinierte Einheit | E1 | — |
 | 29 | 0804EK1683 | AS90152580/01 | robot | Roboter | — | Roboter | E1 | — |
-| 28 | 0804LU7362 | AS00354920 | supporting frame | Gestell | — | Keine der verfügbaren Klasse | E1 | — |
+| 28 | 0804LU7362 | AS00354920 | supporting frame | Gestell | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
 | 25 | 0804KT2332 | AS00150269 | gripper unit | Greifereinheit | — | Greifer | E1 | — |
 | 7 | 0804EV7706 | AS90158200/01 | robot unit | Robotereinheit | — | Roboter | E1 | — |
 | 20 | 0804KY9594 | AS00219172 | Lifting Unit | Hubeinheit | — | Lineareinheit | E1 | — |
 
-本部分共 24 行：E1 为 10 行、E2 为 10 行、M 为 4 行。第 57、58、60 行的 Benennung (D) 分别显示为 `14`、`124`、`51`，Baugruppenebene 为空。第 68 行的 Ground Truth 显示为 `Keine der verfügbaren Klasse`（单数），按照片原样保留，待核对。
+本部分共 24 行：E1 为 10 行、E2 为 10 行、M 为 4 行。第 57、58、60 行的 Benennung (D) 分别显示为 `14`、`124`、`51`，Baugruppenebene 为空。第 68 行的 Ground Truth 可见 `Keine der verfügbaren Klasse`；末尾可能被列宽截断，待与原表核对。
+
+## 第四部分
+
+来源：Excel 第 72–95 行的两张照片，按共同列及行顺序对应。空白单元格记为“—”。第 77、78、94 行的英文名称在本组照片中被列宽截断，表中沿用实验前照片的转录，待核对。
+
+| ID | SAP-Nummer | Teamcenter | Benennung (E) | Benennung (D) | Baugruppenebene | Ground Truth | Register | Weitere zulässige Ground Truth |
+|---:|---|---|---|---|---|---|---|---|
+| 24 | 0804KU2401 | AS00177443 | Lifting Device | Hubeinrichtung | — | Lineareinheit | E1 | — |
+| 1 | 0804LH9239 | AS00306708 | control panel | Steuertafel | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| 6 | 0804LB3626 | AS00245227 | Lifter | Ausheber | — | Lineareinheit | E1 | — |
+| 8 | 0804KW6429 | AS00243076 | axis system | Achssystem | — | Multi-Achs-System (Gantry) | E1 | — |
+| 22 | 0804KB9919 | AS00084317 | gripper unit | Greifereinheit | — | Greifer | E1 | — |
+| 18 | 0804KU7061 | AS00199717 | supporting frame | Gestell | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| 12 | 0804JT7787 | AS00046110 | supporting frame | Gestell | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| 33 | 0804EA6409 | AS90439710/01 | robot | Roboter | — | Roboter | E1 | — |
+| 55 | 0804FR8437 | AS90092024/01 | robot | Roboter | — | Roboter | E1 | — |
+| 63 | 0804CC3075 | AS90234041/00 | robot | Roboter | — | Roboter | E1 | — |
+| 64 | 0804KU9472 | — | gripper unit | Greifereinheit | — | Greifer | E1 | — |
+| 43 | 0804LY4947 | AS00378575 | Lifting Unit | Hubeinheit | — | Lineareinheit | E1 | — |
+| 35 | 0804KT8575 | AS00185495/01 | robot | Roboter | — | Roboter | E1 | — |
+| 31 | 0804MA9380 | AS00397895 | Lifting Unit | Hubeinheit | — | Lineareinheit | E2 | — |
+| 21 | 0804LY8514 | AS00378154 | rotate unit | Dreheinheit | — | Rotationseinheit | E2 | — |
+| 5 | 0804MA7037 | AS00391134 | holder | Befestigung | — | Keine der verfügbaren Klasse（末尾待核对） | E2 | — |
+| 23 | 0804KV4964 | — | gripper unit | Greifereinheit | — | Greifer | M | Keine der verfügbaren Klassen |
+| 26 | 0804JK8878 | AS00037979 | gripper unit | Greifereinheit | — | Greifer | M | Lineareinheit |
+| 61 | 0804LZ1241 | AS00379611 | rotate unit | Dreheinheit | — | Rotationseinheit | E1 | — |
+| 65 | 3843CE1617 | AS00277646/01 | axis system | Achssystem | — | Multi-Achs-System (Gantry) | E1 | — |
+| 62 | 0804GZ3046 | AS90390673/00 | rotation unit | Rotationseinheit | — | Rotationseinheit | E1 | — |
+| 66 | 0804DY2146 | AS90489451/00 | rotation unit | Rotationseinheit | — | Rotationseinheit | E1 | — |
+| 42 | 0804JX5741 | AS00066414 | gantry axis system | Portalachssystem | — | Multi-Achs-System (Gantry) | E1 | — |
+| 53 | 0804LC3026 | AS00234653 | gripper unit | Greifereinheit | — | Greifer | E1 | — |
+
+本部分共 24 行：E1 为 19 行、E2 为 3 行、M 为 2 行。所有 Baugruppenebene 均为空；第 82、88 行 Teamcenter 为空。第 73、77、78、87 行的 Ground Truth 可见 `Keine der verfügbaren Klasse`，末尾可能被列宽截断，待与原表核对。
