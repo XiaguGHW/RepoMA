@@ -300,11 +300,11 @@
 
 ## 第十二部分
 
-来源：Excel 第 199–200 行的照片。ID 单元格为空；Baugruppenebene 和 G–I 列未显示完整，记为“未显示”，不可视为原表为空。
+来源：Excel 第 199–200 行的两张照片，按行顺序对应。ID 和其他允许类别单元格为空，记为“—”；Baugruppenebene 未完整显示，记为“未显示”，不可视为原表为空。
 
 | ID | SAP-Nummer | Teamcenter | Benennung (E) | Benennung (D) | Baugruppenebene | Ground Truth | Register | Weitere zulässige Ground Truth (nur bei M) |
 |---:|---|---|---|---|---|---|---|---|
-| — | 0804JW4969 | AS00058246 | robot | ROBOTER | 未显示 | 未显示 | 未显示 | 未显示 |
-| — | 0804AH9298 | AS90166730 | lift-turning unit | Hub-Dreheinheit | 未显示 | 未显示 | 未显示 | 未显示 |
+| — | 0804JW4969 | AS00058246 | robot | ROBOTER | 未显示 | Roboter | E1 | — |
+| — | 0804AH9298 | AS90166730 | lift-turning unit | Hub-Dreheinheit | 未显示 | Kombinierte Einheit | E2 | — |
 
-本部分共 2 行。照片显示第 201 行开始左侧为空，但右侧列未拍到；本文件目前共转录 199 条记录，其中这两行的右侧信息待补充。
+本部分共 2 行：E1 为 1 行、E2 为 1 行。本文件目前共转录 199 条记录。两行的 Baugruppenebene 尚未完整显示，待核对。
