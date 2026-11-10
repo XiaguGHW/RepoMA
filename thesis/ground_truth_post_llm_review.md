@@ -65,3 +65,36 @@
 | 49 | 0804306221 | AS90101734 | gantry | Portal | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
 
 本部分共 24 行：E1 为 5 行、E2 为 11 行、M 为 8 行。第 24、44 行的 Benennung (D) 分别显示为 `4461`、`52`，Baugruppenebene 为空，按照片原样记录。
+
+## 第三部分
+
+来源：Excel 第 48–71 行的两张照片，按共同列与行顺序对应。空白单元格记为“—”。第 57、58、60、64、67、70 行的 Teamcenter 编号尾部在本组照片中被列宽截断，下表沿用实验前照片转录的编号，待与原表核对。
+
+| ID | SAP-Nummer | Teamcenter | Benennung (E) | Benennung (D) | Baugruppenebene | Ground Truth | Register | Weitere zulässige Ground Truth |
+|---:|---|---|---|---|---|---|---|---|
+| 55 | 0804KZ9209 | AS00231833 | Lifter | Hubgerät | Unterbaugruppe | Lineareinheit | E2 | — |
+| 57 | 0804DN9616 | AS90430781 | gantry | Portal | Hauptbaugruppe | Multi-Achs-System (Gantry) | E2 | — |
+| 60 | 0804LB1151 | AS00238335 | Lifter | Hubgerät | Unterbaugruppe | Lineareinheit | M | Multi-Achs-System (Gantry), Kombinierte Einheit |
+| 3 | 0804CE5532 | AS90000201 | handling | Handhabung | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 7 | 0804FU6515 | AS90303031 | handling | Handhabung | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 9 | 0804GY2576 | AS90308365 | gantry | Portal | Hauptbaugruppe | Kombinierte Einheit | M | Multi-Achs-System (Gantry) |
+| 11 | 0804KM9359 | AS00139165 | turning unit | Wendevorrichtung | Hauptbaugruppe | Rotationseinheit | E2 | — |
+| 39 | 0804CH8012 | AS90513297 | Handling | Handhabung | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 51 | 0804KB7256 | AS00097350 | rotation unit | Rotationseinheit | Hauptbaugruppe | Rotationseinheit | E2 | — |
+| 14 | 0804AR3766 | AS90165357/00 | rotation unit | 14 | — | Rotationseinheit | M | Greifer |
+| 18 | 0804HX0679 | AS90052795/01 | rotation unit | 124 | — | Rotationseinheit | E2 | — |
+| 19 | 0804KZ9488 | AS00231836 | handling device | Handhabungsgerät | Unterbaugruppe | Kombinierte Einheit | E2 | — |
+| 25 | 0804DU5389 | AS90327677/00 | axis system | 51 | — | Multi-Achs-System (Gantry) | M | Kombinierte Einheit |
+| 38 | 0804GY2577 | AS90283974 | turning unit | Wendevorrichtung | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 9 | 0804LG6553 | AS00234620 | gantry axle | Portalachse | — | Multi-Achs-System (Gantry) | E1 | — |
+| 27 | 0804KY6491 | AS00226737 | Lifting Unit | Hubeinheit | — | Lineareinheit | E1 | — |
+| 34 | 0804FH4760 | AS90308280/00 | robot | Roboter | — | Roboter | E1 | — |
+| 4 | 0804KS8037 | AS00164441 | axis system | Achssystem | — | Multi-Achs-System (Gantry) | E1 | — |
+| 2 | 0804KR9943 | AS00156329 | handling unit | Handlingseinheit | — | Kombinierte Einheit | E1 | — |
+| 29 | 0804EK1683 | AS90152580/01 | robot | Roboter | — | Roboter | E1 | — |
+| 28 | 0804LU7362 | AS00354920 | supporting frame | Gestell | — | Keine der verfügbaren Klasse | E1 | — |
+| 25 | 0804KT2332 | AS00150269 | gripper unit | Greifereinheit | — | Greifer | E1 | — |
+| 7 | 0804EV7706 | AS90158200/01 | robot unit | Robotereinheit | — | Roboter | E1 | — |
+| 20 | 0804KY9594 | AS00219172 | Lifting Unit | Hubeinheit | — | Lineareinheit | E1 | — |
+
+本部分共 24 行：E1 为 10 行、E2 为 10 行、M 为 4 行。第 57、58、60 行的 Benennung (D) 分别显示为 `14`、`124`、`51`，Baugruppenebene 为空。第 68 行的 Ground Truth 显示为 `Keine der verfügbaren Klasse`（单数），按照片原样保留，待核对。
