@@ -155,7 +155,61 @@ The workshop took place over four sessions and involved 16 participants, includi
 
 研讨会分四次举行，共有 16 人参加，其中 4 名工程师、12 名学生。每次研讨会都采用相同的流程。为建立统一的分类基础，参与者首先花约 10 分钟阅读 Codebook。随后，参与者各自对装配体进行分类，必要时通过 Teamcenter 和 DFC 查阅补充资料。每个装配体的分类时间预算约为 2 分钟。每名参与者负责其中一部分装配体，每个装配体均由 5 至 10 名参与者独立分类。
 
+## 4.4 Evaluation Procedure | 评价方法
+
+**① 评价步骤**
+
+The evaluation of the workshop results involved three steps, beginning with a review of the classifications against the codebook, followed by the assignment of each assembly to an ambiguity regime and the measurement of agreement among participants.
+
+研讨会结果分三步进行评价。首先对照 Codebook 复核分类结果，然后将每个装配体归入一个歧义类别（ambiguity regime），最后量化参与者之间的一致性。
+
+**② 复核**
+
+For each assembly, the participants' classifications were compared with the initial label and reviewed by two persons against the codebook and the original documentation, such as the 3D view, the drawing and the bill of materials. The reviewers based their decisions on the documentation and the codebook rules, regardless of which class received the most votes. Where the review showed that the initial label did not comply with the codebook, the label was corrected.
+
+对每个装配体，先将参与者的分类结果与初始标签进行比较，再由两人对照 Codebook 和原始资料进行复核。原始资料包括三维视图、图纸和物料清单等。复核人员依据资料和 Codebook 的规则作出判断，票数最多的类别不影响这一判断。如果复核发现初始标签不符合 Codebook，就修正该标签。
+
+**③ Ambiguity regime 的定义**
+
+The review was used to assign each assembly to one of three ambiguity regimes according to how clearly a single class could be determined (Figure 4.4). In regime E1, all participants chose the same class, and the review confirmed that this class complies with the codebook. In regime E2, some participants selected a different class, but the review confirmed that applying the codebook rules yielded a single class and that the documentation did not support the alternative classifications. In regime M, participants disagreed, and the review showed that the documentation and the codebook support more than one class. Participants disagreed in both E2 and M, but the codebook resolved the disagreement only in E2.
+
+根据复核结果，每个装配体被归入三个歧义类别之一，具体取决于能否明确判定唯一的功能类别（图 4.4）。在 E1 中，所有参与者都选择了同一类别，复核确认该类别符合 Codebook。在 E2 中，部分参与者选择了其他类别，但复核确认，按 Codebook 的规则只能得出一个类别，且资料不支持其他分类结果。在 M 中，参与者意见不一致，复核表明资料和 Codebook 支持不止一个类别。E2 和 M 都存在分歧，但只有在 E2 中，Codebook 能够解决这种分歧。
+
+**[Insert Figure 4.4 here / 在此插入图 4.4]**
+
+*Figure 4.4. Examples of the three ambiguity regimes. Numbers in parentheses indicate the share of participants who chose each class (illustrative excerpt) / 图 4.4 三种 ambiguity regime 的示例。括号中的数字表示选择该类别的参与者比例（示意节选）*
+
+**④ 允许标签集合**
+
+The review thereby yielded a set of allowed labels for each assembly. Each assembly in regime E1 or E2 has exactly one allowed class. For assemblies in regime M, it contains all classes that were found in the review to be consistent with the documentation and the codebook.
+
+复核由此为每个装配体确定了一个允许标签集合。E1 或 E2 中的每个装配体只有一个允许类别。对于 M 中的装配体，集合包含复核认定与资料和 Codebook 一致的所有类别。
+
+**⑤ 为什么选 Krippendorff's α**
+
+Krippendorff's α was used to measure agreement among participants (Section 2.5). The coefficient suits the workshop design for three reasons: it accommodates any number of annotators, it does not require each assembly to be classified by the same annotators, and it is defined for nominal data such as functional classes. The workshop required these properties because each assembly was classified by five to ten participants and the group of participants varied across assemblies.
+
+采用 Krippendorff's α 衡量参与者之间的一致性（第 2.5 节）。这一系数适合本研讨会的设计，因为它允许任意数量的标注者，允许不同装配体由不同的标注者分类，也适用于功能类别这类名义尺度数据。由于每个装配体由 5 至 10 名参与者分类，且参与者组合随装配体而异，因此本研讨会需要这些特性。
+
+**⑥ α 的计算范围**
+
+α was calculated for the assemblies in regimes E1 and E2 across the entire dataset, without distinguishing between the primary and the supplementary set. The review confirmed that disagreement in regime M reflects ambiguity, so an agreement coefficient for this regime alone would not be meaningful. Because the regimes were themselves assigned partly on the basis of participant agreement, restricting the calculation to E1 and E2 tends to raise α; the value for all assemblies is therefore reported for comparison. The calculation was performed in Excel using Krippendorff's method for nominal data.
+
+α 的计算涵盖整个数据集中属于 E1 和 E2 的装配体，主数据集和补充数据集合并计算。复核确认 M 中的分歧反映了实际歧义，因此单独为 M 计算一致性系数没有解释意义。由于歧义类别的划分本身部分依据参与者的一致程度，仅对 E1 和 E2 计算往往会使 α 升高。因此，另外报告基于全部装配体计算的 α 作为对照。计算在 Excel 中完成，采用 Krippendorff 针对名义尺度数据的方法。
+
+**⑦ 处理时间**
+
+The timestamps were used to determine processing times and calculate the mean time per assembly separately for engineers and students.
+
+根据时间戳确定处理时间，并分别计算工程师和学生处理每个装配体的平均用时。
+
 ## 待处理
 
 - 第 ④ 段的 DFC 官方文件引用，以及 Teamcenter 和 Autodesk Vault 的关系（BMG 如果两者都在用，加一句说明）。
 - 表 4.1 的数字在复核后如有变化，记得同步更新第 ⑤ 段的“22 至 31”和“29”。
+
+### 4.4 待办
+
+- [ ] 复核 α：按 199 个装配体重新计算时，用 Python（例如 krippendorff 包）独立算一次，确认和 Excel 的结果一致。如果一致，在⑥最后一句补上 “and verified with …”。
+- [ ] ② 的复核范围：确认是所有装配体都复核，还是只复核有分歧或与初始标签不一致的装配体。如果只复核一部分，修改第一句。
+- [ ] ⑦ 工程师的比较基础：工程师只标注了主数据集中的 32 个装配体。如果工程师和学生的用时在同一批装配体上比较，在⑦中说明。
