@@ -164,3 +164,36 @@
 | 47 | 0804GT5112 | AS90282232 | handling unit | Handlingseinheit | — | Kombinierte Einheit | E1 | — |
 
 本部分共 24 行：E1 为 2 行、E2 为 11 行、M 为 11 行。Baugruppenebene 在照片中均为空。第 104、105、117 行的 Ground Truth 可见 `Keine der verfügbaren Klasse`，末尾可能被列宽截断，待与原表核对。第 112 行（0804EN7325）为 M，但其他允许类别在照片中为空，按原样保留。
+
+## 第六部分
+
+来源：Excel 第 120–143 行的两张照片，按共同列及行顺序对应。空白单元格记为“—”。第 124 行的英文名称在本组照片中被列宽截断，表中沿用实验前照片的转录，待核对。
+
+| ID | SAP-Nummer | Teamcenter | Benennung (E) | Benennung (D) | Baugruppenebene | Ground Truth | Register | Weitere zulässige Ground Truth |
+|---:|---|---|---|---|---|---|---|---|
+| 70 | 0804GA4441 | AS90245290 | control panel | Steuertafel | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| 59 | 0804LR0554 | AS00331111 | Lifting Unit | Hubeinheit | — | Lineareinheit | M | Kombinierte Einheit |
+| 68 | 0804JL5526 | AS00016496 | sensor | Sensor | — | Lineareinheit | M | Keine der verfügbaren Klassen |
+| 52 | 0804LE2661 | AS00260156 | gripper unit | Greifereinheit | — | Greifer | M | Kombinierte Einheit |
+| 49 | 0804AF9667 | AS90134089 | gantry axis system | Portalachssystem | — | Multi-Achs-System (Gantry) | M | Kombinierte Einheit |
+| 67 | 0804LV8630 | AS00371812 | rotate unit | Dreheinheit | — | Rotationseinheit | M | Kombinierte Einheit |
+| 40 | 0804BD5654 | AS90338060 | lift turning unit | Hub-Dreheinheit | — | Kombinierte Einheit | E2 | — |
+| 39 | 0804CC2134 | AS90419212/01 | robot | Roboter | — | Roboter | M | Kombinierte Einheit |
+| 58 | 0804JX6656 | AS00057035 | axis system | Achssystem | — | Multi-Achs-System (Gantry) | M | Kombinierte Einheit, Keine der verfügbaren Klassen |
+| 46 | 0804KW8391 | AS00202949 | axis system | Achssystem | — | Multi-Achs-System (Gantry) | M | Kombinierte Einheit, Keine der verfügbaren Klassen |
+| 13 | 0804FT0436 | AS90143556 | handling | Handling | — | Lineareinheit | E1 | — |
+| — | 0804JK3979 | AS00010335 | lifting unit | Hubeinheit | — | Lineareinheit | E1 | — |
+| — | 0804AG8297 | AS90104129 | lifting unit | Hubeinheit | — | Lineareinheit | E1 | — |
+| — | 0804LM7661 | AS00326025 | gantry module | PORTALMODUL | — | Multi-Achs-System (Gantry) | E1 | — |
+| — | 0804KE6397 | AS00114947 | robot | ROBOTER | — | Roboter | E1 | — |
+| — | 0804KV5835 | AS00189642 | lifting unit | Hubeinheit | — | Lineareinheit | E2 | — |
+| — | 0804LC5647 | AS00253628 | lift-turning unit | Hub-Dreheinheit | — | Kombinierte Einheit | E2 | — |
+| — | 0804LW4010 | AS00365833 | rotate unit | Dreheinheit | — | Rotationseinheit | E1 | — |
+| — | — | AS00235507 | control box | BEDIENUNGSKASTEN | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 0804358312 | AS90057078 | sensor | SENSOR | — | Keine der verfügbaren Klasse（末尾待核对） | E2 | — |
+| — | 0804LR7381 | AS00335256 | gripper | GREIFER | — | Greifer | E1 | — |
+| — | 0804LW5713 | AS00366888 | control box | BEDIENUNGSTAFEL | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 0804KC4801 | AS00099579 | base frame | GRUNDGESTELL | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+| — | 0804LD6387 | AS00258437 | base frame | GRUNDGESTELL | — | Keine der verfügbaren Klasse（末尾待核对） | E1 | — |
+
+本部分共 24 行：E1 为 12 行、E2 为 4 行、M 为 8 行。Baugruppenebene 均为空；第 131–143 行 ID 为空，第 138 行 SAP-Nummer 为空。第 120、138、139、141、142、143 行的 Ground Truth 可见 `Keine der verfügbaren Klasse`，末尾可能被列宽截断，待与原表核对。
