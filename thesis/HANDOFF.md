@@ -1,6 +1,6 @@
 # 论文写作交接文档
 
-> 用途：新对话开始时先读这份文档，再读 `thesis/chapter_4.md`，然后从 4.3 继续写。
+> 用途：新对话开始时先读这份文档，再读 `thesis/chapter_4.md`。第 4 章正文已写完，下一步写第 5 章。
 > 更新日期：2026-11-10（含 4.3 草稿）
 
 ---
@@ -38,10 +38,10 @@
 | 章节导语 | 目的 + 内容顺序，Anja 风格（一段 3–6 句，用 first / subsequently / concludes，不列小节编号），提到 GT 迭代形成、最终复核在第 5 章 | – | ✅ 已写 |
 | 4.1 Assembly Dataset | ①概述 ②领域范围 ③选样标准 ④数据来源 ⑤类别分布（表 4.1）⑥初始标签 | 1.5 | ✅ 已写 |
 | 4.2 Classification Scheme and Codebook | 4.2.1 Classes（图 4.1 七类示意图、表 4.2）/ 4.2.2 Decision Logic（图 4.2 流程图） | 2 | ✅ 已写 |
-| 4.3 Workshop Design and Implementation | 设计：目标、Excel 模板（五个字段）、用时记录；实施：四次 Workshop、16 名参与者、流程 | 1.5 | 📝 草稿见第 8 节（尚未放入 chapter_4.md） |
-| 4.4 Evaluation Procedure | 两人复核流程、E1/E2/M 判定规则、Krippendorff's α 的选用理由和计算范围 | 1.5 | ⏳ |
-| 4.5 Results | 4.5.1 GT Review and Regime Distribution / 4.5.2 Inter-Annotator Agreement / 4.5.3 Annotation Time | 2.5 | ⏳ |
-| 4.6 Implications for the LLM Evaluation | 按 Regime 分别评价、Allowed-Label-Set Accuracy、人工用时作基准、过渡到第 5 章 | 1 | ⏳ |
+| 4.3 Workshop Design and Implementation | 设计：目标、Excel 模板（五个字段）、用时记录；实施：四次 Workshop、16 名参与者、流程 | 1.5 | ✅ 已写 |
+| 4.4 Evaluation Procedure | 两人复核流程、E1/E2/M 判定规则、Krippendorff's α 的选用理由和计算范围 | 1.5 | ✅ 已写（待办见 chapter_4.md 末尾） |
+| 4.5 Results | 4.5.1 GT Review and Regime Distribution / 4.5.2 Inter-Annotator Agreement / 4.5.3 Annotation Time | 2.5 | ✅ 已写（4.5.1 ③ 的 [reason] 待补） |
+| 4.6 Implications for the LLM Evaluation | 按 Regime 分别评价、Allowed-Label-Set Accuracy、人工用时作基准、过渡到第 5 章 | 1 | ✅ 已写 |
 
 正文写在 `thesis/chapter_4.md`，图在 `thesis/figures/`。
 
