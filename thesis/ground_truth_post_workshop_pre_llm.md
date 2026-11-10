@@ -54,3 +54,30 @@
 | 21 | 0804KR6993 | AS00156452 | Lifter | Hubgerät | Hauptbaugruppe | Lineareinheit | E2 | — |
 
 本部分共 17 行：E1 为 10 行、E2 为 4 行、M 为 3 行。ID 52 的 Benennung (D) 在照片中显示为 `4461`，Baugruppenebene 单元格为空，均按照片原样记录。
+
+## 第三部分
+
+来源：第三组照片中的 Excel 第 37–54 行；两张照片通过共同的 Baugruppenebene 列和行顺序对应。空白单元格记为“—”。
+
+| ID | SAP-Nummer | Teamcenter | Benennung (E) | Benennung (D) | Baugruppenebene | Ground Truth | Register | Weitere zulässige Ground Truth (nur bei M) |
+|---:|---|---|---|---|---|---|---|---|
+| 23 | 0804LH5422 | AS00289859 | handling device | Handhabungsgerät | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 26 | 0804KZ5637 | AS00212374 | gripper | Greifer | Unterbaugruppe | Greifer | E2 | — |
+| 32 | 0804KR9668 | AS00199755 | gripper module | Greifermodul | Unterbaugruppe | Greifer | M | Keine der verfügbaren Klassen |
+| 34 | 0804JU56371 | AS00049479 | robot unit | Roboter-Einheit | Unterbaugruppe | Roboter | M | Kombinierte Einheit |
+| 35 | 0804AY8008 | AS90102714 | handling | Handhabung | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 37 | 0804EU0861 | AS90247946 | robot | Roboter | Hauptbaugruppe | Roboter | M | Kombinierte Einheit |
+| 40 | 0804GE7738 | AS90109419 | rotation unit | Rotationseinheit | Hauptbaugruppe | Kombinierte Einheit | M | — |
+| 41 | 0804DU5323 | AS90495989/00 | axis system | 52 | — | Multi-Achs-System (Gantry) | E2 | — |
+| 43 | 0804GV7647 | AS90294354 | handling | Handhabung | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 46 | 0804EB6690 | AS90347860 | rotation unit | Rotationseinheit | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 49 | 0804306221 | AS90101734 | gantry | Portal | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 55 | 0804KZ9209 | AS00231833 | Lifter | Hubgerät | Unterbaugruppe | Lineareinheit | E2 | — |
+| 57 | 0804DN9616 | AS90430781 | gantry | Portal | Hauptbaugruppe | Multi-Achs-System (Gantry) | E2 | — |
+| 60 | 0804LB1151 | AS00238335 | Lifter | Hubgerät | Unterbaugruppe | Lineareinheit | M | Multi-Achs-System (Gantry), Kombinierte Einheit |
+| 3 | 0804CE5532 | AS90000201 | handling | Handhabung | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 7 | 0804FU6515 | AS90303031 | handling | Handhabung | Hauptbaugruppe | Kombinierte Einheit | E2 | — |
+| 9 | 0804GY2576 | AS90308365 | gantry | Portal | Hauptbaugruppe | Kombinierte Einheit | M | Multi-Achs-System (Gantry) |
+| 11 | 0804KM9359 | AS00139165 | turning unit | Wendevorrichtung | Hauptbaugruppe | Rotationseinheit | E2 | — |
+
+本部分共 18 行：E2 为 12 行、M 为 6 行。ID 40 的 Register 为 M，但照片中“Weitere zulässige Ground Truth”为空，故按原样记录，不推断其他允许类别。ID 41 的 Benennung (D) 显示为 `52`，Baugruppenebene 为空，均按照片原样记录。ID 34 和 ID 49 的 SAP 编号与此前原始分类照片中记录的 `0804JU56371` 和 `0804306221` 一致。
