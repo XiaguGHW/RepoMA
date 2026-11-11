@@ -16,11 +16,11 @@
 | 类别 | 装配体数 |
 | --- | ---: |
 | 龙门判断错误 | 10 |
-| 信息过载 | 9 |
+| 信息过载 | 10 |
 | 资料不一致（CAD/BOM） | 3 |
 | 执行器计数错误 | 20 |
 | 其他 | 0 |
-| 待定 | 2 |
+| 待定 | 1 |
 | **合计** | **44** |
 
 ## 明细
@@ -38,6 +38,7 @@
 | `0804KS8037` | 50 | Multi-Achs-System (Gantry) | — | Kombinierte Einheit ×1 | 图片 1 | 龙门判断错误 | 混淆基础轴和横轴，误判为单侧悬臂 | 确定（行号待照片核对） |
 | `0804KV2157` | 52 | Kombinierte Einheit | — | Multi-Achs-System (Gantry) ×1 | 图片 1 | 龙门判断错误 | 违反龙门条件 c（单侧悬臂）并漏看旋转轴 | 确定 |
 | `0804DN9616` | 9 | Multi-Achs-System (Gantry) | — | Lineareinheit ×3 | 图片 3 | 信息过载 | 上下文过大，无法处理（Kontext ist zu groß） | 较确定：原文只说上下文过大 |
+| `0804FC1588` | 3 | Multi-Achs-System (Gantry) | Kombinierte Einheit | Keine der verfügbaren Klassen ×2 | 图片 2 | 信息过载 | 图片输入共 142 张图，分 10 批发送；Flash 和 Pro 都把装配体描述为机器人工具快换系统，并据此判为不属于任何可用类别。PDF 和文本输入都识别出门架加摆动轴。来源：作者补充的各次运行推理 | 确定 |
 | `0804CC2134` | 18 | Roboter | Kombinierte Einheit | Rotationseinheit ×1, Keine der verfügbaren Klassen ×2, Greifer ×1 | 图片 4 | 信息过载 | 只拿到快换装置的资料，缺主图纸和主 BOM | 确定 |
 | `0804EK1683` | 19 | Roboter | — | Rotationseinheit ×1, Keine der verfügbaren Klassen ×3 | 图片 4 | 信息过载 | 同 CC2134，只看到快换装置的资料 | 确定 |
 | `0804GD6171` | 21 | Roboter | — | Keine der verfügbaren Klassen ×4 | 图片 4 | 信息过载 | 65 张图片，主装配体的 1–2 页淹没在快换装置目录里 | 确定 |
@@ -69,12 +70,12 @@
 | `0804LE2661` | 55 | Greifer | Kombinierte Einheit | Rotationseinheit ×1 | 图片 1 | 执行器计数错误 | 把固定的基体看成旋转轴 | 确定（行号待照片核对） |
 | `0804LZ1241` | 56 | Rotationseinheit | — | Kombinierte Einheit ×1 | PDF 1 | 执行器计数错误 | 把标准螺钉看成第二个伺服电机和直线轴 | 确定 |
 | `3842998383` | 57 | Keine der verfügbaren Klassen | — | Lineareinheit ×1 | 图片 1 | 执行器计数错误 | 把被动滚道的输送方向算作平移轴，违反边界案例 6.8 | 确定 |
-| `0804FC1588` | 3 | Multi-Achs-System (Gantry) | Kombinierte Einheit | Keine der verfügbaren Klassen ×2 | 图片 2 | 待定 | 原文只讨论了 GT 应为组合单元；没有解释图片输入下判成“不属于任何可用类别”的原因 | 待定 |
+
 | `0804GE7738` | 6 | Rotationseinheit | Kombinierte Einheit | Lineareinheit ×4 | 图片 4 | 待定 | 原文说明 GT 为旋转单元或组合单元，并排除直线单元；没有解释图片输入下判成直线单元的原因 | 待定 |
 
 ## 待作者确认
 
-1. `0804FC1588`、`0804GE7738`：原文没有解释错误预测的原因，请补充或归入“其他”。
+1. `0804GE7738`：原文没有解释错误预测的原因，请补充或归入“其他”。（`0804FC1588` 已按作者补充的推理归为信息过载。）
 2. `0804FT6844`（信息过载或执行器计数错误）、`0804GT0312`（资料不一致或其他）、`0804KE7723`（信息过载或龙门判断错误）的主要原因。
 3. 执行器计数错误这一类是否沿用原幻灯片的名称“Antriebs-Halluzination”，还是按扩展后的范围改名（例如“Fehler bei der Aktorzählung”）。
 4. 本表只覆盖输入形式比较的运行；最终配置中 GPT-5.5 和 DeepSeek-V4-Flash 新出现的出错装配体（脚本 12 的 `Fehler_BG` 中标为 NEU）尚需另行归类。
