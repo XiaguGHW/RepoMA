@@ -311,3 +311,14 @@ Revidierte GT: Keine der verfügbaren Klassen (LLM korrekt: nein – passive Hal
 GT vor Review: Kombinierte Einheit | LLM: Gantry
 Analyse (Halluzination einer zweiten Horizontalachse / Übersehen des Drehaktors): Die Baugruppe ist ein X/Z-Portal auf zwei festen Standfüßen (Pos. 0017), bestehend aus einer einzigen Horizontalachse (Pos. 0100, AFAG Portalmodul PMP, T₁=1), einem Vertikalschlitten (Pos. 0101, SMC MXQ16-100, T₂=1) und einem 180°-Drehgreifer (Pos. 0102, SMC MRHQ20C-180S, R=1 → Kombinierte Einheit). Getäuscht durch die beiden Standfüße und die Benennung Portalmodul hat das LLM eine nicht existente Y-Achse sowie beidseitige Führungen halluziniert (Verstoß gegen Gantry-Kriterium b, Grenzfall 6.6: X/Z-Portal) und zudem die Rotationsachse Pos. 0102 (R=1) übersehen.
 Revidierte GT: Kombinierte Einheit (LLM korrekt: nein – nur eine Horizontalachse (X/Z-Portal, Grenzfall 6.6) plus Drehaktor Pos. 0102, R=1, T=2).
+
+
+## 第十三部分 · Excel 第 38–40 行（待补全）
+
+来源为 `Fehler_Analyse` 工作表照片：A–G 列和 H–K 列可见；G、H–K 列均为空。L–S 列未拍到，按 SAP 和 Teamcenter 编号参考 `corrected_gt_zgt_error_records.md` 中 `Korrigierte GT&ZGT` 的对应记录补录，尚待与本工作表核对。`—` 表示对应来源中为空，不等同于明确显示的 `[EMPTY]`，也不能仅据此推断模型没有输出。T 列 Fehleranalyse 未拍到，待后续照片补全。
+
+| Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
+|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 38 | 1 | 0 | `0804CE5532` | `AS90000201` | E2 | Kombinierte Einheit | — | — | — | — | — | — | — | — | Lineareinheit | — | — | — | — | 待拍摄 |
+| 39 | 1 | 0 | `0804EV7706` | `AS90158200/01` | E1 | Roboter | — | — | — | — | — | — | Kombinierte Einheit | — | — | — | — | — | — | 待拍摄 |
+| 40 | 1 | 0 | `0804FK2694` | `AS90037183` | E2 | Multi-Achs-System (Gantry) | — | — | — | — | — | — | — | Kombinierte Einheit | — | — | — | — | — | 待拍摄 |
