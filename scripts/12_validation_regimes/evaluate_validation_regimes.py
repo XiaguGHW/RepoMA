@@ -59,6 +59,1082 @@ CONFIGS = [
     ("Gemini 2.5 Pro (PDF)", "gemini-2.5-pro"),
     ("GPT-5.5 (Image)", "gpt-5.5"),
 ]
+
+# Finale Ground Truth (Stufe C, nach dem Review nach den LLM-Experimenten) aus
+# thesis/classification_data_and_revision_statistics.md: SAP -> [GT, Register, weitere zulässige].
+# Ohne SAP-Nummer: Schlüssel "TC:<Teamcenter>". Diese Werte haben Vorrang vor den Ergebnisdateien;
+# Abweichungen werden im Blatt "Pruefungen" protokolliert.
+FINAL_GT = {
+"0804FC1588": [
+"Multi-Achs-System (Gantry)",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804FA3834": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"0804BR4641": [
+"Roboter",
+"E1",
+[]
+],
+"0804KM9320": [
+"Greifer",
+"E1",
+[]
+],
+"0804FZ8322": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804FM8785": [
+"Roboter",
+"E1",
+[]
+],
+"0804KZ9027": [
+"Kombinierte Einheit",
+"M",
+[
+"Lineareinheit"
+]
+],
+"0804KK0664": [
+"Greifer",
+"E1",
+[]
+],
+"0804CW9430": [
+"Roboter",
+"E1",
+[]
+],
+"0804KZ1155": [
+"Greifer",
+"E1",
+[]
+],
+"0804HZ8350": [
+"Multi-Achs-System (Gantry)",
+"E1",
+[]
+],
+"0804KZ8712": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804KE7723": [
+"Multi-Achs-System (Gantry)",
+"E1",
+[]
+],
+"0804JL8049": [
+"Greifer",
+"E1",
+[]
+],
+"0804JU4254": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"0804KW6842": [
+"Greifer",
+"E1",
+[]
+],
+"0804KT1289": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804KW1502": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804KY7179": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804FF2025": [
+"Roboter",
+"E1",
+[]
+],
+"0804KM8175": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804KR0143": [
+"Multi-Achs-System (Gantry)",
+"E1",
+[]
+],
+"0804KY3585": [
+"Multi-Achs-System (Gantry)",
+"E1",
+[]
+],
+"0804DT6452": [
+"Multi-Achs-System (Gantry)",
+"M",
+[
+"Keine der verfügbaren Klassen"
+]
+],
+"0804FR1463": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"0804EC1049": [
+"Roboter",
+"E1",
+[]
+],
+"0804LG8766": [
+"Greifer",
+"E1",
+[]
+],
+"0804GD6171": [
+"Roboter",
+"E1",
+[]
+],
+"0804JD0275": [
+"Greifer",
+"E2",
+[]
+],
+"0804FK2694": [
+"Multi-Achs-System (Gantry)",
+"E2",
+[]
+],
+"0804JL8434": [
+"Roboter",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804KB2225": [
+"Rotationseinheit",
+"M",
+[
+"Keine der verfügbaren Klassen"
+]
+],
+"0804KY5559": [
+"Greifer",
+"E2",
+[]
+],
+"0804HK5576": [
+"Roboter",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804KR6993": [
+"Lineareinheit",
+"E2",
+[]
+],
+"0804LH5422": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804KZ5637": [
+"Greifer",
+"E2",
+[]
+],
+"0804KR9668": [
+"Greifer",
+"M",
+[
+"Keine der verfügbaren Klassen"
+]
+],
+"0804JU56371": [
+"Roboter",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804AY8008": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804EU0861": [
+"Roboter",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804GE7738": [
+"Rotationseinheit",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804DU5323": [
+"Multi-Achs-System (Gantry)",
+"E2",
+[]
+],
+"0804GV7647": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804EB6690": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804306221": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804KZ9209": [
+"Lineareinheit",
+"E2",
+[]
+],
+"0804DN9616": [
+"Multi-Achs-System (Gantry)",
+"E2",
+[]
+],
+"0804LB1151": [
+"Lineareinheit",
+"M",
+[
+"Multi-Achs-System (Gantry)",
+"Kombinierte Einheit"
+]
+],
+"0804CE5532": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804FU6515": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804GY2576": [
+"Kombinierte Einheit",
+"M",
+[
+"Multi-Achs-System (Gantry)"
+]
+],
+"0804KM9359": [
+"Rotationseinheit",
+"E2",
+[]
+],
+"0804CH8012": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804KB7256": [
+"Rotationseinheit",
+"E2",
+[]
+],
+"0804AR3766": [
+"Rotationseinheit",
+"M",
+[
+"Greifer"
+]
+],
+"0804HX0679": [
+"Rotationseinheit",
+"E2",
+[]
+],
+"0804KZ9488": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804DU5389": [
+"Multi-Achs-System (Gantry)",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804GY2577": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804LG6553": [
+"Multi-Achs-System (Gantry)",
+"E1",
+[]
+],
+"0804KY6491": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804FH4760": [
+"Roboter",
+"E1",
+[]
+],
+"0804KS8037": [
+"Multi-Achs-System (Gantry)",
+"E1",
+[]
+],
+"0804KR9943": [
+"Kombinierte Einheit",
+"E1",
+[]
+],
+"0804EK1683": [
+"Roboter",
+"E1",
+[]
+],
+"0804LU7362": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804KT2332": [
+"Greifer",
+"E1",
+[]
+],
+"0804EV7706": [
+"Roboter",
+"E1",
+[]
+],
+"0804KY9594": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804KU2401": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804LH9239": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804LB3626": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804KW6429": [
+"Multi-Achs-System (Gantry)",
+"E1",
+[]
+],
+"0804KB9919": [
+"Greifer",
+"E1",
+[]
+],
+"0804KU7061": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804JT7787": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804EA6409": [
+"Roboter",
+"E1",
+[]
+],
+"0804FR8437": [
+"Roboter",
+"E1",
+[]
+],
+"0804CC3075": [
+"Roboter",
+"E1",
+[]
+],
+"0804KU9472": [
+"Greifer",
+"E1",
+[]
+],
+"0804LY4947": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804KT8575": [
+"Roboter",
+"E1",
+[]
+],
+"0804MA9380": [
+"Lineareinheit",
+"E2",
+[]
+],
+"0804LY8514": [
+"Rotationseinheit",
+"E2",
+[]
+],
+"0804MA7037": [
+"Keine der verfügbaren Klassen",
+"E2",
+[]
+],
+"0804KV4964": [
+"Greifer",
+"M",
+[
+"Keine der verfügbaren Klassen"
+]
+],
+"0804JK8878": [
+"Greifer",
+"M",
+[
+"Lineareinheit"
+]
+],
+"0804LZ1241": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"3843CE1617": [
+"Multi-Achs-System (Gantry)",
+"E1",
+[]
+],
+"0804GZ3046": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"0804DY2146": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"0804JX5741": [
+"Multi-Achs-System (Gantry)",
+"E1",
+[]
+],
+"0804LC3026": [
+"Greifer",
+"E1",
+[]
+],
+"0804FL5283": [
+"Roboter",
+"E1",
+[]
+],
+"0804FT6844": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804EZ0597": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804KX4663": [
+"Roboter",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804JX5476": [
+"Rotationseinheit",
+"M",
+[
+"Keine der verfügbaren Klassen"
+]
+],
+"0804KV0861": [
+"Greifer",
+"M",
+[
+"Rotationseinheit"
+]
+],
+"0804HL3088": [
+"Rotationseinheit",
+"E2",
+[]
+],
+"0804HH8872": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804JX8777": [
+"Keine der verfügbaren Klassen",
+"E2",
+[]
+],
+"0804LM2565": [
+"Keine der verfügbaren Klassen",
+"E2",
+[]
+],
+"0804LW3879": [
+"Lineareinheit",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804HK2005": [
+"Greifer",
+"M",
+[
+"Rotationseinheit"
+]
+],
+"0804LM8093": [
+"Rotationseinheit",
+"E2",
+[]
+],
+"0804KY7178": [
+"Lineareinheit",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804LA7293": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804CM8667": [
+"Rotationseinheit",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804EN7325": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804LK3617": [
+"Rotationseinheit",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804GT0312": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804MB2849": [
+"Lineareinheit",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804KU1528": [
+"Greifer",
+"M",
+[
+"Lineareinheit"
+]
+],
+"3842998383": [
+"Keine der verfügbaren Klassen",
+"E2",
+[]
+],
+"0804KV2157": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804GT5112": [
+"Kombinierte Einheit",
+"E1",
+[]
+],
+"0804GA4441": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804LR0554": [
+"Lineareinheit",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804JL5526": [
+"Lineareinheit",
+"M",
+[
+"Keine der verfügbaren Klassen"
+]
+],
+"0804LE2661": [
+"Greifer",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804AF9667": [
+"Multi-Achs-System (Gantry)",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804LV8630": [
+"Rotationseinheit",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804BD5654": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804CC2134": [
+"Roboter",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804JX6656": [
+"Multi-Achs-System (Gantry)",
+"M",
+[
+"Kombinierte Einheit",
+"Keine der verfügbaren Klassen"
+]
+],
+"0804KW8391": [
+"Multi-Achs-System (Gantry)",
+"M",
+[
+"Kombinierte Einheit",
+"Keine der verfügbaren Klassen"
+]
+],
+"0804FT0436": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804JK3979": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804AG8297": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804LM7661": [
+"Multi-Achs-System (Gantry)",
+"E1",
+[]
+],
+"0804KE6397": [
+"Roboter",
+"E1",
+[]
+],
+"0804KV5835": [
+"Lineareinheit",
+"E2",
+[]
+],
+"0804LC5647": [
+"Kombinierte Einheit",
+"E2",
+[]
+],
+"0804LW4010": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"TC:AS00235507": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804358312": [
+"Keine der verfügbaren Klassen",
+"E2",
+[]
+],
+"0804LR7381": [
+"Greifer",
+"E1",
+[]
+],
+"0804LW5713": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804KC4801": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804LD6387": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804LS4641": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"0804KL2297": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804MA1736": [
+"Roboter",
+"E1",
+[]
+],
+"0804MA6689": [
+"Roboter",
+"E1",
+[]
+],
+"0804LN1286": [
+"Greifer",
+"E1",
+[]
+],
+"0804LN1294": [
+"Greifer",
+"E1",
+[]
+],
+"0804LN1297": [
+"Greifer",
+"E1",
+[]
+],
+"0804FE3750": [
+"Lineareinheit",
+"E2",
+[]
+],
+"TC:AS00215660": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"1800257228": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804LK4678": [
+"Kombinierte Einheit",
+"E1",
+[]
+],
+"0804MB2648": [
+"Roboter",
+"E1",
+[]
+],
+"0804LG2192": [
+"Roboter",
+"E1",
+[]
+],
+"1800257479": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"3843AV9602": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"3843AB4237": [
+"Roboter",
+"E1",
+[]
+],
+"1800257202": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804JS9252": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"1800257521": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804LE7880": [
+"Multi-Achs-System (Gantry)",
+"E2",
+[]
+],
+"0804KU1103": [
+"Greifer",
+"E2",
+[]
+],
+"0804AT5037": [
+"Kombinierte Einheit",
+"E1",
+[]
+],
+"0804LB4468": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"0804LU7693": [
+"Lineareinheit",
+"M",
+[
+"Kombinierte Einheit"
+]
+],
+"0804BN2123": [
+"Lineareinheit",
+"E1",
+[]
+],
+"3843106114": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804LL3638": [
+"Multi-Achs-System (Gantry)",
+"E1",
+[]
+],
+"0804EM7937": [
+"Lineareinheit",
+"E1",
+[]
+],
+"3843CD1070": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804LZ1881": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"0804LL8077": [
+"Roboter",
+"E1",
+[]
+],
+"0804KA8953": [
+"Rotationseinheit",
+"E2",
+[]
+],
+"0804KF8538": [
+"Roboter",
+"E1",
+[]
+],
+"0804LF6209": [
+"Greifer",
+"E1",
+[]
+],
+"0804MB8153": [
+"Greifer",
+"E2",
+[]
+],
+"0804LX7355": [
+"Multi-Achs-System (Gantry)",
+"E1",
+[]
+],
+"3843AZ5880": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804GR4842": [
+"Greifer",
+"E2",
+[]
+],
+"0804KB9727": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"0804MC3545": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804JF2622": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804LS3667": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"0804LN1289": [
+"Greifer",
+"E1",
+[]
+],
+"0804KD4277": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"0804LN1287": [
+"Greifer",
+"E1",
+[]
+],
+"0804AF6207": [
+"Kombinierte Einheit",
+"E1",
+[]
+],
+"0804JC9184": [
+"Roboter",
+"E1",
+[]
+],
+"0804LM0799": [
+"Lineareinheit",
+"E1",
+[]
+],
+"0804LH2249": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804LK3474": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"0804HD4595": [
+"Rotationseinheit",
+"E1",
+[]
+],
+"0804JR9924": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"TC:AX01253877": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"1800257200": [
+"Keine der verfügbaren Klassen",
+"E1",
+[]
+],
+"0804KX6885": [
+"Multi-Achs-System (Gantry)",
+"E1",
+[]
+],
+"0804JW4969": [
+"Roboter",
+"E1",
+[]
+],
+"0804AH9298": [
+"Kombinierte Einheit",
+"E2",
+[]
+]
+}
+
 SKIP_PREFIX = ("~$", "PPT_", "Evaluation_", "Validation_", "nachlauf_")
 
 
@@ -148,6 +1224,19 @@ def read_result_file(path, issues, cfg, source, run):
         if pred and pred.startswith("UNGÜLTIG"):
             issues.append(dict(Typ="Ungültige Vorhersage (als falsch gewertet)", Konfiguration=cfg, Quelle=source,
                                Datei=path.name, SAP=sap, Detail=pred))
+        key = sap if sap in FINAL_GT else (sap.lstrip("0") and next((k for k in FINAL_GT if k.lstrip("0") == sap.lstrip("0")), None))
+        if key and key in FINAL_GT:
+            fgt, freg, falts = FINAL_GT[key]
+            fgt = canon(fgt)
+            falts = [canon(x) for x in falts]
+            if gt != fgt or set(alts) != set(falts) or (reg and reg != freg and freg != "M"):
+                issues.append(dict(Typ="GT aus Datei durch finale GT ersetzt", Konfiguration=cfg, Quelle=source,
+                                   Datei=path.name, SAP=sap,
+                                   Detail=f"Datei: {gt} | {', '.join(alts) or '—'} | {reg}  ->  final: {fgt} | {', '.join(falts) or '—'} | {freg}"))
+            gt, alts, reg = fgt, falts, freg
+        else:
+            issues.append(dict(Typ="SAP nicht in finaler GT gefunden (Datei-GT verwendet)", Konfiguration=cfg,
+                               Quelle=source, Datei=path.name, SAP=sap))
         excluded = pred is None or stat == "EXCLUDED"
         recs.append(dict(cfg=cfg, source=source, run=run, sap=sap, gt=gt,
                          allowed=frozenset([gt] + alts), register=reg, pred=pred, excluded=excluded))
