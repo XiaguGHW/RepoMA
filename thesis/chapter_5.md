@@ -14,9 +14,9 @@ The experiments are based on the 199 assemblies described in Section 4.1. A prel
 
 **② 实验顺序**
 
-Each experimental stage built on the preceding stage, following a fixed sequence (Table 5.1). Prompt variants and input representations were compared on the 115 assemblies with four models from two providers. The final configurations selected through these comparisons (Section 5.4) were each evaluated in ten runs on the same assemblies to assess performance and stability, as identical requests can produce different LLM outputs (Atil et al., 2024), and in one run on the supplementary set. Since the prompt and the input representation were selected on the primary set, the results on these assemblies may be optimistic. As the supplementary set was excluded from all selection steps, it provides a basis for checking whether the final configurations maintain their performance on additional assemblies (Cawley & Talbot, 2010).
+Each experimental stage built on the preceding stage, following a fixed sequence (Table 5.1). Prompt variants and input representations were compared on the 115 assemblies with four models from two providers. The final configurations selected through these comparisons (Section 5.5) were each evaluated in ten runs on the same assemblies to assess performance and stability, as identical requests can produce different LLM outputs (Atil et al., 2024), and in one run on the supplementary set. Since the prompt and the input representation were selected on the primary set, the results on these assemblies may be optimistic. As the supplementary set was excluded from all selection steps, it provides a basis for checking whether the final configurations maintain their performance on additional assemblies (Cawley & Talbot, 2010).
 
-实验按固定顺序进行，每个阶段均以前一阶段为基础（表 5.1）。Prompt 变体和输入形式的比较在这 115 个装配体上进行，使用来自两家厂商的四个模型。通过这些比较选出的最终配置（第 5.4 节）在同一批装配体上各运行十次，用于评价表现和稳定性，因为相同请求可能产生不同的 LLM 输出（Atil et al., 2024）。此外，每种最终配置还在补充数据集上运行一次。由于 Prompt 和输入形式均在主数据集上选定，这些装配体上的结果可能偏乐观。补充数据集未参与任何选择步骤，因此用来检验最终配置在其他装配体上能否保持其表现（Cawley & Talbot, 2010）。
+实验按固定顺序进行，每个阶段均以前一阶段为基础（表 5.1）。Prompt 变体和输入形式的比较在这 115 个装配体上进行，使用来自两家厂商的四个模型。通过这些比较选出的最终配置（第 5.5 节）在同一批装配体上各运行十次，用于评价表现和稳定性，因为相同请求可能产生不同的 LLM 输出（Atil et al., 2024）。此外，每种最终配置还在补充数据集上运行一次。由于 Prompt 和输入形式均在主数据集上选定，这些装配体上的结果可能偏乐观。补充数据集未参与任何选择步骤，因此用来检验最终配置在其他装配体上能否保持其表现（Cawley & Talbot, 2010）。
 
 **Table 5.1. Experimental stages / 表 5.1 实验阶段**
 
@@ -160,4 +160,6 @@ P3 在四个模型上的平均准确率最高。由于 P4 没有带来一致的�
 
 ### 章节安排
 
-输入形式的定义和四种最终配置放在第 5.4 节。
+- 5.4：三种输入形式的定义（含 Tesseract，Smith, 2007）和比较结果（表 5.4）；说明 PDF 这组与 5.3 的 P3 是两次独立运行。
+- 5.5 开头：四种最终配置，每个模型一点，写明输入形式和选择理由（Haiku 不选 Opus 因成本；Pro 优于 Flash；Haiku 和 Pro 选 PDF 而非文本：只差一个装配体、PDF 平均最高、无需单独提取步骤；GPT-5.5 因 Azure OpenAI 的 PDF 转换不可控而用图片；DeepSeek 只支持文本）。
+- 附录 [X]：预实验 L1–L4 结果；[Y]：接入方式、模型版本、输入转换设置、生成参数；[W]：Prompt 原文、各阶段置信区间、完整指标。
