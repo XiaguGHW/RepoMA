@@ -222,3 +222,32 @@ Revidierte GT: Gantry (LLM korrekt: nein – durch 9-seitiges Angebot abgelenkt 
 
 Grenzfall: Sperrzylinder Pos. 0101 auch als zweite Hauptachse interpretierbar. Die Baugruppe (Ausheber) besitzt neben dem vertikalen Hubzylinder (Pos. 0100, T₁=1) einen horizontalen Kompaktzylinder (Pos. 0101), der einen Schieber (Pos. 0013, pusher / Schieber) betätigt. Laut Schnitt A-A dient dieser intern als mechanische Verriegelung der Hubwelle (Hilfsfunktion zählt nicht → R=0, T=1, Lineareinheit); wegen der Benennung pusher ist er jedoch auch als zweite Linearachse (R=0, T=2 → Kombinierte Einheit) interpretierbar.
 Revidierte GT: Lineareinheit, Kombinierte Einheit (LLM korrekt: ja – wegen der Doppelfunktion von Zylinder Pos. 0101 als Verriegelung bzw. Pusher sind beide Labels vertretbar).
+
+
+## 第十部分 · Excel 第 27–29 行
+
+来源为 `Fehler_Analyse` 工作表照片，按行顺序及共同列对应。未拍全的模型输出参考已整理的 `Korrigierte GT&ZGT` 对应记录补录，待核对。第 27、29 行的 G 列在本次照片中为空；修正表分别记录 Kombinierte Einheit、Keine der verfügbaren Klassen，错误分析中的修订结论也列出这些允许类别。
+
+| Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth（照片） | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
+|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 27 | 3 | 0 | `0804KZ9027` | `AS00231844` | E1 | Lineareinheit | — | — | — | — | — | — | — | Kombinierte Einheit | — | — | Kombinierte Einheit | — | Kombinierte Einheit | [原文](#excel-第-27-行) |
+| 28 | 2 | 0 | `0804AR3766` | `AS90165357/00` | M | Rotationseinheit | Greifer | — | — | — | — | Kombinierte Einheit | Kombinierte Einheit | — | — | — | — | — | — | [原文](#excel-第-28-行) |
+| 29 | 2 | 0 | `0804DT6452` | `AS90466020` | E1 | Multi-Achs-System (Gantry) | — | — | — | — | — | — | Keine der verfügbaren Klassen | — | — | — | — | — | Keine der verfügbaren Klassen | [原文](#excel-第-29-行) |
+
+### Excel 第 27 行
+
+GT vor Review: Lineareinheit | LLM: Kombinierte Einheit (Umsetzeinheit)
+Analyse (Vertretbarer Grenzfall Haupt- vs. Hilfsfunktion): Die Baugruppe (lifter / Ausheber) besitzt zwei orthogonal angeordnete Pneumatikzylinder: Pos. 0100 (Ø 32, Hub 125 mm) für den vertikalen Hub und Pos. 0103 (Ø 16, Hub 20 mm) für den horizontalen Schieber (Pos. 0013 pusher / Schieber). Wertet man den kleinen Querzylinder als reine Verriegelungs-/Hilfsfunktion (Abschnitt 3: nicht mitzählen), ergibt sich R=0, T=1 → Lineareinheit. Da aus den Unterlagen jedoch nicht eindeutig hervorgeht, ob der Schieber nur verriegelt oder aktiv zum Hauptbewegungsablauf gehört, ist die Argumentation des LLM (Pos. 100 + Pos. 103 als zwei unabhängige Linearachsen → R=0, T=2, Gantry-Test negativ wegen nur einer Horizontalachse → Kombinierte Einheit) vollkommen schlüssig.
+Revidierte GT: Lineareinheit, Kombinierte Einheit (Umsetzeinheit) (LLM korrekt: ja – plausibler Grenzfall bei der Einordnung des zweiten Zylinders Pos. 0103).
+
+### Excel 第 28 行
+
+GT vor Review: Rotationseinheit, Greifer | LLM: Kombinierte Einheit (Umsetzeinheit)
+Analyse (Greifer-Fingerhub als Hubachse missverstanden): Die Baugruppe ist eine reine Rotationseinheit (R=1, T=0, Klasse 6), basierend auf einer SMC Greiferdreheinheit (Pos. 0100, Typ MRHQ16D), die eine 90°-Schwenkbewegung ausführt (R=1). Das LLM begeht im Reasoning einen klaren Zählfehler: Es liest den „Fingerhub“ (die Schließbewegung der Greifbacken von 3 mm) aus dem Datenblatt aus und interpretiert diesen fälschlicherweise als aktive, translatorische Hubachse (T=1). Dadurch wendet es fälschlicherweise den Grenzfall 6.3 (Hub-Schwenk-Einheit) an. Nach Codebook Abschnitt 3 dürfen die Aktoren innerhalb eines Greifers für die Greifbewegung jedoch nicht als translatorische Hauptachsen mitgezählt werden (T=0).
+Revidierte GT: Rotationseinheit, Greifer (LLM korrekt: nein – Fingerhub der Greiferdreheinheit fälschlicherweise als Haupt-Hubachse T=1 gewertet und fälschlich Grenzfall 6.3 angewendet).
+
+### Excel 第 29 行
+
+GT vor Review: Multi-Achs-System (Gantry) | LLM: Keine der verfügbaren Klassen
+Analyse (Widerspruch zwischen 3D-CAD und Stückliste): Im 3D-CAD ist ein komplettes Portal (Gantry) samt Motoren sichtbar, weshalb die ursprüngliche GT Gantry lautet. In der 2D-Zeichnung sind die Achsen jedoch nur als Referenzgeometrie (Strich-Zweipunkt-Linien) angedeutet, und die Stückliste (machining parts and hardware for gantry system) enthält ausschließlich das passive Montagegestell (Alu-Profile Pos. 0001, Auflagebleche Pos. 0002–0007, Schrauben; R=0, T=0). Da 3D-Modell und Stückliste widersprüchlich sind, sind sowohl Gantry als auch Keine der verfügbaren Klassen (Schritt S1 / Grenzfall 6.8) vertretbar (analog zu 0804KW8391).
+Revidierte GT: Gantry, Keine der verfügbaren Klassen (LLM korrekt: ja – wegen Diskrepanz zwischen 3D-Ansicht und Stückliste sind beide Labels korrekt).
