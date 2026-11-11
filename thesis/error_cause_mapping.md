@@ -7,7 +7,7 @@
 - **龙门判断错误**：龙门测试（Codebook 第 4 节）判断错误，例如把双侧导向和单侧悬臂混淆，或被零件名称误导。
 - **信息过载**：主图纸淹没在供应商目录、手册、报价或数据表中，模型评价的不是主装配体。
 - **资料不一致（CAD/BOM）**：图纸 / CAD 与 BOM 互相矛盾，或 3D 模型本身有误。
-- **执行器计数错误**：执行器计数（Codebook 第 3 节）出错，包括把被动零件或末端执行器里的驱动算作主轴、虚构驱动、漏看或合并轴。英文名称 **Actuator miscounting**（德语 Fehlerhafte Aktorzählung）。分两个子类型：多数（over-counting，16 个，相当于原幻灯片的“Antriebs-Halluzination”）和少数（under-counting，4 个：EB6690、LA7293、CE5532、GY2577）。
+- **执行器计数错误**：执行器计数（Codebook 第 3 节）出错，包括把被动零件或末端执行器里的驱动算作主功能执行器、虚构驱动、漏看或合并轴。英文名称 **Actuator miscounting**（德语 Fehlerhafte Aktorzählung）。分两个子类型：多数（over-counting，16 个，相当于原幻灯片的“Antriebs-Halluzination”）和少数（under-counting，4 个：EB6690、LA7293、CE5532、GY2577）。
 - **其他**：GT 本身有争议或其他原因。目前没有装配体归入此类。
 - **待定**：原文无法判断。
 
@@ -60,8 +60,8 @@
 | `0804KY7179` | 32 | Lineareinheit | — | Kombinierte Einheit ×1 | 图片 1 | 执行器计数错误 | 把导杆看成两个气缸，把红色附件看成摆动板 | 确定 |
 | `0804LA7293` | 34 | Kombinierte Einheit | — | Greifer ×2 | 图片 2 | 执行器计数错误 | 把同一单元两个终点位置的画法看成两个夹爪，漏算主执行器 | 确定 |
 | `0804LH9239` | 35 | Keine der verfügbaren Klassen | — | Kombinierte Einheit ×1, Lineareinheit ×1 | 图片 1, PDF 1 | 执行器计数错误 | 把螺钉、铝型材、轴承座等被动零件当成执行器 | 确定 |
-| `0804CE5532` | 38 | Kombinierte Einheit | — | Lineareinheit ×1 | PDF 1 | 执行器计数错误 | 把两根正交的直线轴合并成一根（T=1） | 确定 |
-| `0804EV7706` | 39 | Roboter | — | Kombinierte Einheit ×1 | 文本 1 | 执行器计数错误 | 把末端执行器里的紧凑滑台算作主轴，违反 Codebook 第 3 节 | 确定 |
+| `0804CE5532` | 38 | Kombinierte Einheit | — | Lineareinheit ×1 | PDF 1 | 执行器计数错误 | 把两个运动方向正交的执行器算成一个（T=1） | 确定 |
+| `0804EV7706` | 39 | Roboter | — | Kombinierte Einheit ×1 | 文本 1 | 执行器计数错误 | 把末端执行器里的紧凑滑台算作主功能执行器，违反 Codebook 第 3 节 | 确定 |
 | `0804GA4441` | 43 | Keine der verfügbaren Klassen | — | Kombinierte Einheit ×1 | PDF 1 | 执行器计数错误 | 把被动的 HMI 支臂当成升降气缸和旋转执行器 | 确定 |
 | `0804GY2577` | 44 | Kombinierte Einheit | — | Rotationseinheit ×1 | 图片 1 | 执行器计数错误 | 被名称“turning unit”误导，漏看升降气缸和夹爪 | 确定 |
 | `0804GZ3046` | 45 | Rotationseinheit | — | Kombinierte Einheit ×1 | 图片 1 | 执行器计数错误 | 把工件夹具的被动导柱和弹簧当成升降轴 | 确定 |
@@ -118,22 +118,22 @@ EN7325、306221、HZ8350、KY3585、GT5112（龙门判断错误）；CC2134、EK
 | SAP | 出错配置 | 建议类别 | 依据（推理要点） |
 | --- | --- | --- | --- |
 | `0804FZ8322` | Haiku 5/10 | 其他（S1 判断错误） | 误用“名称否决”规则，把 Hubeinheit 当成静态装置；PDF 里只看到参考表，没有 BOM |
-| `0804GV7647` | DeepSeek 1/10 | Actuator miscounting（少数） | 只数出一根平移轴，漏掉旋转轴 |
-| `0804LG6553` | DeepSeek 7/10 | Actuator miscounting（少数） | 只数出一根直线轴（T=1） |
-| `0804KT1289` | Pro 4/10 | Actuator miscounting（多数） | 把 BOM 里的 Positioniereinheit 算作旋转轴 |
+| `0804GV7647` | DeepSeek 1/10 | Actuator miscounting（少数） | 只数出一个平移执行器，漏掉旋转执行器 |
+| `0804LG6553` | DeepSeek 7/10 | Actuator miscounting（少数） | 只数出一个平移执行器（T=1） |
+| `0804KT1289` | Pro 4/10 | Actuator miscounting（多数） | 把 BOM 里的 Positioniereinheit 算作旋转执行器 |
 | `0804LK3617` | Pro 1/10 | CAD 与 BOM 不一致 | 图纸里有旋转机构，BOM 里没有对应的电机，按“文本优先”规则不计 R |
-| `3843CE1617` | Pro 6/10 | Actuator miscounting（多数） | 把报价里“beigestellte Drehachse”（不属于本装配体）算作旋转轴 |
+| `3843CE1617` | Pro 6/10 | Actuator miscounting（多数） | 把报价里“beigestellte Drehachse”（不属于本装配体）算作旋转执行器 |
 | `0804BN2123` | Haiku | Actuator miscounting（多数） | 根据 aligning part 和渲染图虚构出 X、Y 两根轴 |
-| `0804EM7937` | Haiku | Actuator miscounting（多数） | 把两根钢轴（导向件）算作旋转轴 |
+| `0804EM7937` | Haiku | Actuator miscounting（多数） | 把两根钢轴（导向件）算作旋转执行器 |
 | `0804JW4969` | DeepSeek | 信息过载 | 只描述了快换装置 SWS-020，判为无搬运功能（同 CC2134 模式） |
-| `0804KF8538` | DeepSeek | 资料不完整或不一致 | DFC 结构图确认：BOM 只有机器人底座（Robotergestell）、板件、定心套、夹子、软管附件和销钉螺钉，机器人本体不在 BOM 中；图纸无访问权限。模型据此判为没有执行器 |
-| `0804LD6387` | Haiku | Actuator miscounting（多数） | 把机架型材看成门架和直线轴 |
+| `0804KF8538` | DeepSeek | 资料不完整或不一致 | DFC 结构图确认：BOM 只有机器人底座（Robotergestell）、板件、定心套、夹子、软管附件和销钉螺钉，机器人本体不在 BOM 中，只以参考轮廓（虚线）出现在图纸里；文本输入丢失了这部分图形信息。模型注意到名称“Roboter”，但在 BOM 中找不到执行器 |
+| `0804LD6387` | Haiku | Actuator miscounting（多数） | 把机架型材看成门架和平移执行器 |
 | `0804LM7661` | Pro | 其他（S1 判断错误） | 把主功能判为“Dosieren”，S1 直接得出非搬运，虽然自己认出 R=0、T=3 的门架 |
-| `0804LS4641` | Haiku | Actuator miscounting（多数） | 把导轨算作平移轴 |
+| `0804LS4641` | Haiku | Actuator miscounting（多数） | 把导轨算作平移执行器 |
 | `0804LW5713` | Haiku | Actuator miscounting（多数） | 把操作面板的被动摆臂和导轨算作 R、T（同 GA4441） |
 | `0804DN9616` | GPT-5.5 10/10 | 信息过载 | 只描述了外购的 AVENTICS RTC 气缸 / 滑台 |
-| `0804FT6844` | DeepSeek 8/10 | 信息过载（沿用） | 只描述了平行夹爪（Pos. 100），没看到主轴 |
-| `0804HX0679` | Pro 10/10 | Actuator miscounting（沿用） | 把大型直线单元算作主轴 |
+| `0804FT6844` | DeepSeek 8/10 | 信息过载（沿用） | 只描述了平行夹爪（Pos. 100），没看到实现主功能的执行器 |
+| `0804HX0679` | Pro 10/10 | Actuator miscounting（沿用） | 把大型直线单元算作主功能执行器 |
 
 ### 最终配置的 38 个装配体汇总（建议稿）
 
@@ -162,3 +162,7 @@ EN7325、306221、HZ8350、KY3585、GT5112（龙门判断错误）；CC2134、EK
 ### 类别名称调整（2026-11-11）
 
 “CAD 与 BOM 不一致”改为 **资料不完整或不一致**（英文 Incomplete or inconsistent documentation）：除图纸与 BOM 矛盾（JX6656、KW8391、LK3617）和 3D 模型有误（GT0312）外，也包括决定类别的部件不在资料中（KF8538：机器人本体未列入 BOM）。数量不变。
+
+### 术语更正（2026-11-11）
+
+Codebook 第 3 节为“Zählregeln für Aktoren”：统计的是实现主功能、具有独立运动方向的执行器（R、T），不是“主轴”。本文件中相关描述已改为执行器的说法；部件名称（如“升降轴”“直线轴”）和几何意义上的轴保留不变。

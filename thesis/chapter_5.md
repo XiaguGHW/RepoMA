@@ -276,6 +276,61 @@ Each configuration predicted an allowed class for at least 93 % of the assemblie
 
 在 M 中，每种配置都对至少 93% 的装配体预测出了允许类别，Gemini 2.5 Pro 对该类别中几乎所有装配体都预测出了允许类别。不过，各配置选择哪个允许类别有所不同。在这些装配体中，Gemini 2.5 Pro 和 GPT-5.5 预测为主标签以外类别的比例分别为 39.4% 和 27.7%，Claude Haiku 4.5 和 DeepSeek-V4-Flash 则分别为 12.9% 和 6.5%。对于 Gemini 2.5 Pro，M 中 99.7% 的预测几乎全部正确，但只有 60.3% 与主标签一致；按严格标准，其余 39.4% 尽管属于允许的类别，仍被计为错误。对于 M 中的装配体，所有允许标签均得到资料和 Codebook 的支持，因此主标签并不比其他允许标签更正确（第 4.4 节）。所以，第 5.5 节中严格指标的差异反映的是配置更倾向于哪个有效类别，而不是更多的错误。在全部 185 个装配体上，四种配置的 Strict Accuracy 相差不超过 1.4 个百分点，Allowed Accuracy 则介于 92.2% 和 97.2% 之间。
 
+## 5.7 Error Analysis | 错误分析
+
+**① Scope and method / 范围与方法**
+
+This section examines the misclassifications that occurred with prompt P3, that is, in the input comparison (Section 5.4) and with the final configurations (Sections 5.5 and 5.6). A prediction counts as an error if it is not contained in the allowed label set of the final ground truth. In total, 58 assemblies were misclassified at least once: 44 of the 115 assemblies in the twelve runs of the input comparison and 38 of the 185 assemblies with the final configurations, with 24 assemblies appearing in both groups. For each of these assemblies, the reasoning of the erroneous runs was read and one primary cause was assigned. Assemblies rather than runs are counted, since repeated runs of the same configuration often reproduced the same error.
+
+本节分析使用 Prompt P3 时出现的错误分类，也就是输入形式比较（第 5.4 节）和最终配置（第 5.5、5.6 节）中的错误。预测不在最终版 Ground Truth 的允许标签集合内即算作错误。共有 58 个装配体至少出错一次：输入形式比较的十二次运行中，115 个装配体里有 44 个出错；最终配置中，185 个装配体里有 38 个出错；两组有 24 个装配体重叠。对每个装配体，阅读出错运行的推理，并归入一个主要原因。统计单位是装配体而不是运行，因为同一配置的重复运行常常重复同一个错误。
+
+**② Confusion patterns / 混淆模式**
+
+Figure 5.1 compares the confusion matrices of the four final configurations with that of the individual workshop annotations. Of the 35 errors made by the models, 16 concern assemblies with the primary label Combined Unit, ten of which were predicted as Multi-Axis System (Gantry). A further 11 errors concern assemblies with the primary label Gantry, which were mainly predicted as Linear Unit or Combined Unit. The human annotators also made most of their errors on Combined Unit assemblies (66 of 98), but predicted Linear Unit most often (26), followed by Gantry (20) and Rotary Unit (11). The boundary between Combined Unit and the classes with a single type of motion was therefore the main difficulty for both, whereas confusions between Gantry and Combined Unit were more frequent for the models. Errors on grippers and robots were rare for both; the three errors in the Robot row all stem from GPT-5.5 and are explained below.
+
+图 5.1 把四种最终配置的混淆矩阵和 Workshop 中各条人工标注的混淆矩阵放在一起比较。模型共出错 35 次，其中 16 次涉及主标签为组合单元的装配体，这 16 次中有 10 次被预测为龙门。另有 11 次涉及主标签为龙门的装配体，主要被预测为直线单元或组合单元。人工标注者的错误也主要集中在组合单元的装配体上（98 次中有 66 次），但最常判成直线单元（26 次），其次是龙门（20 次）和旋转单元（11 次）。因此，对两者来说，组合单元与只有一种运动形式的类别之间的边界都是主要难点；而龙门与组合单元之间的混淆在模型中更常见。两者在夹爪和机器人上都很少出错；机器人一行的三个错误都来自 GPT-5.5，原因见下文。
+
+**Figure 5.1. Confusion matrices of the final configurations (115 assemblies) and of the individual workshop annotations / 图 5.1 最终配置（115 个装配体）与 Workshop 人工标注的混淆矩阵**
+
+*[konfusion_gesamt.png，脚本 13 输出]*
+
+*Note: Rows show the primary label of the final ground truth, columns the prediction. Off-diagonal cells are split into misclassifications (left) and other allowed labels (right).*
+
+注：行为最终版 Ground Truth 的主标签，列为预测。非对角线格子分为错误分类（左）和其他允许标签（右）。
+
+**③ Causes / 错误原因**
+
+Table 5.7 shows the primary causes. Actuator miscounting is the largest category in both groups and accounts for 29 of the 58 assemblies. In these cases, the step of counting the actuators according to the codebook failed. Most often, the models counted too many actuators (23 assemblies), for example by treating passive parts such as guide rods, profiles or bearings, or actuators belonging to the end effector, as actuators of the main function. In six assemblies, actuators were overlooked or two actuators with different directions of motion were counted as one. Information overload (12 assemblies) occurred when the main drawing was outnumbered by supplier catalogues, manuals, quotations or data sheets, so that the model classified a purchased component instead of the assembly. This cause occurred more often with image input, as two observations show. First, in the input comparison, where the same models were run with all three input representations, errors of this kind occurred mainly in the image runs. Second, with the final configurations, they were most frequent for GPT-5.5, the only configuration with image input.
+
+表 5.7 列出了主要原因。在两组中，执行器计数错误都是最大的一类，占 58 个装配体中的 29 个。这些情况下，按 Codebook 统计执行器这一步出了错。最常见的是模型数出的执行器太多（23 个装配体），例如把导杆、型材、轴承等被动零件，或属于末端执行器的执行器，当成实现主功能的执行器。另有 6 个装配体漏看了执行器，或把两个运动方向不同的执行器算成了一个。信息过载（12 个装配体）出现在主图纸被供应商目录、手册、报价或数据表淹没的时候，模型分类的是外购件，而不是装配体本身。这一原因在图片输入中出现得更多，有两点可以说明。第一，在输入形式比较中，同一批模型分别使用了三种输入形式，这类错误主要出现在图片输入的运行中。第二，在最终配置中，这类错误在使用图片输入的 GPT-5.5 上出现得最多。
+
+The gantry test was misapplied in ten assemblies. In these cases, the models confused double-sided guidance with a single-sided cantilever or were misled by part names such as “Portalachse”. In five assemblies, the cause lay in the documentation itself: drawings and bill of materials contradicted each other, the 3D model was faulty, or the component that determines the class was missing. These errors therefore do not reflect faulty reasoning by the models. In the remaining two assemblies, the models did not recognise handling as the main function; for example, Gemini 2.5 Pro classified a gantry with a dosing head as a dosing unit.
+
+十个装配体的龙门判断出了错。这些情况下，模型把双侧导向和单侧悬臂混淆，或被“Portalachse”之类的零件名称误导。五个装配体的错误原因在于资料本身：图纸和 BOM 互相矛盾，3D 模型有误，或者决定类别的部件不在资料中。因此，这些错误并不反映模型的推理问题。其余两个装配体中，模型没有把搬运识别为主功能。例如，Gemini 2.5 Pro 把一个装有计量头的龙门当成了计量装置。
+
+**Table 5.7. Primary causes of misclassification (number of assemblies) / 表 5.7 错误分类的主要原因（装配体数）**
+
+| Cause / 原因 | Input comparison / 输入形式比较 | Final configurations / 最终配置 | Total, distinct / 合计（去重） |
+| --- | ---: | ---: | ---: |
+| Actuator miscounting / 执行器计数错误 | 20 | 18 | 29 |
+| Information overload / 信息过载 | 11 | 8 | 12 |
+| Gantry test misapplied / 龙门判断错误 | 10 | 5 | 10 |
+| Incomplete or inconsistent documentation / 资料不完整或不一致 | 3 | 5 | 5 |
+| Other / 其他 | 0 | 2 | 2 |
+| **Total / 合计** | **44** | **38** | **58** |
+
+**④ Examples / 典型案例**
+
+Three assemblies illustrate the causes. For the rotary unit 0804GE7738, all four models described only the purchased guided cylinder from its data sheet when given image input and classified the assembly as Linear Unit; Claude Opus 4.8 even stated that the designation “Rotationseinheit” contradicted the documentation. With PDF and text input, the rotary module was recognised. For 0804EN7325, the four final configurations predicted Gantry in 38 of 40 runs. The models regarded the gantry criteria as fulfilled, interpreting the double-sided guidance as a portal structure and assuming a third axis, although the assembly has only two linear axes. The robot 0804KF8538 shows a case of incomplete documentation: its bill of materials lists the robot base, plates, centring sleeves, clamps and hose fittings, but not the robot itself, which appears only as a reference contour in the drawing. With text input, this graphical information was lost. DeepSeek-V4-Flash noted the designation “Roboter” but, finding no actuator in the bill of materials, predicted None of the Available Classes.
+
+三个装配体可以说明这些原因。对于旋转单元 0804GE7738，四个模型在图片输入下都只根据数据表描述了外购的导向气缸，并把装配体判为直线单元；Claude Opus 4.8 甚至指出名称“Rotationseinheit”与资料矛盾。使用 PDF 和文本输入时，旋转模块都被识别了出来。对于 0804EN7325，四种最终配置在 40 次运行中有 38 次预测为龙门。模型认为龙门条件已经满足：它们把双侧导向理解为门式结构，并假设存在第三根轴，而这个装配体实际上只有两根直线轴。机器人 0804KF8538 是资料不完整的例子：它的 BOM 列出了机器人底座、板件、定心套、夹子和软管附件，但没有机器人本体；机器人本体只以参考轮廓的形式出现在图纸中。使用文本输入时，这部分图形信息丢失了。DeepSeek-V4-Flash 注意到了名称“Roboter”，但由于在 BOM 中找不到执行器，预测为“不属于任何可用类别”。
+
+**⑤ Summary / 小结**
+
+Most errors arose before the decision matrix was applied: in counting the actuators and in identifying which documents describe the assembly. Errors in applying the class rules themselves, such as the gantry test, were less frequent. This points to the preparation of the input documents and the guidance for counting actuators as the main starting points for improvement.
+
+大多数错误发生在应用决策矩阵之前：统计执行器，以及判断哪些资料描述的是装配体本身。类别规则本身的应用错误，例如龙门判断，相对较少。因此，改进的主要切入点在于输入资料的整理，以及执行器计数规则的说明。
+
 ## 待处理
 
 ### 5.1 待办
@@ -316,7 +371,15 @@ Each configuration predicted an allowed class for at least 93 % of the assemblie
 
 - 数据来源：`scripts/12_validation_regimes/evaluate_validation_regimes.py` 的输出 `Validation_Regimes.xlsx`（2026-11-11）。脚本内置最终版 GT；`Pruefungen` 中 44 条均已核对：40 条为 `0804EN7325` 的 Register M → E2（按第 112 行的处理决定，结果不受影响），4 条为 `0804LU7693`（补充数据集结果文件中主标签为旧值组合单元，最终版为直线单元，ZGT 组合单元）。
 - 验证（未出表，正文一句话）：E1+E2 上 70 个对 115 个，Haiku 92.8 / 91.2，DeepSeek 97.1 / 88.5，Pro 98.6 / 95.2，GPT-5.5 100.0 / 90.8；E1 比例 86% 对 60%。补充数据集唯一的 M（`0804LU7693`）四种配置均在允许范围内（Haiku、GPT-5.5 预测组合单元，DeepSeek、Pro 预测直线单元）。
-- [ ] 5.7 需分析三个 regime 中剩余的全部错误（包括 M 中约 0.3–6.8% 的错误）。
+- [x] 5.7 需分析三个 regime 中剩余的全部错误（包括 M 中约 0.3–6.8% 的错误）：已纳入 5.7 的 58 个装配体。
+
+### 5.7 待办
+
+- 数据来源：`thesis/error_cause_mapping.md`（58 个装配体的归类，均已由作者确认）；最终配置的错误来自脚本 12 的 `Fehler_BG` / `Fehler_GPT_DeepSeek`，推理由脚本 14 汇总。
+- 图 5.1 的数字从 `konfusion_gesamt.png`（脚本 13）读取：模型 35 个错误（Haiku 10、Pro 4、GPT-5.5 9、DeepSeek 12），人工 98 个错误 / 789 条标注。GPT-5.5 矩阵 A 行和 C 行的拆分需对照原始数据核对。
+- [ ] 图 5.1 中各张 LLM 矩阵来自哪次运行（Haiku、Pro：输入形式比较的 PDF 运行；GPT-5.5、DeepSeek：稳定性实验第 1 次运行），待定写在图注还是附录。
+- [ ] `0804EN7325`：“只有两根直线轴”依据原错误分析（Z/X 两轴），请确认；38/40 = Haiku 10、DeepSeek 10、Pro 8、GPT-5.5 10。
+- 人工与模型的错误率不作比较（GT 由人工标注得出，且人工为单个标注者的判断）。
 
 ### 章节安排
 

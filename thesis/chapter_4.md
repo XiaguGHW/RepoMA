@@ -127,9 +127,9 @@ Third, the resulting actuator counts R and T are used to determine the class (Fi
 
 **⑧ 核对类别与边界案例**
 
-Finally, the result is cross-checked against the class definitions and eight documented borderline cases. A gripper mounted on a lifting cylinder, for example, is assigned to Linear Unit because the gripper is treated as an end effector and the lifting axis is the only axis counted. An articulated robot on an additional linear axis, in contrast, is classified as Combined Unit, since its kinematics are no longer exclusively rotary. Appendix A contains the full codebook and all borderline cases.
+Finally, the result is cross-checked against the class definitions and eight documented borderline cases. A gripper mounted on a lifting cylinder, for example, is assigned to Linear Unit because the gripper is treated as an end effector and the lifting cylinder is the only actuator counted. An articulated robot on an additional linear axis, in contrast, is classified as Combined Unit, since its kinematics are no longer exclusively rotary. Appendix A contains the full codebook and all borderline cases.
 
-最后，对照类别定义和八个已记录的边界案例核对分类结果。例如，安装在升降气缸上的夹爪归为直线单元，因为夹爪被视为末端执行器，仅统计升降轴。相比之下，安装在附加直线轴上的关节机器人归为组合单元，因为它的运动学同时涉及旋转和平移。附录 A 收录了完整的 Codebook 及全部边界案例。
+最后，对照类别定义和八个已记录的边界案例核对分类结果。例如，安装在升降气缸上的夹爪归为直线单元，因为夹爪被视为末端执行器，只统计升降气缸这一个执行器。相比之下，安装在附加直线轴上的关节机器人归为组合单元，因为它的运动学同时涉及旋转和平移。附录 A 收录了完整的 Codebook 及全部边界案例。
 
 ## 4.3 Workshop Design and Implementation | Workshop 设计与实施
 
