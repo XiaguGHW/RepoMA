@@ -58,3 +58,18 @@
 - 幻灯片称约 **21%** 的原判错误在修订 Ground Truth 后判为正确。按表中含 `[EMPTY]` 的总错误数复算，比例为 **40 / 190 = 21,05%**。
 - 幻灯片称纯图片输入占约 **50%** 的错误。按四个模型汇总，图片输入的错误数为 **94 / 190 = 49,47%**，分母同样包含 `[EMPTY]`。
 - 四张表的各行合计均等于三种输入形式之和。每个模型及输入形式下，`Gesamtfehler` 均等于 `Falschvorhersagen` 与 `Leere Ausgabe [EMPTY]` 之和。`LLM korrekt (GT korrigiert)` 记录经 Ground Truth 修订后改判为正确的情况。
+
+## 第二部分 · 主要错误原因与典型示例（P3）
+
+来源为 2026 年 10 月 15 日的幻灯片第 3 页及同页的两张近照。页标题为 **Fehleranalyse (185 Baugruppe)**，表标题为 **Hauptursachen der Vorhersageabweichungen inkl. Typischer Beispiele (Fehleranalyse, P3)**。
+
+| Fehlerkategorie | Anteil（原表） | Komponenten (BG) | Einträge | Beschreibung / Ursache（原文） | 典型示例 SAP-Nummer | Teamcenter |
+|---|---:|---:|---:|---|---|---|
+| Abweichung CAD-BOM | ca. 28% | 9 | 54 | CAD-Modelle zeigen Motorachsen, während die BOM nur den Rahmen ohne Antrieb listet. | `0804JX6656` | `AS00057035` |
+| Informationsflut | ca. 12% | 8 | 22 | Hauptzeichnungen gehen in dutzenden Seiten von Drittanbieter-Katalogen (z. B. Schunk-SWS) unter. | `0804GD6171` | `AS90191800` |
+| Fehlinterpretation Gantry | ca. 30% | 12 | 57 | Das Modell stuft einseitige Ausleger oder X/Z-Systeme fälschlicherweise als Portal (Gantry) ein. | `0804EN7325` | `AS90118452/01` |
+| Antriebs-Halluzination | ca. 23% | 21 | 43 | Passive Teile (z. B. Greiferhub, Führungsbolzen, Halterungen) werden fälschlicherweise als aktive Antriebsachsen erkannt. | `0804KM9359` | `AS00139165` |
+
+幻灯片以装配体编号和 3D 视图展示典型示例。上表保留两种编号，四组编号均与分类数据汇总中的对应记录一致。幻灯片底部的详细分析工作簿为 `Model_Prediction_Errors_Summary_All_12_Runs.xlsx`。
+
+四类的 `Einträge` 相加为 **176**。以第一部分的 **190 条原判错误记录**为分母复算，四类按表格顺序分别为 **28.42%、11.58%、30.00%、22.63%**，四舍五入后与原表的近似比例一致。幻灯片未明确写出分母，也未说明各类别是否互斥或覆盖全部记录。
