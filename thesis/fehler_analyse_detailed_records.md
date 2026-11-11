@@ -145,3 +145,24 @@ Revidierte GT: Gantry (LLM korrekt: nein).
 GT vor Review: Roboter, Kombinierte Einheit | LLM: Greifer / Keine der verfügbaren Klassen / Rotationseinheit
 Analyse: Die Hauptbaugruppe umfasst einen 4-Achs-SCARA-Roboter (Pos. 0100, Stäubli TS60, R=3, T=1 mit 400 mm Pinolenhub) auf einem Standfuß (Pos. 0001) samt Vakuum-Ejektor (Pos. 0101) und SCHUNK-Schnellwechselkopf (Pos. 0102, SWK-011) – somit sind sowohl Roboter als auch Kombinierte Einheit (R ≥ 2, T=1) korrekt. Die Begründungen zeigen jedoch ein Dateninput-Problem: Dem LLM lagen im Kontext lediglich die Unterlagen des untergeordneten SCHUNK-Schnellwechselsystems (Pos. 0102, SWS/SWK 011) vor, während die Hauptzeichnung und Hauptstückliste mit dem Stäubli-Roboter fehlten. Isoliert auf den Schnellwechselkopf bezogen rieten die Modelle daher zwischen Keine der verfügbaren Klassen (R=0, T=0, Verriegelung als Hilfsfunktion), Greifer (Werkzeugklemmung als Greiffunktion gedeutet) und Rotationseinheit (4 × 90°-Anbaulagen als Drehachse fehlinterpretiert).
 Revidierte GT: Roboter, Kombinierte Einheit (LLM korrekt: nein – bedingt durch unvollständigen Dokumenten-Input nur für Unterposition 0102).
+
+## 第七部分 · Excel 第 19–20 行
+
+来源为 `Fehler_Analyse` 工作表的三张照片。按行顺序和共同的 Ground Truth 列对应。部分模型输出列未拍全，参考同一工作簿 `Korrigierte GT&ZGT` 对应记录补录，待核对。两行其他允许类别栏均为空。
+
+| Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
+|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 19 | 4 | 0 | `0804EK1683` | `AS90152580/01` | E1 | Roboter | — | Rotationseinheit | — | — | Keine der verfügbaren Klassen | — | — | Keine der verfügbaren Klassen | — | — | Keine der verfügbaren Klassen | — | — | [原文](#excel-第-19-行) |
+| 20 | 4 | 0 | `0804FT0436` | `AS90143556` | E1 | Lineareinheit | — | Kombinierte Einheit | Kombinierte Einheit | — | — | — | — | Kombinierte Einheit | — | — | Kombinierte Einheit | — | — | [原文](#excel-第-20-行) |
+
+### Excel 第 19 行
+
+GT vor Review: Roboter | LLM: Keine der verfügbaren Klassen / Rotationseinheit
+Analyse: Eindeutiger 6-Achs-Knickarmroboter (R=6, T=0): Verbaut ist ein FANUC-Industrieroboter (Pos. 0100, LRM-200iD/7L) auf einer Grundplatte (Pos. 0001) mit SCHUNK-Schnellwechselkopf (Pos. 0101, SWK-011 / SWS 011). Wie die LLM-Begründungen belegen, liegt exakt dasselbe Dateninput-Problem wie bei 0804CC2134 vor: Dem LLM wurden im Kontext nur die Unterlagen des untergeordneten Schnellwechselsystems (SWS 011) ohne die Hauptzeichnung/Hauptstückliste des FANUC-Roboters übergeben. Isoliert auf das SWS 011 bezogen stuften drei Modelle das Bauteil folgerichtig als Hilfsfunktion ohne eigene Hauptachsen ein (R=0, T=0 → Keine der verfügbaren Klassen), während ein Modell die zylindersymmetrische Bauform samt Kolbenhubkontrolle fälschlicherweise als Rundschalttisch (R=1, T=0 → Rotationseinheit) halluzinierte.
+Revidierte GT: Roboter (LLM korrekt: nein – bedingt durch fehlenden Input der Hauptbaugruppe; bewertet wurde nur Unterposition 0101).
+
+### Excel 第 20 行
+
+GT vor Review: Lineareinheit | LLM: Kombinierte Einheit
+Analyse: Eindeutiger Fall von Grenzfall 6.1 („Greifer auf einer Hubachse“ → Lineareinheit): Verbaut ist genau eine vertikale Rexroth-Linearachse mit Motor (Stufe 6, Pos. 1, R040.563.545, Hub 455 mm → T=1), an deren Ausleger ein zylindrischer SCHUNK-Drei-Finger-Greifer (Pos. 102, PZN-plus 80) als Endeffektor montiert ist (R=0). Die LLM-Begründungen zeigen drei charakteristische Fehlermuster: (1) Das zylindrische Gehäuse des Drei-Finger-Greifers wird optisch als separate Schwenkeinheit (R=1) zwischen Hubachse und Greifbacken halluziniert; (2) die interne Keilhaken-Mechanik des PZN-plus 80-Datenblatts wird fälschlich als Hub-Schwenk-Kinematik (R=1, T=1) gedeutet; oder (3) das Modell ermittelt zwar völlig korrekt R=0, T=1 und zitiert sogar explizit Grenzfall 6.1, setzt sich aber wegen der Benennung „Handling“ sowie vorhandener Sensorik/Energiekette bewusst über die Regel hinweg.
+Revidierte GT: Lineareinheit (LLM korrekt: nein).
