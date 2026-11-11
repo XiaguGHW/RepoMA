@@ -165,9 +165,9 @@ The mean Allowed Accuracy across the four models was highest with P3. Since P4 d
 
 **① 三种输入形式**
 
-The input representation specifies the form in which an assembly's documentation is provided to the model. Three representations were compared, each containing the same documentation in a different file format. The PDF representation contains all PDF files, the image representation contains the CAD screenshots, the DFC structure and PDF pages converted to images, and the text representation consists of raw text extracted from these files, using the open-source OCR engine Tesseract to extract text from images (Smith, 2007). Details of the conversion are given in Appendix B. Prompt P3 was used for the comparison, with the same four models and one run for each configuration. The PDF configuration was run independently of the prompt comparison, so its results differ slightly from those for P3 in Table 5.3.
+The input representation specifies the form in which an assembly's documentation is provided to the model. Three representations were compared, each containing the same documentation in a different file format. The PDF representation contains all PDF files, the image representation contains the CAD screenshots, the DFC structure and PDF pages converted to images, and the text representation consists of raw text extracted from these files, using the open-source OCR engine Tesseract to extract text from images (Smith, 2007). Prompt P3 was used for the comparison, with the same four models and one run for each configuration. The PDF configuration was run independently of the prompt comparison, so its results differ slightly from those for P3 in Table 5.3.
 
-输入形式规定了装配体资料提供给模型时所采用的形式。本研究比较了三种输入形式，它们包含同一份资料，只是文件格式不同。PDF 形式包含全部 PDF 文件，图片形式包含 CAD 截图、DFC 结构和转换为图片的 PDF 页面。文本形式由从这些文件中提取的原始文本组成，图片中的文字使用开源 OCR 工具 Tesseract 提取（Smith, 2007）。转换的具体设置见附录 B。该比较使用 Prompt P3 和相同的四个模型，每种配置运行一次。PDF 配置与 Prompt 比较是分开独立运行的，因此其结果与表 5.3 中 P3 的结果略有不同。
+输入形式规定了装配体资料提供给模型时所采用的形式。本研究比较了三种输入形式，它们包含同一份资料，只是文件格式不同。PDF 形式包含全部 PDF 文件，图片形式包含 CAD 截图、DFC 结构和转换为图片的 PDF 页面。文本形式由从这些文件中提取的原始文本组成，图片中的文字使用开源 OCR 工具 Tesseract 提取（Smith, 2007）。该比较使用 Prompt P3 和相同的四个模型，每种配置运行一次。PDF 配置与 Prompt 比较是分开独立运行的，因此其结果与表 5.3 中 P3 的结果略有不同。
 
 **② 结果**
 
@@ -383,6 +383,7 @@ Allowed Accuracy 最高的 Gemini 2.5 Pro（表 5.6），成本是第二低的�
 
 - [ ] 后续补充预实验 L1–L4 结果的附录，结果需按最终版 GT 重算。
 - [ ] **附录 B**：接入方式、模型版本号、输入转换设置、生成参数。
+- [ ] 5.4 开头原有一句“Details of the conversion are given in Appendix B.”（中文“转换细节见附录 B”），作者暂时删除，之后决定是否加回。
 - [ ] **GPT-5.5 的 temperature**：查请求日志确认确实是 0。
 
 ### 5.2 待办
