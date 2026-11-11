@@ -39,7 +39,7 @@ GT vor Review: Kombinierte Einheit | LLM: Rotationseinheit (oder Lineareinheit).
 
 ## 第二部分 · Excel 第 7–11 行
 
-来源为 `Fehler_Analyse` 工作表的四张照片。第 9 行在照片中为黄色高亮。部分模型列在这批照片中被裁切，表中对应位置参考同一工作簿 `Korrigierte GT&ZGT` 工作表的相同行转录，尚需核对。第 11 行 Fehleranalyse 只记录照片中可见部分。
+来源为 `Fehler_Analyse` 工作表的四张照片。第 9 行在照片中为黄色高亮。部分模型列在这批照片中被裁切，表中对应位置参考同一工作簿 `Korrigierte GT&ZGT` 工作表的相同行转录，尚需核对。第 11 行 Fehleranalyse 已根据后续照片补齐。
 
 | Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
 |---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -47,7 +47,7 @@ GT vor Review: Kombinierte Einheit | LLM: Rotationseinheit (oder Lineareinheit).
 | 8 | 8 | 0 | `0804MB2849` | `AS00394314` | E1 | Lineareinheit | — | Kombinierte Einheit | Kombinierte Einheit | — | Kombinierte Einheit | Kombinierte Einheit | — | — | Kombinierte Einheit | Kombinierte Einheit | — | Kombinierte Einheit | Kombinierte Einheit | [原文](#excel-第-8-行) |
 | 9 | 7 | 0 | `0804DN9616` | `AS90430781` | E2 | Multi-Achs-System (Gantry) | — | — | `[EMPTY]` | — | Lineareinheit | `[EMPTY]` | — | Lineareinheit | `[EMPTY]` | — | Lineareinheit | `[EMPTY]` | — | [原文](#excel-第-9-行) |
 | 10 | 6 | 0 | `0804EB6690` | `AS90347860` | E2 | Kombinierte Einheit | — | Greifer | Rotationseinheit | Rotationseinheit | Greifer | — | — | Greifer | — | — | Greifer | — | — | [原文](#excel-第-10-行) |
-| 11 | 6 | 0 | `0804GT5112` | `AS90282232` | E1 | Kombinierte Einheit | — | Gantry | Gantry | Gantry | — | — | — | Gantry | — | — | Gantry | — | Gantry | [原文（不完整）](#excel-第-11-行) |
+| 11 | 6 | 0 | `0804GT5112` | `AS90282232` | E1 | Kombinierte Einheit | — | Gantry | Gantry | Gantry | — | — | — | Gantry | — | — | Gantry | — | Gantry | [原文](#excel-第-11-行) |
 
 ### Excel 第 7 行
 
@@ -66,7 +66,22 @@ Kontext ist zu groß, es kann keine Verarbeitung durchgeführt werden. Es wird k
 GT vor Review: Kombinierte Einheit (Umsetzeinheit) | LLM: Greifer / Rotationseinheit
 Analyse: Beide LLM-Vorschläge sind falsch. Verbaut sind ein translatorischer AVENTICS-Kompaktschlitten (Pos. 0102, Hub 30 mm → T=1), eine rotatorische SCHUNK-Schwenkeinheit (Pos. 0104, 90° → R=1) sowie zwei Winkelgreifer (Pos. 0105) als Endeffektoren. Das LLM lässt sich durch die irreführende Benennung („Rotationseinheit“) bzw. die vorhandenen Greifer täuschen und übersieht die Kombination aus Hub- und Schwenkachse (R=1, T=1, vgl. Codebook Grenzfall 6.3). Revidierte GT: Kombinierte Einheit / Umsetzeinheit (LLM korrekt: nein).
 
-### Excel 第 11 行（未完）
+### Excel 第 11 行
 
 GT vor Review: Kombinierte Einheit (Umsetzeinheit) | LLM: Gantry
-Analyse: Verbaut sind genau zwei translatorische Achsen (R=0, T=2): ein Festo-Kompaktschlitten (Pos. 0001, D=16, Hub 100 mm) und eine Lineareinheit (Pos. 0006, D=25, Hub 250 mm), verbunden über Adapterstück (Pos. 0002) und Verbindungssatz (Pos. 0003). Das LLM lässt sich durch die Benennung „gantry axle / Portalachse“ täuschen: Ein Zweiachsensystem ohne zwei Horizontalachsen mit beidseitig geführter **［照片到此截断］**
+Analyse: Verbaut sind genau zwei translatorische Achsen (R=0, T=2): ein Festo-Kompaktschlitten (Pos. 0001, D=16, Hub 100 mm) und eine Lineareinheit (Pos. 0006, D=25, Hub 250 mm), verbunden über Adapterstück (Pos. 0002) und Verbindungssatz (Pos. 0003). Das LLM lässt sich durch die Benennung „gantry axle / Portalachse“ täuschen: Ein Zweiachsensystem ohne zwei Horizontalachsen mit beidseitig geführter Portalstruktur fällt im Gantry-Test (Codebook Abschnitt 4, Fall B sowie Grenzfall 6.4 / 6.6) durch und ist zwingend als Kombinierte Einheit (Umsetzeinheit) einzustufen.
+Revidierte GT: Kombinierte Einheit / Umsetzeinheit (LLM korrekt: nein).
+
+## 第三部分 · Excel 第 12 行
+
+来源为 `Fehler_Analyse` 工作表的照片。G 列在照片中为空。模型输出完整显示为六个非空值，与 `Error_Count` 一致。
+
+| Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
+|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 12 | 6 | 0 | `0804JX6656` | `AS00057035` | E2 | Multi-Achs-System (Gantry) | — | — | — | Lineareinheit | Kombinierte Einheit | Lineareinheit | Keine der verfügbaren Klassen | — | — | Keine der verfügbaren Klassen | Lineareinheit | — | — | [原文](#excel-第-12-行) |
+
+### Excel 第 12 行
+
+GT vor Review: Multi-Achs-System (Gantry) | LLM: Lineareinheit / Kombinierte Einheit / Keine der verfügbaren Klassen
+Analyse: Diskrepanz zwischen Zeichnung/CAD und Stückliste (analog zu 0804KW8391): In der Zeichnung sind zwei orthogonale Horizontalachsen inklusive Motoren und Energieführungsketten als Referenz-/Störkontur (Strich-Zweipunkt-Linie) dargestellt, in der Stückliste (0804JX6656) sind diese Antriebe jedoch nicht enthalten – verbaut sind nur das Gestell (Pos. 0001–0010), Spannstücke (Pos. 0101) zur Klemmung des externen Linearmoduls sowie zwei orthogonale Führungsschienen (Pos. 0102, Pos. 0103) mit Führungswagen (Pos. 0104). Bezieht man die in CAD/Zeichnung dargestellten zwei Motorachsen (R=0, T=2) ein, sind Gantry (X/Y-System mit paralleler Stützschiene Pos. 0102) und Kombinierte Einheit (Umsetzeinheit) vertretbar; wertet man streng nach Stückliste ohne eigene Aktoren (R=0, T=0), gilt Keine der verfügbaren Klassen. Lineareinheit (T=1) ist in jedem Fall falsch.
+Revidierte GT: Gantry, Kombinierte Einheit (Umsetzeinheit), Keine der verfügbaren Klassen (LLM korrekt bei „Kombinierte Einheit“ und „Keine der verfügbaren Klassen“, falsch bei „Lineareinheit“).
