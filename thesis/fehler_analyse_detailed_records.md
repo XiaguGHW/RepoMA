@@ -481,3 +481,14 @@ Revidierte GT: Lineareinheit (LLM korrekt: nein - Pos. 0004 ist nur die passive 
 GT vor Review: Greifer, Kombinierte Einheit LLM: Rotationseinheit
 Analyse (Statischer Grundkörper als Drehachse fehlinterpretiert): Die Baugruppe (GREIFEREINHEIT) besteht aus einem festen Grundkörper (Pos. 0004) mit zwei Schwenkgreifern (Pos. 0001, 0005, R=2) und einem linear verfahrbaren Sauggreifer (Pos. 0002, T=1 → Greifer oder Kombinierte Einheit). Das LLM hat den statischen Tragkörper (Pos. 0004) im 3D-Bild fälschlicherweise für eine „zentrale Rotationsachse" (R=1, T=0) gehalten.
 Revidierte GT: Greifer, Kombinierte Einheit (LLM korrekt: nein - fester Grundkörper Pos. 0004 wurde als zentrale Drehachse R=1 halluziniert).
+
+
+## 第十八部分 · Excel 第 56–58 行（待照片核对）
+
+行号、SAP 和 Teamcenter 由用户按顺序提供，编号配对均与 `corrected_gt_zgt_error_records.md` 一致；第 56、57 行 Register 由用户提供，第 58 行 Register 尚未提供。下表修正表信息尚未与 `Fehler_Analyse` 本工作表核对。修正表标记 `3843CE1617` 黄色高亮，本工作表颜色待核对。`—` 表示修正表中为空，与明确显示的 `[EMPTY]` 不同，不能据此推断模型没有输出。错误分析待提供。
+
+| Excel 行 | SAP-Nummer | Teamcenter | Register（用户提供） | Register / Ground Truth（修正表） | 其他允许类别（修正表） | 非空模型记录（修正表） | Fehleranalyse |
+|---:|---|---|---|---|---|---|---|
+| 56 | `0804LZ1241` | `AS00379611` | E1 | E1 / Rotationseinheit | — | gemini-2.5-flash (pdf): Kombinierte Einheit | 待提供 |
+| 57 | `3842998383` | `PT00412992` | E2 | E2 / Keine der verfügbaren Klassen | — | claude-haiku-4-5_20251001 (image): Lineareinheit | 待提供 |
+| 58 | `3843CE1617` | `AS00277646/01` | 未提供 | E1 / Multi-Achs-System (Gantry) | — | gemini-2.5-flash (pdf): `[EMPTY]` | 待提供 |
