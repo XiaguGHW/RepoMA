@@ -628,6 +628,9 @@ def run(args):
         matplotlib.use("Agg")
         matplotlib.rcParams["font.family"] = "sans-serif"
         matplotlib.rcParams["font.sans-serif"] = ["Arial", "Liberation Sans", "Helvetica", "DejaVu Sans"]
+        from matplotlib import font_manager
+        if "Arial" not in {f.name for f in font_manager.fontManager.ttflist}:
+            print("Hinweis: Schrift Arial nicht gefunden, Ersatzschrift wird verwendet.")
         files = {"M_Mensch": "konfusion_mensch.png", "M_Haiku": "konfusion_haiku.png",
                  "M_Gemini": "konfusion_gemini.png", "M_GPT": "konfusion_gpt.png",
                  "M_DeepSeek": "konfusion_deepseek.png"}
