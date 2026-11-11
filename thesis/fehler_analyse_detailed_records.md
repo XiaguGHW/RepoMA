@@ -443,11 +443,41 @@ Portalbasis für die Querachse CKK-110).
 
 ## 第十七部分 · Excel 第 52–55 行（待照片核对）
 
-行号、编号和可辨认的 Register 根据用户提供的文字暂按顺序匹配，SAP 与 Teamcenter 配对均与 `corrected_gt_zgt_error_records.md` 一致。第 54、55 行文字排列交错，行号及 Register 待照片确认；用户提供的 `Li` 截断且无法可靠确定所属字段，`0`、`1` 也无法可靠归属到具体行和列。下表修正表信息尚未与 `Fehler_Analyse` 本工作表核对；`—` 表示修正表中为空，与明确显示的 `[EMPTY]` 不同，不能据此推断模型没有输出。错误分析待提供。
+行号、编号和可辨认的 Register 根据用户提供的文字暂按顺序匹配，SAP 与 Teamcenter 配对均与 `corrected_gt_zgt_error_records.md` 一致。第 54、55 行文字排列交错，行号及 Register 待照片确认；用户提供的 `Li` 截断且无法可靠确定所属字段，`0`、`1` 也无法可靠归属到具体行和列。下表修正表信息尚未与 `Fehler_Analyse` 本工作表核对；`—` 表示修正表中为空，与明确显示的 `[EMPTY]` 不同，不能据此推断模型没有输出。第 52–55 行错误分析根据用户所给顺序及修正表中的 GT 和模型结果匹配并原样补录；第 53、54 行 GT 与 LLM 结果相同，无法仅凭这两项区分，仍需原表核对。第 52 行的 `T-3` 原样保留，待核对。
 
 | Excel 行 | SAP-Nummer | Teamcenter | Register（用户文字，待核对） | Ground Truth（修正表） | 其他允许类别（修正表） | 非空模型记录（修正表） | Fehleranalyse |
 |---:|---|---|---|---|---|---|---|
-| 52 | `0804KV2157` | `AS00190354` | E2 | Kombinierte Einheit | — | gemini-2.5-pro (image): Gantry | 待提供 |
-| 53 | `0804KZ8712` | `AS00231951` | E1 | Lineareinheit | — | claude-haiku-4-5_20251001 (image): Kombinierte Einheit | 待提供 |
-| 54（待核对） | `0804LB3626` | `AS00245227` | E1（暂配） | Lineareinheit | — | gemini-2.5-pro (image): Kombinierte Einheit | 待提供 |
-| 55（待核对） | `0804LE2661` | `AS00260156` | M（暂配） | Greifer | Kombinierte Einheit | gemini-2.5-flash (image): Rotationseinheit | 待提供 |
+| 52 | `0804KV2157` | `AS00190354` | E2 | Kombinierte Einheit | — | gemini-2.5-pro (image): Gantry | [原文](#excel-第-52-行) |
+| 53 | `0804KZ8712` | `AS00231951` | E1 | Lineareinheit | — | claude-haiku-4-5_20251001 (image): Kombinierte Einheit | [原文](#excel-第-53-行) |
+| 54（待核对） | `0804LB3626` | `AS00245227` | E1（暂配） | Lineareinheit | — | gemini-2.5-pro (image): Kombinierte Einheit | [原文](#excel-第-54-行) |
+| 55（待核对） | `0804LE2661` | `AS00260156` | M（暂配） | Greifer | Kombinierte Einheit | gemini-2.5-flash (image): Rotationseinheit | [原文](#excel-第-55-行) |
+
+
+### Excel 第 52 行
+
+GT vor Review: Kombinierte Einheit | LLM: Gantry
+Analyse (Verstoß gegen Gantry-Kriterium c und Übersehen der Rotationsachse): Die Baugruppe (Handlingseinheit) besteht aus drei orthogonalen Lineareinheiten (Pos. 0001-0003, T-3) sowie einer Greiferdreheinheit (Pos. 0004, R=1). Entgegen der Annahme des LLMs ist die lange Basisachse (Pos. 0001) als einzelner Balken auf einer Stützenreihe ausgeführt, an dem die zweite Horizontalachse (Pos. 0002) einseitig als Ausleger montiert ist (Gantry-Kriterium c verletzt, Grenzfall 6.4; eine Stützschiene am selben Balken ist keine Brückenlagerung). Zudem hat das LLM die Rotationsachse Pos. 0004 (R=1) übersehen.
+Revidierte GT: Kombinierte Einheit (LLM korrekt: nein - einseitiger Ausleger nach Grenzfall 6.4 ohne
+Brückenführung sowie zusätzliche Drehachse Pos. 0004, R=1, T=3).
+
+### Excel 第 53 行
+
+GT vor Review: Lineareinheit LLM: Kombinierte Einheit
+Analyse (Vakuumejektor im 3D-Bild als Schwenkachse fehlinterpretiert): Die Baugruppe (Ausheber fuer Flippen) besitzt nur eine vertikale Spindelachse (Pos. 0101, Festo ELGC mit Schrittmotor Pos. 0100, R=0, T=1 →
+Lineareinheit). Das LLM hat den seitlich montierten, blau-orangen Vakuumejektor (Pos. 0104, Kompaktejektor) im 3D-Rendering fälschlicherweise als „Schwenkeinheit mit Schwenkarmen" (R=1, Grenzfall
+6.3) halluziniert.
+Revidierte GT: Lineareinheit (LLM korrekt: nein - blau-oranger Vakuumejektor Pos. 0104 wurde im 3D-Bild als
+Schwenkantrieb R=1 fehlinterpretiert).
+
+### Excel 第 54 行
+
+GT vor Review: Lineareinheit | LLM: Kombinierte Einheit
+Analyse (Passive Führung als zweite Achse fehlinterpretiert): Die Baugruppe (Ausheber) besitzt nur einen vertikalen Pneumatikzylinder (Pos. 0100, R=0, T=1 → Lineareinheit), der seitlich durch zwei passive Kugelbüchsenführungen (Pos. 0004 Linearführung, Pos. 0005) stabilisiert wird. Wegen der irreführenden englischen Übersetzung linear unit für Pos. 0004 hat das LLM diese rein passive Parallelführung fälschlicherweise als zweite, angetriebene Horizontalachse (T2=1) gezählt.
+Revidierte GT: Lineareinheit (LLM korrekt: nein - Pos. 0004 ist nur die passive Führung des Hubzylinders Pos.
+0100, R=0, T=1).
+
+### Excel 第 55 行
+
+GT vor Review: Greifer, Kombinierte Einheit LLM: Rotationseinheit
+Analyse (Statischer Grundkörper als Drehachse fehlinterpretiert): Die Baugruppe (GREIFEREINHEIT) besteht aus einem festen Grundkörper (Pos. 0004) mit zwei Schwenkgreifern (Pos. 0001, 0005, R=2) und einem linear verfahrbaren Sauggreifer (Pos. 0002, T=1 → Greifer oder Kombinierte Einheit). Das LLM hat den statischen Tragkörper (Pos. 0004) im 3D-Bild fälschlicherweise für eine „zentrale Rotationsachse" (R=1, T=0) gehalten.
+Revidierte GT: Greifer, Kombinierte Einheit (LLM korrekt: nein - fester Grundkörper Pos. 0004 wurde als zentrale Drehachse R=1 halluziniert).
