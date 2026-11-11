@@ -12,6 +12,7 @@
 | Pruefungen | Ungültige Labels, abweichende GT zwischen Dateien, EXCLUDED, durch finale GT ersetzte Werte |
 | Fehler_BG | Jede Baugruppe mit mindestens einem Fehler: Vorhersagen je Konfiguration (k/n Läufe), Regime, ob unter den 57 BG der bisherigen Fehleranalyse |
 | Fehler_GPT_DeepSeek | Wie Fehler_BG, nur Baugruppen mit Fehlern bei GPT-5.5 oder DeepSeek-V4-Flash |
+| Konfusion_LLM_1Lauf | Alle Vorhersagen, ein Lauf je Baugruppe (115 BG: Lauf 1, 70 BG: einziger Lauf), Primärlabel × Vorhersage, Anzahl und Zeilenprozent; für den Vergleich mit der manuellen Klassifikation |
 | Konfusion_Fehler | Fehlerhafte Vorhersagen: Primärlabel × Vorhersage, gesamt und je Konfiguration |
 
 Zusammenführung: 115 BG je Baugruppe Anteil korrekter Läufe, 70 BG 0/1; Mittelwerte und

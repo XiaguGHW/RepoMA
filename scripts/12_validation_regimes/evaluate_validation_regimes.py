@@ -1465,6 +1465,28 @@ def main():
         return m
     conf_blocks = [("Alle Konfigurationen", confusion(wrong))] + [(c, confusion(wrong[wrong.cfg == c])) for c in cfgs]
 
+
+    # Vollständige Konfusionsmatrix (alle Vorhersagen, Primärlabel × Vorhersage) für den Vergleich
+    # mit der manuellen Klassifikation: je Konfiguration genau ein Lauf je Baugruppe
+    # (115 BG: erster Lauf, 70 BG: einziger Lauf) -> 185 Vorhersagen je Konfiguration.
+    one = df[(~df.excluded) & (((df.source == "115") & (df.run == 1)) | (df.source == "70"))]
+    def full_conf(sub):
+        m = pd.DataFrame(0, index=CLASSES, columns=labels)
+        for gt_, pr in zip(sub["gt"], sub["pred"]):
+            col = pr if pr in CLASSES else "(ungültig)"
+            if gt_ in CLASSES:
+                m.loc[gt_, col] += 1
+        m["Summe"] = m.sum(axis=1)
+        m.loc["Summe"] = m.sum(axis=0)
+        m.index.name = "Primärlabel \\ Vorhersage"
+        return m
+    def row_pct(m):
+        core = m.drop(index="Summe").drop(columns="Summe")
+        pctm = core.div(core.sum(axis=1).replace(0, np.nan), axis=0) * 100
+        return pctm.round(1)
+    full_blocks = [("Alle vier Konfigurationen (je 185 Vorhersagen)", full_conf(one))] + \
+                  [(c, full_conf(one[one.cfg == c])) for c in cfgs]
+
     notes = pd.DataFrame({"Hinweis": [
         "Werte in %, in Klammern 95%-Bootstrap-CI (B=2000, Seed 42, Ziehen von Baugruppen mit Zurücklegen).",
         "115 BG: je Baugruppe Anteil korrekter Läufe über 10 Läufe; 70 BG: 1 Lauf (0 oder 1).",
@@ -1475,6 +1497,7 @@ def main():
         "Fehler_BG: je Baugruppe mit mindestens einem Fehler 'k/n: Vorhersage ×Anzahl' je Konfiguration (k Fehlläufe von n).",
         "Fehler: Vorhersage außerhalb der zulässigen Labels. 'NEU' = nicht unter den 57 BG der bisherigen Fehleranalyse.",
         "Konfusion_Fehler: nur fehlerhafte Vorhersagen, Zeilen = Primärlabel, Spalten = Vorhersage; gezählt über Läufe.",
+        "Konfusion_LLM_1Lauf: alle Vorhersagen (auch korrekte), ein Lauf je Baugruppe (115 BG: Lauf 1, 70 BG: einziger Lauf); Anzahl und Zeilenprozent. Abweichungen vom Primärlabel können in M zulässig sein.",
     ]})
 
     with pd.ExcelWriter(a.out, engine="openpyxl") as xw:
@@ -1490,6 +1513,13 @@ def main():
         for title, m in conf_blocks:
             pd.DataFrame({title: []}).to_excel(xw, sheet_name="Konfusion_Fehler", startrow=r0, index=False)
             m.to_excel(xw, sheet_name="Konfusion_Fehler", startrow=r0 + 1)
+            r0 += len(m) + 4
+        r0 = 0
+        for title, m in full_blocks:
+            pd.DataFrame({title + " – Anzahl": []}).to_excel(xw, sheet_name="Konfusion_LLM_1Lauf", startrow=r0, index=False)
+            m.to_excel(xw, sheet_name="Konfusion_LLM_1Lauf", startrow=r0 + 1)
+            pd.DataFrame({title + " – Zeilenprozent": []}).to_excel(xw, sheet_name="Konfusion_LLM_1Lauf", startrow=r0, startcol=11, index=False)
+            row_pct(m).to_excel(xw, sheet_name="Konfusion_LLM_1Lauf", startrow=r0 + 1, startcol=11)
             r0 += len(m) + 4
         notes.to_excel(xw, sheet_name="Hinweise", index=False)
         for ws in xw.book.worksheets:
