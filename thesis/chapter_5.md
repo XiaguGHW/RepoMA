@@ -35,21 +35,21 @@ Six models from four providers were used: Claude Haiku 4.5 and Claude Opus 4.8 (
 
 ## 5.2 Ground Truth Revision and Evaluation Metrics | Ground Truth 修订与评价指标
 
-This section first describes the final revision of the ground truth and then the metrics and statistical methods used in the following sections.
+This section presents the final revision of the ground truth before introducing the metrics and statistical methods used in the following sections.
 
-本节首先介绍 Ground Truth 的最终修订，然后介绍后续各节使用的评价指标和统计方法。
+本节先介绍 Ground Truth 的最终修订，再说明后续各节采用的评价指标和统计方法。
 
 **① 修订的触发**
 
-The LLM experiments led to a final review of the ground truth. All assemblies for which a configuration predicted a class outside the allowed label set were reviewed again following the procedure in Section 4.4.
+The LLM experiments led to a final review of the ground truth. Following the procedure in Section 4.4, the review covered every assembly for which at least one configuration predicted a class outside its allowed label set.
 
-LLM 实验之后，对 Ground Truth 进行了最终复核。凡是有配置预测出允许标签集合以外类别的装配体，都按第 4.4 节的流程重新复核。
+LLM 实验之后，对 Ground Truth 进行了最终复核。只要至少一种配置对某个装配体预测了其允许标签集合以外的类别，就按第 4.4 节的流程对该装配体重新复核。
 
 **② 修订结果**
 
-The review changed the primary label of two assemblies: one assembly previously labelled Linear Unit was reassigned to Combined Unit and one previously labelled Combined Unit to Rotary Unit, with the previous label retained as an allowed label in both cases. Seven assemblies were moved to regime M, five from E1 and two from E2, and for three further assemblies in regime M the set of allowed labels was changed. All changes concern the primary set. Across all 199 assemblies, the final ground truth comprises 117 assemblies in regime E1, 47 in E2 and 35 in M. It was applied to all configurations and experimental stages.
+The review reassigned the primary label of one assembly from Linear Unit to Combined Unit and that of another from Combined Unit to Rotary Unit, retaining the previous label as an allowed label in both cases. Seven assemblies were moved to regime M, five from E1 and two from E2, and for three further assemblies in regime M the set of allowed labels was changed. Every change was made within the primary set. Across all 199 assemblies, the final ground truth comprises 117 assemblies in regime E1, 47 in E2 and 35 in M. The final ground truth was used for every configuration and experimental stage.
 
-复核修改了两个装配体的主标签：一个原为直线单元的装配体改为组合单元，一个原为组合单元的装配体改为旋转单元，两者都保留原标签作为允许标签。有七个装配体改为 M，其中五个原属 E1，两个原属 E2；另有三个 M 类装配体的允许标签集合发生了变化。所有修改都在主数据集中。在全部 199 个装配体中，最终版 Ground Truth 有 117 个属于 E1、47 个属于 E2、35 个属于 M。最终版 Ground Truth 统一用于所有配置和实验阶段。
+复核后，一个装配体的主标签由直线单元改为组合单元，另一个由组合单元改为旋转单元。两个装配体的原标签均保留为允许标签。有七个装配体改为 M，其中五个原属 E1，两个原属 E2。另有三个原属 M 的装配体调整了允许标签集合。这些修改均发生在主数据集。在全部 199 个装配体中，最终版 Ground Truth 有 117 个属于 E1、47 个属于 E2、35 个属于 M。所有配置和实验阶段均采用最终版 Ground Truth。
 
 **③ 评价数据集的分布**
 
@@ -76,47 +76,47 @@ Table 5.2 shows the distribution of the 185 evaluated assemblies across classes 
 
 **④ 指标**
 
-For assembly $i$ ($i = 1, \dots, N$), let $\hat{y}_i$ denote the predicted class, $y_i$ the primary label and $A_i$ the set of allowed labels, with $y_i \in A_i$; $C$ denotes the set of the seven classes. The main metric is the Allowed Accuracy defined in Section 4.6, which follows evaluation practice for datasets with several valid labels per item (Shankar et al., 2020; Beyer et al., 2020):
+With $C$ denoting the set of seven classes, each assembly $i$ ($i = 1, \dots, N$) has a predicted class $\hat{y}_i$, a primary label $y_i$ and a set of allowed labels $A_i$ that contains $y_i$ ($y_i \in A_i$). The main metric is the Allowed Accuracy defined in Section 4.6, which follows evaluation practice for datasets with several valid labels per item (Shankar et al., 2020; Beyer et al., 2020):
 
 $$\text{Allowed Accuracy} = \frac{1}{N} \sum_{i=1}^{N} \mathbb{1}\left[\hat{y}_i \in A_i\right] \tag{5.1}$$
 
-对于装配体 $i$（$i = 1, \dots, N$），$\hat{y}_i$ 表示预测类别，$y_i$ 表示主标签，$A_i$ 表示允许标签集合，且 $y_i \in A_i$；$C$ 表示七个类别的集合。主要指标是第 4.6 节定义的 Allowed Accuracy，它沿用了每个样本有多个有效标签时的评价做法（Shankar et al., 2020; Beyer et al., 2020）。
+设 $C$ 为七个类别的集合。对于每个装配体 $i$（$i = 1, \dots, N$），$\hat{y}_i$ 表示预测类别，$y_i$ 表示主标签，$A_i$ 表示包含主标签的允许标签集合（$y_i \in A_i$）。主要指标是第 4.6 节定义的 Allowed Accuracy，它沿用了每个样本有多个有效标签时的评价做法（Shankar et al., 2020; Beyer et al., 2020）。
 
 Class-specific performance is described by Allowed Precision and Allowed Recall, which apply the standard definitions (Sokolova & Lapalme, 2009) to the allowed label sets:
 
 $$\text{AP}_c = \frac{\left|\{\, i : \hat{y}_i = c \,\wedge\, c \in A_i \,\}\right|}{\left|\{\, i : \hat{y}_i = c \,\}\right|} \qquad \text{AR}_c = \frac{\left|\{\, i : y_i = c \,\wedge\, \hat{y}_i \in A_i \,\}\right|}{\left|\{\, i : y_i = c \,\}\right|} \tag{5.2}$$
 
-Both are averaged over the seven classes with equal weight to obtain Allowed Macro-Precision and Allowed Macro-Recall. This extension ensures that a prediction counted as correct by the Allowed Accuracy is not counted as an error in precision or recall.
+Allowed Macro-Precision and Allowed Macro-Recall are the equally weighted averages of the corresponding values across the seven classes. This extension ensures that a prediction counted as correct by the Allowed Accuracy is not counted as an error in precision or recall.
 
-各类别的表现用 Allowed Precision 和 Allowed Recall 描述，即把标准定义（Sokolova & Lapalme, 2009）应用到允许标签集合上。两者在七个类别上等权平均，得到 Allowed Macro-Precision 和 Allowed Macro-Recall。这一扩展保证了被 Allowed Accuracy 计为正确的预测，在 Precision 和 Recall 中不会被计为错误。
+各类别的表现用 Allowed Precision 和 Allowed Recall 描述，即把标准定义（Sokolova & Lapalme, 2009）应用到允许标签集合上。将对应指标在七个类别上的数值分别等权平均，即得 Allowed Macro-Precision 和 Allowed Macro-Recall。这一扩展保证了被 Allowed Accuracy 计为正确的预测，在 Precision 和 Recall 中不会被计为错误。
 
-F1 is reported only in its strict form, since under the allowed criterion precision and recall can refer to different classes for the same prediction. Strict Macro-F1 is the mean of the class-wise F1 values (Opitz & Burst, 2019):
+Only strict F1 is reported because precision and recall under the allowed criterion can refer to different classes for a single prediction. Strict Macro-F1 is the mean of the class-wise F1 values (Opitz & Burst, 2019):
 
 $$\text{Strict Macro-F1} = \frac{1}{|C|} \sum_{c \in C} \frac{2\, \text{P}_c\, \text{R}_c}{\text{P}_c + \text{R}_c} \tag{5.3}$$
 
-where $\text{P}_c$ and $\text{R}_c$ follow from Equation 5.2 with $A_i$ replaced by $\{y_i\}$. It indicates how often the primary label itself is predicted and allows comparison with studies that use a single correct label. For configurations with ten runs, each metric is calculated per run and averaged across the runs.
+where $\text{P}_c$ and $\text{R}_c$ follow from Equation 5.2 with $A_i$ replaced by $\{y_i\}$. This metric reflects how often predictions match the primary label and supports comparison with studies that use a single correct label. For configurations with ten runs, each metric is calculated per run and averaged across the runs.
 
-F1 只报告严格形式，因为在允许标签准则下，同一个预测在 Precision 和 Recall 中可能分别对应不同的类别。Strict Macro-F1 是各类别 F1 的平均值（Opitz & Burst, 2019）。其中 $\text{P}_c$ 和 $\text{R}_c$ 由公式 5.2 将 $A_i$ 替换为 $\{y_i\}$ 得到。它反映模型预测出主标签本身的频率，并可与只使用一个正确标签的研究进行比较。对于运行十次的配置，每个指标按每次运行分别计算，再在各次运行之间取平均。
+本文仅报告严格形式的 F1，因为按允许标签准则计算时，同一个预测在 Precision 和 Recall 中可能对应不同的类别。Strict Macro-F1 是各类别 F1 的平均值（Opitz & Burst, 2019）。其中 $\text{P}_c$ 和 $\text{R}_c$ 由公式 5.2 将 $A_i$ 替换为 $\{y_i\}$ 得到。这一指标反映预测与主标签匹配的频率，可用于和仅采用一个正确标签的研究进行比较。对于运行十次的配置，每个指标按每次运行分别计算，再在各次运行之间取平均。
 
 **⑤ 统计方法**
 
-Given the size of the dataset, the results depend on which assemblies it contains. All values are therefore reported with 95 % confidence intervals obtained by bootstrapping (Efron & Tibshirani, 1993; Miller, 2024). In each of 2,000 resamples, the assemblies were drawn with replacement, each together with its predictions from all runs, and all metrics were recalculated; the 2.5th and 97.5th percentiles of the resulting values form the interval. Differences between the final configurations were tested with a paired bootstrap, in which both configurations are evaluated on the same resampled assemblies (Koehn, 2004; Berg-Kirkpatrick et al., 2012). The test covers Allowed Accuracy, Allowed Macro-Precision, Allowed Macro-Recall and Strict Macro-F1. Since each metric involves six pairwise comparisons, the p-values were adjusted with the Holm procedure (Holm, 1979), separately for each metric because the metrics address different questions (Bender & Lange, 2001).
+Given the size of the dataset, the results depend on which assemblies it contains. To reflect this dependence, 95 % bootstrap confidence intervals are reported for all values (Efron & Tibshirani, 1993; Miller, 2024). In each of 2,000 resamples, the assemblies were drawn with replacement, each together with its predictions from all runs, and all metrics were recalculated; the 2.5th and 97.5th percentiles of the resulting values form the interval. A paired bootstrap was used to test differences between final configurations by evaluating the two configurations in each comparison on the same resampled assemblies (Koehn, 2004; Berg-Kirkpatrick et al., 2012). The test covers Allowed Accuracy, Allowed Macro-Precision, Allowed Macro-Recall and Strict Macro-F1. The Holm procedure (Holm, 1979) was used to adjust the p-values for the six pairwise comparisons per metric, with a separate adjustment for each metric because they address different questions (Bender & Lange, 2001).
 
-由于数据集规模有限，结果取决于数据集中包含哪些装配体。因此，所有数值都附有通过 Bootstrap 得到的 95% 置信区间（Efron & Tibshirani, 1993; Miller, 2024）。在 2000 次重抽样中，每次都有放回地抽取装配体，每个装配体带上它在所有运行中的预测，并重新计算所有指标；所得数值的第 2.5 和第 97.5 百分位数构成置信区间。最终配置之间的差异用配对 Bootstrap 检验，即两种配置在同一批重抽样的装配体上评价（Koehn, 2004; Berg-Kirkpatrick et al., 2012）。检验涵盖 Allowed Accuracy、Allowed Macro-Precision、Allowed Macro-Recall 和 Strict Macro-F1。由于每个指标涉及六对比较，p 值采用 Holm 方法校正（Holm, 1979）。由于各指标回答的是不同的问题，校正按指标分别进行（Bender & Lange, 2001）。
+由于数据集规模有限，结果取决于数据集中包含哪些装配体。为反映这种依赖关系，所有数值均报告通过 Bootstrap 得到的 95% 置信区间（Efron & Tibshirani, 1993; Miller, 2024）。在 2000 次重抽样中，每次都有放回地抽取装配体，每个装配体带上它在所有运行中的预测，并重新计算所有指标。所得数值的第 2.5 和第 97.5 百分位数构成置信区间。最终配置之间的差异采用配对 Bootstrap 检验，每次比较的两种配置都在同一批重抽样的装配体上评价（Koehn, 2004; Berg-Kirkpatrick et al., 2012）。检验涵盖 Allowed Accuracy、Allowed Macro-Precision、Allowed Macro-Recall 和 Strict Macro-F1。每个指标的六组两两比较所得 p 值采用 Holm 方法校正（Holm, 1979）。各指标回答不同的问题，因此分别进行校正（Bender & Lange, 2001）。
 
 ## 5.3 Prompt Design | Prompt 设计
 
 **① 目的与 Prompt 变体**
 
-The amount of codebook information provided in the prompt was varied to determine which information the models need for the classification, since the performance of LLMs can depend considerably on prompt design (Sclar et al., 2024). Four prompt variants were defined, each extending the previous one. P1 contains only the class names, P2 adds the class definitions, P3 adds the decision logic with the actuator counting rules, the decision table and the gantry test, and P4 adds examples and exceptions in the form of the borderline cases. All other parts of the prompt, including the output format and the instruction to base the decision on the documentation rather than on the designation alone, were identical across the variants (Appendix [W]).
+Because prompt design can substantially affect LLM performance (Sclar et al., 2024), the amount of codebook information in the prompt was varied to identify what the models need to classify the assemblies. Four prompt variants were defined, each extending the previous one. Starting with the class names in P1, the variants successively add the class definitions in P2, the decision logic in P3 (actuator counting rules, decision table and gantry test), and examples and exceptions in the form of borderline cases in P4. All other parts of the prompt, including the output format and the instruction to base the decision on the documentation rather than on the designation alone, were identical across the variants (Appendix [W]).
 
-为了确定模型在分类时需要哪些信息，本研究改变 Prompt 中提供的 Codebook 信息量，因为 LLM 的表现可能在很大程度上取决于 Prompt 的设计（Sclar et al., 2024）。本研究定义了四种 Prompt 变体，每种都在前一种的基础上扩展。P1 只包含类别名称；P2 增加类别定义；P3 增加决策逻辑，包括执行器计数规则、决策表和龙门测试；P4 再以边界案例的形式增加例子和例外。各变体中 Prompt 的其他部分都相同，包括输出格式，以及要求依据资料而不是只凭名称作出判断的说明（附录 [W]）。
+Prompt 的设计可能显著影响 LLM 的表现（Sclar et al., 2024）。本研究通过改变 Prompt 中提供的 Codebook 信息量，确定模型对装配体分类时需要哪些信息。本研究定义了四种 Prompt 变体，每种都在前一种的基础上扩展。P1 只包含类别名称。P2 增加类别定义，P3 增加决策逻辑，包括执行器计数规则、决策表和龙门测试，P4 再以边界案例的形式补充例子和例外。各变体中 Prompt 的其他部分都相同，包括输出格式，以及要求依据资料而不是只凭名称作出判断的说明（附录 [W]）。
 
 **② 结果**
 
-Table 5.3 shows the Allowed Accuracy of the four models with PDF input. Adding the decision logic in P3 led to the largest change: compared with P2, the Allowed Accuracy increased for all four models, by between 2.6 and 8.8 percentage points. In contrast, adding the class definitions in P2 did not yield a consistent improvement over P1; the accuracy increased for Claude Haiku 4.5, remained almost unchanged for the two Gemini models and decreased for Claude Opus 4.8. The examples and exceptions in P4 likewise had no consistent effect, increasing the accuracy for Claude Haiku 4.5 and Gemini 2.5 Pro and decreasing it for Claude Opus 4.8 and Gemini 2.5 Flash, in each case by no more than two assemblies.
+Table 5.3 shows the Allowed Accuracy of the four models with PDF input. The largest change occurred when P3 added the decision logic, raising Allowed Accuracy by 2.6 to 8.8 percentage points across the four models compared with P2. In contrast, adding the class definitions in P2 did not yield a consistent improvement over P1; the accuracy increased for Claude Haiku 4.5, remained almost unchanged for the two Gemini models and decreased for Claude Opus 4.8. The effect of the examples and exceptions in P4 also varied by model, with accuracy rising for Claude Haiku 4.5 and Gemini 2.5 Pro and falling for Claude Opus 4.8 and Gemini 2.5 Flash, with each change corresponding to at most two assemblies.
 
-表 5.3 列出了四个模型使用 PDF 输入时的 Allowed Accuracy。P3 加入决策逻辑带来的变化最大：与 P2 相比，四个模型的 Allowed Accuracy 都有所提高，提升幅度在 2.6 至 8.8 个百分点之间。相比之下，P2 加入类别定义后，相对于 P1 没有带来一致的提升：Claude Haiku 4.5 的准确率提高，两个 Gemini 模型基本不变，Claude Opus 4.8 则有所下降。P4 中的例子和例外同样没有一致的效果：Claude Haiku 4.5 和 Gemini 2.5 Pro 的准确率提高，Claude Opus 4.8 和 Gemini 2.5 Flash 的准确率下降，变化幅度都不超过两个装配体。
+表 5.3 列出了四个模型使用 PDF 输入时的 Allowed Accuracy。加入决策逻辑的 P3 带来的变化最大。与 P2 相比，四个模型的 Allowed Accuracy 均提高了 2.6 至 8.8 个百分点。相比之下，P2 加入类别定义后，相对于 P1 没有带来一致的提升：Claude Haiku 4.5 的准确率提高，两个 Gemini 模型基本不变，Claude Opus 4.8 则有所下降。P4 中的例子和例外对各模型的影响也不同。Claude Haiku 4.5 和 Gemini 2.5 Pro 的准确率提高，Claude Opus 4.8 和 Gemini 2.5 Flash 的准确率下降。各模型正确分类的装配体数量变化均不超过两个。
 
 **Table 5.3. Allowed Accuracy (%) by prompt variant (PDF input, 115 assemblies) / 表 5.3 各 Prompt 变体的 Allowed Accuracy（%）（PDF 输入，115 个装配体）**
 
@@ -134,9 +134,9 @@ Table 5.3 shows the Allowed Accuracy of the four models with PDF input. Adding t
 
 **③ 选择 P3**
 
-P3 achieved the highest mean accuracy across the four models. Since P4 did not improve the results consistently, the additional examples and exceptions were not adopted, and P3 was used in all subsequent experiments. The results indicate that the decision logic of the codebook, rather than the class definitions or individual examples, enables the models to apply the classification rules. As P3 was selected on the 115 assemblies of the primary set, its performance is examined on the supplementary set in Section 5.8.
+The mean Allowed Accuracy across the four models was highest with P3. Since P4 did not improve the results consistently, the additional examples and exceptions were not adopted, and P3 was used in all subsequent experiments. The results suggest that the codebook's decision logic contributes more to the models' ability to apply the classification rules than the class definitions or individual examples. As P3 was selected on the 115 assemblies of the primary set, its performance is examined on the supplementary set in Section 5.8.
 
-P3 在四个模型上的平均准确率最高。由于 P4 没有带来一致的提升，例子和例外没有采用，之后的所有实验都使用 P3。结果表明，使模型能够应用分类规则的是 Codebook 的决策逻辑，而不是类别定义或个别例子。由于 P3 是在主数据集的 115 个装配体上选定的，第 5.8 节将在补充数据集上检验它的表现。
+使用 P3 时，四个模型的平均 Allowed Accuracy 最高。由于 P4 没有带来一致的提升，例子和例外没有采用，之后的所有实验都使用 P3。结果表明，与类别定义或个别例子相比，Codebook 的决策逻辑更有助于模型应用分类规则。由于 P3 是在主数据集的 115 个装配体上选定的，第 5.8 节将在补充数据集上检验它的表现。
 
 ## 待处理
 
