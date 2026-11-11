@@ -267,9 +267,9 @@ The main metric is therefore the Allowed-Label-Set Accuracy (hereafter Allowed A
 
 **④ 过渡到第 5 章**
 
-Chapter 5 builds on these results. After describing the experimental setup and configurations, the chapter evaluates LLM-based classification against the reviewed ground truth and includes a comparison with human processing times in Section 5.9.
+Chapter 5 builds on these results. After describing the experimental setup and configurations, the chapter evaluates LLM-based classification against the reviewed ground truth and compares the processing times with those of the human classification.
 
-第 5 章在这些结果的基础上展开。该章先介绍实验设置和配置，再以复核后的 Ground Truth 为参考，评价基于 LLM 的分类，并在第 5.9 节与人工处理时间进行比较。
+第 5 章在这些结果的基础上展开。该章先介绍实验设置和配置，再以复核后的 Ground Truth 为参考，评价基于 LLM 的分类，并与人工处理时间进行比较。
 
 ## 待处理
 
@@ -286,5 +286,4 @@ Chapter 5 builds on these results. After describing the experimental setup and c
 
 ### 4.6 待办
 
-- [ ] **④ 引用的第 5.9 节**：第 5 章定稿后核对编号。
 - [ ] **是否提主数据集和补充数据集的差别**：M 类有 27 个在主数据集，补充数据集只有 1 个，可能影响 5.8 的验证结果。可以留到第 5 章或第 7 章再说。
