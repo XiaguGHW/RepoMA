@@ -395,16 +395,18 @@ def draw_matrix(ax, m, title, fs=1.0, title_fs=None):
 TXT_HEAD = "GT \\ Pred"
 
 
-def legend_lines(lang):
-    """Text unter den Farbfeldern: Zeilen/Spalten, Klassencodes auf zwei Zeilen."""
+def codes_line(lang):
+    """Eine Zeile mit den Klassencodes A–G."""
     t = TXT[lang]
-    names = [f"{c} = {n}" for c, n in zip(CODES, LEGEND_NAMES[lang])]
-    head, codes_word = t["rows"].split(". ", 1)
-    return [head + ".", codes_word.strip() + " " + " | ".join(names[:4]) + " |", " | ".join(names[4:])]
+    prefix = t["rows"].split(". ", 1)[1].strip()          # "Class codes:" / "Klassencode:"
+    return prefix + " " + " | ".join(f"{c} = {n}" for c, n in zip(CODES, LEGEND_NAMES[lang]))
 
 
-def draw_legend(ax, lang, fs=1.0):
-    """Legende wie A1: Farbfelder, darunter Zeilen/Spalten und Klassencodes (ohne Hinweiszeile)."""
+def draw_legend(ax, lang, fs=1.0, codes_max=None):
+    """Legende wie A1: Farbfelder, darunter die Klassencodes in einer Zeile.
+
+    Die Schriftgröße der Codezeile wird verkleinert, bis die Zeile in die Breite passt
+    (höchstens codes_max pt)."""
     from matplotlib.patches import Patch
     t = TXT[lang]
     ax.axis("off")
@@ -414,26 +416,34 @@ def draw_legend(ax, lang, fs=1.0):
                     fontsize=11 * fs, handlelength=1.5, handleheight=1.1, columnspacing=2.2,
                     borderaxespad=0, borderpad=0, handletextpad=0.6)
     leg._legend_box.align = "left"
-    size = 10.5 * fs
-    for k, line in enumerate(legend_lines(lang)):
-        ax.annotate(line, xy=(0, 1), xycoords="axes fraction", xytext=(0, -(2.1 + 1.45 * k) * size),
-                    textcoords="offset points", va="top", ha="left", fontsize=size)
+    size = codes_max or 9.5 * fs
+    txt = ax.annotate(codes_line(lang), xy=(0, 1), xycoords="axes fraction", xytext=(0, -2.3 * 11 * fs),
+                      textcoords="offset points", va="top", ha="left", fontsize=size)
+    fig = ax.figure
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    avail = ax.get_window_extent(r).width
+    width = txt.get_window_extent(r).width
+    if width > avail:
+        txt.set_fontsize(size * avail / width * 0.98)
 
 
-def save_single(m, title, path, lang):
+def save_single(m, title, path, lang, hf=1.0):
+    """hf: Höhenfaktor der Matrix (1.0 = ursprüngliche Zeilenhöhe)."""
     import matplotlib.pyplot as plt
-    fig = plt.figure(figsize=(8.6, 6.4))
-    gs = fig.add_gridspec(2, 1, height_ratios=[1, 0.36], hspace=0.05)
+    fig = plt.figure(figsize=(8.6, 4.7 * hf + 0.8))
+    gs = fig.add_gridspec(2, 1, height_ratios=[4.7 * hf, 0.8], hspace=0.05 / hf)
     draw_matrix(fig.add_subplot(gs[0]), m, title)
     draw_legend(fig.add_subplot(gs[1]), lang, fs=1.05)
     fig.savefig(path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
 
-def save_overview(llm_mats, human_mat, path, lang):
+def save_overview(llm_mats, human_mat, path, lang, hf=1.0):
+    """hf: Höhenfaktor der Matrizen (1.0 = ursprüngliche Zeilenhöhe)."""
     import matplotlib.pyplot as plt
-    fig = plt.figure(figsize=(16, 10.2))
-    gs = fig.add_gridspec(3, 3, height_ratios=[1, 1, 0.42], width_ratios=[1, 1, 2.08],
+    fig = plt.figure(figsize=(16, 8.4 * hf + 1.1))
+    gs = fig.add_gridspec(3, 3, height_ratios=[4.2 * hf, 4.2 * hf, 1.1], width_ratios=[1, 1, 2.08],
                           hspace=0.08, wspace=0.05)
     pos = [(0, 0), (0, 1), (1, 0), (1, 1)]
     for (r, c), (name, m) in zip(pos, llm_mats):
@@ -606,10 +616,10 @@ def run(args):
                  "M_DeepSeek": "konfusion_deepseek.png"}
         for sheet, name, m in sheets:
             p = out / files[sheet]
-            save_single(m, title_for(name, m, lang, human=(sheet == "M_Mensch")), p, lang)
+            save_single(m, title_for(name, m, lang, human=(sheet == "M_Mensch")), p, lang, args.height)
             pngs.append(p)
         p = out / "konfusion_gesamt.png"
-        save_overview(llm_m, human_m, p, lang)
+        save_overview(llm_m, human_m, p, lang, args.height)
         pngs.append(p)
     except ImportError:
         print("matplotlib nicht installiert: keine PNGs erzeugt.")
@@ -636,6 +646,8 @@ def parse_args(argv=None):
     ap.add_argument("--deepseek", required=True, help="Ergebnisdatei DeepSeek-V4-Flash, Text (Stabilität, Lauf 1)")
     ap.add_argument("--out", default="Konfusion_Mensch_LLM", help="Ausgabeordner (Standard: %(default)s)")
     ap.add_argument("--lang", choices=["en", "de"], default="en", help="Sprache der Abbildungen (Standard: en)")
+    ap.add_argument("--height", type=float, default=0.7,
+                    help="Höhenfaktor der Matrizen (1.0 = höhere Zeilen; Standard: %(default)s)")
     return ap.parse_args(argv)
 
 

@@ -34,11 +34,11 @@ python confusion_human_llm.py `
   --out Konfusion_Mensch_LLM
 ```
 
-Optional: `--sheet <Blattname>`, `--lang de` (Abbildungen deutsch; Standard englisch).
+Optional: `--sheet <Blattname>`, `--lang de` (Abbildungen deutsch; Standard englisch), `--height 0.7` (Höhenfaktor der Matrizen).
 
 ## Ausgabe (`--out`)
 
-- `konfusion_gesamt.png`: links 2×2 LLM, rechts Mensch; Legende und Hinweis darunter.
+- `konfusion_gesamt.png`: links 2×2 LLM, rechts Mensch; darunter Farblegende und Klassencodes (eine Zeile). Zeilenhöhe über `--height` (Standard 0.7).
 - `konfusion_mensch.png`, `konfusion_haiku.png`, `konfusion_gemini.png`, `konfusion_gpt.png`, `konfusion_deepseek.png`.
 - `Konfusion_Mensch_LLM.xlsx`:
   `Uebersicht` (n, Diagonale/grün/rot, Allowed/Strict Accuracy je Matrix), `M_…` (Gesamt-, Rot- und Grün-Matrix),
