@@ -439,3 +439,15 @@ Analyse (Verwechslung von Basis- und Querachse beim Gantry-Test): Die Baugruppe 
 Im Rexroth-Mehrachssystem (Pos. 0100, CKK-110-NN-1 + 2x MKR-065-NN-3) bilden die beiden parallelen Linearmodule (2x MKR-065) die beidseitig geführte horizontale Basisachse, auf der das CKK-110 als Querbrücke läuft (alle drei Gantry-Kriterien a, b, c erfüllt). Das LLM hat jedoch die Rollen der Achsen vertauscht, das einzelne CKK-110 fälschlicherweise für die Basisachse gehalten und das System irrig als einseitigen Ausleger (Grenzfall 6.4) eingestuft.
 Revidierte GT: Gantry (LLM korrekt: nein - 2x MKR-065 bildet eindeutig eine beidseitig geführte
 Portalbasis für die Querachse CKK-110).
+
+
+## 第十七部分 · Excel 第 52–55 行（待照片核对）
+
+行号、编号和可辨认的 Register 根据用户提供的文字暂按顺序匹配，SAP 与 Teamcenter 配对均与 `corrected_gt_zgt_error_records.md` 一致。第 54、55 行文字排列交错，行号及 Register 待照片确认；用户提供的 `Li` 截断且无法可靠确定所属字段，`0`、`1` 也无法可靠归属到具体行和列。下表修正表信息尚未与 `Fehler_Analyse` 本工作表核对；`—` 表示修正表中为空，与明确显示的 `[EMPTY]` 不同，不能据此推断模型没有输出。错误分析待提供。
+
+| Excel 行 | SAP-Nummer | Teamcenter | Register（用户文字，待核对） | Ground Truth（修正表） | 其他允许类别（修正表） | 非空模型记录（修正表） | Fehleranalyse |
+|---:|---|---|---|---|---|---|---|
+| 52 | `0804KV2157` | `AS00190354` | E2 | Kombinierte Einheit | — | gemini-2.5-pro (image): Gantry | 待提供 |
+| 53 | `0804KZ8712` | `AS00231951` | E1 | Lineareinheit | — | claude-haiku-4-5_20251001 (image): Kombinierte Einheit | 待提供 |
+| 54（待核对） | `0804LB3626` | `AS00245227` | E1（暂配） | Lineareinheit | — | gemini-2.5-pro (image): Kombinierte Einheit | 待提供 |
+| 55（待核对） | `0804LE2661` | `AS00260156` | M（暂配） | Greifer | Kombinierte Einheit | gemini-2.5-flash (image): Rotationseinheit | 待提供 |
