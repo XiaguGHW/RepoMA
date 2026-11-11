@@ -334,13 +334,13 @@ TXT = {
                rows="Zeilen: Primärlabel (finale GT), Spalten: vergebene Klasse. Klassencode: ",
                human="Manuelle Klassifikation (Workshop)", n_h="Klassifikationen", n_l="Baugruppen",
                note="LLM: je Konfiguration ein Lauf (Prompt P3, 115 Baugruppen). Mensch: jede Klassifikation "
-                    "im Workshop zählt einmal (5–10 Personen je Baugruppe). Absolute Anzahlen."),
+                    "im Workshop zählt einmal ({lo}–{hi} Personen je Baugruppe). Absolute Anzahlen."),
     "en": dict(head="GT \\ Pred", diag="Primary label predicted", red="Misclassification (left)",
                green="Other allowed label (right)",
                rows="Rows: primary label (final ground truth), columns: assigned class. Class codes: ",
                human="Human classification (workshop)", n_h="annotations", n_l="assemblies",
                note="LLM: one run per configuration (prompt P3, 115 assemblies). Human: each workshop "
-                    "annotation counted once (5–10 annotators per assembly). Absolute counts."),
+                    "annotation counted once ({lo}–{hi} annotators per assembly). Absolute counts."),
 }
 
 
@@ -395,7 +395,7 @@ def draw_matrix(ax, m, title, fs=1.0):
 TXT_HEAD = "GT \\ Pred"
 
 
-def draw_legend(ax, lang, fs=1.0, note=True, wrap=False):
+def draw_legend(ax, lang, fs=1.0, note=True, wrap=False, rng=(5, 10)):
     """Legende wie A1: Farbfelder, darunter Zeilen/Spalten und Klassencodes, darunter Hinweis."""
     from matplotlib.patches import Patch
     t = TXT[lang]
@@ -411,7 +411,7 @@ def draw_legend(ax, lang, fs=1.0, note=True, wrap=False):
     ax.text(0, 0.38, t["rows"].replace(". ", "." + sep, 1) + codes if wrap else t["rows"] + codes,
             va="top", fontsize=10 * fs, linespacing=1.4)
     if note:
-        ax.text(0, 0.78, t["note"], va="top", fontsize=9.5 * fs, style="italic", color="#555555")
+        ax.text(0, 0.78, t["note"].format(lo=rng[0], hi=rng[1]), va="top", fontsize=9.5 * fs, style="italic", color="#555555")
 
 
 def save_single(m, title, path, lang):
@@ -424,7 +424,7 @@ def save_single(m, title, path, lang):
     plt.close(fig)
 
 
-def save_overview(llm_mats, human_mat, path, lang):
+def save_overview(llm_mats, human_mat, path, lang, rng=(5, 10)):
     import matplotlib.pyplot as plt
     fig = plt.figure(figsize=(22, 11.4))
     gs = fig.add_gridspec(3, 3, height_ratios=[1, 1, 0.22], width_ratios=[1, 1, 2.08],
@@ -434,7 +434,7 @@ def save_overview(llm_mats, human_mat, path, lang):
         draw_matrix(fig.add_subplot(gs[r, c]), m, title_for(name, m, lang), fs=0.78)
     draw_matrix(fig.add_subplot(gs[0:2, 2]), human_mat, title_for(TXT[lang]["human"], human_mat, lang, True),
                 fs=1.45)
-    draw_legend(fig.add_subplot(gs[2, :]), lang, fs=1.15)
+    draw_legend(fig.add_subplot(gs[2, :]), lang, fs=1.15, rng=rng)
     fig.savefig(path, dpi=200, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
@@ -603,7 +603,7 @@ def run(args):
             save_single(m, title_for(name, m, lang, human=(sheet == "M_Mensch")), p, lang)
             pngs.append(p)
         p = out / "konfusion_gesamt.png"
-        save_overview(llm_m, human_m, p, lang)
+        save_overview(llm_m, human_m, p, lang, rng=(min(n_counts), max(n_counts)))
         pngs.append(p)
     except ImportError:
         print("matplotlib nicht installiert: keine PNGs erzeugt.")
