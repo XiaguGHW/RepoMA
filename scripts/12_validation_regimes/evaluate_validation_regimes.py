@@ -1135,6 +1135,9 @@ FINAL_GT = {
 ]
 }
 
+# 57 Baugruppen der bisherigen Fehleranalyse (Blatt "Korrigierte GT&ZGT", Input-Vergleich, 12 Läufe)
+FEHLERANALYSE_57 = ['0804EN7325', '0804FC1588', '0804LV8630', '804306221', '0804GE7738', '0804GT0312', '0804MB2849', '0804DN9616', '0804EB6690', '0804GT5112', '0804JX6656', '0804KM9359', '0804KW8391', '0804LK3617', '0804HZ8350', '0804KY3585', '0804CC2134', '0804EK1683', '0804FT0436', '0804GD6171', '0804FH4760', '0804HH8872', '0804HX0679', '0804KE7723', '0804KY7178', '0804KZ9027', '0804AR3766', '0804DT6452', '0804KB7256', '0804KU2401', '0804KY7179', '0804KZ9488', '0804LA7293', '0804LH9239', '0804AF9667', '0804AY8008', '0804CE5532', '0804EV7706', '0804FK2694', '0804FT6844', '0804FU6515', '0804GA4441', '0804GY2577', '0804GZ3046', '0804JL5526', '0804JU56371', '0804KK0664', '0804KM8175', '0804KS8037', '0804KT1289', '0804KV2157', '0804KZ8712', '0804LB3626', '0804LE2661', '0804LZ1241', '3842998383', '3843CE1617']
+
 SKIP_PREFIX = ("~$", "PPT_", "Evaluation_", "Validation_", "nachlauf_")
 
 
@@ -1196,6 +1199,7 @@ def read_result_file(path, issues, cfg, source, run):
     c_stat = find_col(cols, contains=["allowed", "status"])
     c_reg = find_col(cols, exact="Register")
     c_pe = find_col(cols, contains=["prompt", "engineering"])
+    c_name = find_col(cols, contains=["benennung", "(e)"]) or find_col(cols, contains=["benennung"])
     if not (c_sap and c_gt and c_pred):
         sys.exit(f"Spalten nicht gefunden in {path.name} (Blatt {sheet}): {cols}")
     if c_reg is None:
@@ -1238,7 +1242,8 @@ def read_result_file(path, issues, cfg, source, run):
             issues.append(dict(Typ="SAP nicht in finaler GT gefunden (Datei-GT verwendet)", Konfiguration=cfg,
                                Quelle=source, Datei=path.name, SAP=sap))
         excluded = pred is None or stat == "EXCLUDED"
-        recs.append(dict(cfg=cfg, source=source, run=run, sap=sap, gt=gt,
+        name = "" if c_name is None or is_empty(row[c_name]) else str(row[c_name]).strip()
+        recs.append(dict(cfg=cfg, source=source, run=run, sap=sap, gt=gt, name=name,
                          allowed=frozenset([gt] + alts), register=reg, pred=pred, excluded=excluded))
     return recs
 
@@ -1409,6 +1414,49 @@ def main():
         t57.append(row)
     t57 = pd.DataFrame(t57)
 
+
+    # Fehlerliste je Baugruppe und Konfusionsmatrix der Fehler
+    in57 = {s.lstrip("0") for s in FEHLERANALYSE_57}
+    v = df[~df.excluded].copy()
+    v["hit"] = [p in a for p, a in zip(v["pred"], v["allowed"])]
+    wrong = v[~v["hit"]]
+    err_rows = []
+    for (src, sap), g in wrong.groupby(["source", "sap"]):
+        first = df[(df.source == src) & (df.sap == sap)].iloc[0]
+        row = {"Datensatz": src, "SAP": sap, "Benennung": first["name"],
+               "Regime": regime(first["allowed"], first["register"]),
+               "Ground Truth": first["gt"],
+               "Weitere zulässige": ", ".join(sorted(a for a in first["allowed"] if a != first["gt"])) or "—",
+               "In Fehleranalyse (57)": "ja" if sap.lstrip("0") in in57 else "NEU"}
+        n_cfg = 0
+        for c in cfgs:
+            gc = g[g.cfg == c]
+            total = int(((v.cfg == c) & (v.source == src) & (v.sap == sap)).sum())
+            if len(gc):
+                n_cfg += 1
+                preds = gc["pred"].fillna("—").value_counts()
+                row[c] = f"{len(gc)}/{total}: " + ", ".join(f"{k} ×{n}" for k, n in preds.items())
+            else:
+                row[c] = "–"
+        row["Konfigurationen mit Fehler"] = n_cfg
+        err_rows.append(row)
+    errs = pd.DataFrame(err_rows)
+    if len(errs):
+        errs = errs.sort_values(["Konfigurationen mit Fehler", "Datensatz", "SAP"], ascending=[False, True, True])
+    gd = [c for c in cfgs if c.startswith(("GPT", "DeepSeek"))]
+    errs_gd = errs[(errs[gd] != "–").any(axis=1)] if len(errs) else errs
+
+    labels = CLASSES + ["(ungültig)"]
+    def confusion(sub):
+        m = pd.DataFrame(0, index=CLASSES, columns=labels)
+        for gt_, pr in zip(sub["gt"], sub["pred"]):
+            col = pr if pr in CLASSES else "(ungültig)"
+            if gt_ in CLASSES:
+                m.loc[gt_, col] += 1
+        m.index.name = "Primärlabel \\ Vorhersage (nur Fehler)"
+        return m
+    conf_blocks = [("Alle Konfigurationen", confusion(wrong))] + [(c, confusion(wrong[wrong.cfg == c])) for c in cfgs]
+
     notes = pd.DataFrame({"Hinweis": [
         "Werte in %, in Klammern 95%-Bootstrap-CI (B=2000, Seed 42, Ziehen von Baugruppen mit Zurücklegen).",
         "115 BG: je Baugruppe Anteil korrekter Läufe über 10 Läufe; 70 BG: 1 Lauf (0 oder 1).",
@@ -1416,6 +1464,9 @@ def main():
         "Regime: M = mehr als ein zulässiges Label; sonst Spalte Register (M ohne weitere Klasse -> E2).",
         "Δ (70 − 115): Differenz der Mittelwerte, CI aus unabhängigen Bootstrap-Ziehungen beider Datensätze.",
         "EXCLUDED/leere Vorhersagen werden nicht gewertet (siehe Prüfungen).",
+        "Fehler_BG: je Baugruppe mit mindestens einem Fehler 'k/n: Vorhersage ×Anzahl' je Konfiguration (k Fehlläufe von n).",
+        "Fehler: Vorhersage außerhalb der zulässigen Labels. 'NEU' = nicht unter den 57 BG der bisherigen Fehleranalyse.",
+        "Konfusion_Fehler: nur fehlerhafte Vorhersagen, Zeilen = Primärlabel, Spalten = Vorhersage; gezählt über Läufe.",
     ]})
 
     with pd.ExcelWriter(a.out, engine="openpyxl") as xw:
@@ -1425,6 +1476,13 @@ def main():
         kl.to_excel(xw, sheet_name="Klassen_E1E2_115_vs_70", index=False)
         pd.DataFrame(chk).to_excel(xw, sheet_name="Pruefung_Regime", index=False)
         (pd.DataFrame(issues) if issues else pd.DataFrame({"Hinweis": ["keine Auffälligkeiten"]})).to_excel(xw, sheet_name="Pruefungen", index=False)
+        errs.to_excel(xw, sheet_name="Fehler_BG", index=False)
+        errs_gd.to_excel(xw, sheet_name="Fehler_GPT_DeepSeek", index=False)
+        r0 = 0
+        for title, m in conf_blocks:
+            pd.DataFrame({title: []}).to_excel(xw, sheet_name="Konfusion_Fehler", startrow=r0, index=False)
+            m.to_excel(xw, sheet_name="Konfusion_Fehler", startrow=r0 + 1)
+            r0 += len(m) + 4
         notes.to_excel(xw, sheet_name="Hinweise", index=False)
         for ws in xw.book.worksheets:
             for col in ws.columns:
@@ -1435,6 +1493,12 @@ def main():
     print("\nPrüfung Regime-Verteilung:\n", pd.DataFrame(chk).to_string(index=False))
     print("\nTabelle 5.6:\n", t56.to_string(index=False))
     print("\nTabelle 5.7:\n", t57.to_string(index=False))
+    if len(errs):
+        print("\nBaugruppen mit Fehlern:")
+        for src in ["115", "70"]:
+            e = errs[errs["Datensatz"] == src]
+            print(f"  {src} BG: {len(e)} Baugruppen, davon NEU (nicht in 57): {(e['In Fehleranalyse (57)'] == 'NEU').sum()}")
+        print(f"  mit Fehlern bei GPT-5.5 oder DeepSeek: {len(errs_gd)}, davon NEU: {(errs_gd['In Fehleranalyse (57)'] == 'NEU').sum()}")
     print(f"\n{len(issues)} Hinweise in 'Pruefungen'. Ausgabe: {Path(a.out).resolve()}")
 
 

@@ -9,7 +9,10 @@
 | M_im_70er_Satz | Vorhersagen für die einzige M-Baugruppe des Ergänzungsdatensatzes |
 | Klassen_E1E2_115_vs_70 | Klassenweise Accuracy (E1+E2) in beiden Datensätzen |
 | Pruefung_Regime | Regime-Verteilung gegen Erwartung (115: 51/34/30, 70: 59/10/1) |
-| Pruefungen | Ungültige Labels, abweichende GT zwischen Dateien, EXCLUDED |
+| Pruefungen | Ungültige Labels, abweichende GT zwischen Dateien, EXCLUDED, durch finale GT ersetzte Werte |
+| Fehler_BG | Jede Baugruppe mit mindestens einem Fehler: Vorhersagen je Konfiguration (k/n Läufe), Regime, ob unter den 57 BG der bisherigen Fehleranalyse |
+| Fehler_GPT_DeepSeek | Wie Fehler_BG, nur Baugruppen mit Fehlern bei GPT-5.5 oder DeepSeek-V4-Flash |
+| Konfusion_Fehler | Fehlerhafte Vorhersagen: Primärlabel × Vorhersage, gesamt und je Konfiguration |
 
 Zusammenführung: 115 BG je Baugruppe Anteil korrekter Läufe, 70 BG 0/1; Mittelwerte und
 Bootstrap-CIs (B = 2000) über Baugruppen. Regime: M = mehr als ein zulässiges Label, sonst Spalte `Register`.
