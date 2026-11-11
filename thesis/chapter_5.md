@@ -29,9 +29,9 @@ Each experimental stage built on the preceding stage, following a fixed sequence
 
 **③ 模型与运行方式**
 
-Six models from four providers were used: Claude Haiku 4.5 and Claude Opus 4.8 (Anthropic), Gemini 2.5 Flash and Gemini 2.5 Pro (Google), GPT-5.5 (OpenAI) and DeepSeek-V4-Flash (DeepSeek) (access and model versions in Appendix B). A separate request was submitted for each assembly, with no information carried over from earlier requests. The temperature was set to 0 for all models. As the codebook rules define a single correct class for this decision task, the aim is to obtain the most probable output and avoid variation between outputs, while a temperature of 0 also supports reproducibility. Requests that returned an empty output were identified after each run and repeated individually. Once these requests had been repeated, a valid output was available for every assembly, and each output contained one of the seven class names. The token usage of each request was recorded for the cost analysis.
+Six models from four providers were used: Claude Haiku 4.5 and Claude Opus 4.8 (Anthropic), Gemini 2.5 Flash and Gemini 2.5 Pro (Google), GPT-5.5 (OpenAI) and DeepSeek-V4-Flash (DeepSeek) (access and model versions in Appendix B). A separate request was submitted for each assembly, with no information carried over from earlier requests. The temperature was set to 0 for all models. As the codebook rules define a single correct class for this decision task, the aim is to obtain the most probable output and avoid variation between outputs, while a temperature of 0 also supports reproducibility. Requests that returned an empty output were identified after each run and repeated individually. Once these requests had been repeated, a valid output was available for every assembly, and each output contained one of the seven class names. For some assemblies with extensive documentation, PDF documents had to be shortened to meet the request size limits of the platforms; this mainly affected long supplier catalogues and manuals. The token usage of each request was recorded for the cost analysis.
 
-实验使用了来自四家厂商的六个模型，包括 Claude Haiku 4.5 和 Claude Opus 4.8（Anthropic）、Gemini 2.5 Flash 和 Gemini 2.5 Pro（Google）、GPT-5.5（OpenAI），以及 DeepSeek-V4-Flash（DeepSeek）（接入方式和模型版本见附录 B）。每个装配体通过单独的请求进行分类，不带入此前请求的信息。所有模型的 temperature 均设为 0。由于这一决策任务按 Codebook 规则只有一个正确类别，因此目标是获得最可能的输出并避免输出之间的变化，同时 temperature 为 0 也有助于提高可复现性。每轮运行后，找出输出为空的请求并单独重新运行。重新运行后，每个装配体均有有效输出，且每个输出都包含七个类别名称之一。每次请求的 token 用量均被记录，用于成本分析。
+实验使用了来自四家厂商的六个模型，包括 Claude Haiku 4.5 和 Claude Opus 4.8（Anthropic）、Gemini 2.5 Flash 和 Gemini 2.5 Pro（Google）、GPT-5.5（OpenAI），以及 DeepSeek-V4-Flash（DeepSeek）（接入方式和模型版本见附录 B）。每个装配体通过单独的请求进行分类，不带入此前请求的信息。所有模型的 temperature 均设为 0。由于这一决策任务按 Codebook 规则只有一个正确类别，因此目标是获得最可能的输出并避免输出之间的变化，同时 temperature 为 0 也有助于提高可复现性。每轮运行后，找出输出为空的请求并单独重新运行。重新运行后，每个装配体均有有效输出，且每个输出都包含七个类别名称之一。对于少数资料篇幅很大的装配体，必须截断 PDF 资料，才能满足各平台对请求大小的限制；被截断的主要是篇幅较长的供应商样本和手册。每次请求的 token 用量均被记录，用于成本分析。
 
 ## 5.2 Ground Truth Revision and Evaluation Metrics | Ground Truth 修订与评价指标
 
@@ -331,6 +331,30 @@ Most errors arose before the decision matrix was applied: in counting the actuat
 
 大多数错误发生在应用决策矩阵之前：统计执行器，以及判断哪些资料描述的是装配体本身。类别规则本身的应用错误较少，例如龙门判断错误。因此，改进的主要切入点在于输入资料的整理，以及执行器计数规则的说明。
 
+## 5.8 Cost | 成本
+
+The cost of the LLM-based classification was calculated from the token counts reported by the APIs and the list prices of the platforms used at the time of the experiments. Table 5.8 shows the means per assembly for the 70 assemblies of the supplementary set, each of which was classified once by every final configuration and by Claude Opus 4.8 with PDF input. Among the final configurations, the cost per assembly ranged from USD 0.004 for DeepSeek-V4-Flash to USD 0.098 for GPT-5.5, so classifying all 185 assemblies would cost between USD 0.77 and USD 18.14. The number of input tokens depended mainly on the extent of the documentation and reached more than 160,000 tokens for single assemblies with Claude. It also depended on how each provider counts the input. Gemini counts a fixed number of tokens per PDF page or image tile regardless of its content, whereas text is counted by characters. In the input comparison, text input therefore required about three times as many tokens as PDF input for Gemini 2.5 Pro (Appendix D), and for the same PDF documents, Gemini 2.5 Pro required only about one fifth of the input tokens counted for Claude Haiku 4.5. Since Gemini 2.5 Pro also generated about 2,000 reasoning tokens per assembly, its cost arose mainly from output tokens.
+
+LLM 分类的成本根据 API 报告的 token 数量，以及实验期间所用平台的公开标价计算。表 5.8 列出了补充数据集 70 个装配体的每个装配体平均值。每个装配体由每种最终配置分类一次，另外也由 Claude Opus 4.8 用 PDF 输入分类一次。在最终配置中，每个装配体的成本从 DeepSeek-V4-Flash 的 0.004 美元到 GPT-5.5 的 0.098 美元不等，因此分类全部 185 个装配体的费用在 0.77 至 18.14 美元之间。输入 token 的数量主要取决于资料的多少；对于个别装配体，Claude 处理的输入超过 16 万个 token。输入 token 的数量还取决于各厂商的计数方式。Gemini 对每页 PDF 或每个图块按固定数量的 token 计，与内容多少无关；文本则按字符计数。因此在输入形式比较中，Gemini 2.5 Pro 的文本输入所需 token 约为 PDF 输入的三倍（附录 D）。对于同样的 PDF 资料，Gemini 2.5 Pro 的输入 token 只有 Claude Haiku 4.5 的约五分之一。由于 Gemini 2.5 Pro 每个装配体还生成约 2,000 个推理 token，它的成本主要来自输出 token。
+
+Gemini 2.5 Pro, which achieved the highest Allowed Accuracy (Table 5.6), was the second least expensive configuration. DeepSeek-V4-Flash cost about one eighth as much, but its Allowed Accuracy across the 185 assemblies was 4.7 percentage points lower. Claude Opus 4.8 cost USD 0.28 per assembly, 5.3 times as much as Claude Haiku 4.5 with a similar number of tokens, which corresponds to the difference in list prices. For the 1,150 requests of the stability experiment, this would have amounted to about USD 320 instead of about USD 60.
+
+Allowed Accuracy 最高的 Gemini 2.5 Pro（表 5.6），成本是第二低的。DeepSeek-V4-Flash 的成本约为它的八分之一，但在 185 个装配体上的 Allowed Accuracy 低 4.7 个百分点。Claude Opus 4.8 每个装配体的成本为 0.28 美元，在 token 数量相近的情况下是 Claude Haiku 4.5 的 5.3 倍，这与两者标价的差异一致。按稳定性实验的 1,150 次请求计算，这意味着约 320 美元，而 Haiku 约为 60 美元。
+
+**Table 5.8. Mean token usage and cost per assembly (supplementary set, 70 assemblies) / 表 5.8 每个装配体的平均 token 用量和成本（补充数据集，70 个装配体）**
+
+| Configuration / 配置 | Input tokens / 输入 token | Output tokens / 输出 token | Cost per assembly (USD) / 每个装配体成本（美元） | Cost for 185 assemblies (USD) / 185 个装配体成本（美元） |
+| --- | ---: | ---: | ---: | ---: |
+| Claude Haiku 4.5 (PDF) | 50,836 | 361 | 0.053 | 9.74 |
+| DeepSeek-V4-Flash (Text) | 22,201 | 143 | 0.004 | 0.77 |
+| Gemini 2.5 Pro (PDF) | 9,983 | 2,167 | 0.034 | 6.32 |
+| GPT-5.5 (Image) | 17,747 | 310 | 0.098 | 18.14 |
+| Claude Opus 4.8 (PDF) | 54,700 | 385 | 0.280 | 51.84 |
+
+*Note: Means per assembly, one request each. Output tokens include reasoning tokens. Token counts refer to the input actually sent, after any shortening. Cost for 185 assemblies extrapolated from the mean cost per assembly.*
+
+注：每个装配体的平均值，每个装配体一次请求。输出 token 包含推理 token。token 数量指实际发送的输入，即截断后的输入。185 个装配体的成本由每个装配体的平均成本推算。
+
 ## 待处理
 
 ### 5.1 待办
@@ -381,9 +405,19 @@ Most errors arose before the decision matrix was applied: in counting the actuat
 - [ ] `0804EN7325`：“只有两根直线轴”依据原错误分析（Z/X 两轴），请确认；38/40 = Haiku 10、DeepSeek 10、Pro 8、GPT-5.5 10。
 - 人工与模型的错误率不作比较（GT 由人工标注得出，且人工为单个标注者的判断）。
 
+### 5.8 待办
+
+- 数据来源：`scripts/15_cost_summary/summarize_costs.py` 的输出 `Kosten_5_8.xlsx`（2026-11-11），五个 70BG 结果文件（含 Opus 4.8 重跑，PDF）。价格：Haiku 4.5 Vertex AI 1 / 5（全局端点；区域端点 +10%）；Gemini 2.5 Pro Vertex AI 1.25 / 10（≤ 200k）；GPT-5.5 Azure OpenAI 5 / 30（取自 model_pricing.json，未另行核对）；DeepSeek-V4-Flash Azure AI Foundry 0.19 / 0.51；Opus 4.8 5 / 25。
+- 用时不报告：只有 GPT-5.5 有 API 延迟（中位数 5.4 s）；其他配置的 `Run_Time` 是整次运行的开始时间，10 次运行为手动启动、中间有间隔。
+- [ ] 第 4 章有两处说 Workshop 用时作为第 5 章的人工基准（4.3、4.6）；5.8 暂不提人工用时，之后需决定改第 4 章还是在 5.8 加一句（工程师 31 s，185 个约 1.6 h）。
+- [ ] 附录 D：加入输入形式比较的 token 表（Gemini 2.5 Flash / Pro × 图片 / PDF / 文本，115 个装配体）。
+- [ ] Gemini 按页 / 图块计 token 的说法需引用 Google 官方文档。
+- [ ] 价格表和截断规则（三阶段：100 页预截断到 10 页；过大时封顶 10 页再逐页减到 4 页；仍过大则丢弃最大 PDF）暂不放附录 B，之后再定。
+- DeepSeek-V4-Flash 未开启思考（reasoning_tokens = 0）；GPT-5.5 每个装配体平均 174 个推理 token，Gemini 2.5 Pro 2,018 个。
+
 ### 章节安排
 
-第 5 章结构（2026-11-11 调整）：5.1 Setup and Configurations / 5.2 Ground Truth Revision and Evaluation Metrics / 5.3 Prompt Design / 5.4 Input Representation / 5.5 Final Configurations and Stability（115 个 × 10 次）/ 5.6 Performance Across Ambiguity Regimes（不分三级标题；与 115 个的 E1+E2 比较只用一句话交代，不出表；185 个合并，E1、E2、M 分开报告，按装配体计算——115 个取 10 次运行中分对的比例，70 个取 0/1，再对 185 个求平均，Bootstrap 也按 185 个装配体抽样；脚本 09 不能直接这样算，需单独计算）/ 5.7 Error Analysis / 5.8 Cost and Efficiency / 5.9 Summary。
+第 5 章结构（2026-11-11 调整）：5.1 Setup and Configurations / 5.2 Ground Truth Revision and Evaluation Metrics / 5.3 Prompt Design / 5.4 Input Representation / 5.5 Final Configurations and Stability（115 个 × 10 次）/ 5.6 Performance Across Ambiguity Regimes（不分三级标题；与 115 个的 E1+E2 比较只用一句话交代，不出表；185 个合并，E1、E2、M 分开报告，按装配体计算——115 个取 10 次运行中分对的比例，70 个取 0/1，再对 185 个求平均，Bootstrap 也按 185 个装配体抽样；脚本 09 不能直接这样算，需单独计算）/ 5.7 Error Analysis / 5.8 Cost / 5.9 Summary。
 
 章节引用原则：只保留读者需要跳转查看的引用（如 5.1 ① 指向 5.2 的 GT 修订、5.2 ① 指向 4.4 的复核流程）；实验阶段与小节的对应只在表 5.1 的 Section 列中给出。
 
