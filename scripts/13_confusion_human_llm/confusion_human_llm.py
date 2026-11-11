@@ -349,6 +349,17 @@ def title_for(name, m, lang, human=False):
     return f"{name}, n = {m['n']} {t['n_h']}" if human else f"{name}, n = {m['n']}"
 
 
+def fit_text(ax, t, x0, x1, frac=0.94):
+    """Verkleinert die Schrift von t, bis der Text zwischen x0 und x1 (Datenkoordinaten) passt.
+
+    Nötig, weil die Schriftbreite je nach installierter Schrift (Windows: Arial/DejaVu Sans) variiert."""
+    r = ax.figure.canvas.get_renderer()
+    avail = abs(ax.transData.transform((x1, 0))[0] - ax.transData.transform((x0, 0))[0]) * frac
+    w = t.get_window_extent(r).width
+    if w > avail > 0:
+        t.set_fontsize(t.get_fontsize() * avail / w)
+
+
 def draw_matrix(ax, m, title, fs=1.0, title_fs=None):
     """Zeichnet eine Matrix im Stil A1 in ax (Koordinaten: x 0..8.3, y 0..8.35, y nach unten)."""
     from matplotlib.patches import Rectangle
@@ -365,9 +376,13 @@ def draw_matrix(ax, m, title, fs=1.0, title_fs=None):
         ax.add_patch(Rectangle((x, y), w, h, facecolor=fc, edgecolor=ec, linewidth=lw_, zorder=z))
 
     box(0, 0, W, th, NAVY, NAVY)
-    ax.text(W / 2, th / 2, title, ha="center", va="center", color="white", fontsize=12.5 * (title_fs or fs), fontweight="bold")
+    t = ax.text(W / 2, th / 2, title, ha="center", va="center", color="white", fontsize=12.5 * (title_fs or fs),
+                fontweight="bold")
+    fit_text(ax, t, 0, W)
     box(0, th, lw, hh, HEAD, HEAD)
-    ax.text(lw / 2, th + hh / 2, TXT_HEAD, ha="center", va="center", color="white", fontsize=7.9 * fs, fontweight="bold")
+    t = ax.text(lw / 2, th + hh / 2, TXT_HEAD, ha="center", va="center", color="white", fontsize=7.9 * fs,
+                fontweight="bold")
+    fit_text(ax, t, 0, lw, frac=0.9)
     for j, c in enumerate(CODES):
         box(lw + j * cw, th, cw, hh, HEAD, HEAD)
         ax.text(lw + (j + 0.5) * cw, th + hh / 2, c, ha="center", va="center", color="white",
@@ -611,6 +626,8 @@ def run(args):
     try:
         import matplotlib
         matplotlib.use("Agg")
+        matplotlib.rcParams["font.family"] = "sans-serif"
+        matplotlib.rcParams["font.sans-serif"] = ["Arial", "Liberation Sans", "Helvetica", "DejaVu Sans"]
         files = {"M_Mensch": "konfusion_mensch.png", "M_Haiku": "konfusion_haiku.png",
                  "M_Gemini": "konfusion_gemini.png", "M_GPT": "konfusion_gpt.png",
                  "M_DeepSeek": "konfusion_deepseek.png"}
