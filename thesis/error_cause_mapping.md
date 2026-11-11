@@ -77,3 +77,38 @@
 
 - 44 个装配体的归类已全部由作者确认。
 - 尚未覆盖：最终配置中 GPT-5.5 和 DeepSeek-V4-Flash 新出现的出错装配体，以及补充数据集的 8 条错误（脚本 12 的 `Fehler_BG` 中标为 NEU 的），需要另行归类。
+
+## 最终配置（5.5 / 5.6）中的出错装配体
+
+来源：脚本 12 的 `Validation_Regimes.xlsx`，工作表 `Fehler_BG` 和 `Fehler_GPT_DeepSeek`（作者截图，2026-11-11）。按最终版 GT 共 38 个装配体至少出错一次：主数据集 30 个，补充数据集 8 个。
+
+### 需要新归类（14 个）
+
+| SAP | 数据集 | GT | 出错配置：错误预测 |
+| --- | --- | --- | --- |
+| `0804FZ8322` | 115 | Lineareinheit | Haiku 5/10 Keine |
+| `0804GV7647` | 115 | Kombinierte Einheit | DeepSeek 1/10 Lineareinheit |
+| `0804LG6553` | 115 | Gantry | DeepSeek 7/10 Lineareinheit |
+| `0804KT1289` | 115 | Lineareinheit | Pro 4/10 Kombinierte Einheit（原错误分析为空） |
+| `0804LK3617` | 115 | Rotationseinheit（+ Kombi） | Pro 1/10 Lineareinheit（原错误分析只涉及 GT） |
+| `3843CE1617` | 115 | Gantry | Pro 6/10 Kombinierte Einheit（原错误分析为空） |
+| `0804BN2123` | 70 | Lineareinheit | Haiku Kombinierte Einheit |
+| `0804EM7937` | 70 | Lineareinheit | Haiku Kombinierte Einheit |
+| `0804JW4969` | 70 | Roboter | DeepSeek Keine |
+| `0804KF8538` | 70 | Roboter | DeepSeek Keine |
+| `0804LD6387` | 70 | Keine | Haiku Gantry |
+| `0804LM7661` | 70 | Gantry | Pro Keine（单元格位置由补充数据集的错误数推断） |
+| `0804LS4641` | 70 | Rotationseinheit | Haiku Kombinierte Einheit |
+| `0804LW5713` | 70 | Keine | Haiku Kombinierte Einheit |
+
+### 建议抽查（错误形式和已有分析不同）
+
+- `0804DN9616`：GPT-5.5 10/10 Lineareinheit；原记录只有“上下文过大”，没有推理。
+- `0804FT6844`：DeepSeek（文本）8/10 Greifer；原归类依据是图片输入。
+- `0804HX0679`：Pro（PDF）10/10 Kombinierte Einheit；原错误是图片输入下误读图纸。
+
+### 沿用已有类别（21 个）
+
+EN7325、306221、HZ8350、KY3585、GT5112（龙门判断错误）；CC2134、EK1683、GD6171、FC1588、KE7723（信息过载）；JX6656、KW8391、GT0312（CAD 与 BOM 不一致）；EB6690、KM9359、CE5532、GY2577、FT0436、KZ8712、LE2661、3842998383（Actuator miscounting）。
+
+观察：GPT-5.5（图片）出错的 CC2134、EK1683、GD6171、FC1588 都预测为 Keine，和输入形式比较中图片输入的信息过载模式相同。
