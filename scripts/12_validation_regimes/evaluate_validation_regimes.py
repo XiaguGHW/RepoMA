@@ -1206,6 +1206,7 @@ def read_result_file(path, issues, cfg, source, run):
         issues.append(dict(Typ="Spalte Register fehlt (Regime aus finaler GT)", Konfiguration=cfg, Quelle=source, Datei=path.name))
 
     recs = []
+    seen = set()
     for i, row in df.iterrows():
         if is_empty(row[c_gt]):
             continue
@@ -1242,6 +1243,11 @@ def read_result_file(path, issues, cfg, source, run):
         else:
             issues.append(dict(Typ="SAP nicht in finaler GT gefunden (Datei-GT verwendet)", Konfiguration=cfg,
                                Quelle=source, Datei=path.name, SAP=sap))
+        if sap in seen:
+            issues.append(dict(Typ="Doppelte Baugruppe in einer Datei (zweite Zeile ignoriert)", Konfiguration=cfg,
+                               Quelle=source, Datei=path.name, SAP=sap))
+            continue
+        seen.add(sap)
         excluded = pred is None or stat == "EXCLUDED"
         name = "" if c_name is None or is_empty(row[c_name]) else str(row[c_name]).strip()
         recs.append(dict(cfg=cfg, source=source, run=run, sap=sap, gt=gt, name=name,
@@ -1346,11 +1352,12 @@ def main():
 
     # Prüfungen: Regime-Verteilung und GT-Konsistenz
     chk = []
-    for src in ["115", "70"]:
-        sub = pa[(pa.cfg == cfgs[0]) & (pa.source == src)]
-        vc = sub.regime.value_counts()
-        chk.append({"Datensatz": src, "Baugruppen": len(sub),
-                    **{r: int(vc.get(r, 0)) for r in ["E1", "E2", "M", "?"]}})
+    for c in cfgs:
+        for src in ["115", "70"]:
+            sub = pa[(pa.cfg == c) & (pa.source == src)]
+            vc = sub.regime.value_counts()
+            chk.append({"Konfiguration": c, "Datensatz": src, "Baugruppen": len(sub),
+                        **{r: int(vc.get(r, 0)) for r in ["E1", "E2", "M", "?"]}})
     expected = {"115": (115, 51, 34, 30), "70": (70, 59, 10, 1)}
     for row in chk:
         e = expected[row["Datensatz"]]
