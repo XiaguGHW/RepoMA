@@ -1,8 +1,8 @@
 # 5 Experimental Evaluation
 
-The LLM-based classification is evaluated in this chapter using the ground truth established in Chapter 4 as the reference. After the experimental setup and the evaluation metrics, the chapter first reports the selection of prompt and input representation. It then examines the stability of the final configurations, validates them on the supplementary set, reports their performance across the ambiguity regimes and analyses their errors. The chapter concludes by comparing their cost and processing time with those of human classification.
+The LLM-based classification is evaluated in this chapter using the ground truth established in Chapter 4 as the reference. After the experimental setup and the evaluation metrics, the chapter first reports the selection of prompt and input representation. It then examines the stability of the final configurations, reports their performance on all assemblies across the ambiguity regimes and analyses their errors. The chapter concludes by comparing their cost and processing time with those of human classification.
 
-本章以第 4 章建立的 Ground Truth 为参考，评价基于 LLM 的分类。在介绍实验设置和评价指标之后，本章先报告 Prompt 和输入形式的选择，然后检验最终配置的稳定性，在补充数据集上对其进行验证，报告其在各歧义类别中的表现，并分析其错误。最后，将其成本和处理时间与人工分类进行比较。
+本章以第 4 章建立的 Ground Truth 为参考，评价基于 LLM 的分类。在介绍实验设置和评价指标之后，本章先报告 Prompt 和输入形式的选择，然后检验最终配置的稳定性，报告其在全部装配体上按歧义类别的表现，并分析其错误。最后，将其成本和处理时间与人工分类进行比较。
 
 ## 5.1 Setup and Configurations | 实验设置与配置
 
@@ -25,7 +25,7 @@ Each experimental stage built on the preceding stage, following a fixed sequence
 | Prompt comparison / Prompt 比较 | 115 | P1–P4 | PDF | Haiku 4.5, Opus 4.8, Gemini 2.5 Flash, Gemini 2.5 Pro | 1 | 5.3 |
 | Input comparison / 输入形式比较 | 115 | P3 | PDF, image, text | as above / 同上 | 1 | 5.4 |
 | Performance and stability / 表现与稳定性 | 115 | P3 | final / 最终配置 | 4 final configurations / 4 种最终配置 | 10 | 5.5 |
-| Validation / 验证 | 70 | P3 | final / 最终配置 | 4 final configurations / 4 种最终配置 | 1 | 5.6 |
+| Supplementary set / 补充数据集 | 70 | P3 | final / 最终配置 | 4 final configurations / 4 种最终配置 | 1 | 5.6 |
 
 **③ 模型与运行方式**
 
@@ -200,9 +200,9 @@ Table 5.5 presents the final configurations' results averaged across ten runs. G
 
 表 5.5 给出了最终配置在十次运行中的平均结果。Gemini 2.5 Pro 的 Allowed Accuracy 最高，为 96.4%；其次是 Claude Haiku 4.5 和 GPT-5.5，均为 91.7%；DeepSeek-V4-Flash 为 89.7%。Allowed Macro-Precision 和 Allowed Macro-Recall 的排序也相同。Claude Haiku 4.5 和 Gemini 2.5 Pro 的结果与第 5.4 节中 PDF 输入的单次运行相差不到一个百分点。由于第 5.4 节的输入形式比较只涵盖 Claude 和 Gemini 模型，其中图片输入结果较低的发现不能直接用于 GPT-5.5。
 
-The strict metrics, which count only the primary label as correct, lead to a different order. Only assemblies in regime M have an allowed label other than the primary label, so the gap between Allowed Accuracy and Strict Accuracy indicates how often a configuration predicted such an alternative. This difference amounted to 10.6 percentage points for Gemini 2.5 Pro and 6.6 for GPT-5.5, but only 2.6 for Claude Haiku 4.5 and 1.7 for DeepSeek-V4-Flash. Claude Haiku 4.5 therefore had the highest Strict Macro-F1 at 89.2 %, while Gemini 2.5 Pro achieved 85.2 %. The advantage of Gemini 2.5 Pro under the allowed criterion is therefore based mainly on the assemblies in regime M, which are examined in Section 5.6.2.
+The strict metrics, which count only the primary label as correct, lead to a different order. Only assemblies in regime M have an allowed label other than the primary label, so the gap between Allowed Accuracy and Strict Accuracy indicates how often a configuration predicted such an alternative. This difference amounted to 10.6 percentage points for Gemini 2.5 Pro and 6.6 for GPT-5.5, but only 2.6 for Claude Haiku 4.5 and 1.7 for DeepSeek-V4-Flash. Claude Haiku 4.5 therefore had the highest Strict Macro-F1 at 89.2 %, while Gemini 2.5 Pro achieved 85.2 %. The advantage of Gemini 2.5 Pro under the allowed criterion is therefore based mainly on the assemblies in regime M, which are examined in Section 5.6.
 
-只把主标签计为正确的严格指标得出了不同的排序。只有 M 中的装配体具有主标签以外的允许标签，因此 Allowed Accuracy 与 Strict Accuracy 的差值反映了配置预测此类备选允许类别的频率。这一差值在 Gemini 2.5 Pro 上为 10.6 个百分点，在 GPT-5.5 上为 6.6 个百分点，而在 Claude Haiku 4.5 和 DeepSeek-V4-Flash 上分别只有 2.6 和 1.7 个百分点。因此，Claude Haiku 4.5 的 Strict Macro-F1 最高，达到 89.2%，Gemini 2.5 Pro 则为 85.2%。由此可见，Gemini 2.5 Pro 在允许标签准则下的优势主要来自 M 中的装配体，这将在第 5.6.2 节中分析。
+只把主标签计为正确的严格指标得出了不同的排序。只有 M 中的装配体具有主标签以外的允许标签，因此 Allowed Accuracy 与 Strict Accuracy 的差值反映了配置预测此类备选允许类别的频率。这一差值在 Gemini 2.5 Pro 上为 10.6 个百分点，在 GPT-5.5 上为 6.6 个百分点，而在 Claude Haiku 4.5 和 DeepSeek-V4-Flash 上分别只有 2.6 和 1.7 个百分点。因此，Claude Haiku 4.5 的 Strict Macro-F1 最高，达到 89.2%，Gemini 2.5 Pro 则为 85.2%。由此可见，Gemini 2.5 Pro 在允许标签准则下的优势主要来自 M 中的装配体，这将在第 5.6 节中分析。
 
 **Table 5.5. Results of the final configurations (115 assemblies, ten runs) / 表 5.5 最终配置的结果（115 个装配体，十次运行）**
 
@@ -236,9 +236,45 @@ The variation between runs was small for all configurations (Table 5.5). For eve
 
 **⑤ 过渡**
 
-The results are based on the primary set used to select the prompt and input representation. Section 5.6 therefore examines whether they are maintained on the supplementary set and how the configurations perform in the individual ambiguity regimes.
+The results are based on the primary set used to select the prompt and input representation. Section 5.6 therefore combines them with the results on the supplementary set and reports the performance in the individual ambiguity regimes.
 
-这些结果基于主数据集，Prompt 和输入形式也是在该数据集上选定的。因此，第 5.6 节检验这些结果在补充数据集上能否保持，以及各配置在不同歧义类别中的表现。
+这些结果基于主数据集，Prompt 和输入形式也是在该数据集上选定的。因此，第 5.6 节将其与补充数据集上的结果合并，并报告各配置在不同歧义类别中的表现。
+
+## 5.6 Performance Across Ambiguity Regimes | 各歧义类别中的表现
+
+**① 数据与合并方法**
+
+This section reports the results of the final configurations for all 185 assemblies, separately for the ambiguity regimes. Since the assemblies of the primary set were classified in ten runs and those of the supplementary set in one, each assembly was weighted equally: for the primary set, the share of correct runs was used, and for the supplementary set, the single result. The confidence intervals were obtained by resampling the assemblies within each regime. Before the two sets were combined, the results on the supplementary set, which was not involved in any selection step, were compared with those on the primary set for the assemblies in regimes E1 and E2. None of the configurations achieved a lower accuracy on the supplementary set; since this set contains a considerably higher share of assemblies in regime E1, the two sets are not compared further.
+
+本节报告最终配置在全部 185 个装配体上的结果，并按歧义类别分别列出。由于主数据集的装配体运行了十次，而补充数据集的装配体只运行了一次，每个装配体按相同权重计算：主数据集取十次运行中分类正确的比例，补充数据集取单次运行的结果。置信区间通过在各歧义类别内对装配体重抽样得到。在合并两个数据集之前，先比较了 E1 和 E2 装配体在补充数据集和主数据集上的结果。补充数据集未参与任何选择步骤，而没有一种配置在补充数据集上的准确率低于主数据集。由于补充数据集中 E1 装配体的比例明显更高，两个数据集不再作进一步比较。
+
+**② E1 与 E2**
+
+In regime E1, all configurations classified at least 93 % of the assemblies correctly (Table 5.6). Since all workshop participants assigned the same class to these assemblies, the remaining errors of between 2.5 and 6.8 % represent departures from a clear human judgement. In regime E2, the accuracy was lower for all configurations, by between 3.0 and 9.0 percentage points. These are the assemblies for which individual participants deviated and the class follows only from the codebook rules. The models thus encountered difficulties with the same assemblies as the human annotators. Since regime E2 comprises only 44 assemblies, the confidence intervals are wide and the decrease is not certain for each configuration individually; its consistency across all four configurations, however, indicates that these assemblies are more difficult to classify.
+
+在 E1 中，所有配置都至少正确分类了 93% 的装配体（表 5.6）。由于所有 Workshop 参与者都为这些装配体选择了相同的类别，剩余 2.5% 至 6.8% 的错误代表偏离了明确的人工判断。在 E2 中，所有配置的准确率都更低，下降 3.0 至 9.0 个百分点。这些装配体中有个别参与者判断出现偏差，类别只能按 Codebook 的规则得出。因此，模型和人工标注者在同样的装配体上遇到了困难。由于 E2 只有 44 个装配体，置信区间较宽，因此不能确定每种配置的准确率都确实下降了；不过，四种配置一致下降，说明这些装配体更难分类。
+
+**Table 5.6. Allowed Accuracy by ambiguity regime (185 assemblies) / 表 5.6 各歧义类别的 Allowed Accuracy（185 个装配体）**
+
+| Regime / 类别 | Claude Haiku 4.5 (PDF) | DeepSeek-V4-Flash (Text) | Gemini 2.5 Pro (PDF) | GPT-5.5 (Image) |
+| --- | ---: | ---: | ---: | ---: |
+| E1 (n = 110) | 93.2 [88.2–97.3] | 94.9 [90.5–98.5] | **97.5** [94.6–99.6] | 96.5 [92.8–99.2] |
+| E2 (n = 44) | 88.6 [79.5–97.7] | 85.9 [74.8–94.8] | **94.5** [88.2–99.5] | 91.1 [82.3–98.0] |
+| M (n = 31) | 93.5 [83.9–100.0] | 93.2 [83.5–100.0] | **99.7** [99.0–100.0] | 94.2 [85.2–100.0] |
+| – of which primary label predicted / 其中预测为主标签 | 80.6 | 86.8 | 60.3 | 66.5 |
+| – of which other allowed label predicted / 其中预测为其他允许标签 | 12.9 | 6.5 | 39.4 | 27.7 |
+| All, Allowed Accuracy / 全部，Allowed Accuracy | 92.2 [88.1–95.7] | 92.5 [88.5–96.1] | **97.2** [95.0–99.0] | 94.8 [91.1–97.7] |
+| All, Strict Accuracy / 全部，Strict Accuracy | 90.0 [85.4–94.1] | **91.4** [87.4–95.1] | 90.6 [86.7–94.1] | 90.2 [85.9–94.2] |
+
+*Note: Values in %; values in brackets are 95 % bootstrap confidence intervals. Primary set: share of correct runs per assembly (ten runs); supplementary set: one run. The two rows below M divide its Allowed Accuracy according to whether the primary label or another allowed label was predicted.*
+
+注：数值单位为 %；方括号内为 95% Bootstrap 置信区间。主数据集：每个装配体十次运行中分类正确的比例；补充数据集：运行一次。M 下面的两行把它的 Allowed Accuracy 按预测的是主标签还是其他允许标签拆分开。
+
+**③ M**
+
+In regime M, all configurations predicted an allowed class for at least 93 % of the assemblies, and Gemini 2.5 Pro did so for almost all of them. The configurations differed, however, in which allowed class they chose. Gemini 2.5 Pro and GPT-5.5 predicted a class other than the primary label for 39.4 % and 27.7 % of these assemblies, whereas Claude Haiku 4.5 and DeepSeek-V4-Flash did so for 12.9 % and 6.5 %. For Gemini 2.5 Pro, almost all of the 99.7 % in regime M were correct, but only 60.3 % matched the primary label; under the strict criterion, the remaining 39.4 % are counted as errors although they are allowed classes. For assemblies in regime M, the primary label is not more correct than the other allowed labels, since the documentation and the codebook support all of them (Section 4.4). The differences in the strict metrics in Section 5.5 therefore reflect which of the valid classes a configuration preferred rather than additional errors. Across all 185 assemblies, the Strict Accuracy of the four configurations lay within 1.4 percentage points, whereas the Allowed Accuracy ranged from 92.2 to 97.2 %.
+
+在 M 中，所有配置都对至少 93% 的装配体预测出了允许的类别，Gemini 2.5 Pro 几乎全部正确。不过，各配置选择哪个允许类别有所不同。Gemini 2.5 Pro 和 GPT-5.5 分别对 39.4% 和 27.7% 的装配体预测了主标签以外的类别，而 Claude Haiku 4.5 和 DeepSeek-V4-Flash 分别只有 12.9% 和 6.5%。对于 Gemini 2.5 Pro，M 中 99.7% 的预测几乎全部正确，但只有 60.3% 与主标签一致；按严格标准，其余 39.4% 尽管属于允许的类别，仍被计为错误。对于 M 中的装配体，资料和 Codebook 支持全部允许标签，因此主标签并不比其他允许标签更正确（第 4.4 节）。所以，第 5.5 节中严格指标的差异反映的是配置更倾向于哪个有效类别，而不是更多的错误。在全部 185 个装配体上，四种配置的 Strict Accuracy 相差不到 1.4 个百分点，而 Allowed Accuracy 在 92.2% 至 97.2% 之间。
 
 ## 待处理
 
@@ -276,9 +312,15 @@ The results are based on the primary set used to select the prompt and input rep
 - 预测有变化的装配体：Haiku `0804FZ8322`；DeepSeek 6 个（1 个 M）；Pro 13 个（7 个 M）；GPT-5.5 10 个（6 个 M，含 5.4 ③ 中的机器人 `0804EK1683`）。
 - 额外的 GPT 系列图片实验（各运行一次）未写入正文；如 Jonas 需要，可放附录。
 
+### 5.6 待办
+
+- 数据来源：`scripts/12_validation_regimes/evaluate_validation_regimes.py` 的输出 `Validation_Regimes.xlsx`（2026-11-11）。脚本内置最终版 GT；`Pruefungen` 中 44 条均已核对：40 条为 `0804EN7325` 的 Register M → E2（按第 112 行的处理决定，结果不受影响），4 条为 `0804LU7693`（补充数据集结果文件中主标签为旧值组合单元，最终版为直线单元，ZGT 组合单元）。
+- 验证（未出表，正文一句话）：E1+E2 上 70 个对 115 个，Haiku 92.8 / 91.2，DeepSeek 97.1 / 88.5，Pro 98.6 / 95.2，GPT-5.5 100.0 / 90.8；E1 比例 86% 对 60%。补充数据集唯一的 M（`0804LU7693`）四种配置均在允许范围内（Haiku、GPT-5.5 预测组合单元，DeepSeek、Pro 预测直线单元）。
+- [ ] 5.7 需分析三个 regime 中剩余的全部错误（包括 M 中约 0.3–6.8% 的错误）。
+
 ### 章节安排
 
-第 5 章结构（2026-11-11 调整）：5.1 Setup and Configurations / 5.2 Ground Truth Revision and Evaluation Metrics / 5.3 Prompt Design / 5.4 Input Representation / 5.5 Final Configurations and Stability（115 个 × 10 次）/ 5.6 Validation and Performance Across Ambiguity Regimes（5.6.1 Validation on the Supplementary Set：70 个的 E1+E2 对比 115 个的 E1+E2，那 1 个 M 一句话说明；5.6.2 Performance in Regimes E1, E2 and M：185 个合并，E1、E2、M 分开报告，按装配体计算——115 个取 10 次运行中分对的比例，70 个取 0/1，再对 185 个求平均，Bootstrap 也按 185 个装配体抽样；脚本 09 不能直接这样算，需单独计算）/ 5.7 Error Analysis / 5.8 Cost and Efficiency / 5.9 Summary。
+第 5 章结构（2026-11-11 调整）：5.1 Setup and Configurations / 5.2 Ground Truth Revision and Evaluation Metrics / 5.3 Prompt Design / 5.4 Input Representation / 5.5 Final Configurations and Stability（115 个 × 10 次）/ 5.6 Performance Across Ambiguity Regimes（不分三级标题；与 115 个的 E1+E2 比较只用一句话交代，不出表；185 个合并，E1、E2、M 分开报告，按装配体计算——115 个取 10 次运行中分对的比例，70 个取 0/1，再对 185 个求平均，Bootstrap 也按 185 个装配体抽样；脚本 09 不能直接这样算，需单独计算）/ 5.7 Error Analysis / 5.8 Cost and Efficiency / 5.9 Summary。
 
 章节引用原则：只保留读者需要跳转查看的引用（如 5.1 ① 指向 5.2 的 GT 修订、5.2 ① 指向 4.4 的复核流程）；实验阶段与小节的对应只在表 5.1 的 Section 列中给出。
 

@@ -22,12 +22,12 @@
 | 2 | State of Research（2.1 Functional Classification and Reuse / 2.2 Technical Documentation / 2.3 LLMs and Multimodal Models / 2.4 Prompt Design / 2.5 Human Annotation and Reference Labels / 2.6 Related Work and Research Gap） | 13 |
 | 3 | Methodology（3.1 Research Design，可简要对应 DRM / 3.2 Comparison Strategy / 3.3 Validity and Reproducibility） | 3 |
 | 4 | Labeling Workshop and Ground Truth | 10 |
-| 5 | Experimental Evaluation（5.1 Setup and Configurations / 5.2 Ground Truth Revision and Evaluation Metrics / 5.3 Prompt Design / 5.4 Input Representation / 5.5 Final Configurations and Stability / 5.6 Validation and Performance Across Ambiguity Regimes（5.6.1 Validation on the Supplementary Set / 5.6.2 Performance in Regimes E1, E2 and M）/ 5.7 Error Analysis / 5.8 Cost and Efficiency / 5.9 Summary） | 16–18 |
+| 5 | Experimental Evaluation（5.1 Setup and Configurations / 5.2 Ground Truth Revision and Evaluation Metrics / 5.3 Prompt Design / 5.4 Input Representation / 5.5 Final Configurations and Stability / 5.6 Performance Across Ambiguity Regimes/ 5.7 Error Analysis / 5.8 Cost and Efficiency / 5.9 Summary） | 16–18 |
 | 6 | Prototype: Bosch Assembly Assistant（Requirements / Architecture and Workflow / Core Functions / Verification and Scope） | 5 |
 | 7 | Discussion（Answers to RQs / Role of Rules and Ambiguity / Comparison with State of Research / Implications for Practice / Limitations） | 7 |
 | 8 | Conclusion and Outlook | 2 |
 
-- 第 5 章页数分配：5.1 约 1 / 5.2 约 2 / 5.3 约 1.5 / 5.4 约 1.5 / 5.5 约 2.5 / 5.6 约 2.5 / 5.7 约 2.5 / 5.8 约 1 / 5.9 约 0.5；按类别的 P/R、完整 CI、全部配对检验、Prompt 原文放附录。5.5 只用 115 个 × 10 次；5.6.1 比较 70 个与 115 个的 E1+E2；5.6.2 合并 185 个，E1、E2、M 分开报告（按装配体计算）
+- 第 5 章页数分配：5.1 约 1 / 5.2 约 2 / 5.3 约 1.5 / 5.4 约 1.5 / 5.5 约 2.5 / 5.6 约 1.5 / 5.7 约 2.5 / 5.8 约 1 / 5.9 约 0.5；按类别的 P/R、完整 CI、全部配对检验、Prompt 原文放附录。5.5 只用 115 个 × 10 次；5.6 合并 185 个，E1、E2、M 分开报告（按装配体计算），与 115 个的比较只用一句话交代
 - 不写 BMG 现状调查（Jonas 说 Anja 写得太多了，这次不用）
 - Workshop 单独一章（第 4 章），实验评价单独一章（第 5 章），这是 Jonas 的要求
 - 研究所要求的论文结构是 DRM（RC / DS I / PS / DS II），但不按 DRM 重排目录，只在 3.1 用一两句话说明对应关系
