@@ -85,3 +85,28 @@ Revidierte GT: Kombinierte Einheit / Umsetzeinheit (LLM korrekt: nein).
 GT vor Review: Multi-Achs-System (Gantry) | LLM: Lineareinheit / Kombinierte Einheit / Keine der verfügbaren Klassen
 Analyse: Diskrepanz zwischen Zeichnung/CAD und Stückliste (analog zu 0804KW8391): In der Zeichnung sind zwei orthogonale Horizontalachsen inklusive Motoren und Energieführungsketten als Referenz-/Störkontur (Strich-Zweipunkt-Linie) dargestellt, in der Stückliste (0804JX6656) sind diese Antriebe jedoch nicht enthalten – verbaut sind nur das Gestell (Pos. 0001–0010), Spannstücke (Pos. 0101) zur Klemmung des externen Linearmoduls sowie zwei orthogonale Führungsschienen (Pos. 0102, Pos. 0103) mit Führungswagen (Pos. 0104). Bezieht man die in CAD/Zeichnung dargestellten zwei Motorachsen (R=0, T=2) ein, sind Gantry (X/Y-System mit paralleler Stützschiene Pos. 0102) und Kombinierte Einheit (Umsetzeinheit) vertretbar; wertet man streng nach Stückliste ohne eigene Aktoren (R=0, T=0), gilt Keine der verfügbaren Klassen. Lineareinheit (T=1) ist in jedem Fall falsch.
 Revidierte GT: Gantry, Kombinierte Einheit (Umsetzeinheit), Keine der verfügbaren Klassen (LLM korrekt bei „Kombinierte Einheit“ und „Keine der verfügbaren Klassen“, falsch bei „Lineareinheit“).
+
+## 第四部分 · Excel 第 13–15 行
+
+来源为 `Fehler_Analyse` 工作表三张照片。根据行顺序及重叠列对应；部分模型输出列未完整拍到，暂参考同一工作簿 `Korrigierte GT&ZGT` 对应记录，待核对。Ground Truth、Register 和其他允许类别按本工作表照片记录。第 15 行错误分析照片截断，暂录入可见部分。
+
+| Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
+|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 13 | 6 | 0 | 0804KM9359 | AS00139165 | E2 | Rotationseinheit | — | — | Kombinierte Einheit | Kombinierte Einheit | Kombinierte Einheit | Kombinierte Einheit | Kombinierte Einheit | Kombinierte Einheit | — | — | — | — | — | [原文](#excel-第-13-行) |
+| 14 | 6 | 0 | 0804KW8391 | AS00202949 | M | Multi-Achs-System (Gantry) | Kombinierte Einheit | — | Lineareinheit | Lineareinheit | — | — | Lineareinheit | — | — | Keine der verfügbaren Klassen | — | Lineareinheit | Keine der verfügbaren Klassen | [原文](#excel-第-14-行) |
+| 15 | 6 | 0 | 0804LK3617 | AS00295735 | M | Rotationseinheit | Lineareinheit | — | Kombinierte Einheit | — | — | Kombinierte Einheit | Kombinierte Einheit | — | Kombinierte Einheit | — | Kombinierte Einheit | Kombinierte Einheit | — | [原文（不完整）](#excel-第-15-行) |
+
+### Excel 第 13 行
+
+GT vor Review: Rotationseinheit | LLM: Kombinierte Einheit (Umsetzeinheit)
+Analyse (Variante 1 - PDF/Text): Verbaut ist lediglich ein einziger Hauptaktor: eine pneumatische SCHUNK-Schwenkeinheit (Pos. 100, SRU-plus 63-W-180, 180° → R=1). Die daran montierte Greifereinheit (Pos. 10, 0804.KM9.320) mit einem 2-Finger-Parallelgreifer (Stufe 6, Pos. 100, SCHUNK) zählt als Endeffektor ebenso wenig mit wie die manuelle Verstellplatte (Pos. 3, 30 mm Einstellmaß) (T=0, vgl. Codebook Abschnitt 3). Das LLM wertet den Parallelgreifer bzw. die Verstellmöglichkeit fälschlicherweise als translatorische Achse (T=1).
+Analyse (Variante 2 - 3D/Matrix): Verbaut sind lediglich eine pneumatische SCHUNK-Schwenkeinheit (Pos. 100, SRU-plus 63, 180° → R=1) und ein angebauter 2-Finger-Parallelgreifer (Stufe 6, Pos. 100, PGN-plus-P 160) als Endeffektor (T=0). Das LLM scheitert auf zwei Arten: Entweder wird das Doppelschaft-Gehäuse der Schwenkeinheit im 3D-Modell fälschlicherweise als lineare Hubeinheit/Doppelzylinder (T=1) halluziniert, oder das LLM ermittelt zwar korrekt R=1, T=0, setzt sich aber über die Entscheidungsmatrix hinweg, indem es „Schwenken + Greifen“ (in falscher Analogie zu Grenzfall 6.3) als heterogene Kinematik wertet.
+Revidierte GT: Rotationseinheit (LLM korrekt: nein).
+
+### Excel 第 14 行
+
+Fehleranalyse: X/Y Bewegung und beidseitige Fixierung, aber keine Portalführung an beiden Enden der ersten Achse. Zweiter Aktor nicht Bestandteil der Baugruppe. Korrektur: Es sind überhaupt keine Aktoren vorhanden! Vertretbar ist daher Gantry, Kombiniert und Keine der verfügbaren Klassen. Das LLM entscheidet falsch!
+
+### Excel 第 15 行（未完）
+
+Fehleranalyse: Sehr schwierig: Eine Lineareinheit, die rotatorisch bewegt wird. Verbauter Aktor ist nur linear, aber Kettenrad und Lagerung für Rotation vorhanden. Kombinierte Einheit daher vertretbar, wenn Aktorkriterium weich ausgelegt wird. Rotationseinheit dann ebenfalls vertretbar, da die gesamte Baugruppe eine Rotation vollführt. Streng genommen aber eigentlich Lineareinheit. Rückblick: Rotation **［照片到此截断］**
