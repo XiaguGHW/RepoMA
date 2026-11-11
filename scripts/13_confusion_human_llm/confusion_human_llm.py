@@ -346,10 +346,10 @@ TXT = {
 
 def title_for(name, m, lang, human=False):
     t = TXT[lang]
-    return f"{name}, n = {m['n']} {t['n_h'] if human else t['n_l']}"
+    return f"{name}, n = {m['n']} {t['n_h']}" if human else f"{name}, n = {m['n']}"
 
 
-def draw_matrix(ax, m, title, fs=1.0):
+def draw_matrix(ax, m, title, fs=1.0, title_fs=None):
     """Zeichnet eine Matrix im Stil A1 in ax (Koordinaten: x 0..8.3, y 0..8.35, y nach unten)."""
     from matplotlib.patches import Rectangle
     K = len(CLASSES)
@@ -365,9 +365,9 @@ def draw_matrix(ax, m, title, fs=1.0):
         ax.add_patch(Rectangle((x, y), w, h, facecolor=fc, edgecolor=ec, linewidth=lw_, zorder=z))
 
     box(0, 0, W, th, NAVY, NAVY)
-    ax.text(W / 2, th / 2, title, ha="center", va="center", color="white", fontsize=12.5 * fs, fontweight="bold")
+    ax.text(W / 2, th / 2, title, ha="center", va="center", color="white", fontsize=12.5 * (title_fs or fs), fontweight="bold")
     box(0, th, lw, hh, HEAD, HEAD)
-    ax.text(lw / 2, th + hh / 2, TXT_HEAD, ha="center", va="center", color="white", fontsize=10.5 * fs, fontweight="bold")
+    ax.text(lw / 2, th + hh / 2, TXT_HEAD, ha="center", va="center", color="white", fontsize=7.9 * fs, fontweight="bold")
     for j, c in enumerate(CODES):
         box(lw + j * cw, th, cw, hh, HEAD, HEAD)
         ax.text(lw + (j + 0.5) * cw, th + hh / 2, c, ha="center", va="center", color="white",
@@ -395,47 +395,53 @@ def draw_matrix(ax, m, title, fs=1.0):
 TXT_HEAD = "GT \\ Pred"
 
 
-def draw_legend(ax, lang, fs=1.0, note=True, wrap=False, rng=(5, 10)):
-    """Legende wie A1: Farbfelder, darunter Zeilen/Spalten und Klassencodes, darunter Hinweis."""
+def legend_lines(lang):
+    """Text unter den Farbfeldern: Zeilen/Spalten, Klassencodes auf zwei Zeilen."""
+    t = TXT[lang]
+    names = [f"{c} = {n}" for c, n in zip(CODES, LEGEND_NAMES[lang])]
+    head, codes_word = t["rows"].split(". ", 1)
+    return [head + ".", codes_word.strip() + " " + " | ".join(names[:4]) + " |", " | ".join(names[4:])]
+
+
+def draw_legend(ax, lang, fs=1.0):
+    """Legende wie A1: Farbfelder, darunter Zeilen/Spalten und Klassencodes (ohne Hinweiszeile)."""
     from matplotlib.patches import Patch
     t = TXT[lang]
-    ax.set_xlim(0, 1)
-    ax.set_ylim(1, 0)
     ax.axis("off")
-    handles = [Patch(facecolor=bg, edgecolor="#BBBBBB", linewidth=0.6, label=lab)
+    handles = [Patch(facecolor=bg, edgecolor="#BBBBBB", linewidth=0.8, label=lab)
                for bg, lab in [(BLUE_BG, t["diag"]), (RED_BG, t["red"]), (GREEN_BG, t["green"])]]
-    ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(0, 1.0), ncol=3, frameon=False,
-              fontsize=10.5 * fs, handlelength=1.4, handleheight=1.0, columnspacing=2.5, borderaxespad=0)
-    codes = " | ".join(f"{c} = {n}" for c, n in zip(CODES, LEGEND_NAMES[lang]))
-    sep = "\n" if wrap else ""
-    ax.text(0, 0.38, t["rows"].replace(". ", "." + sep, 1) + codes if wrap else t["rows"] + codes,
-            va="top", fontsize=10 * fs, linespacing=1.4)
-    if note:
-        ax.text(0, 0.78, t["note"].format(lo=rng[0], hi=rng[1]), va="top", fontsize=9.5 * fs, style="italic", color="#555555")
+    leg = ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(0, 1.0), ncol=3, frameon=False,
+                    fontsize=11 * fs, handlelength=1.5, handleheight=1.1, columnspacing=2.2,
+                    borderaxespad=0, borderpad=0, handletextpad=0.6)
+    leg._legend_box.align = "left"
+    size = 10.5 * fs
+    for k, line in enumerate(legend_lines(lang)):
+        ax.annotate(line, xy=(0, 1), xycoords="axes fraction", xytext=(0, -(2.1 + 1.45 * k) * size),
+                    textcoords="offset points", va="top", ha="left", fontsize=size)
 
 
 def save_single(m, title, path, lang):
     import matplotlib.pyplot as plt
-    fig = plt.figure(figsize=(8.6, 6.0))
-    gs = fig.add_gridspec(2, 1, height_ratios=[1, 0.26], hspace=0.04)
+    fig = plt.figure(figsize=(8.6, 6.4))
+    gs = fig.add_gridspec(2, 1, height_ratios=[1, 0.36], hspace=0.05)
     draw_matrix(fig.add_subplot(gs[0]), m, title)
-    draw_legend(fig.add_subplot(gs[1]), lang, fs=0.82, note=False, wrap=True)
-    fig.savefig(path, dpi=200, bbox_inches="tight", facecolor="white")
+    draw_legend(fig.add_subplot(gs[1]), lang, fs=1.05)
+    fig.savefig(path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
 
-def save_overview(llm_mats, human_mat, path, lang, rng=(5, 10)):
+def save_overview(llm_mats, human_mat, path, lang):
     import matplotlib.pyplot as plt
-    fig = plt.figure(figsize=(22, 11.4))
-    gs = fig.add_gridspec(3, 3, height_ratios=[1, 1, 0.22], width_ratios=[1, 1, 2.08],
-                          hspace=0.10, wspace=0.06)
+    fig = plt.figure(figsize=(16, 10.2))
+    gs = fig.add_gridspec(3, 3, height_ratios=[1, 1, 0.42], width_ratios=[1, 1, 2.08],
+                          hspace=0.08, wspace=0.05)
     pos = [(0, 0), (0, 1), (1, 0), (1, 1)]
     for (r, c), (name, m) in zip(pos, llm_mats):
-        draw_matrix(fig.add_subplot(gs[r, c]), m, title_for(name, m, lang), fs=0.78)
+        draw_matrix(fig.add_subplot(gs[r, c]), m, title_for(name, m, lang), fs=0.92)
     draw_matrix(fig.add_subplot(gs[0:2, 2]), human_mat, title_for(TXT[lang]["human"], human_mat, lang, True),
-                fs=1.45)
-    draw_legend(fig.add_subplot(gs[2, :]), lang, fs=1.15, rng=rng)
-    fig.savefig(path, dpi=200, bbox_inches="tight", facecolor="white")
+                fs=1.55, title_fs=1.2)
+    draw_legend(fig.add_subplot(gs[2, :]), lang, fs=1.75)
+    fig.savefig(path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
 
@@ -603,7 +609,7 @@ def run(args):
             save_single(m, title_for(name, m, lang, human=(sheet == "M_Mensch")), p, lang)
             pngs.append(p)
         p = out / "konfusion_gesamt.png"
-        save_overview(llm_m, human_m, p, lang, rng=(min(n_counts), max(n_counts)))
+        save_overview(llm_m, human_m, p, lang)
         pngs.append(p)
     except ImportError:
         print("matplotlib nicht installiert: keine PNGs erzeugt.")
