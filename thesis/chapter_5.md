@@ -331,7 +331,7 @@ Most errors arose before the decision matrix was applied: in counting the actuat
 
 大多数错误发生在应用决策矩阵之前：统计执行器，以及判断哪些资料描述的是装配体本身。类别规则本身的应用错误较少，例如龙门判断错误。因此，改进的主要切入点在于输入资料的整理，以及执行器计数规则的说明。
 
-## 5.8 Cost | 成本
+## 5.8 Average Cost per Assembly | 每个装配体的平均成本
 
 The cost of the LLM-based classification was calculated from the token counts reported by the APIs and the list prices of the platforms used at the time of the experiments. Table 5.8 shows the means per assembly for the 70 assemblies of the supplementary set, each of which was classified once by every final configuration and by Claude Opus 4.8 with PDF input. Among the final configurations, the cost per assembly ranged from USD 0.004 for DeepSeek-V4-Flash to USD 0.098 for GPT-5.5, so classifying all 185 assemblies would cost between USD 0.77 and USD 18.14. The number of input tokens depended mainly on the extent of the documentation and reached more than 160,000 tokens for single assemblies with Claude. It also depended on how each provider counts the input. Gemini counts a fixed number of tokens per PDF page or image tile regardless of its content, whereas text is counted by characters. In the input comparison, text input therefore required about three times as many tokens as PDF input for Gemini 2.5 Pro (Appendix D), and for the same PDF documents, Gemini 2.5 Pro required only about one fifth of the input tokens counted for Claude Haiku 4.5. Since Gemini 2.5 Pro also generated about 2,000 reasoning tokens per assembly, its cost arose mainly from output tokens.
 
@@ -417,7 +417,7 @@ Allowed Accuracy 最高的 Gemini 2.5 Pro（表 5.6），成本是第二低的�
 
 ### 章节安排
 
-第 5 章结构（2026-11-11 调整）：5.1 Setup and Configurations / 5.2 Ground Truth Revision and Evaluation Metrics / 5.3 Prompt Design / 5.4 Input Representation / 5.5 Final Configurations and Stability（115 个 × 10 次）/ 5.6 Performance Across Ambiguity Regimes（不分三级标题；与 115 个的 E1+E2 比较只用一句话交代，不出表；185 个合并，E1、E2、M 分开报告，按装配体计算——115 个取 10 次运行中分对的比例，70 个取 0/1，再对 185 个求平均，Bootstrap 也按 185 个装配体抽样；脚本 09 不能直接这样算，需单独计算）/ 5.7 Error Analysis / 5.8 Cost / 5.9 Summary。
+第 5 章结构（2026-11-11 调整）：5.1 Setup and Configurations / 5.2 Ground Truth Revision and Evaluation Metrics / 5.3 Prompt Design / 5.4 Input Representation / 5.5 Final Configurations and Stability（115 个 × 10 次）/ 5.6 Performance Across Ambiguity Regimes（不分三级标题；与 115 个的 E1+E2 比较只用一句话交代，不出表；185 个合并，E1、E2、M 分开报告，按装配体计算——115 个取 10 次运行中分对的比例，70 个取 0/1，再对 185 个求平均，Bootstrap 也按 185 个装配体抽样；脚本 09 不能直接这样算，需单独计算）/ 5.7 Error Analysis / 5.8 Average Cost per Assembly / 5.9 Summary。
 
 章节引用原则：只保留读者需要跳转查看的引用（如 5.1 ① 指向 5.2 的 GT 修订、5.2 ① 指向 4.4 的复核流程）；实验阶段与小节的对应只在表 5.1 的 Section 列中给出。
 

@@ -22,7 +22,7 @@
 | 2 | State of Research（2.1 Functional Classification and Reuse / 2.2 Technical Documentation / 2.3 LLMs and Multimodal Models / 2.4 Prompt Design / 2.5 Human Annotation and Reference Labels / 2.6 Related Work and Research Gap） | 13 |
 | 3 | Methodology（3.1 Research Design，可简要对应 DRM / 3.2 Comparison Strategy / 3.3 Validity and Reproducibility） | 3 |
 | 4 | Labeling Workshop and Ground Truth | 10 |
-| 5 | Experimental Evaluation（5.1 Setup and Configurations / 5.2 Ground Truth Revision and Evaluation Metrics / 5.3 Prompt Design / 5.4 Input Representation / 5.5 Final Configurations and Stability / 5.6 Performance Across Ambiguity Regimes/ 5.7 Error Analysis / 5.8 Cost / 5.9 Summary） | 16–18 |
+| 5 | Experimental Evaluation（5.1 Setup and Configurations / 5.2 Ground Truth Revision and Evaluation Metrics / 5.3 Prompt Design / 5.4 Input Representation / 5.5 Final Configurations and Stability / 5.6 Performance Across Ambiguity Regimes/ 5.7 Error Analysis / 5.8 Average Cost per Assembly / 5.9 Summary） | 16–18 |
 | 6 | Prototype: Bosch Assembly Assistant（Requirements / Architecture and Workflow / Core Functions / Verification and Scope） | 5 |
 | 7 | Discussion（Answers to RQs / Role of Rules and Ambiguity / Comparison with State of Research / Implications for Practice / Limitations） | 7 |
 | 8 | Conclusion and Outlook | 2 |
