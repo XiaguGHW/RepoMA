@@ -135,6 +135,7 @@
 
 ## 7 待确认 / 待补充
 
+- 附录编号：A 为 Codebook 全文，B 为实验设置，C 为 Prompt 原文，D 为补充结果，E 为修订前 GT 的敏感性分析。
 - [ ] DFC 官方文件的引用格式；Teamcenter 与 Autodesk Vault 的关系（BMG 是否两者都在用）
 - [ ] 4.1 中“操作类装配体是 BMG 非标设备的核心组成部分”这一理由，向 Jonas 确认
 - [ ] 4.2 是否写“Codebook 由作者与导师共同制定”，问 Jonas

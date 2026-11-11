@@ -29,9 +29,9 @@ Each experimental stage built on the preceding stage, following a fixed sequence
 
 **③ 模型与运行方式**
 
-Six models from four providers were used: Claude Haiku 4.5 and Claude Opus 4.8 (Anthropic), Gemini 2.5 Flash and Gemini 2.5 Pro (Google), GPT-5.5 (OpenAI) and DeepSeek-V4-Flash (DeepSeek) (access and model versions in Appendix [Y]). A separate request was submitted for each assembly, with no information carried over from earlier requests. The temperature was set to 0 for all models. As the codebook rules define a single correct class for this decision task, the aim is to obtain the most probable output and avoid variation between outputs, while a temperature of 0 also supports reproducibility. Requests that returned an empty output were identified after each run and repeated individually. Once these requests had been repeated, a valid output was available for every assembly, and each output contained one of the seven class names. The token usage of each request was recorded for the cost analysis.
+Six models from four providers were used: Claude Haiku 4.5 and Claude Opus 4.8 (Anthropic), Gemini 2.5 Flash and Gemini 2.5 Pro (Google), GPT-5.5 (OpenAI) and DeepSeek-V4-Flash (DeepSeek) (access and model versions in Appendix B). A separate request was submitted for each assembly, with no information carried over from earlier requests. The temperature was set to 0 for all models. As the codebook rules define a single correct class for this decision task, the aim is to obtain the most probable output and avoid variation between outputs, while a temperature of 0 also supports reproducibility. Requests that returned an empty output were identified after each run and repeated individually. Once these requests had been repeated, a valid output was available for every assembly, and each output contained one of the seven class names. The token usage of each request was recorded for the cost analysis.
 
-实验使用了来自四家厂商的六个模型，包括 Claude Haiku 4.5 和 Claude Opus 4.8（Anthropic）、Gemini 2.5 Flash 和 Gemini 2.5 Pro（Google）、GPT-5.5（OpenAI），以及 DeepSeek-V4-Flash（DeepSeek）（接入方式和模型版本见附录 [Y]）。每个装配体通过单独的请求进行分类，不带入此前请求的信息。所有模型的 temperature 均设为 0。由于这一决策任务按 Codebook 规则只有一个正确类别，因此目标是获得最可能的输出并避免输出之间的变化，同时 temperature 为 0 也有助于提高可复现性。每轮运行后，找出输出为空的请求并单独重新运行。重新运行后，每个装配体均有有效输出，且每个输出都包含七个类别名称之一。每次请求的 token 用量均被记录，用于成本分析。
+实验使用了来自四家厂商的六个模型，包括 Claude Haiku 4.5 和 Claude Opus 4.8（Anthropic）、Gemini 2.5 Flash 和 Gemini 2.5 Pro（Google）、GPT-5.5（OpenAI），以及 DeepSeek-V4-Flash（DeepSeek）（接入方式和模型版本见附录 B）。每个装配体通过单独的请求进行分类，不带入此前请求的信息。所有模型的 temperature 均设为 0。由于这一决策任务按 Codebook 规则只有一个正确类别，因此目标是获得最可能的输出并避免输出之间的变化，同时 temperature 为 0 也有助于提高可复现性。每轮运行后，找出输出为空的请求并单独重新运行。重新运行后，每个装配体均有有效输出，且每个输出都包含七个类别名称之一。每次请求的 token 用量均被记录，用于成本分析。
 
 ## 5.2 Ground Truth Revision and Evaluation Metrics | Ground Truth 修订与评价指标
 
@@ -108,9 +108,9 @@ Given the size of the dataset, the results depend on which assemblies it contain
 
 **① 目的与 Prompt 变体**
 
-Because prompt design can substantially affect LLM performance (Sclar et al., 2024), the amount of codebook information in the prompt was varied to identify what the models need to classify the assemblies. Four prompt variants were defined, each extending the previous one. Starting with the class names in P1, the variants successively add the class definitions in P2, the decision logic in P3 (actuator counting rules, decision table and gantry test), and examples and exceptions in the form of borderline cases in P4. All other parts of the prompt, including the output format and the instruction to base the decision on the documentation rather than on the designation alone, were identical across the variants (Appendix [W]).
+Because prompt design can substantially affect LLM performance (Sclar et al., 2024), the amount of codebook information in the prompt was varied to identify what the models need to classify the assemblies. Four prompt variants were defined, each extending the previous one. Starting with the class names in P1, the variants successively add the class definitions in P2, the decision logic in P3 (actuator counting rules, decision table and gantry test), and examples and exceptions in the form of borderline cases in P4. All other parts of the prompt, including the output format and the instruction to base the decision on the documentation rather than on the designation alone, were identical across the variants (Appendix C).
 
-Prompt 的设计可能显著影响 LLM 的表现（Sclar et al., 2024）。本研究通过改变 Prompt 中提供的 Codebook 信息量，确定模型对装配体分类时需要哪些信息。本研究定义了四种 Prompt 变体，每种都在前一种的基础上扩展。P1 只包含类别名称。P2 增加类别定义，P3 增加决策逻辑，包括执行器计数规则、决策表和龙门测试，P4 再以边界案例的形式补充例子和例外。各变体中 Prompt 的其他部分都相同，包括输出格式，以及要求依据资料而不是只凭名称作出判断的说明（附录 [W]）。
+Prompt 的设计可能显著影响 LLM 的表现（Sclar et al., 2024）。本研究通过改变 Prompt 中提供的 Codebook 信息量，确定模型对装配体分类时需要哪些信息。本研究定义了四种 Prompt 变体，每种都在前一种的基础上扩展。P1 只包含类别名称。P2 增加类别定义，P3 增加决策逻辑，包括执行器计数规则、决策表和龙门测试，P4 再以边界案例的形式补充例子和例外。各变体中 Prompt 的其他部分都相同，包括输出格式，以及要求依据资料而不是只凭名称作出判断的说明（附录 C）。
 
 **② 结果**
 
@@ -128,9 +128,9 @@ Table 5.3 shows the Allowed Accuracy of the four models with PDF input. The larg
 | Gemini 2.5 Pro | 87.7 | 87.7 | 96.5 | 97.4 |
 | Mean / 平均 | 89.0 | 89.0 | **94.5** | 94.3 |
 
-*Note: One run per configuration; 95 % confidence intervals in Appendix [W].*
+*Note: One run per configuration; 95 % confidence intervals in Appendix D.*
 
-注：每种配置运行一次；95% 置信区间见附录 [W]。
+注：每种配置运行一次；95% 置信区间见附录 D。
 
 **③ 选择 P3**
 
@@ -142,9 +142,9 @@ The mean Allowed Accuracy across the four models was highest with P3. Since P4 d
 
 **① 三种输入形式**
 
-The input representation determines the form in which the documentation of an assembly is passed to the model. Three representations were compared, each containing the same documentation in a different file format. The PDF representation comprises all PDF files, the image representation the CAD screenshots, the DFC structure and the PDF pages rendered as images, and the text representation the raw text extracted from these files, using the open-source OCR engine Tesseract for text in images (Smith, 2007). Details of the conversion are given in Appendix [Y]. The comparison used prompt P3 with the same four models and one run per configuration. The PDF configuration was run independently of the prompt comparison, so its results differ slightly from those for P3 in Table 5.3.
+The input representation determines the form in which the documentation of an assembly is passed to the model. Three representations were compared, each containing the same documentation in a different file format. The PDF representation comprises all PDF files, the image representation the CAD screenshots, the DFC structure and the PDF pages rendered as images, and the text representation the raw text extracted from these files, using the open-source OCR engine Tesseract for text in images (Smith, 2007). Details of the conversion are given in Appendix B. The comparison used prompt P3 with the same four models and one run per configuration. The PDF configuration was run independently of the prompt comparison, so its results differ slightly from those for P3 in Table 5.3.
 
-输入形式决定了装配体资料以什么形式传给模型。本研究比较了三种输入形式，它们包含同一份资料，只是文件格式不同。PDF 形式包括全部 PDF 文件；图片形式包括 CAD 截图、DFC 结构和渲染成图片的 PDF 页面；文本形式是从这些文件中提取的原始文本，图片中的文本用开源 OCR 工具 Tesseract 提取（Smith, 2007）。转换的具体设置见附录 [Y]。比较使用 Prompt P3 和同样的四个模型，每种配置运行一次。PDF 配置与 Prompt 比较是分开独立运行的，因此其结果与表 5.3 中 P3 的结果略有不同。
+输入形式决定了装配体资料以什么形式传给模型。本研究比较了三种输入形式，它们包含同一份资料，只是文件格式不同。PDF 形式包括全部 PDF 文件；图片形式包括 CAD 截图、DFC 结构和渲染成图片的 PDF 页面；文本形式是从这些文件中提取的原始文本，图片中的文本用开源 OCR 工具 Tesseract 提取（Smith, 2007）。转换的具体设置见附录 B。比较使用 Prompt P3 和同样的四个模型，每种配置运行一次。PDF 配置与 Prompt 比较是分开独立运行的，因此其结果与表 5.3 中 P3 的结果略有不同。
 
 **② 结果**
 
@@ -162,9 +162,9 @@ Table 5.4 shows that the image representation yielded the lowest Allowed Accurac
 | Gemini 2.5 Pro | 96.5 | 83.5 | 97.4 |
 | Mean / 平均 | **94.8** | 82.6 | 94.6 |
 
-*Note: One run per configuration; 95 % confidence intervals in Appendix [W].*
+*Note: One run per configuration; 95 % confidence intervals in Appendix D.*
 
-注：每种配置运行一次；95% 置信区间见附录 [W]。
+注：每种配置运行一次；95% 置信区间见附录 D。
 
 **③ 图片输入准确率较低的原因**
 
@@ -177,30 +177,38 @@ With image input, the four models produced 80 of the 129 incorrect classificatio
 ### 5.1 待办
 
 - [ ] 后续补充预实验 L1–L4 结果的附录，结果需按最终版 GT 重算。
-- [ ] **附录 [Y]**：接入方式、模型版本号、输入转换设置、生成参数。
+- [ ] **附录 B**：接入方式、模型版本号、输入转换设置、生成参数。
 - [ ] **GPT-5.5 的 temperature**：查请求日志确认确实是 0。
 
 ### 5.2 待办
 
 - [ ] **p 值的算法**：对照 `evaluate_allowed_strict.py` 确认配对 Bootstrap 的 p 值如何得出。
-- [ ] **偏向说明**：只复核了预测错误的装配体，修订可能使 LLM 结果偏好。问过 Jonas 后决定写在 5.2 还是第 7 章，以及是否做修订前 GT 的敏感性分析（附录 [Z]）。
+- [ ] **偏向说明**：只复核了预测错误的装配体，修订可能使 LLM 结果偏好。问过 Jonas 后决定写在 5.2 还是第 7 章，以及是否做修订前 GT 的敏感性分析（附录 E）。
 
 ### 5.3 待办
 
-- [ ] **置信区间**：表 5.3 各值的 95% CI，放附录 [W]；补上后可改成带误差棒的分组柱状图（图 5.1），表移到附录。
+- [ ] **置信区间**：表 5.3 各值的 95% CI，放附录 D；补上后可改成带误差棒的分组柱状图（图 5.1），表移到附录。
 - [ ] **分母**：Prompt 比较中 Opus（114）、Flash（111–113）、Pro（113–114）的分母不是 115（空输出未补跑；Haiku 已重跑，为 115）。问过 Jonas 后在表注中说明，或补跑。5.1 ③ 暂不改。
-- [ ] **可选核对**：Strict Macro-F1 的趋势是否也支持 P3；一致则加一句 “Strict Macro-F1 showed the same pattern (Appendix [W])”。
+- [ ] **可选核对**：Strict Macro-F1 的趋势是否也支持 P3；一致则加一句 “Strict Macro-F1 showed the same pattern (Appendix D)”。
 - 已确认：数字基于最终版 GT；P4 的例子为作者自拟，不取自数据集；P3 + PDF 在 5.3 和 5.4 中是两次独立运行，5.4 开头需说明数字略有不同的原因。
 
 ### 5.4 待办
 
 - [ ] **Flash 文本输入的错误数**：按 `corrected_gt_zgt_error_records.md` 换算为 3 个，表 5.4（96.5%）对应 4 个。对照原表核对转录。
 - [ ] **表 5.4 分母**：Flash 图片输入为 114（1 个空输出未补跑），与 5.3 的分母问题一起问 Jonas。
-- [ ] **置信区间**：放附录 [W]。
+- [ ] **置信区间**：放附录 D。
 - 依据：③ 中 80 / 129 来自表 5.4（图片 23+15+23+19；PDF 10+3+7+4；文本 9+9+4+3）。四个机器人为 `0804CC2134`、`0804EK1683`、`0804GD6171`、`0804FH4760`（Fehler_Analyse 第 18、19、21、22 行），两个旋转单元为 `0804HX0679`、`0804KB7256`（第 24、30 行），这些装配体只在图片输入下出错。图片按每批 15 张发送，但每个装配体仍是一次请求。两个三轴龙门（`0804HZ8350`、`0804KY3585`）在文本输入下也出错，留给 5.7。
 
 ### 章节安排
 
 - 5.4：三种输入形式的定义（含 Tesseract，Smith, 2007）和比较结果（表 5.4）；说明 PDF 这组与 5.3 的 P3 是两次独立运行。
 - 5.5 开头：四种最终配置，每个模型一点，写明输入形式和选择理由（Haiku 不选 Opus 因成本；Pro 优于 Flash；Haiku 和 Pro 选 PDF 而非文本：只差一个装配体、PDF 平均最高、无需单独提取步骤；GPT-5.5 因 Azure OpenAI 的 PDF 转换不可控而用图片；DeepSeek 只支持文本）。
-- 附录 [Y]：接入方式、模型版本、输入转换设置、生成参数；[W]：Prompt 原文、各阶段置信区间、完整指标。
+- 附录 B：接入方式、模型版本、输入转换设置、生成参数；附录 C：Prompt 原文；附录 D：各阶段置信区间、完整指标。
+
+| 附录 | 内容 |
+| --- | --- |
+| A | Codebook 全文，含八个边界案例 |
+| B | 实验设置，包括接入方式、模型版本、输入转换设置和生成参数 |
+| C | Prompt P1–P4 全文 |
+| D | 表 5.3 和表 5.4 的置信区间及完整指标 |
+| E | 修订前 GT 的敏感性分析 |
