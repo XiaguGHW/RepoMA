@@ -29,13 +29,14 @@ CONFIGS = [
     ("deepseek", "DeepSeek-V4-Flash (Text)", "deepseek"),
     ("gemini-2.5-pro", "Gemini 2.5 Pro (PDF)", "gemini-pro"),
     ("gpt-5.5", "GPT-5.5 (Image)", "gpt-5.5"),
+    ("opus", "Claude Opus 4.8 (PDF)", "opus"),
 ]
 
 # USD je 1 Mio. Token. cache_read / cache_write als Faktor auf den Input-Preis.
 # BITTE PRÜFEN (Stand der Experimente, Zugangsweg).
 PRICES = {
     "haiku":      dict(inp=1.00, out=5.00, cache_read=0.10, cache_write=1.25),
-    "opus":       dict(inp=5.00, out=25.00, cache_read=0.10, cache_write=1.25),   # nur Schätzung (Haiku-Token)
+    "opus":       dict(inp=5.00, out=25.00, cache_read=0.10, cache_write=1.25),
     "gemini-pro": dict(inp=1.25, out=10.00, inp_long=2.50, out_long=15.00, long_from=200_000, cache_read=0.10),
     "gpt-5.5":    dict(inp=5.00, out=30.00, cache_read=0.10),
     "deepseek":   dict(inp=0.19, out=0.51, cache_read=0.10),   # Azure AI Foundry (Global Standard); DeepSeek-API direkt: 0,14 / 0,28
@@ -162,9 +163,6 @@ def main():
                        Input=u["input"], Cached=u["cached"], Cache_Write=u["cache_write"], Output=u["output"],
                        Reasoning=u["reasoning"], Kosten_USD=cost(u, PRICES[pk]), Zeit_s=t, Zeit_Quelle=quelle)
             rows.append(row)
-            if pk == "haiku":  # Schätzung Opus 4.8 mit denselben Token
-                rows.append({**row, "Konfiguration": "Claude Opus 4.8 (PDF) – Schätzung mit Haiku-Token",
-                             "Kosten_USD": cost(u, PRICES["opus"])})
         notes.append(dict(Datei=f.name, Hinweis=f"{cfg}: Blatt {sheet}, Token-Spalte '{c_tok}', "
                           f"Zeitspalte '{c_time}', Zeitstempel '{c_run}' (Abstand zur nächsten Anfrage, nur < 15 min), nicht lesbar: {n_bad}"))
 
@@ -194,7 +192,11 @@ def main():
         prices.to_excel(xw, sheet_name="Preise", index=False)
         pd.DataFrame(notes).to_excel(xw, sheet_name="Hinweise", index=False)
     pd.set_option("display.width", 250, "display.max_columns", 20)
-    print(summ.drop(columns=["Format"]).to_string(index=False))
+    kurz = pd.DataFrame({"Konfiguration": summ["Konfiguration"], "n": summ["Anfragen"],
+                         "Input-Token": summ["Input-Token Mittel"],
+                         "Output-Token": summ["Output-Token Mittel (inkl. Reasoning)"],
+                         "USD je BG": summ["Kosten je BG Mittel (USD)"]})
+    print(kurz.to_string(index=False))
     print(f"\nAusgabe: {Path(a.out).resolve()}")
 
 
