@@ -78,15 +78,15 @@ Table 5.2 shows the distribution of the 185 evaluated assemblies across classes 
 
 With $C$ denoting the set of seven classes, each assembly $i$ ($i = 1, \dots, N$) has a predicted class $\hat{y}_i$, a primary label $y_i$ and a set of allowed labels $A_i$ that contains $y_i$ ($y_i \in A_i$). The main metric is the Allowed Accuracy, which follows evaluation practice for datasets with several valid labels per item (Shankar et al., 2020; Beyer et al., 2020):
 
-$$\text{Allowed Accuracy} = \frac{1}{N}\sum_{i=1}^{N} \mathbb{1}\!\left[\hat{y}_i \in A_i\right] \qquad (5.1)$$
+$$\text{Allowed Accuracy} = \frac{\left|\left\lbrace i : \hat{y}_i \in A_i \right\rbrace\right|}{N} \qquad (5.1)$$
 
-设 $C$ 为七个类别的集合。对于每个装配体 $i$（$i = 1, \dots, N$），$\hat{y}_i$ 表示预测类别，$y_i$ 表示主标签，$A_i$ 表示包含主标签的允许标签集合（$y_i \in A_i$）。主要指标是 Allowed Accuracy，它沿用了每个样本有多个有效标签时的评价做法（Shankar et al., 2020; Beyer et al., 2020）。
+设 $C$ 为七个类别的集合。对于每个装配体 $i$ （ $i = 1, \dots, N$ ）， $\hat{y}_i$ 表示预测类别， $y_i$ 表示主标签， $A_i$ 表示包含主标签的允许标签集合（ $y_i \in A_i$ ）。主要指标是 Allowed Accuracy，它沿用了每个样本有多个有效标签时的评价做法（Shankar et al., 2020; Beyer et al., 2020）。
 
 Class-specific performance is described by Allowed Precision and Allowed Recall, which apply the standard definitions (Sokolova & Lapalme, 2009) to the allowed label sets:
 
-$$\mathrm{AP}_c = \frac{\left|\left\{ i : \hat{y}_i = c \wedge c \in A_i \right\}\right|}{\left|\left\{ i : \hat{y}_i = c \right\}\right|} \qquad (5.2\text{a})$$
+$$\mathrm{AP}_c = \frac{\left|\left\lbrace i : \hat{y}_i = c \wedge c \in A_i \right\rbrace\right|}{\left|\left\lbrace i : \hat{y}_i = c \right\rbrace\right|} \qquad (5.2\text{a})$$
 
-$$\mathrm{AR}_c = \frac{\left|\left\{ i : y_i = c \wedge \hat{y}_i \in A_i \right\}\right|}{\left|\left\{ i : y_i = c \right\}\right|} \qquad (5.2\text{b})$$
+$$\mathrm{AR}_c = \frac{\left|\left\lbrace i : y_i = c \wedge \hat{y}_i \in A_i \right\rbrace\right|}{\left|\left\lbrace i : y_i = c \right\rbrace\right|} \qquad (5.2\text{b})$$
 
 Allowed Macro-Precision and Allowed Macro-Recall are the equally weighted averages of the corresponding values across the seven classes. This extension ensures that a prediction counted as correct by the Allowed Accuracy is not counted as an error in precision or recall.
 
@@ -96,9 +96,9 @@ Only strict F1 is reported because precision and recall under the allowed criter
 
 $$\text{Strict Macro-F1} = \frac{1}{|C|}\sum_{c \in C} \frac{2\,\mathrm{P}_c\,\mathrm{R}_c}{\mathrm{P}_c + \mathrm{R}_c} \qquad (5.3)$$
 
-where $\mathrm{P}_c$ and $\mathrm{R}_c$ follow from Equations 5.2a and 5.2b with $A_i$ replaced by $\{y_i\}$. This metric reflects how often predictions match the primary label and supports comparison with studies that use a single correct label. For configurations with ten runs, each metric is calculated per run and averaged across the runs.
+where $\mathrm{P}_c$ and $\mathrm{R}_c$ follow from Equations 5.2a and 5.2b with $A_i$ replaced by $\lbrace y_i \rbrace$. This metric reflects how often predictions match the primary label and supports comparison with studies that use a single correct label. For configurations with ten runs, each metric is calculated per run and averaged across the runs.
 
-本文仅报告严格形式的 F1，因为按允许标签准则计算时，同一个预测在 Precision 和 Recall 中可能对应不同的类别。Strict Macro-F1 是各类别 F1 的平均值（Opitz & Burst, 2019）。其中 $\mathrm{P}_c$ 和 $\mathrm{R}_c$ 由公式 5.2a 和 5.2b 将 $A_i$ 替换为 $\{y_i\}$ 得到。这一指标反映预测与主标签匹配的频率，可用于和仅采用一个正确标签的研究进行比较。对于运行十次的配置，每个指标按每次运行分别计算，再在各次运行之间取平均。
+本文仅报告严格形式的 F1，因为按允许标签准则计算时，同一个预测在 Precision 和 Recall 中可能对应不同的类别。Strict Macro-F1 是各类别 F1 的平均值（Opitz & Burst, 2019）。其中 $\mathrm{P}_c$ 和 $\mathrm{R}_c$ 由公式 5.2a 和 5.2b 将 $A_i$ 替换为 $\lbrace y_i \rbrace$ 得到。这一指标反映预测与主标签匹配的频率，可用于和仅采用一个正确标签的研究进行比较。对于运行十次的配置，每个指标按每次运行分别计算，再在各次运行之间取平均。
 
 **⑤ 统计方法**
 
