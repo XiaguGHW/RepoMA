@@ -194,3 +194,31 @@ Revidierte GT: Roboter (LLM korrekt: nein – Roboter-Zeichnung ging im Handbuch
 GT vor Review: Kombinierte Einheit (Umsetzeinheit) | LLM: Gantry
 Analyse (Ausleger als Portalstruktur fehlinterpretiert): Die Baugruppe besteht aus zwei horizontalen Linearachsen (R=0, T=2: X-Achse Pos. 0100 und Y-Achse Pos. 0104). Es ist jedoch ein einseitig geführtes Auslegersystem (Grenzfall 6.4) und kein Gantry: Die obere Y-Achse ist nur einseitig am Schlitten der einzelnen X-Achse montiert und ragt frei aus. Das LLM begeht zwei Fehler: Erstens verwechselt es die Abstützung der einzelnen X-Achse auf zwei Standprofilen (Pos. 0102) mit einer beidseitigen Portalführung der Y-Achse (Gantry-Kriterium c verletzt, analog zu 0804306221). Zweitens zählt es fälschlicherweise den Frequenzumrichter (Pos. 0108, R030529477) als dritte Linearachse (T=3).
 Revidierte GT: Kombinierte Einheit / Umsetzeinheit (LLM korrekt: nein – Auslegerbauweise mit Portalführung verwechselt, Kriterium c verletzt).
+
+
+## 第九部分 · Excel 第 24–26 行
+
+来源为 `Fehler_Analyse` 工作表照片，按行顺序及共同列对应。未拍全的模型输出参考同一工作簿 `Korrigierte GT&ZGT` 对应记录补录，待核对。第 26 行的 G 列在本次照片中为空；已整理的修正表中该项为 Kombinierte Einheit，两者可能反映修正前后状态，保留此差异。
+
+| Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth（照片） | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
+|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 24 | 3 | 0 | `0804HX0679` | `AS90052795/01` | E2 | Rotationseinheit | — | — | — | — | Kombinierte Einheit | — | — | Kombinierte Einheit | — | — | Kombinierte Einheit | — | — | [原文](#excel-第-24-行) |
+| 25 | 3 | 0 | `0804KE7723` | `AS00115515` | E1 | Multi-Achs-System (Gantry) | — | Kombinierte Einheit | — | Kombinierte Einheit | — | — | Kombinierte Einheit | — | — | — | — | — | — | [原文](#excel-第-25-行) |
+| 26 | 3 | 0 | `0804KY7178` | `AS00217781` | E1 | Lineareinheit | — | — | `[EMPTY]` | — | — | — | — | — | — | Kombinierte Einheit | — | — | Kombinierte Einheit | [原文](#excel-第-26-行) |
+
+### Excel 第 24 行
+
+GT vor Review: Rotationseinheit | LLM: Kombinierte Einheit (Umsetzeinheit)
+Analyse (Vertikaler Zahnriemenantrieb als Hubachse fehlinterpretiert): Die Baugruppe ist eine reine Rotationseinheit (R=1, T=0, Klasse 6): Der oben an einer statischen Standsäule (Pos. 0105) montierte Servomotor (Pos. 0109) treibt über einen vertikal verlaufenden Zahnriemen (Pos. 0114) lediglich die untere Schwenkachse mit den zwei Parallelgreifern an. Es gibt keine vertikale Hubbewegung. Das LLM hat die Kombination aus vertikaler Säule, obenliegendem Motor und Zahnriementrieb optisch als „vertikale Hubachse (T=1)“ halluziniert und die Baugruppe daher fälschlicherweise als Hub-Schwenk-Einheit (Grenzfall 6.3, R=1, T=1 → Kombinierte Einheit) eingestuft.
+Revidierte GT: Rotationseinheit (LLM korrekt: nein – statische Säule mit vertikalem Zahnriementrieb fälschlicherweise als Hubachse T=1 gedeutet).
+
+### Excel 第 25 行
+
+GT vor Review: Multi-Achs-System (Gantry) | LLM: Kombinierte Einheit (Umsetzeinheit)
+Analyse (Irreführung durch 9-seitigen Angebotstext): Eindeutiges 3-Achs-Portal (Gantry, R=0, T=3): Zwei parallele X-Achsen (Pos. 20/30, 2x MKR-110) führen beidseitig die Y-Brücke (Pos. 60, CKK-145) samt vertikaler Z-Achse (Pos. 80, CKK-145). Da dem LLM zusätzlich ein 9-seitiges Rexroth-Textangebot übergeben wurde, ging die 1-seitige Hauptzeichnung (DR00218359) unter. Im Angebot erkennt das LLM zwar die zwei parallelen X-Achsen und R=0, T=3, deutet aber den 2964 mm langen Portal-Brückenträger (Pos. 50) allein wegen seiner Benennung als Sonderverbindungswinkel fälschlicherweise als einseitigen Ausleger (Grenzfall 6.4) und verneint Kriterium (c).
+Revidierte GT: Gantry (LLM korrekt: nein – durch 9-seitiges Angebot abgelenkt und Brückenträger Pos. 50 als Auslegerwinkel fehlinterpretiert).
+
+### Excel 第 26 行
+
+Grenzfall: Sperrzylinder Pos. 0101 auch als zweite Hauptachse interpretierbar. Die Baugruppe (Ausheber) besitzt neben dem vertikalen Hubzylinder (Pos. 0100, T₁=1) einen horizontalen Kompaktzylinder (Pos. 0101), der einen Schieber (Pos. 0013, pusher / Schieber) betätigt. Laut Schnitt A-A dient dieser intern als mechanische Verriegelung der Hubwelle (Hilfsfunktion zählt nicht → R=0, T=1, Lineareinheit); wegen der Benennung pusher ist er jedoch auch als zweite Linearachse (R=0, T=2 → Kombinierte Einheit) interpretierbar.
+Revidierte GT: Lineareinheit, Kombinierte Einheit (LLM korrekt: ja – wegen der Doppelfunktion von Zylinder Pos. 0101 als Verriegelung bzw. Pusher sind beide Labels vertretbar).
