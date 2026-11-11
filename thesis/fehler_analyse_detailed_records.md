@@ -313,12 +313,34 @@ Analyse (Halluzination einer zweiten Horizontalachse / Übersehen des Drehaktors
 Revidierte GT: Kombinierte Einheit (LLM korrekt: nein – nur eine Horizontalachse (X/Z-Portal, Grenzfall 6.6) plus Drehaktor Pos. 0102, R=1, T=2).
 
 
-## 第十三部分 · Excel 第 38–40 行（待补全）
+## 第十三部分 · Excel 第 38–40 行
 
-来源为 `Fehler_Analyse` 工作表照片：A–G 列和 H–K 列可见；G、H–K 列均为空。L–S 列未拍到，按 SAP 和 Teamcenter 编号参考 `corrected_gt_zgt_error_records.md` 中 `Korrigierte GT&ZGT` 的对应记录补录，尚待与本工作表核对。`—` 表示对应来源中为空，不等同于明确显示的 `[EMPTY]`，也不能仅据此推断模型没有输出。T 列 Fehleranalyse 未拍到，待后续照片补全。
+来源为 `Fehler_Analyse` 工作表照片：A–G 列和 H–K 列可见；G、H–K 列均为空。L–S 列未拍到，按 SAP 和 Teamcenter 编号参考 `corrected_gt_zgt_error_records.md` 中 `Korrigierte GT&ZGT` 的对应记录补录，尚待与本工作表核对。`—` 表示对应来源中为空，不等同于明确显示的 `[EMPTY]`，也不能仅据此推断模型没有输出。T 列错误分析依据用户随后提供的文字补录；按 Ground Truth、模型类别和原有行顺序匹配，文字中未包含 SAP 或 Teamcenter 编号，待原照片进一步核对。第 40 行“×/Y/Z”按用户提供的文字保留，待核对。
 
 | Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
 |---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 38 | 1 | 0 | `0804CE5532` | `AS90000201` | E2 | Kombinierte Einheit | — | — | — | — | — | — | — | — | Lineareinheit | — | — | — | — | 待拍摄 |
-| 39 | 1 | 0 | `0804EV7706` | `AS90158200/01` | E1 | Roboter | — | — | — | — | — | — | Kombinierte Einheit | — | — | — | — | — | — | 待拍摄 |
-| 40 | 1 | 0 | `0804FK2694` | `AS90037183` | E2 | Multi-Achs-System (Gantry) | — | — | — | — | — | — | — | Kombinierte Einheit | — | — | — | — | — | 待拍摄 |
+| 38 | 1 | 0 | `0804CE5532` | `AS90000201` | E2 | Kombinierte Einheit | — | — | — | — | — | — | — | — | Lineareinheit | — | — | — | — | [原文](#excel-第-38-行) |
+| 39 | 1 | 0 | `0804EV7706` | `AS90158200/01` | E1 | Roboter | — | — | — | — | — | — | Kombinierte Einheit | — | — | — | — | — | — | [原文](#excel-第-39-行) |
+| 40 | 1 | 0 | `0804FK2694` | `AS90037183` | E2 | Multi-Achs-System (Gantry) | — | — | — | — | — | — | — | Kombinierte Einheit | — | — | — | — | — | [原文](#excel-第-40-行) |
+
+
+### Excel 第 38 行
+
+GT vor Review: Kombinierte Einheit | LLM: Lineareinheit
+Analyse (Fälschliche Zusammenfassung zweier orthogonaler Linearachsen zu T=1): Die Baugruppe (Handling) ist ein X/Z-Zweiachssystem aus einem horizontalen Schlitzzylinder (Pos. 0100, Hub 300 mm, T1=1), einem orthogonal daran montierten vertikalen Kompaktschlitten (Pos. 0105, Hub 100 mm, T2=1) und einem Parallelgreifer (Pos. 0106 → R=0, T=2, Kombinierte Einheit nach Grenzfall 6.6). Das LLM hat zwar beide Linearaktoren (Pos. 0100 und 0105) in der Stückliste erkannt, deren orthogonale Einbaulage (horizontal + vertikal) jedoch übersehen und sie fälschlicherweise zu einer einzigen vertikalen
+Hubachse (T=1) zusammengefasst.
+Revidierte GT: Kombinierte Einheit (LLM korrekt: nein - die orthogonalen Achsen Pos. 0100 und Pos.
+0105 wurden fälschlicherweise als eine einzige Achse T=1 gezählt).
+
+### Excel 第 39 行
+
+GT vor Review: Roboter LLM: Kombinierte Einheit
+Analyse (Verstoß gegen Zählregel für Endeffektoren): Die Baugruppe (robot unit) besteht aus einem 6-Achs-Knickarmroboter (Pos. 0104, KUKA, R=6, T=0) und einem am Flansch montierten Doppel-Vakuumgreifer (Unterbaugruppen Pos. 0001-0003). Obwohl das LLM die beiden pneumatischen Kompaktschlitten (Pos. 0104 in den Unterbaugruppen, R412.019.211, Hub 20 mm) explizit als Teil der Endeffektoren erkannt hat, hat es diese entgegen Abschnitt 3 (wonach Aktoren innerhalb von Endeffektoren/Greifern nicht mitzählen) fälschlicherweise als zusätzliche Hauptachsen (T ≥ 1) gewertet.
+Revidierte GT: Roboter (LLM korrekt: nein - Kompaktschlitten innerhalb des Endeffektors wurden regelwidrig als Hauptachse T ≥ 1 mitgezählt).
+
+### Excel 第 40 行
+
+GT vor Review: Multi-Achs-System (Gantry) | LLM: Kombinierte Einheit
+Analyse (Fehlbeurteilung des Gantry-Tests / Beidseitige Führung übersehen): Die Baugruppe (gantry / Portal) ist ein ×/Y/Z-Flächenportal (R=0, T=3) auf einem Portalgestell (Pos. 0001). Entgegen der Annahme des LLMs ist Gantry-Kriterium (c) eindeutig erfüllt: Die horizontale Basisachse wird beidseitig über zwei parallele Linearmodule geführt (Pos. 0002 mit Achsen Pos. 107/108 sowie Pos. 0005 mit Verbindungswelle Pos. 120 und Achsen Pos. 124/125). Das LLM ließ sich durch die Benennung der Querachse (Pick and Place links X-Achse Pos. 105) verwirren und hat die Brückenlagerung fälschlicherweise verneint.
+Revidierte GT: Gantry (LLM korrekt: nein - Gantry-Kriterium c ist durch die parallelen Basisachsen Pos.
+107/108 bzw. 124/125 erfüllt).
