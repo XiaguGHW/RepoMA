@@ -376,11 +376,33 @@ R=O, T=O).
 
 ## 第十五部分 · Excel 第 44–47 行（待照片核对）
 
-行号、SAP、Teamcenter 及下表注明的字段由用户提供；编号配对均与 `corrected_gt_zgt_error_records.md` 一致。第 44 行 Ground Truth 用户提供为截断的 `Kombinierte Ei`；完整名称仅按修正表记录。第 47 行 Register 未提供，其 SAP 编号前的 `0` 所属列未确认。修正表记录该装配体黄色高亮，仍需核对 `Fehler_Analyse` 工作表行颜色。以下修正表的其他允许类别及模型记录尚未通过本工作表照片核对；空白与 `[EMPTY]` 不混同。错误分析待提供。
+行号、SAP、Teamcenter 及下表注明的字段由用户提供；编号配对均与 `corrected_gt_zgt_error_records.md` 一致。第 44 行 Ground Truth 用户提供为截断的 `Kombinierte Ei`；完整名称仅按修正表记录。第 47 行 Register 未提供，其 SAP 编号前的 `0` 所属列未确认。修正表记录该装配体黄色高亮，仍需核对 `Fehler_Analyse` 工作表行颜色。以下修正表的其他允许类别及模型记录尚未通过本工作表照片核对；空白与 `[EMPTY]` 不混同。第 44–46 行错误分析按用户文字补录，第 47 行错误分析据用户说明为空；用户提供的 `R-0` 和 `T-1` 原样保留，待核对。用户文字开头的 `gemini-2.5-pro (text)` 为表头，未据此推断该列的单元格内容。
 
 | Excel 行 | SAP-Nummer | Teamcenter | 用户提供 Register | 用户提供 Ground Truth | 修正表 Register / Ground Truth | 修正表其他允许类别 | 修正表非空模型记录 | Fehleranalyse |
 |---:|---|---|---|---|---|---|---|---|
-| 44 | `0804GY2577` | `AS90283974` | E2 | Kombinierte Ei（截断） | E2 / Kombinierte Einheit | — | claude-haiku-4-5_20251001 (image): Rotationseinheit | 待提供 |
-| 45 | `0804GZ3046` | `AS90390673/00` | E1 | Rotationseinheit | E1 / Rotationseinheit | — | claude-opus-4-8 (image): Kombinierte Einheit | 待提供 |
-| 46 | `0804JL5526` | `AS00016496` | E2 | Lineareinheit | E2 / Lineareinheit | Keine der verfügbaren Klassen | claude-haiku-4-5_20251001 (image): Keine der verfügbaren Klassen | 待提供 |
-| 47 | `0804JU56371` | `AS00049479` | 未提供 | Roboter | M / Roboter | Kombinierte Einheit | gemini-2.5-flash (pdf): `[EMPTY]` | 待提供 |
+| 44 | `0804GY2577` | `AS90283974` | E2 | Kombinierte Ei（截断） | E2 / Kombinierte Einheit | — | claude-haiku-4-5_20251001 (image): Rotationseinheit | [原文](#excel-第-44-行) |
+| 45 | `0804GZ3046` | `AS90390673/00` | E1 | Rotationseinheit | E1 / Rotationseinheit | — | claude-opus-4-8 (image): Kombinierte Einheit | [原文](#excel-第-45-行) |
+| 46 | `0804JL5526` | `AS00016496` | E2 | Lineareinheit | E2 / Lineareinheit | Keine der verfügbaren Klassen | claude-haiku-4-5_20251001 (image): Keine der verfügbaren Klassen | [原文](#excel-第-46-行) |
+| 47 | `0804JU56371` | `AS00049479` | 未提供 | Roboter | M / Roboter | Kombinierte Einheit | gemini-2.5-flash (pdf): `[EMPTY]` | 空白（用户确认） |
+
+
+### Excel 第 44 行
+
+GT vor Review: Kombinierte Einheit | LLM: Rotationseinheit
+Analyse (Übersehene Hubachse / Irreführende Bauteilbenennung): Trotz der Benennung turning unit / Wendeeinheit handelt es sich um eine Hub-Schwenk-Einheit (R=1, T=1 → Kombinierte Einheit, Grenzfall 6.3), bei der ein vertikaler Pneumatikzylinder (Pos. 0110, Festo ADN-32-120, T=1) eine 180°-Schwenkeinheit (Pos. 0112, Festo DRRD-25-180, R=1) samt Parallelgreifer (Pos. 0102) anhebt. Das LLM ließ sich vom Namen täuschen, hat eine „zylindrische Arbeitsplattform mit vertikaler Drehachse" halluziniert und sowohl den Hubzylinder (Pos. 0110) als auch den Greifer (Pos. 0102) komplett übersehen.
+Revidierte GT: Kombinierte Einheit (LLM korrekt: nein - vertikaler Hubzylinder Pos. 0110 wurde
+übersehen, R=1, T=1).
+
+### Excel 第 45 行
+
+GT vor Review: Rotationseinheit | LLM: Kombinierte Einheit
+Analyse (Gefederte Werkstücknester auf Rundtisch als T=1 fehlinterpretiert): Die Baugruppe (rotation unit) ist ein Rundtisch (RT2 mit Teller, R=1, T=0 → Rotationseinheit, Grenzfall 6.2) mit vier Werkstückaufnahmen (Produktnest / swivel fixture) und Fixiergreifern. Das LLM hat die passiven Führungssäulen (GUIDE PILLAR) und Druckfedern (pressure springs) der Werkstücknester fälschlicherweise als aktive translatorische Hubachse (T=1) gewertet.
+Revidierte GT: Rotationseinheit (LLM korrekt: nein - passive Führungssäulen und Federn der Produktnester wurden als Hubachse T=1 fehlinterpretiert).
+
+### Excel 第 46 行
+
+GT vor Review: Lineareinheit | LLM: Keine der verfügbaren Klassen
+Analyse (Grenzfall zwischen linearer Positioniereinheit und Messfunktion nach S1): Die Baugruppe (Sensor / PowerMeter) besteht laut Stückliste im Kern aus einem pneumatischen Kompaktschlitten
+(Pos. 0100, Aventics MSC-MG-HM, Hub 100 mm, R=0, T=1), der das in der 2D-Zeichnung nur als Referenzgeometrie angedeutete Messgerät (3843AY6685) linear verfährt (→ Lineareinheit). Das LLM hat den Minischlitten (R-0, T=1) zwar korrekt erkannt, die übergeordnete Hauptfunktion wegen des im 3D-CAD sichtbaren PowerMeters und der Benennung Sensor jedoch als „Messen/Prüfen" eingestuft und gemäß Schritt S1 ausgeschlossen. Da im Codebook sowohl die Einstufung als lineare Positioniereinheit eines Messkopfs als auch der Ausschluss als Messapplikation (S1) gut begründbar sind, sind beide
+Labels vertretbar.
+Revidierte GT: Lineareinheit, Keine der verfügbaren Klassen (LLM korrekt: ja - sowohl die Einstufung als lineare Zustelleinheit T-1 als auch der Ausschluss als Messbaugruppe nach S1 sind vertretbar).
