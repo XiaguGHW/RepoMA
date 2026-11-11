@@ -113,12 +113,12 @@ Fehleranalyse: Sehr schwierig: Eine Lineareinheit, die rotatorisch bewegt wird. 
 
 ## 第五部分 · Excel 第 16–17 行
 
-来源为 `Fehler_Analyse` 工作表的三张照片。第 16 行的 Fehleranalyse 完整显示，第 17 行的 Fehleranalyse 在照片底部截断。部分模型列未拍全，表中对应位置参考 `Korrigierte GT&ZGT` 的记录，待核对。
+来源为 `Fehler_Analyse` 工作表的三张照片。第 16 行的 Fehleranalyse 完整显示，第 17 行的 Fehleranalyse 已由后续照片补齐。部分模型列未拍全，表中对应位置参考 `Korrigierte GT&ZGT` 的记录，待核对。
 
 | Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
 |---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 16 | 5 | 0 | `0804HZ8350` | `AS90317924` | E1 | Multi-Achs-System (Gantry) | — | Kombinierte Einheit | — | — | Kombinierte Einheit | — | Kombinierte Einheit | Kombinierte Einheit | — | — | Kombinierte Einheit | — | — | [原文](#excel-第-16-行) |
-| 17 | 5 | 0 | `0804KY3585` | `AS00228511/03` | E1 | Multi-Achs-System (Gantry) | — | Lineareinheit | — | — | Kombinierte Einheit | — | Kombinierte Einheit | Lineareinheit | — | — | Lineareinheit | — | — | [原文（不完整）](#excel-第-17-行) |
+| 17 | 5 | 0 | `0804KY3585` | `AS00228511/03` | E1 | Multi-Achs-System (Gantry) | — | Lineareinheit | — | — | Kombinierte Einheit | — | Kombinierte Einheit | Lineareinheit | — | — | Lineareinheit | — | — | [原文](#excel-第-17-行) |
 
 ### Excel 第 16 行
 
@@ -126,7 +126,22 @@ GT vor Review: Multi-Achs-System (Gantry) | LLM: Kombinierte Einheit
 Analyse: Eindeutiges 3-Achs-Gantry (R=0, T=3): Das Rexroth-Mehrachssystem (Pos. 0100, R115.800.975) besteht aus einer beidseitig geführten Portal-Basisachse (2x MKR-140 mit Synchronwelle, Hub 1750 mm), einer darüber als Brücke gelagerten Querachse (CKR-200, Hub 3220 mm) und einer vertikalen Z-Achse (CKK-145, Hub 420 mm). Das LLM scheitert aus zwei Gründen: Entweder übersieht es in der Unterstückliste die beiden MKR-140-Basismodule komplett und zählt nur T=2 (CKR-200 + CKK-145), oder es erkennt zwar T=3 inklusive 2x MKR-140, schließt aber aus dem Bauteilnamen „Kreuzplatte“ (Verbindung Y zu Z) fälschlicherweise auf eine einseitige Auslegerbauweise der Querachse und verneint so Kriterium (c).
 Revidierte GT: Gantry (LLM korrekt: nein).
 
-### Excel 第 17 行（未完）
+### Excel 第 17 行
 
 GT vor Review: Multi-Achs-System (Gantry) | LLM: Kombinierte Einheit / Lineareinheit
-Analyse: Eindeutiges 3-Achs-Gantry (R=0, T=3) auf 6 Ständern (Pos. 0010, H=1400 mm) mit X-Achse (Pos. 0020, beidseitig geführt über Fest- und Losseitenschlitten Pos. 0055–0070), zwei Y-Achsen (Pos. 0030, 0804.KX6.886) und einer Z-Achse (Pos. 0035, 0804.KX3.877). Das LLM scheitert an zwei typischen Fallstricken: Entweder betrachtet es isoliert nur die Unterstückliste der Z-Achse (0804.KX3.877 mit 1x Rexroth-Achse + Siemens-Motor → T=1) und klassifiziert fälschlich Lineareinheit, oder es erkennt zwar **［照片到此截断］**
+Analyse: Eindeutiges 3-Achs-Gantry (R=0, T=3) auf 6 Ständern (Pos. 0010, H=1400 mm) mit X-Achse (Pos. 0020, beidseitig geführt über Fest- und Losseitenschlitten Pos. 0055–0070), zwei Y-Achsen (Pos. 0030, 0804.KX6.886) und einer Z-Achse (Pos. 0035, 0804.KX3.877). Das LLM scheitert an zwei typischen Fallstricken: Entweder betrachtet es isoliert nur die Unterstückliste der Z-Achse (0804.KX3.877 mit 1x Rexroth-Achse + Siemens-Motor → T=1) und klassifiziert fälschlich Lineareinheit, oder es erkennt zwar T=2 bzw. T=3, lässt sich aber durch das Einzelteil Pos. 0008 („Ausleger / Cantilever“ innerhalb der Z-Achse) in die Irre führen und schließt trotz der 6 Ständer und der expliziten Fest-/Loslager-Portalführung fälschlicherweise auf eine einseitige Auslegerbauweise der Gesamtstruktur (Kombinierte Einheit).
+Revidierte GT: Gantry (LLM korrekt: nein).
+
+## 第六部分 · Excel 第 18 行
+
+来源为 `Fehler_Analyse` 工作表的三张照片。G 列文字在左侧照片边缘被裁切，可见开头与另一张表一致。部分模型列未拍全，参考同一工作簿 `Korrigierte GT&ZGT` 对应记录补录，待核对。
+
+| Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
+|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 18 | 4 | 0 | `0804CC2134` | `AS90419212/01` | M | Roboter | Kombinierte Einheit | Rotationseinheit | — | — | Keine der verfügbaren Klassen | — | — | Keine der verfügbaren Klassen | — | — | Greifer | — | — | [原文](#excel-第-18-行) |
+
+### Excel 第 18 行
+
+GT vor Review: Roboter, Kombinierte Einheit | LLM: Greifer / Keine der verfügbaren Klassen / Rotationseinheit
+Analyse: Die Hauptbaugruppe umfasst einen 4-Achs-SCARA-Roboter (Pos. 0100, Stäubli TS60, R=3, T=1 mit 400 mm Pinolenhub) auf einem Standfuß (Pos. 0001) samt Vakuum-Ejektor (Pos. 0101) und SCHUNK-Schnellwechselkopf (Pos. 0102, SWK-011) – somit sind sowohl Roboter als auch Kombinierte Einheit (R ≥ 2, T=1) korrekt. Die Begründungen zeigen jedoch ein Dateninput-Problem: Dem LLM lagen im Kontext lediglich die Unterlagen des untergeordneten SCHUNK-Schnellwechselsystems (Pos. 0102, SWS/SWK 011) vor, während die Hauptzeichnung und Hauptstückliste mit dem Stäubli-Roboter fehlten. Isoliert auf den Schnellwechselkopf bezogen rieten die Modelle daher zwischen Keine der verfügbaren Klassen (R=0, T=0, Verriegelung als Hilfsfunktion), Greifer (Werkzeugklemmung als Greiffunktion gedeutet) und Rotationseinheit (4 × 90°-Anbaulagen als Drehachse fehlinterpretiert).
+Revidierte GT: Roboter, Kombinierte Einheit (LLM korrekt: nein – bedingt durch unvollständigen Dokumenten-Input nur für Unterposition 0102).
