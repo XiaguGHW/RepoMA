@@ -263,7 +263,7 @@ Revidierte GT: Gantry, Keine der verfügbaren Klassen (LLM korrekt: ja – wegen
 | 31 | 2 | 0 | `0804KU2401` | `AS00177443` | E1 | Lineareinheit | — | — | `[EMPTY]` | — | — | — | — | — | `[EMPTY]` | — | — | — | — | 空白（黄色高亮） |
 | 32 | 2 | 0 | `0804KY7179` | `AS00221603` | E1 | Lineareinheit | — | Kombinierte Einheit | `[EMPTY]` | — | — | — | — | — | — | — | — | — | — | [原文](#excel-第-32-行) |
 | 33 | 2 | 0 | `0804KZ9488` | `AS00231836` | E2 | Kombinierte Einheit | — | Rotationseinheit | — | — | — | — | — | Rotationseinheit | — | — | — | — | — | [原文](#excel-第-33-行) |
-| 34 | 2 | 0 | `0804LA7293` | `AS00242009` | E2 | Kombinierte Einheit | — | Greifer | — | — | — | — | — | Greifer | — | — | — | — | — | [部分原文](#excel-第-34-行) |
+| 34 | 2 | 0 | `0804LA7293` | `AS00242009` | E2 | Kombinierte Einheit | — | Greifer | — | — | — | — | — | Greifer | — | — | — | — | — | [原文](#excel-第-34-行) |
 
 ### Excel 第 30 行
 
@@ -286,6 +286,28 @@ Revidierte GT: Kombinierte Einheit (LLM korrekt: nein – Hauptzeichnung ging im
 ### Excel 第 34 行
 
 GT vor Review: Kombinierte Einheit | LLM: Greifer
-Analyse (Fehlinterpretation der 2D-Endlagenansichten): Die Baugruppe besteht aus einem Linearmodul (Pos. 0100, T=1), einer 180°-Schwenkeinheit (Pos. 0105, R=1) und einem Parallelgreifer (Pos. 0106 → Kombinierte Einheit, Grenzfall 6.3). Da die 2D-Zeichnung dieselbe Einheit zweimal in ihren beiden
+Analyse (Fehlinterpretation der 2D-Endlagenansichten): Die Baugruppe besteht aus einem Linearmodul (Pos. 0100, T=1), einer 180°-Schwenkeinheit (Pos. 0105, R=1) und einem Parallelgreifer (Pos. 0106 → Kombinierte Einheit, Grenzfall 6.3). Da die 2D-Zeichnung dieselbe Einheit zweimal in ihren beiden Endlagen zeigt, hat das LLM dies als „zwei Greifer“ missverstanden und die Hauptaktoren (Pos. 0100, 0105) fälschlicherweise als bloßen Greifbackenantrieb (R=0, T=0) gewertet.
+Revidierte GT: Kombinierte Einheit (LLM korrekt: nein – Linearmodul Pos. 0100 und Schwenkeinheit Pos. 0105 wurden als Greifbackenantrieb fehlinterpretiert).
 
-[后续文字被照片下边缘截断，待补充。]
+
+## 第十二部分 · Excel 第 35–37 行
+
+来源为 `Fehler_Analyse` 工作表照片，按行顺序及共同列对应。未拍全的模型输出参考已整理的 `Korrigierte GT&ZGT` 对应记录补录，待核对。`—` 表示来源中为空，不等同于明确显示的 `[EMPTY]`。第 36 行黄色高亮，照片中 T 列为空。
+
+| Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
+|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 35 | 2 | 0 | `0804LH9239` | `AS00306708` | E1 | Keine der verfügbaren Klassen | — | Kombinierte Einheit | Lineareinheit | — | — | — | — | — | — | — | — | — | — | [原文](#excel-第-35-行) |
+| 36 | 1 | 0 | `0804AF9667` | `AS90134089` | M | Multi-Achs-System (Gantry) | Kombinierte Einheit | — | `[EMPTY]` | — | — | — | — | — | — | — | — | — | — | 空白（黄色高亮） |
+| 37 | 1 | 0 | `0804AY8008` | `AS90102714` | E2 | Kombinierte Einheit | — | Gantry | — | — | — | — | — | — | — | — | — | — | — | [原文](#excel-第-37-行) |
+
+### Excel 第 35 行
+
+GT vor Review: Keine der verfügbaren Klassen | LLM: Kombinierte Einheit / Lineareinheit
+Analyse (Fehlinterpretation passiver Bauteile als Aktoren): Die Baugruppe (Bedienpultbefestigung) ist ein rein passiver HMI-Haltearm aus Alu-Profilen (Pos. 0101, 0102), Lagerböcken (Pos. 0100) und Zylinderschrauben (Pos. 0200). Ohne Aktoren und Handhabungsfunktion (R=0, T=0) greift Schritt S1 bzw. Grenzfall 6.8 (Keine der verfügbaren Klassen). Die LLMs haben passive Teile wie Schrauben (Pos. 0200), Alu-Profile und Lagerböcke fälschlicherweise als Hub-, Linear- bzw. Schwenkaktoren (T ≥ 1, R=1) gewertet.
+Revidierte GT: Keine der verfügbaren Klassen (LLM korrekt: nein – passive Halterung ohne Aktoren; Schrauben und Alu-Profile wurden als Antriebe fehlinterpretiert).
+
+### Excel 第 37 行
+
+GT vor Review: Kombinierte Einheit | LLM: Gantry
+Analyse (Halluzination einer zweiten Horizontalachse / Übersehen des Drehaktors): Die Baugruppe ist ein X/Z-Portal auf zwei festen Standfüßen (Pos. 0017), bestehend aus einer einzigen Horizontalachse (Pos. 0100, AFAG Portalmodul PMP, T₁=1), einem Vertikalschlitten (Pos. 0101, SMC MXQ16-100, T₂=1) und einem 180°-Drehgreifer (Pos. 0102, SMC MRHQ20C-180S, R=1 → Kombinierte Einheit). Getäuscht durch die beiden Standfüße und die Benennung Portalmodul hat das LLM eine nicht existente Y-Achse sowie beidseitige Führungen halluziniert (Verstoß gegen Gantry-Kriterium b, Grenzfall 6.6: X/Z-Portal) und zudem die Rotationsachse Pos. 0102 (R=1) übersehen.
+Revidierte GT: Kombinierte Einheit (LLM korrekt: nein – nur eine Horizontalachse (X/Z-Portal, Grenzfall 6.6) plus Drehaktor Pos. 0102, R=1, T=2).
