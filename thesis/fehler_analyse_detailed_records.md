@@ -348,10 +348,27 @@ Revidierte GT: Gantry (LLM korrekt: nein - Gantry-Kriterium c ist durch die para
 
 ## 第十四部分 · Excel 第 41–43 行（待照片核对）
 
-Excel 行号及 SAP、Teamcenter 编号由用户按顺序提供；编号配对与 `corrected_gt_zgt_error_records.md` 一致。以下 Register、Ground Truth、其他允许类别和模型列为修正表记录，尚未通过 `Fehler_Analyse` 工作表照片核对，不能视为该工作表对应字段已确认。修正表记录 SAP `0804FU6515` 对应黄色高亮，尚待核对本工作表的行颜色。A、B 列及错误分析等待照片；`—` 表示修正表来源为空，不等同于 `[EMPTY]`，不能据此推断模型未输出。
+Excel 行号及 SAP、Teamcenter 编号由用户按顺序提供；编号配对与 `corrected_gt_zgt_error_records.md` 一致。以下 Register、Ground Truth、其他允许类别和模型列为修正表记录，尚未通过 `Fehler_Analyse` 工作表照片核对，不能视为该工作表对应字段已确认。修正表记录 SAP `0804FU6515` 对应黄色高亮，尚待核对本工作表的行颜色。A、B 列等待照片；第 41、43 行错误分析按用户提供的文字原样补录，第 42 行错误分析据用户说明为空。用户文字中的 `Tz=1` 和 `R=O, T=O` 保留原样，待核对；`—` 表示修正表来源为空，不等同于 `[EMPTY]`，不能据此推断模型未输出。
 
 | Excel 行 | SAP-Nummer | Teamcenter | 修正表 Register | 修正表 Ground Truth | 修正表其他允许类别 | 修正表非空模型记录 | Fehleranalyse |
 |---:|---|---|---|---|---|---|---|
-| 41 | `0804FT6844` | `AS90412772` | E2 | Kombinierte Einheit | — | claude-haiku-4-5_20251001 (image): Lineareinheit | 待提供 |
-| 42 | `0804FU6515` | `AS90303031` | E2 | Kombinierte Einheit | — | gemini-2.5-flash (image): `[EMPTY]` | 待提供 |
-| 43 | `0804GA4441` | `AS90245290` | E1 | Keine der verfügbaren Klassen | — | claude-haiku-4-5_20251001 (pdf): Kombinierte Einheit | 待提供 |
+| 41 | `0804FT6844` | `AS90412772` | E2 | Kombinierte Einheit | — | claude-haiku-4-5_20251001 (image): Lineareinheit | [原文](#excel-第-41-行) |
+| 42 | `0804FU6515` | `AS90303031` | E2 | Kombinierte Einheit | — | gemini-2.5-flash (image): `[EMPTY]` | 空白（用户确认） |
+| 43 | `0804GA4441` | `AS90245290` | E1 | Keine der verfügbaren Klassen | — | claude-haiku-4-5_20251001 (pdf): Kombinierte Einheit | [原文](#excel-第-43-行) |
+
+
+### Excel 第 41 行
+
+GT vor Review: Kombinierte Einheit LLM: Lineareinheit
+Analyse (Variante 1 - Übersehene zweite Linearachse): Die Baugruppe ist ein zweiachsiges X/Z-Auslegersystem aus einer vertikalen Schlitteneinheit (Pos. 0101, Festo, Hub 200 mm, T1=1), einer orthogonal dazu montierten horizontalen Schlitteneinheit (Pos. 0105, Festo, Hub 150 mm, Tz=1) und einem Parallelgreifer mit Absaugstutzen (Pos. 0100, Schunk, Endeffektor zählt nicht). Da zwei orthogonale Linearachsen ohne Portalstruktur bzw. zweite Horizontalachse vorliegen (R=0, T=2, Gantry-Kriterien b und c verletzt, Grenzfall 6.4/6.6), gehört die Baugruppe eindeutig zur Klasse Kombinierte Einheit (genau wie das Schwesterbauteil 0804MB2849). Das LLM hat eine der beiden Schlitteneinheiten
+(Pos. 0101 oder 0105) übersehen und fälschlicherweise T=1 angenommen.
+Analyse (Variante 2 - Dateninput-Bug / Katalogblatt überlagert Hauptzeichnung): Da beim Export das Hersteller-Datenblatt des Festo-Minischlittens (Mini slides DGSL) mitgeschickt wurde, hat das LLM die eigentliche Hauptbaugruppe samt Greifer und zweiter Achse übersehen und ausschließlich einen einzelnen Katalog-Schlitten (R=0, T=1) bewertet (analog zu 0804FH4760).
+Revidierte GT: Kombinierte Einheit (LLM korrekt: nein - zweite Schlitteneinheit übersehen bzw.
+Hauptzeichnung ging im Festo-DGSL-Datenblatt unter).
+
+### Excel 第 43 行
+
+GT vor Review: Keine der verfügbaren Klassen | LLM: Kombinierte Einheit
+Analyse (Passiver HMI-Tragarm als Aktorik fehlinterpretiert): Die Baugruppe (control panel fixing) ist ein rein passiver Bedienpult-Tragarm ohne Aktoren (R=0, T=0 → Keine der verfügbaren Klassen, Grenzfall 6.8, analog zu 0804LH9239). Das LLM hat das vertikale Tragprofil (Pos. 0002/0901) fälschlicherweise als Hubzylinder (T=1) und die manuell drehbare Kupplung (Pos. 0104, 0-320deg rotable) als Drehaktor (R=1) gewertet.
+Revidierte GT: Keine der verfügbaren Klassen (LLM korrekt: nein - passiver HMI-Tragarm ohne Aktoren,
+R=O, T=O).
