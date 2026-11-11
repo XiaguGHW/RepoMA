@@ -410,11 +410,32 @@ Revidierte GT: Lineareinheit, Keine der verfügbaren Klassen (LLM korrekt: ja - 
 
 ## 第十六部分 · Excel 第 48–51 行（待照片核对）
 
-以下编号配对与 `corrected_gt_zgt_error_records.md` 一致。第 48、49 行根据用户给出的顺序匹配；第 50、51 行的文字次序交错，暂参考修正表顺序匹配，行号须由照片确认。用户提供的 0、1 未能可靠归属到具体行和列，暂不填写。Register E1 为用户提供；Ground Truth 和模型信息来自修正表，尚未与本工作表核对。修正表标记 `0804KT1289` 为黄色高亮；本工作表的颜色待确认。`—` 与明确标记的 `[EMPTY]` 不等同。错误分析待提供。
+以下编号配对与 `corrected_gt_zgt_error_records.md` 一致。第 48、49 行根据用户给出的顺序匹配；第 50、51 行的文字次序交错，暂参考修正表顺序匹配，行号须由照片确认。用户提供的 0、1 未能可靠归属到具体行和列，暂不填写。Register E1 为用户提供；Ground Truth 和模型信息来自修正表，尚未与本工作表核对。修正表标记 `0804KT1289` 为黄色高亮；本工作表的颜色待确认。`—` 与明确标记的 `[EMPTY]` 不等同。第 48–50 行错误分析按用户提供的文字原样补录，第 51 行据用户说明为空；第 48 行的 `R-0` 和第 49 行的 `T,=1` 原样保留，待核对。
 
 | Excel 行 | SAP-Nummer | Teamcenter | Register（用户提供） | Ground Truth（修正表） | 其他允许类别（修正表） | 非空模型记录（修正表） | Fehleranalyse |
 |---:|---|---|---|---|---|---|---|
-| 48 | `0804KK0664` | `AS00127924` | E1 | Greifer | — | gemini-2.5-flash (pdf): Kombinierte Einheit | 待提供 |
-| 49 | `0804KM8175` | `AS00145823` | E1 | Lineareinheit | — | gemini-2.5-flash (image): Kombinierte Einheit | 待提供 |
-| 50（待核对） | `0804KS8037` | `AS00164441` | E1 | Multi-Achs-System (Gantry) | — | claude-opus-4-8 (image): Kombinierte Einheit | 待提供 |
-| 51（待核对） | `0804KT1289` | `AS00177742` | E1 | Lineareinheit | — | claude-haiku-4-5_20251001 (pdf): `[EMPTY]` | 待提供 |
+| 48 | `0804KK0664` | `AS00127924` | E1 | Greifer | — | gemini-2.5-flash (pdf): Kombinierte Einheit | [原文](#excel-第-48-行) |
+| 49 | `0804KM8175` | `AS00145823` | E1 | Lineareinheit | — | gemini-2.5-flash (image): Kombinierte Einheit | [原文](#excel-第-49-行) |
+| 50（待核对） | `0804KS8037` | `AS00164441` | E1 | Multi-Achs-System (Gantry) | — | claude-opus-4-8 (image): Kombinierte Einheit | [原文](#excel-第-50-行) |
+| 51（待核对） | `0804KT1289` | `AS00177742` | E1 | Lineareinheit | — | claude-haiku-4-5_20251001 (pdf): `[EMPTY]` | 空白（用户确认） |
+
+
+### Excel 第 48 行
+
+GT vor Review: Greifer | LLM: Kombinierte Einheit
+Analyse (Dateninput-Bug / Katalog-Anwendungsbeispiel bewertet): Die Baugruppe ist ein reiner Parallelgreifer (Pos. 0100, Schunk PGN-plus 64-1) mit Schnellwechsler und Sensorik (R-0, T=0 → Greifer). Da das Schunk-Datenblatt (PGN-plus) mitgeliefert wurde, hat das LLM fälschlicherweise die generische Werbegrafik („Anwendungsbeispiel" mit Schwenkeinheit und Linearachsen, R=1, T=2) auf Seite 1 des Katalogs statt der eigentlichen Baugruppe klassifiziert.
+Revidierte GT: Greifer (LLM korrekt: nein - Katalog-Anwendungsbeispiel auf dem Datenblatt-Deckblatt wurde statt der eigentlichen Baugruppe bewertet).
+
+### Excel 第 49 行
+
+GT vor Review: Lineareinheit | LLM: Kombinierte Einheit
+Analyse (Fehlinterpretation der liegenden 3D-Ansicht / Doppelzählung der Achse): Die Baugruppe (Hubeinrichtung) besitzt nur eine einzige vertikale Linearachse (Pos. 0100, Rexroth CKK-145 mit Motor Pos. 0101, R=0, T=1 → Lineareinheit). Wegen der liegenden Darstellung im 3D-Bild hat das LLM diese Achse als „Horizontalachse" (T,=1) gelesen und allein aufgrund des Namens Hubeinrichtung eine zweite, „unsichtbare" Vertikalachse (T2=1) dazuhalluziniert.
+Revidierte GT: Lineareinheit (LLM korrekt: nein - dieselbe Hubachse Pos. 0100 wurde wegen der liegenden 3D-Ansicht doppelt als Horizontal- und Vertikalachse T=2 gezählt).
+
+### Excel 第 50 行
+
+GT vor Review: Multi-Achs-System (Gantry) | LLM: Kombinierte Einheit
+Analyse (Verwechslung von Basis- und Querachse beim Gantry-Test): Die Baugruppe (Achssystem / Gantry) ist ein klassisches zweiachsiges X/Y-Flächenportal (R=0, T=2) auf einem Standgestell (Pos. 0114).
+Im Rexroth-Mehrachssystem (Pos. 0100, CKK-110-NN-1 + 2x MKR-065-NN-3) bilden die beiden parallelen Linearmodule (2x MKR-065) die beidseitig geführte horizontale Basisachse, auf der das CKK-110 als Querbrücke läuft (alle drei Gantry-Kriterien a, b, c erfüllt). Das LLM hat jedoch die Rollen der Achsen vertauscht, das einzelne CKK-110 fälschlicherweise für die Basisachse gehalten und das System irrig als einseitigen Ausleger (Grenzfall 6.4) eingestuft.
+Revidierte GT: Gantry (LLM korrekt: nein - 2x MKR-065 bildet eindeutig eine beidseitig geführte
+Portalbasis für die Querachse CKK-110).
