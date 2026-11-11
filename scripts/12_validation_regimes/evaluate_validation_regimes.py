@@ -1203,7 +1203,7 @@ def read_result_file(path, issues, cfg, source, run):
     if not (c_sap and c_gt and c_pred):
         sys.exit(f"Spalten nicht gefunden in {path.name} (Blatt {sheet}): {cols}")
     if c_reg is None:
-        issues.append(dict(Typ="Spalte Register fehlt", Konfiguration=cfg, Quelle=source, Datei=path.name))
+        issues.append(dict(Typ="Spalte Register fehlt (Regime aus finaler GT)", Konfiguration=cfg, Quelle=source, Datei=path.name))
 
     recs = []
     for i, row in df.iterrows():
@@ -1238,6 +1238,7 @@ def read_result_file(path, issues, cfg, source, run):
                                    Datei=path.name, SAP=sap,
                                    Detail=f"Datei: {gt} | {', '.join(alts) or '—'} | {reg}  ->  final: {fgt} | {', '.join(falts) or '—'} | {freg}"))
             gt, alts, reg = fgt, falts, freg
+            sap = key  # einheitliche SAP-Schreibweise (z. B. fehlende führende Null)
         else:
             issues.append(dict(Typ="SAP nicht in finaler GT gefunden (Datei-GT verwendet)", Konfiguration=cfg,
                                Quelle=source, Datei=path.name, SAP=sap))
