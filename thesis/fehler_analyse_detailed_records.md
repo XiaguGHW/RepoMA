@@ -344,3 +344,14 @@ GT vor Review: Multi-Achs-System (Gantry) | LLM: Kombinierte Einheit
 Analyse (Fehlbeurteilung des Gantry-Tests / Beidseitige Führung übersehen): Die Baugruppe (gantry / Portal) ist ein ×/Y/Z-Flächenportal (R=0, T=3) auf einem Portalgestell (Pos. 0001). Entgegen der Annahme des LLMs ist Gantry-Kriterium (c) eindeutig erfüllt: Die horizontale Basisachse wird beidseitig über zwei parallele Linearmodule geführt (Pos. 0002 mit Achsen Pos. 107/108 sowie Pos. 0005 mit Verbindungswelle Pos. 120 und Achsen Pos. 124/125). Das LLM ließ sich durch die Benennung der Querachse (Pick and Place links X-Achse Pos. 105) verwirren und hat die Brückenlagerung fälschlicherweise verneint.
 Revidierte GT: Gantry (LLM korrekt: nein - Gantry-Kriterium c ist durch die parallelen Basisachsen Pos.
 107/108 bzw. 124/125 erfüllt).
+
+
+## 第十四部分 · Excel 第 41–43 行（待照片核对）
+
+Excel 行号及 SAP、Teamcenter 编号由用户按顺序提供；编号配对与 `corrected_gt_zgt_error_records.md` 一致。以下 Register、Ground Truth、其他允许类别和模型列为修正表记录，尚未通过 `Fehler_Analyse` 工作表照片核对，不能视为该工作表对应字段已确认。修正表记录 SAP `0804FU6515` 对应黄色高亮，尚待核对本工作表的行颜色。A、B 列及错误分析等待照片；`—` 表示修正表来源为空，不等同于 `[EMPTY]`，不能据此推断模型未输出。
+
+| Excel 行 | SAP-Nummer | Teamcenter | 修正表 Register | 修正表 Ground Truth | 修正表其他允许类别 | 修正表非空模型记录 | Fehleranalyse |
+|---:|---|---|---|---|---|---|---|
+| 41 | `0804FT6844` | `AS90412772` | E2 | Kombinierte Einheit | — | claude-haiku-4-5_20251001 (image): Lineareinheit | 待提供 |
+| 42 | `0804FU6515` | `AS90303031` | E2 | Kombinierte Einheit | — | gemini-2.5-flash (image): `[EMPTY]` | 待提供 |
+| 43 | `0804GA4441` | `AS90245290` | E1 | Keine der verfügbaren Klassen | — | claude-haiku-4-5_20251001 (pdf): Kombinierte Einheit | 待提供 |
