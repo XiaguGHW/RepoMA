@@ -278,6 +278,8 @@ def read_llm(path, cfg_name, expect, issues):
         issues.append(it)
     out = []
     for r in recs:
+        # SAP-Schreibweise selbst vereinheitlichen (ältere Versionen von Skript 12 behalten z. B. '804306221')
+        r["sap"] = match_key(r["sap"]) or r["sap"]
         if r["sap"] not in SET_115:
             issues.append(dict(Typ="LLM: Baugruppe nicht im 115er-Satz (ignoriert)", Quelle=cfg_name,
                                Datei=path.name, SAP=r["sap"]))
