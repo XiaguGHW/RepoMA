@@ -8,9 +8,9 @@ The LLM-based classification is evaluated in this chapter using the ground truth
 
 **① 评价数据集与预实验**
 
-The experiments are based on the 199 assemblies described in Section 4.1. A preliminary experiment was conducted before the main experiments to establish what information the models should return for each assembly. Fourteen assemblies from the primary set, two per class, were classified with Gemini 2.5 Pro in four output formats, which requested either only the primary class or additional information such as alternative classes. The format requesting only the primary class achieved results at least as good as those of the other formats. It corresponds to the codebook rule of assigning exactly one class to each assembly (Section 4.2.1) and allows predictions to be evaluated directly against the allowed label sets without additional scoring rules. All subsequent experiments therefore adopted this output format (Appendix [X]). The 14 assemblies were excluded from the evaluation, which thus covers 185 assemblies: the remaining 115 of the primary set and the 70 of the supplementary set. The results are all based on the final ground truth, with its revision and distribution by class and ambiguity regime presented in Section 5.2.
+The experiments are based on the 199 assemblies described in Section 4.1. A preliminary experiment was conducted before the main experiments to establish what information the models should return for each assembly. Fourteen assemblies from the primary set, two per class, were classified with Gemini 2.5 Pro in four output formats, which requested either only the primary class or additional information such as alternative classes. The format requesting only the primary class achieved results at least as good as those of the other formats. It corresponds to the codebook rule of assigning exactly one class to each assembly (Section 4.2.1) and allows predictions to be evaluated directly against the allowed label sets without additional scoring rules. All subsequent experiments therefore adopted this output format. The 14 assemblies were excluded from the evaluation, which thus covers 185 assemblies: the remaining 115 of the primary set and the 70 of the supplementary set. The results are all based on the final ground truth, with its revision and distribution by class and ambiguity regime presented in Section 5.2.
 
-实验以第 4.1 节介绍的 199 个装配体为基础。在主要实验之前，通过预实验确定模型对每个装配体应返回哪些信息。从主数据集中选取 14 个装配体，每类 2 个，使用 Gemini 2.5 Pro 按四种输出格式进行分类。这些格式分别要求仅返回主类别，或同时返回备选类别等补充信息。仅要求返回主类别的格式，其表现至少与其他格式相当。这一格式符合 Codebook 中每个装配体只归入一个类别的规则（第 4.2.1 节），也使预测结果能够直接与允许标签集合进行比较，无需额外的计分规则。因此，之后的所有实验均采用这一输出格式（附录 [X]）。这 14 个装配体不参与评价，评价因此涵盖 185 个装配体，即主数据集剩余的 115 个和补充数据集的 70 个。所有结果均基于最终版 Ground Truth，其修订以及各类别和歧义类别的分布见第 5.2 节。
+实验以第 4.1 节介绍的 199 个装配体为基础。在主要实验之前，通过预实验确定模型对每个装配体应返回哪些信息。从主数据集中选取 14 个装配体，每类 2 个，使用 Gemini 2.5 Pro 按四种输出格式进行分类。这些格式分别要求仅返回主类别，或同时返回备选类别等补充信息。仅要求返回主类别的格式，其表现至少与其他格式相当。这一格式符合 Codebook 中每个装配体只归入一个类别的规则（第 4.2.1 节），也使预测结果能够直接与允许标签集合进行比较，无需额外的计分规则。因此，之后的所有实验均采用这一输出格式。这 14 个装配体不参与评价，评价因此涵盖 185 个装配体，即主数据集剩余的 115 个和补充数据集的 70 个。所有结果均基于最终版 Ground Truth，其修订以及各类别和歧义类别的分布见第 5.2 节。
 
 **② 实验顺序**
 
@@ -176,7 +176,7 @@ With image input, the four models produced 80 of the 129 incorrect classificatio
 
 ### 5.1 待办
 
-- [ ] **附录 [X]**：L1–L4 的结果，按最终版 GT 重算。
+- [ ] 后续补充预实验 L1–L4 结果的附录，结果需按最终版 GT 重算。
 - [ ] **附录 [Y]**：接入方式、模型版本号、输入转换设置、生成参数。
 - [ ] **GPT-5.5 的 temperature**：查请求日志确认确实是 0。
 
@@ -203,4 +203,4 @@ With image input, the four models produced 80 of the 129 incorrect classificatio
 
 - 5.4：三种输入形式的定义（含 Tesseract，Smith, 2007）和比较结果（表 5.4）；说明 PDF 这组与 5.3 的 P3 是两次独立运行。
 - 5.5 开头：四种最终配置，每个模型一点，写明输入形式和选择理由（Haiku 不选 Opus 因成本；Pro 优于 Flash；Haiku 和 Pro 选 PDF 而非文本：只差一个装配体、PDF 平均最高、无需单独提取步骤；GPT-5.5 因 Azure OpenAI 的 PDF 转换不可控而用图片；DeepSeek 只支持文本）。
-- 附录 [X]：预实验 L1–L4 结果；[Y]：接入方式、模型版本、输入转换设置、生成参数；[W]：Prompt 原文、各阶段置信区间、完整指标。
+- 附录 [Y]：接入方式、模型版本、输入转换设置、生成参数；[W]：Prompt 原文、各阶段置信区间、完整指标。
