@@ -330,13 +330,13 @@ def main():
     ]})
 
     with pd.ExcelWriter(a.out, engine="openpyxl") as xw:
-        t56.to_excel(xw, "Tabelle_5_6", index=False)
-        t57.to_excel(xw, "Tabelle_5_7", index=False)
-        (mcase if len(mcase) else pd.DataFrame({"Hinweis": ["keine M-Baugruppe im Ergänzungsdatensatz"]})).to_excel(xw, "M_im_70er_Satz", index=False)
-        kl.to_excel(xw, "Klassen_E1E2_115_vs_70", index=False)
-        pd.DataFrame(chk).to_excel(xw, "Pruefung_Regime", index=False)
-        (pd.DataFrame(issues) if issues else pd.DataFrame({"Hinweis": ["keine Auffälligkeiten"]})).to_excel(xw, "Pruefungen", index=False)
-        notes.to_excel(xw, "Hinweise", index=False)
+        t56.to_excel(xw, sheet_name="Tabelle_5_6", index=False)
+        t57.to_excel(xw, sheet_name="Tabelle_5_7", index=False)
+        (mcase if len(mcase) else pd.DataFrame({"Hinweis": ["keine M-Baugruppe im Ergänzungsdatensatz"]})).to_excel(xw, sheet_name="M_im_70er_Satz", index=False)
+        kl.to_excel(xw, sheet_name="Klassen_E1E2_115_vs_70", index=False)
+        pd.DataFrame(chk).to_excel(xw, sheet_name="Pruefung_Regime", index=False)
+        (pd.DataFrame(issues) if issues else pd.DataFrame({"Hinweis": ["keine Auffälligkeiten"]})).to_excel(xw, sheet_name="Pruefungen", index=False)
+        notes.to_excel(xw, sheet_name="Hinweise", index=False)
         for ws in xw.book.worksheets:
             for col in ws.columns:
                 w = max(len(str(c.value)) if c.value is not None else 0 for c in col)
