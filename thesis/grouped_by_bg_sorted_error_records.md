@@ -1,8 +1,8 @@
 # Grouped_By_BG_Sorted | 按装配体分组的错误明细
 
-## Excel 第 2–9 行
+## Excel 第 2–11 行
 
-三批截图按重叠的模型、输入类型和相邻 Reasoning 内容对齐。第 2–9 行对应同一个装配体的八条预测记录。表中 `—` 表示照片中可见的空白单元格。截图中未展示的列未转录。
+四批截图按重叠的模型、输入类型和相邻 Reasoning 内容对齐。第 2–11 行对应同一个装配体的十条预测记录。表中 `—` 表示照片中可见的空白单元格。截图中未展示的列未转录。
 
 | Excel 行 | D · SAP-Nummer | E · Teamcenter | G · Register | H · Ground Truth | I · Weitere zulässige Ground Truth | J · Predicted Label | L · Model | M · Input_File Type | P · Pages_Sent_Status | Q · Reasoning |
 |---:|---|---|---|---|---|---|---|---|---|---|
@@ -14,10 +14,12 @@
 | 7 | `0804EN7325` | `AS90118452/01` | M | Kombinierte Einheit | — | Gantry | `gemini-2.5-flash` | pdf | Full Document | [原文](#excel-第-7-行) |
 | 8 | `0804EN7325` | `AS90118452/01` | M | Kombinierte Einheit | — | Gantry | `gemini-2.5-pro` | pdf | Full Document | [原文](#excel-第-8-行) |
 | 9 | `0804EN7325` | `AS90118452/01` | M | Kombinierte Einheit | — | Gantry | `claude-haiku-4-5_`（显示部分） | text | Text Document Only | [原文](#excel-第-9-行) |
+| 10 | `0804EN7325` | `AS90118452/01` | M | Kombinierte Einheit | — | Gantry | `claude-opus-4-8` | text | Text Document Only | [原文](#excel-第-10-行) |
+| 11 | `0804EN7325` | `AS90118452/01` | M | Kombinierte Einheit | — | Gantry | `gemini-2.5-flash` | text | Text Document Only | [原文](#excel-第-11-行) |
 
 - 第 2、6、9 行的模型标识被列宽截断。上一张工作表中该装配体对应的图片、PDF 和文本预测列均使用 `claude-haiku-4-5_20251001`，可作为对照。
 - 第一张照片的名称框显示 `R3`，公式栏显示 `P3`，因此可确认 R3 的值为 `P3`。R 列表头与 R2 未显示。
-- 第 5、8 行在截图中为浅绿色。第 10 行仅露出 Q 列开头 `Die Baugruppe enthält zwei angetriebene Linearachsen von Bosch`，待补拍后录入。
+- 第 5、8 行在截图中为浅绿色。第 12 行只部分出现在截图底部，待补拍后录入。
 - 以下 Reasoning 为工作表中的模型输出原文。
 
 ### Excel 第 2 行
@@ -51,3 +53,11 @@ Die Baugruppe besitzt drei translatorische Achsen (T=3) und keine rotatorische A
 ### Excel 第 9 行
 
 Die Baugruppe ist ein Portal-System (Gantry) mit R=0 und T>=2 Freiheitsgraden. Die Stückliste enthält zwei elektrische Linearachsen (0100: CKK-200-NN mit Kugelspindel, 0101: CKR-145-NN mit Riemenantrieb), die orthogonal zueinander angeordnet sind und einen kartesischen Arbeitsraum aufspannen. Die Führungsschienen (0107, 0108: KSA-025-SNS-H-MA-AK, BG=25) sowie die Führungswagen (0110: KWD-025-SNS-C2-H-1, 6 Stück) bestätigen die beidseitig geführte Portal-/Brückenstruktur. Die technische Benennung in den Dokumenten (E: 'gantry', D: 'Portal') und die Struktur mit Strebenprofilen (0101, 0102, 0103 in der Stückliste), Portalgestellen (0017, 0018 in BOM) und Rahmenmodulen (0001) erfüllen alle drei Kriterien des Gantry-Tests: (a) orthogonale Linearachsen, (b) mindestens zwei horizontale Achsen (X, Y), (c) beidseitig geführte Portal-/Brückenstruktur mit Kugelführungen und Klemmelementen (0109: UBPS2505AS1A).
+
+### Excel 第 10 行
+
+Die Baugruppe enthält zwei angetriebene Linearachsen von Bosch Rexroth: eine kugelspindelgetriebene CKK-200 (Pos. 100, X4=KGT 32X10, mit Servomotor MSK060C) und eine riemengetriebene CKR-145 (Pos. 101, mit Getriebe/Motor MSK). Damit gibt es keine Rotationsachse (R=0) und zwei unabhängige translatorische Antriebsachsen (T=2) -> Fall B. Der Gantry-Test ist erfüllt: (a) die Achsen sind orthogonal in kartesischer Anordnung, (b) die BOM/Zeichnung weisen mehrere Portalgestelle (Pos. 17/18 'Portalgestell', 'gantry frame') sowie eine Brücken-/Portalstruktur mit horizontalen Basisachsen auf, (c) die horizontale Basisachse ist über die Portalgestelle beidseitig geführt/gelagert (Brückenstruktur). Zusätzlich bestätigt die Benennung explizit 'gantry / Portal'. Somit R=0, T>=2, Gantry-Test bestanden -> Gantry.
+
+### Excel 第 11 行
+
+Die Baugruppe besitzt zwei translatorische Achsen (T=2) und keine rotatorischen Achsen (R=0), was gemäß der Kinematik-Entscheidungsmatrix zu 'Fall B' führt. Der Gantry-Test wird bestanden, da (a) die Linearachsen orthogonal zueinander angeordnet sind und einen kartesischen Arbeitsraum aufspannen (visuell erkennbar), (b) mindestens zwei Achsen horizontal ausgerichtet sind (X- und Y-Achse, visuell erkennbar), und (c) die erste horizontale Basisachse (X-Achse) beidseitig geführt und gelagert ist (erkennbar an den zwei 'guide rail' (0107) und 'runner block' (0110) Komponenten in der Stückliste, sowie der visuellen Darstellung einer Portal-/Brückenstruktur). Die explizite Benennung als 'Gantry / Portal' in den technischen Zeichnungen und der Stückliste bestätigt diese Klassifizierung zusätzlich.
