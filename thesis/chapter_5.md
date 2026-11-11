@@ -104,6 +104,40 @@ Given the size of the dataset, the results depend on which assemblies it contain
 
 由于数据集规模有限，结果取决于数据集中包含哪些装配体。因此，所有数值都附有通过 Bootstrap 得到的 95% 置信区间（Efron & Tibshirani, 1993; Miller, 2024）。在 2000 次重抽样中，每次都有放回地抽取装配体，每个装配体带上它在所有运行中的预测，并重新计算所有指标；所得数值的第 2.5 和第 97.5 百分位数构成置信区间。最终配置之间的差异用配对 Bootstrap 检验，即两种配置在同一批重抽样的装配体上评价（Koehn, 2004; Berg-Kirkpatrick et al., 2012）。检验涵盖 Allowed Accuracy、Allowed Macro-Precision、Allowed Macro-Recall 和 Strict Macro-F1。由于每个指标涉及六对比较，p 值采用 Holm 方法校正（Holm, 1979）。由于各指标回答的是不同的问题，校正按指标分别进行（Bender & Lange, 2001）。
 
+## 5.3 Prompt Design | Prompt 设计
+
+**① 目的与 Prompt 变体**
+
+The amount of codebook information provided in the prompt was varied to determine which information the models need for the classification, since the performance of LLMs can depend considerably on prompt design (Sclar et al., 2024). Four prompt variants were defined, each extending the previous one. P1 contains only the class names, P2 adds the class definitions, P3 adds the decision logic with the actuator counting rules, the decision table and the gantry test, and P4 adds examples and exceptions in the form of the borderline cases. All other parts of the prompt, including the output format and the instruction to base the decision on the documentation rather than on the designation alone, were identical across the variants (Appendix [W]).
+
+为了确定模型在分类时需要哪些信息，本研究改变 Prompt 中提供的 Codebook 信息量，因为 LLM 的表现可能在很大程度上取决于 Prompt 的设计（Sclar et al., 2024）。本研究定义了四种 Prompt 变体，每种都在前一种的基础上扩展。P1 只包含类别名称；P2 增加类别定义；P3 增加决策逻辑，包括执行器计数规则、决策表和龙门测试；P4 再以边界案例的形式增加例子和例外。各变体中 Prompt 的其他部分都相同，包括输出格式，以及要求依据资料而不是只凭名称作出判断的说明（附录 [W]）。
+
+**② 结果**
+
+Table 5.3 shows the Allowed Accuracy of the four models with PDF input. Adding the decision logic in P3 led to the largest change: compared with P2, the Allowed Accuracy increased for all four models, by between 2.6 and 8.8 percentage points. In contrast, adding the class definitions in P2 did not yield a consistent improvement over P1; the accuracy increased for Claude Haiku 4.5, remained almost unchanged for the two Gemini models and decreased for Claude Opus 4.8. The examples and exceptions in P4 likewise had no consistent effect, increasing the accuracy for Claude Haiku 4.5 and Gemini 2.5 Pro and decreasing it for Claude Opus 4.8 and Gemini 2.5 Flash, in each case by no more than two assemblies.
+
+表 5.3 列出了四个模型使用 PDF 输入时的 Allowed Accuracy。P3 加入决策逻辑带来的变化最大：与 P2 相比，四个模型的 Allowed Accuracy 都有所提高，提升幅度在 2.6 至 8.8 个百分点之间。相比之下，P2 加入类别定义后，相对于 P1 没有带来一致的提升：Claude Haiku 4.5 的准确率提高，两个 Gemini 模型基本不变，Claude Opus 4.8 则有所下降。P4 中的例子和例外同样没有一致的效果：Claude Haiku 4.5 和 Gemini 2.5 Pro 的准确率提高，Claude Opus 4.8 和 Gemini 2.5 Flash 的准确率下降，变化幅度都不超过两个装配体。
+
+**Table 5.3. Allowed Accuracy (%) by prompt variant (PDF input, 115 assemblies) / 表 5.3 各 Prompt 变体的 Allowed Accuracy（%）（PDF 输入，115 个装配体）**
+
+| Model / 模型 | P1 | P2 | P3 | P4 |
+| --- | ---: | ---: | ---: | ---: |
+| Claude Haiku 4.5 | 85.2 | 87.8 | 90.4 | 92.2 |
+| Claude Opus 4.8 | 93.9 | 91.2 | **97.4** | 95.6 |
+| Gemini 2.5 Flash | 89.4 | 89.3 | **93.7** | 92.0 |
+| Gemini 2.5 Pro | 87.7 | 87.7 | 96.5 | 97.4 |
+| Mean / 平均 | 89.0 | 89.0 | **94.5** | 94.3 |
+
+*Note: One run per configuration; 95 % confidence intervals in Appendix [W].*
+
+注：每种配置运行一次；95% 置信区间见附录 [W]。
+
+**③ 选择 P3**
+
+P3 achieved the highest mean accuracy across the four models. Since P4 did not improve the results consistently, the additional examples and exceptions were not adopted, and P3 was used in all subsequent experiments. The results indicate that the decision logic of the codebook, rather than the class definitions or individual examples, enables the models to apply the classification rules. As P3 was selected on the 115 assemblies of the primary set, its performance is examined on the supplementary set in Section 5.8.
+
+P3 在四个模型上的平均准确率最高。由于 P4 没有带来一致的提升，例子和例外没有采用，之后的所有实验都使用 P3。结果表明，使模型能够应用分类规则的是 Codebook 的决策逻辑，而不是类别定义或个别例子。由于 P3 是在主数据集的 115 个装配体上选定的，第 5.8 节将在补充数据集上检验它的表现。
+
 ## 待处理
 
 ### 5.1 待办
@@ -116,6 +150,13 @@ Given the size of the dataset, the results depend on which assemblies it contain
 
 - [ ] **p 值的算法**：对照 `evaluate_allowed_strict.py` 确认配对 Bootstrap 的 p 值如何得出。
 - [ ] **偏向说明**：只复核了预测错误的装配体，修订可能使 LLM 结果偏好。问过 Jonas 后决定写在 5.2 还是第 7 章，以及是否做修订前 GT 的敏感性分析（附录 [Z]）。
+
+### 5.3 待办
+
+- [ ] **置信区间**：表 5.3 各值的 95% CI，放附录 [W]；补上后可改成带误差棒的分组柱状图（图 5.1），表移到附录。
+- [ ] **分母**：Prompt 比较中 Opus（114）、Flash（111–113）、Pro（113–114）的分母不是 115（空输出未补跑；Haiku 已重跑，为 115）。问过 Jonas 后在表注中说明，或补跑。5.1 ③ 暂不改。
+- [ ] **可选核对**：Strict Macro-F1 的趋势是否也支持 P3；一致则加一句 “Strict Macro-F1 showed the same pattern (Appendix [W])”。
+- 已确认：数字基于最终版 GT；P4 的例子为作者自拟，不取自数据集；P3 + PDF 在 5.3 和 5.4 中是两次独立运行，5.4 开头需说明数字略有不同的原因。
 
 ### 章节安排
 
