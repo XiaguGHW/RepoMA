@@ -176,33 +176,33 @@ Of the 129 incorrect classifications produced by the four models in the input co
 
 **① 最终配置**
 
-Based on the results in Sections 5.3 and 5.4, four final configurations were defined, comprising one model per provider and one open-weight model. They were used for the repeated runs on the primary set and for the validation on the supplementary set:
+Four final configurations were defined using the results in Sections 5.3 and 5.4, comprising one model per provider and one open-weight model. They were used for the repeated runs on the primary set and for the validation on the supplementary set:
 
-- **Claude Haiku 4.5** with PDF input. It was chosen instead of Claude Opus 4.8, since the cost of Opus is not justifiable for repeated runs (Section 5.8). Text input exceeded PDF input by only one assembly, which lies within the variation between independent runs, whereas PDF input achieved the highest mean accuracy and requires no separate extraction step.
-- **Gemini 2.5 Pro** with PDF input. It achieved higher results than Gemini 2.5 Flash in both comparisons, and PDF input was retained for the same reasons as for Claude Haiku 4.5.
-- **GPT-5.5** with image input. Since PDF files submitted via Azure OpenAI are converted on the server side in a way that cannot be controlled, the PDF pages were converted into images beforehand. With this choice, the final configurations cover all three input representations.
-- **DeepSeek-V4-Flash** with text input. It was included as an open-weight model released under the MIT licence and supports only text input; the text representation achieved results similar to those of PDF input in Section 5.4.
+- **Claude Haiku 4.5** with PDF input. It was chosen instead of Claude Opus 4.8, since the cost of Opus is not justifiable for repeated runs (Section 5.8). Text input correctly classified only one more assembly than PDF input, a difference within the variation between independent runs, while PDF input achieved the highest mean accuracy and requires no separate extraction step.
+- **Gemini 2.5 Pro** with PDF input. Its results were higher than those of Gemini 2.5 Flash in both comparisons, and PDF input was retained for the same reasons as for Claude Haiku 4.5.
+- **GPT-5.5** with image input. Since PDF files submitted via Azure OpenAI are converted on the server side in a way that cannot be controlled, the PDF pages were converted into images beforehand. This choice ensures that all three input representations are covered by the final configurations.
+- **DeepSeek-V4-Flash** with text input. The model was included as an open-weight model released under the MIT licence and supports only text input, which achieved results similar to those of PDF input in Section 5.4.
 
 Since each configuration combines a specific model with a specific input representation, differences between the configurations cannot be attributed to the model or the input alone.
 
-根据第 5.3 和 5.4 节的结果，确定了四种最终配置，包括每家厂商一个模型和一个开源模型。它们用于主数据集上的重复运行，以及补充数据集上的验证：
+依据第 5.3 和 5.4 节的结果，确定了四种最终配置，包括每家厂商一个模型和一个开放权重模型。它们用于主数据集上的重复运行，以及补充数据集上的验证：
 
-- **Claude Haiku 4.5**，使用 PDF 输入。选择它而不是 Claude Opus 4.8，是因为 Opus 的成本不适合重复运行（第 5.8 节）。文本输入只比 PDF 输入多对一个装配体，这一差异在独立运行之间的波动范围内；而 PDF 输入的平均准确率最高，也不需要单独的提取步骤。
-- **Gemini 2.5 Pro**，使用 PDF 输入。它在两项比较中的结果都高于 Gemini 2.5 Flash，选择 PDF 输入的理由与 Claude Haiku 4.5 相同。
-- **GPT-5.5**，使用图片输入。由于通过 Azure OpenAI 提交的 PDF 文件会在服务器端以无法控制的方式转换，PDF 页面事先已转换为图片。这样，最终配置涵盖了全部三种输入形式。
-- **DeepSeek-V4-Flash**，使用文本输入。它作为以 MIT 许可发布的开源模型纳入，且只支持文本输入；第 5.4 节显示，文本输入的结果与 PDF 输入相近。
+- **Claude Haiku 4.5**，使用 PDF 输入。选择它而不是 Claude Opus 4.8，是因为 Opus 的成本不适合重复运行（第 5.8 节）。文本输入比 PDF 输入仅多正确分类一个装配体，这一差异处于独立运行之间的波动范围内。PDF 输入的平均准确率最高，且不需要单独的提取步骤。
+- **Gemini 2.5 Pro**，使用 PDF 输入。它在两项比较中的结果均高于 Gemini 2.5 Flash，保留 PDF 输入的理由与 Claude Haiku 4.5 相同。
+- **GPT-5.5**，使用图片输入。由于通过 Azure OpenAI 提交的 PDF 文件会在服务器端以无法控制的方式转换，PDF 页面事先已转换为图片。这一选择使最终配置涵盖了全部三种输入形式。
+- **DeepSeek-V4-Flash**，使用文本输入。它作为以 MIT 许可发布的开放权重模型纳入，且只支持文本输入。第 5.4 节显示，文本输入的结果与 PDF 输入相近。
 
 由于每种配置都是某个模型与某种输入形式的组合，配置之间的差异不能单独归因于模型或输入形式。
 
 **② 总体表现**
 
-Table 5.5 shows the results of the final configurations averaged over the ten runs. Gemini 2.5 Pro achieved the highest Allowed Accuracy at 96.4 %, followed by Claude Haiku 4.5 and GPT-5.5 at 91.7 % each and DeepSeek-V4-Flash at 89.7 %. Allowed Macro-Precision and Allowed Macro-Recall show the same order. The results of Claude Haiku 4.5 and Gemini 2.5 Pro correspond to their single runs with PDF input in Section 5.4 within less than one percentage point. The input comparison in Section 5.4 included only the Claude and Gemini models, so its finding that image input yields lower results cannot be transferred directly to GPT-5.5.
+Table 5.5 presents the final configurations' results averaged across ten runs. Gemini 2.5 Pro achieved the highest Allowed Accuracy at 96.4 %, followed by Claude Haiku 4.5 and GPT-5.5 at 91.7 % each and DeepSeek-V4-Flash at 89.7 %. The same order is observed for Allowed Macro-Precision and Allowed Macro-Recall. The results of Claude Haiku 4.5 and Gemini 2.5 Pro correspond to their single runs with PDF input in Section 5.4 within less than one percentage point. Because the input comparison in Section 5.4 covered only the Claude and Gemini models, its finding of lower results for image input cannot be applied directly to GPT-5.5.
 
-表 5.5 列出了最终配置十次运行的平均结果。Gemini 2.5 Pro 的 Allowed Accuracy 最高，为 96.4%；其次是 Claude Haiku 4.5 和 GPT-5.5，均为 91.7%；DeepSeek-V4-Flash 为 89.7%。Allowed Macro-Precision 和 Allowed Macro-Recall 的排序相同。Claude Haiku 4.5 和 Gemini 2.5 Pro 的结果与第 5.4 节中 PDF 输入的单次运行相差不到一个百分点。第 5.4 节的输入形式比较只包括 Claude 和 Gemini 模型，因此图片输入结果较低这一发现不能直接套用到 GPT-5.5 上。
+表 5.5 给出了最终配置在十次运行中的平均结果。Gemini 2.5 Pro 的 Allowed Accuracy 最高，为 96.4%；其次是 Claude Haiku 4.5 和 GPT-5.5，均为 91.7%；DeepSeek-V4-Flash 为 89.7%。Allowed Macro-Precision 和 Allowed Macro-Recall 的排序也相同。Claude Haiku 4.5 和 Gemini 2.5 Pro 的结果与第 5.4 节中 PDF 输入的单次运行相差不到一个百分点。由于第 5.4 节的输入形式比较只涵盖 Claude 和 Gemini 模型，其中图片输入结果较低的发现不能直接用于 GPT-5.5。
 
-The strict metrics, which count only the primary label as correct, lead to a different order. Since an allowed label other than the primary label exists only in regime M, the difference between Allowed Accuracy and Strict Accuracy indicates how often a configuration predicted an alternative allowed class. This difference amounted to 10.6 percentage points for Gemini 2.5 Pro and 6.6 for GPT-5.5, but only 2.6 for Claude Haiku 4.5 and 1.7 for DeepSeek-V4-Flash. Consequently, Claude Haiku 4.5 achieved the highest Strict Macro-F1 at 89.2 %, whereas Gemini 2.5 Pro reached 85.2 %. The advantage of Gemini 2.5 Pro under the allowed criterion is therefore based mainly on the assemblies in regime M, which are examined in Section 5.6.2.
+The strict metrics, which count only the primary label as correct, lead to a different order. Only assemblies in regime M have an allowed label other than the primary label, so the gap between Allowed Accuracy and Strict Accuracy indicates how often a configuration predicted such an alternative. This difference amounted to 10.6 percentage points for Gemini 2.5 Pro and 6.6 for GPT-5.5, but only 2.6 for Claude Haiku 4.5 and 1.7 for DeepSeek-V4-Flash. Claude Haiku 4.5 therefore had the highest Strict Macro-F1 at 89.2 %, while Gemini 2.5 Pro achieved 85.2 %. The advantage of Gemini 2.5 Pro under the allowed criterion is therefore based mainly on the assemblies in regime M, which are examined in Section 5.6.2.
 
-只把主标签计为正确的严格指标得出了不同的排序。由于只有 M 中才存在主标签以外的允许标签，Allowed Accuracy 与 Strict Accuracy 之差反映了配置预测备选允许类别的频率。这一差值在 Gemini 2.5 Pro 上为 10.6 个百分点，在 GPT-5.5 上为 6.6 个百分点，而在 Claude Haiku 4.5 和 DeepSeek-V4-Flash 上分别只有 2.6 和 1.7 个百分点。因此，Claude Haiku 4.5 的 Strict Macro-F1 最高，为 89.2%，而 Gemini 2.5 Pro 为 85.2%。由此可见，Gemini 2.5 Pro 在允许标签准则下的优势主要来自 M 中的装配体，这将在第 5.6.2 节中分析。
+只把主标签计为正确的严格指标得出了不同的排序。只有 M 中的装配体具有主标签以外的允许标签，因此 Allowed Accuracy 与 Strict Accuracy 的差值反映了配置预测此类备选允许类别的频率。这一差值在 Gemini 2.5 Pro 上为 10.6 个百分点，在 GPT-5.5 上为 6.6 个百分点，而在 Claude Haiku 4.5 和 DeepSeek-V4-Flash 上分别只有 2.6 和 1.7 个百分点。因此，Claude Haiku 4.5 的 Strict Macro-F1 最高，达到 89.2%，Gemini 2.5 Pro 则为 85.2%。由此可见，Gemini 2.5 Pro 在允许标签准则下的优势主要来自 M 中的装配体，这将在第 5.6.2 节中分析。
 
 **Table 5.5. Results of the final configurations (115 assemblies, ten runs) / 表 5.5 最终配置的结果（115 个装配体，十次运行）**
 
@@ -224,21 +224,21 @@ The strict metrics, which count only the primary label as correct, lead to a dif
 
 **③ 配置之间的差异**
 
-Table 5.5 shows differences between the configurations, but on 115 assemblies such differences can also arise by chance. Each pair of configurations was therefore compared with the paired bootstrap test described in Section 5.2. Of the differences tested, only one remained significant after correction for multiple comparisons: Gemini 2.5 Pro achieved a higher Allowed Macro-Precision than DeepSeek-V4-Flash, by 6.4 percentage points (p = 0.042). Even the largest difference in Allowed Accuracy, 6.7 percentage points between Gemini 2.5 Pro and DeepSeek-V4-Flash, was significant only before the correction (p = 0.014) and not after it (p = 0.084), and the configurations did not differ in Strict Macro-F1 (Appendix D). The four configurations can therefore not be ranked reliably on the basis of these assemblies.
+Although Table 5.5 shows differences between configurations, differences on a set of 115 assemblies can also occur by chance. Each pair of configurations was therefore compared with the paired bootstrap test described in Section 5.2. After correction for multiple comparisons, only one tested difference remained significant: Gemini 2.5 Pro had a 6.4 percentage point higher Allowed Macro-Precision than DeepSeek-V4-Flash (p = 0.042). Even the largest difference in Allowed Accuracy, 6.7 percentage points between Gemini 2.5 Pro and DeepSeek-V4-Flash, was significant only before the correction (p = 0.014) and not after it (p = 0.084), and the configurations did not differ in Strict Macro-F1 (Appendix D). These assemblies therefore do not provide a reliable basis for ranking the four configurations.
 
-表 5.5 显示了各配置之间的差异，但在 115 个装配体上，这样的差异也可能是偶然产生的。因此，每两种配置之间都用第 5.2 节介绍的配对 Bootstrap 检验进行比较。在所检验的差异中，经多重比较校正后只有一项仍然显著：Gemini 2.5 Pro 的 Allowed Macro-Precision 比 DeepSeek-V4-Flash 高 6.4 个百分点（p = 0.042）。即使是 Allowed Accuracy 上最大的差异，即 Gemini 2.5 Pro 与 DeepSeek-V4-Flash 之间的 6.7 个百分点，也只在校正前显著（p = 0.014），校正后不再显著（p = 0.084）；各配置在 Strict Macro-F1 上也没有差异（附录 D）。因此，根据这些装配体，无法对四种配置作出可靠的排序。
+尽管表 5.5 显示各配置存在差异，但在包含 115 个装配体的数据集中，这些差异也可能由偶然因素产生。因此，每两种配置之间都用第 5.2 节介绍的配对 Bootstrap 检验进行比较。经多重比较校正后，所检验的差异中只有一项仍具有统计显著性：Gemini 2.5 Pro 的 Allowed Macro-Precision 比 DeepSeek-V4-Flash 高 6.4 个百分点（p = 0.042）。即使是 Allowed Accuracy 上最大的差异，即 Gemini 2.5 Pro 与 DeepSeek-V4-Flash 之间的 6.7 个百分点，也只在校正前显著（p = 0.014），校正后不再显著（p = 0.084）；各配置在 Strict Macro-F1 上也没有差异（附录 D）。因此，这些装配体无法为四种配置提供可靠的排序依据。
 
 **④ 稳定性**
 
-The variation between runs was small for all configurations (Table 5.5). The standard deviation of the Allowed Accuracy remained below one percentage point, which corresponds to less than one assembly, and was thus considerably smaller than the differences between the configurations and the width of the confidence intervals. Claude Haiku 4.5 assigned the same class in all ten runs to all but one assembly, whereas the predictions of the other configurations varied for between 6 and 13 assemblies. For Gemini 2.5 Pro and GPT-5.5, more than half of these assemblies belong to regime M, in which more than one class is consistent with the documentation, and most of the assemblies with varying predictions involved Combined Unit as the primary or an allowed label.
+The variation between runs was small for all configurations (Table 5.5). For every configuration, the standard deviation of Allowed Accuracy was below one percentage point, corresponding to less than one assembly, and was considerably smaller than the differences between configurations and the widths of the confidence intervals. Claude Haiku 4.5 assigned the same class in all ten runs to all but one assembly, whereas the predictions of the other configurations varied for between 6 and 13 assemblies. For Gemini 2.5 Pro and GPT-5.5, over half of these assemblies belong to regime M, where the documentation supports more than one class, and most assemblies with varying predictions had Combined Unit as their primary or an allowed label.
 
-所有配置在不同运行之间的波动都很小（表 5.5）。Allowed Accuracy 的标准差都低于一个百分点，相当于不到一个装配体，因此明显小于配置之间的差异和置信区间的宽度。Claude Haiku 4.5 除一个装配体外，在全部十次运行中都给出了相同的类别；其他配置则有 6 至 13 个装配体的预测发生变化。对于 Gemini 2.5 Pro 和 GPT-5.5，这些装配体中有一半以上属于 M，即资料支持不止一个类别的情况；大多数预测发生变化的装配体都以组合单元作为主标签或允许标签。
+所有配置在不同运行之间的波动都很小（表 5.5）。各配置的 Allowed Accuracy 标准差均低于一个百分点，相当于不到一个装配体，明显小于配置之间的差异和置信区间的宽度。Claude Haiku 4.5 除一个装配体外，在全部十次运行中都给出了相同的类别；其他配置则有 6 至 13 个装配体的预测发生变化。对于 Gemini 2.5 Pro 和 GPT-5.5，这些装配体中有一半以上属于 M，即资料支持多个类别。大多数预测发生变化的装配体都以组合单元作为主标签或允许标签。
 
 **⑤ 过渡**
 
-These results are based on the primary set, on which the prompt and the input representation were selected. Section 5.6 therefore examines whether they are maintained on the supplementary set and how the configurations perform in the individual ambiguity regimes.
+The results are based on the primary set used to select the prompt and input representation. Section 5.6 therefore examines whether they are maintained on the supplementary set and how the configurations perform in the individual ambiguity regimes.
 
-这些结果基于主数据集，而 Prompt 和输入形式正是在主数据集上选定的。因此，第 5.6 节检验这些结果在补充数据集上能否保持，以及各配置在不同歧义类别中的表现。
+这些结果基于主数据集，Prompt 和输入形式也是在该数据集上选定的。因此，第 5.6 节检验这些结果在补充数据集上能否保持，以及各配置在不同歧义类别中的表现。
 
 ## 待处理
 
