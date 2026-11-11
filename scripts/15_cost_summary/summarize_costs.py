@@ -153,6 +153,23 @@ def run_times(main_dir, max_hours=6):
     return pd.DataFrame(out)
 
 
+def input_status(s):
+    """Kategorie der gesendeten Eingabe aus Pages_Sent_Status / Files_Used."""
+    s = "" if s is None or (isinstance(s, float) and pd.isna(s)) else str(s)
+    low = s.lower()
+    if not low.strip():
+        return "leer"
+    if "dropped" in low:
+        return "Datei verworfen"
+    if "error" in low or "too_large" in low or "too large" in low:
+        return "Fehler (zu groß)"
+    if re.search(r"first\s*\d+|erste|truncat|reduced|gekürzt|cap|pages? used|\d+\s*/\s*\d+", low):
+        return "gekürzt"
+    if "full" in low or "text document only" in low or "vollständig" in low:
+        return "vollständig"
+    return "anderes: " + s[:60]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", action="append", required=True, help="Ordner mit Ergebnisdateien (mehrfach möglich)")
@@ -160,7 +177,7 @@ def main():
     ap.add_argument("--runs", help="Ordner mit den 10-Lauf-Ordnern (115 BG): Zeit je BG aus den Startzeiten aufeinanderfolgender Läufe")
     a = ap.parse_args()
 
-    rows, notes = [], []
+    rows, notes, kuerz = [], [], []
     files = [f for d in a.dir for f in sorted(Path(d).rglob("*.xlsx")) if not f.name.startswith(("~$", "Kosten_", "Validation_"))]
     for f in files:
         name = f.name.lower()
@@ -174,6 +191,14 @@ def main():
         c_tok = find_col(df.columns, "token_usage")
         c_sap = find_col(df.columns, "sap")
         c_time = find_col(df.columns, "latency", "duration", "dauer", "elapsed", "laufzeit", "time_s", "seconds")
+        c_pages = find_col(df.columns, "pages_sent")
+        c_files = find_col(df.columns, "files_used")
+        c_gt = find_col(df.columns, "ground truth")
+        for _, r in (df[df[c_gt].notna()] if c_gt is not None else df).iterrows():
+            src = r[c_pages] if c_pages is not None else (r[c_files] if c_files is not None else None)
+            kuerz.append({"Konfiguration": cfg, "SAP": None if c_sap is None else r[c_sap],
+                          "Status": input_status(src), "Pages_Sent_Status": None if c_pages is None else r[c_pages],
+                          "Files_Used": None if c_files is None else r[c_files]})
         if c_tok is None:
             notes.append(dict(Datei=f.name, Hinweis="keine Spalte Token_Usage_JSON"))
             continue
@@ -224,6 +249,9 @@ def main():
                      "Format": ", ".join(sorted(g.Format.unique()))})
     summ = pd.DataFrame(summ)
     zeit = run_times(Path(a.runs)) if a.runs else pd.DataFrame()
+    kz = pd.DataFrame(kuerz)
+    kz_sum = kz.pivot_table(index="Konfiguration", columns="Status", values="SAP", aggfunc="count", fill_value=0) \
+        if len(kz) else pd.DataFrame()
     prices = pd.DataFrame([{"Preis-Schlüssel": k, **v} for k, v in PRICES.items()])
     with pd.ExcelWriter(a.out, engine="openpyxl") as xw:
         summ.to_excel(xw, sheet_name="Zusammenfassung", index=False)
@@ -232,12 +260,18 @@ def main():
         pd.DataFrame(notes).to_excel(xw, sheet_name="Hinweise", index=False)
         if len(zeit):
             zeit.to_excel(xw, sheet_name="Zeit_aus_Laeufen", index=False)
+        if len(kz):
+            kz_sum.to_excel(xw, sheet_name="Eingabe_Kuerzung")
+            kz.to_excel(xw, sheet_name="Eingabe_je_BG", index=False)
     pd.set_option("display.width", 250, "display.max_columns", 20)
     kurz = pd.DataFrame({"Konfiguration": summ["Konfiguration"], "n": summ["Anfragen"],
                          "Input-Token": summ["Input-Token Mittel"],
                          "Output-Token": summ["Output-Token Mittel (inkl. Reasoning)"],
                          "USD je BG": summ["Kosten je BG Mittel (USD)"]})
     print(kurz.to_string(index=False))
+    if len(kz):
+        print("\nGesendete Eingabe je Baugruppe (aus Pages_Sent_Status, sonst Files_Used):")
+        print(kz_sum.to_string())
     if len(zeit):
         print("\nZeit je Baugruppe aus den Startzeiten aufeinanderfolgender Läufe (115 BG):")
         print(zeit[zeit["Abstand"] == "Zusammenfassung"][["Konfiguration", "s je BG", "verwendet"]].to_string(index=False))

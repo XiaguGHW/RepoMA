@@ -24,3 +24,8 @@ wurden; Blatt `Zeit_aus_Laeufen` zeigt jeden Abstand zur Kontrolle.
 ```powershell
 python summarize_costs.py --dir $HOME\Downloads\Token --runs .
 ```
+
+Gesendete Eingabe: Je Baugruppe wird `Pages_Sent_Status` (sonst `Files_Used`) eingeordnet in
+vollständig / gekürzt / Datei verworfen / Fehler (zu groß) / anderes. Blatt `Eingabe_Kuerzung`
+(Anzahl je Konfiguration) und `Eingabe_je_BG` (Rohwerte zur Kontrolle). Einträge „anderes: …“
+zeigen Formulierungen, die das Skript noch nicht kennt.
