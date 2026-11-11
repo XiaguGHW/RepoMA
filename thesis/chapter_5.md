@@ -215,14 +215,13 @@ The strict metrics, which count only the primary label as correct, lead to a dif
 | Allowed Macro-Recall | 92.7 [88.3–96.9] | 90.5 [86.0–95.0] | **96.7** [94.0–99.0] | 91.2 [85.7–96.1] |
 | Strict Accuracy | **89.1** [83.5–94.3] | 87.9 [81.9–93.5] | 85.7 [79.7–91.4] | 85.0 [78.7–91.3] |
 | Strict Macro-F1 | **89.2** [82.9–94.3] | 88.6 [83.3–93.4] | 85.2 [78.4–90.8] | 84.0 [76.7–90.2] |
-| *Stability across ten runs / 十次运行的稳定性* | | | | |
-| SD of Allowed Accuracy (pp) / Allowed Accuracy 标准差（百分点） | 0.46 | 0.86 | 0.90 | 0.93 |
+| Standard deviation of Allowed Accuracy / Allowed Accuracy 的标准差 | 0.46 | 0.86 | 0.90 | 0.93 |
 | Assemblies with varying prediction / 预测有变化的装配体 | 1 | 6 | 13 | 10 |
 | of which in regime M / 其中属于 M | 0 | 1 | 7 | 6 |
 
-*Note: Values in % (mean over ten runs); values in brackets are 95 % bootstrap confidence intervals (Section 5.2). Class-wise results in Appendix D.*
+*Note: Values in % (mean over ten runs); values in brackets are 95 % bootstrap confidence intervals (Section 5.2). Standard deviation across the ten runs in percentage points. Class-wise results in Appendix D.*
 
-注：数值单位为 %（十次运行的平均值）；方括号内为 95% Bootstrap 置信区间（第 5.2 节）。各类别的结果见附录 D。
+注：数值单位为 %（十次运行的平均值）；方括号内为 95% Bootstrap 置信区间（第 5.2 节）。标准差为十次运行之间的标准差，单位为百分点。各类别的结果见附录 D。
 
 **③ 配置之间的差异**
 
