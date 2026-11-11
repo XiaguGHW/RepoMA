@@ -100,6 +100,27 @@ where $\mathrm{P}_c$ and $\mathrm{R}_c$ follow from Equations 5.2a and 5.2b with
 
 本文仅报告严格形式的 F1，因为按允许标签准则计算时，同一个预测在 Precision 和 Recall 中可能对应不同的类别。Strict Macro-F1 是各类别 F1 的平均值（Opitz & Burst, 2019）。其中 $\mathrm{P}_c$ 和 $\mathrm{R}_c$ 由公式 5.2a 和 5.2b 将 $A_i$ 替换为 $\lbrace y_i \rbrace$ 得到。这一指标反映预测与主标签匹配的频率，可用于和仅采用一个正确标签的研究进行比较。对于运行十次的配置，每个指标按每次运行分别计算，再在各次运行之间取平均。
 
+> **公式 5.1–5.3 的 LaTeX 原文（供复制到 Word / Overleaf，不属于正文）**
+>
+> ```latex
+> % (5.1)
+> \text{Allowed Accuracy} = \frac{\left|\left\{ i : \hat{y}_i \in A_i \right\}\right|}{N}
+>
+> % (5.2a)
+> \mathrm{AP}_c = \frac{\left|\left\{ i : \hat{y}_i = c \wedge c \in A_i \right\}\right|}{\left|\left\{ i : \hat{y}_i = c \right\}\right|}
+>
+> % (5.2b)
+> \mathrm{AR}_c = \frac{\left|\left\{ i : y_i = c \wedge \hat{y}_i \in A_i \right\}\right|}{\left|\left\{ i : y_i = c \right\}\right|}
+>
+> % (5.3)
+> \text{Strict Macro-F1} = \frac{1}{|C|} \sum_{c \in C} \frac{2\,\mathrm{P}_c\,\mathrm{R}_c}{\mathrm{P}_c + \mathrm{R}_c}
+>
+> % 正文中的行内符号
+> C,\quad i = 1, \dots, N,\quad \hat{y}_i,\quad y_i,\quad A_i,\quad y_i \in A_i,\quad \mathrm{P}_c,\quad \mathrm{R}_c,\quad \{y_i\}
+> ```
+>
+> 说明：代码框里是标准 LaTeX，可原样复制到 Overleaf 的 `equation` 环境中，或粘贴到 Word 公式编辑器（Alt + =，选择 LaTeX 输入格式）。正文上方的公式为了在 Markdown 预览中正确显示，用 `\lbrace`、`\rbrace` 代替了 `\{`、`\}`，并去掉了 `\,`，含义相同。编号 (5.1)–(5.3) 用 Word 或 LaTeX 的公式编号功能另加。
+
 **⑤ 统计方法**
 
 Given the size of the dataset, the results depend on which assemblies it contains. To reflect this dependence, 95 % bootstrap confidence intervals are reported for all values (Efron & Tibshirani, 1993; Miller, 2024). In each of 2,000 resamples, the assemblies were drawn with replacement, each together with its predictions from all runs, and all metrics were recalculated; the 2.5th and 97.5th percentiles of the resulting values form the interval. A paired bootstrap was used to test differences between final configurations by evaluating the two configurations in each comparison on the same resampled assemblies (Koehn, 2004; Berg-Kirkpatrick et al., 2012). The test covers Allowed Accuracy, Allowed Macro-Precision, Allowed Macro-Recall and Strict Macro-F1. The Holm procedure (Holm, 1979) was used to adjust the p-values for the six pairwise comparisons per metric, with a separate adjustment for each metric because they address different questions (Bender & Lange, 2001).
