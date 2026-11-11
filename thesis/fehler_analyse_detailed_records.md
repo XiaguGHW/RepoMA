@@ -166,3 +166,31 @@ Revidierte GT: Roboter (LLM korrekt: nein – bedingt durch fehlenden Input der 
 GT vor Review: Lineareinheit | LLM: Kombinierte Einheit
 Analyse: Eindeutiger Fall von Grenzfall 6.1 („Greifer auf einer Hubachse“ → Lineareinheit): Verbaut ist genau eine vertikale Rexroth-Linearachse mit Motor (Stufe 6, Pos. 1, R040.563.545, Hub 455 mm → T=1), an deren Ausleger ein zylindrischer SCHUNK-Drei-Finger-Greifer (Pos. 102, PZN-plus 80) als Endeffektor montiert ist (R=0). Die LLM-Begründungen zeigen drei charakteristische Fehlermuster: (1) Das zylindrische Gehäuse des Drei-Finger-Greifers wird optisch als separate Schwenkeinheit (R=1) zwischen Hubachse und Greifbacken halluziniert; (2) die interne Keilhaken-Mechanik des PZN-plus 80-Datenblatts wird fälschlich als Hub-Schwenk-Kinematik (R=1, T=1) gedeutet; oder (3) das Modell ermittelt zwar völlig korrekt R=0, T=1 und zitiert sogar explizit Grenzfall 6.1, setzt sich aber wegen der Benennung „Handling“ sowie vorhandener Sensorik/Energiekette bewusst über die Regel hinweg.
 Revidierte GT: Lineareinheit (LLM korrekt: nein).
+
+## 第八部分 · Excel 第 21–23 行
+
+来源为 `Fehler_Analyse` 工作表的三张照片，按行顺序及共同列对应。部分模型输出列未拍全，参考同一工作簿 `Korrigierte GT&ZGT` 对应记录补录，待核对。
+
+| Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
+|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 21 | 4 | 0 | `0804GD6171` | `AS90191800` | E1 | Roboter | — | Keine der verfügbaren Klassen | — | — | Keine der verfügbaren Klassen | — | — | Keine der verfügbaren Klassen | — | — | Keine der verfügbaren Klassen | — | — | [原文](#excel-第-21-行) |
+| 22 | 3 | 0 | `0804FH4760` | `AS90308280/00` | E1 | Roboter | — | Keine der verfügbaren Klassen | — | — | Keine der verfügbaren Klassen | — | — | Keine der verfügbaren Klassen | — | — | — | — | — | [原文](#excel-第-22-行) |
+| 23 | 3 | 0 | `0804HH8872` | `AS90105353` | E2 | Kombinierte Einheit | — | — | — | — | — | — | — | Gantry | Gantry | Gantry | — | — | — | [原文](#excel-第-23-行) |
+
+### Excel 第 21 行
+
+GT vor Review: Roboter | LLM: Keine der verfügbaren Klassen
+Analyse (Dateninput-Bug): Eindeutiger 6-Achs-Knickarmroboter (R=6, T=0) von KUKA (Pos. 0100, KR10R900-2) auf einer Grundplatte (Pos. 0001) samt Greifer-Unterbaugruppe (Pos. 0002). Die Fehlklassifizierung als Keine der verfügbaren Klassen liegt an einem systematischen Dateninput-Fehler: Das LLM erhielt insgesamt 65 Bilder in 5 Batches à 15 Bildern, da für das untergeordnete SCHUNK-Schnellwechselsystem (SWS-005 in Pos. 0002) der mehrseitige Hersteller-Katalog mitextrahiert wurde. Die 1–2 Seiten der Hauptbaugruppe gingen in der Flut an SWS-Unterlagen komplett unter, weshalb das LLM fälschlicherweise nur die passive Schnittstelle isoliert bewertete (R=0, T=0 → Grenzfall 6.8).
+Revidierte GT: Roboter (LLM korrekt: nein – bedingt durch unvollständigen/überfluteten Dokumenten-Input).
+
+### Excel 第 22 行
+
+GT vor Review: Roboter | LLM: Keine der verfügbaren Klassen
+Analyse (Dateninput-Bug): Die Baugruppe ist eigentlich ein Stäubli 6-Achs-Roboter (Pos. 0100, RX160, R=6, T=0) mit montiertem Werkzeugwechsler (Pos. 0101, MPS32). Beim Datenexport wurde jedoch versehentlich das lange Hersteller-Handbuch des Werkzeugwechslers mitgeschickt. Dadurch hat das LLM die eigentliche Roboter-Hauptzeichnung übersehen und nur den passiven Werkzeugwechsler bewertet (R=0, T=0 → Grenzfall 6.8, gleicher Bug wie bei 0804GD6171).
+Revidierte GT: Roboter (LLM korrekt: nein – Roboter-Zeichnung ging im Handbuch des Anbauteils unter).
+
+### Excel 第 23 行
+
+GT vor Review: Kombinierte Einheit (Umsetzeinheit) | LLM: Gantry
+Analyse (Ausleger als Portalstruktur fehlinterpretiert): Die Baugruppe besteht aus zwei horizontalen Linearachsen (R=0, T=2: X-Achse Pos. 0100 und Y-Achse Pos. 0104). Es ist jedoch ein einseitig geführtes Auslegersystem (Grenzfall 6.4) und kein Gantry: Die obere Y-Achse ist nur einseitig am Schlitten der einzelnen X-Achse montiert und ragt frei aus. Das LLM begeht zwei Fehler: Erstens verwechselt es die Abstützung der einzelnen X-Achse auf zwei Standprofilen (Pos. 0102) mit einer beidseitigen Portalführung der Y-Achse (Gantry-Kriterium c verletzt, analog zu 0804306221). Zweitens zählt es fälschlicherweise den Frequenzumrichter (Pos. 0108, R030529477) als dritte Linearachse (T=3).
+Revidierte GT: Kombinierte Einheit / Umsetzeinheit (LLM korrekt: nein – Auslegerbauweise mit Portalführung verwechselt, Kriterium c verletzt).
