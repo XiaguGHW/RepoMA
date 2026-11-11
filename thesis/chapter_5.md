@@ -138,6 +138,40 @@ The mean Allowed Accuracy across the four models was highest with P3. Since P4 d
 
 使用 P3 时，四个模型的平均 Allowed Accuracy 最高。由于 P4 没有带来一致的提升，例子和例外没有采用，之后的所有实验都使用 P3。结果表明，与类别定义或个别例子相比，Codebook 的决策逻辑更有助于模型应用分类规则。由于 P3 是在主数据集的 115 个装配体上选定的，第 5.8 节将在补充数据集上检验它的表现。
 
+## 5.4 Input Representation | 输入形式
+
+**① 三种输入形式**
+
+The input representation determines the form in which the documentation of an assembly is passed to the model. Three representations were compared, each containing the same documentation in a different file format. The PDF representation comprises all PDF files, the image representation the CAD screenshots, the DFC structure and the PDF pages rendered as images, and the text representation the raw text extracted from these files, using the open-source OCR engine Tesseract for text in images (Smith, 2007). Details of the conversion are given in Appendix [Y]. The comparison used prompt P3 with the same four models and one run per configuration. The PDF configuration was run independently of the prompt comparison, so its results differ slightly from those for P3 in Table 5.3.
+
+输入形式决定了装配体资料以什么形式传给模型。本研究比较了三种输入形式，它们包含同一份资料，只是文件格式不同。PDF 形式包括全部 PDF 文件；图片形式包括 CAD 截图、DFC 结构和渲染成图片的 PDF 页面；文本形式是从这些文件中提取的原始文本，图片中的文本用开源 OCR 工具 Tesseract 提取（Smith, 2007）。转换的具体设置见附录 [Y]。比较使用 Prompt P3 和同样的四个模型，每种配置运行一次。PDF 配置与 Prompt 比较是分开独立运行的，因此其结果与表 5.3 中 P3 的结果略有不同。
+
+**② 结果**
+
+Table 5.4 shows that the image representation yielded the lowest Allowed Accuracy for all four models, between 9 and 14 percentage points below the PDF representation. In contrast, neither the PDF nor the text representation was consistently superior: text input achieved slightly higher values for three models, whereas the largest difference between the two, for Claude Opus 4.8, favoured PDF input. On average, both representations reached a similar level of 94.8 % and 94.6 %.
+
+表 5.4 显示，图片输入在四个模型上的 Allowed Accuracy 都最低，比 PDF 输入低 9 至 14 个百分点。相比之下，PDF 和文本输入都没有一致的优势：文本输入在三个模型上略高，但两者之间最大的差异出现在 Claude Opus 4.8 上，且有利于 PDF 输入。平均而言，两种输入形式达到相近的水平，分别为 94.8% 和 94.6%。
+
+**Table 5.4. Allowed Accuracy (%) by input representation (P3, 115 assemblies) / 表 5.4 各输入形式的 Allowed Accuracy（%）（P3，115 个装配体）**
+
+| Model / 模型 | PDF | Image / 图片 | Text / 文本 |
+| --- | ---: | ---: | ---: |
+| Claude Haiku 4.5 | 91.3 | 80.0 | 92.2 |
+| Claude Opus 4.8 | 97.4 | 87.0 | 92.2 |
+| Gemini 2.5 Flash | 93.9 | 79.8 | 96.5 |
+| Gemini 2.5 Pro | 96.5 | 83.5 | 97.4 |
+| Mean / 平均 | **94.8** | 82.6 | 94.6 |
+
+*Note: One run per configuration; 95 % confidence intervals in Appendix [W].*
+
+注：每种配置运行一次；95% 置信区间见附录 [W]。
+
+**③ 图片输入准确率较低的原因**
+
+With image input, the four models produced 80 of the 129 incorrect classifications in the input comparison. The reasoning of these classifications points to two causes that occurred only with this representation (Section 5.7). First, every document page was passed as a separate image, so that extensive supplier documentation could dominate the input. For four robots whose documentation included the multi-page catalogue or manual of a mounted quick-change system, these pages shifted the focus of the models to the quick-change system. The models therefore based their classification primarily on this passive interface rather than on the robot and assigned None of the Available Classes or Rotary Unit, whereas the same assemblies were classified correctly with PDF and text input. Second, technical drawings were misread: for two rotary units, a vertical belt drive and a vertically drawn servo motor were interpreted as lifting axes, which led to the class Combined Unit.
+
+使用图片输入时，四个模型在输入形式比较中共产生了 129 个错误分类中的 80 个。这些分类的推理过程指向两个只在这种输入形式下出现的原因（第 5.7 节）。第一，每一页资料都作为单独的图片传入，篇幅很大的供应商资料可能占据输入的主要部分。有四个机器人的资料中包含安装在其上的快换装置的多页目录或手册。这些页面使模型的关注点转移到快换装置上，因此模型评价的重点主要成了这个被动接口，而不是机器人，并将其归为“不属于任何可用类别”或旋转单元；而同样的装配体在 PDF 和文本输入下都分类正确。第二，技术图纸被误读：在两个旋转单元中，竖向同步带传动和竖向绘制的伺服电机被理解为升降轴，因此被归为组合单元。
+
 ## 待处理
 
 ### 5.1 待办
@@ -157,6 +191,13 @@ The mean Allowed Accuracy across the four models was highest with P3. Since P4 d
 - [ ] **分母**：Prompt 比较中 Opus（114）、Flash（111–113）、Pro（113–114）的分母不是 115（空输出未补跑；Haiku 已重跑，为 115）。问过 Jonas 后在表注中说明，或补跑。5.1 ③ 暂不改。
 - [ ] **可选核对**：Strict Macro-F1 的趋势是否也支持 P3；一致则加一句 “Strict Macro-F1 showed the same pattern (Appendix [W])”。
 - 已确认：数字基于最终版 GT；P4 的例子为作者自拟，不取自数据集；P3 + PDF 在 5.3 和 5.4 中是两次独立运行，5.4 开头需说明数字略有不同的原因。
+
+### 5.4 待办
+
+- [ ] **Flash 文本输入的错误数**：按 `corrected_gt_zgt_error_records.md` 换算为 3 个，表 5.4（96.5%）对应 4 个。对照原表核对转录。
+- [ ] **表 5.4 分母**：Flash 图片输入为 114（1 个空输出未补跑），与 5.3 的分母问题一起问 Jonas。
+- [ ] **置信区间**：放附录 [W]。
+- 依据：③ 中 80 / 129 来自表 5.4（图片 23+15+23+19；PDF 10+3+7+4；文本 9+9+4+3）。四个机器人为 `0804CC2134`、`0804EK1683`、`0804GD6171`、`0804FH4760`（Fehler_Analyse 第 18、19、21、22 行），两个旋转单元为 `0804HX0679`、`0804KB7256`（第 24、30 行），这些装配体只在图片输入下出错。图片按每批 15 张发送，但每个装配体仍是一次请求。两个三轴龙门（`0804HZ8350`、`0804KY3585`）在文本输入下也出错，留给 5.7。
 
 ### 章节安排
 
