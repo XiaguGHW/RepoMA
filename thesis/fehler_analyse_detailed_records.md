@@ -88,13 +88,13 @@ Revidierte GT: Gantry, Kombinierte Einheit (Umsetzeinheit), Keine der verfügbar
 
 ## 第四部分 · Excel 第 13–15 行
 
-来源为 `Fehler_Analyse` 工作表三张照片。根据行顺序及重叠列对应；部分模型输出列未完整拍到，暂参考同一工作簿 `Korrigierte GT&ZGT` 对应记录，待核对。Ground Truth、Register 和其他允许类别按本工作表照片记录。第 15 行错误分析照片截断，暂录入可见部分。
+来源为 `Fehler_Analyse` 工作表三张照片。根据行顺序及重叠列对应；部分模型输出列未完整拍到，暂参考同一工作簿 `Korrigierte GT&ZGT` 对应记录，待核对。Ground Truth、Register 和其他允许类别按本工作表照片记录。第 15 行错误分析已由后续照片补齐。
 
 | Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
 |---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 13 | 6 | 0 | 0804KM9359 | AS00139165 | E2 | Rotationseinheit | — | — | Kombinierte Einheit | Kombinierte Einheit | Kombinierte Einheit | Kombinierte Einheit | Kombinierte Einheit | Kombinierte Einheit | — | — | — | — | — | [原文](#excel-第-13-行) |
 | 14 | 6 | 0 | 0804KW8391 | AS00202949 | M | Multi-Achs-System (Gantry) | Kombinierte Einheit | — | Lineareinheit | Lineareinheit | — | — | Lineareinheit | — | — | Keine der verfügbaren Klassen | — | Lineareinheit | Keine der verfügbaren Klassen | [原文](#excel-第-14-行) |
-| 15 | 6 | 0 | 0804LK3617 | AS00295735 | M | Rotationseinheit | Lineareinheit | — | Kombinierte Einheit | — | — | Kombinierte Einheit | Kombinierte Einheit | — | Kombinierte Einheit | — | Kombinierte Einheit | Kombinierte Einheit | — | [原文（不完整）](#excel-第-15-行) |
+| 15 | 6 | 0 | 0804LK3617 | AS00295735 | M | Rotationseinheit | Lineareinheit | — | Kombinierte Einheit | — | — | Kombinierte Einheit | Kombinierte Einheit | — | Kombinierte Einheit | — | Kombinierte Einheit | Kombinierte Einheit | — | [原文](#excel-第-15-行) |
 
 ### Excel 第 13 行
 
@@ -107,6 +107,26 @@ Revidierte GT: Rotationseinheit (LLM korrekt: nein).
 
 Fehleranalyse: X/Y Bewegung und beidseitige Fixierung, aber keine Portalführung an beiden Enden der ersten Achse. Zweiter Aktor nicht Bestandteil der Baugruppe. Korrektur: Es sind überhaupt keine Aktoren vorhanden! Vertretbar ist daher Gantry, Kombiniert und Keine der verfügbaren Klassen. Das LLM entscheidet falsch!
 
-### Excel 第 15 行（未完）
+### Excel 第 15 行
 
-Fehleranalyse: Sehr schwierig: Eine Lineareinheit, die rotatorisch bewegt wird. Verbauter Aktor ist nur linear, aber Kettenrad und Lagerung für Rotation vorhanden. Kombinierte Einheit daher vertretbar, wenn Aktorkriterium weich ausgelegt wird. Rotationseinheit dann ebenfalls vertretbar, da die gesamte Baugruppe eine Rotation vollführt. Streng genommen aber eigentlich Lineareinheit. Rückblick: Rotation **［照片到此截断］**
+Fehleranalyse: Sehr schwierig: Eine Lineareinheit, die rotatorisch bewegt wird. Verbauter Aktor ist nur linear, aber Kettenrad und Lagerung für Rotation vorhanden. Kombinierte Einheit daher vertretbar, wenn Aktorkriterium weich ausgelegt wird. Rotationseinheit dann ebenfalls vertretbar, da die gesamte Baugruppe eine Rotation vollführt. Streng genommen aber eigentlich Lineareinheit. Rückblick: Rotation nicht vertretbar, da nur linearer Aktor verbaut ist! Dieser wird zwar durch Rotation angetrieben, aber bewegt sich linear. Zulässige Labels: Kombiniert, Linearaktor. LLM entscheidet korrekt!
+
+## 第五部分 · Excel 第 16–17 行
+
+来源为 `Fehler_Analyse` 工作表的三张照片。第 16 行的 Fehleranalyse 完整显示，第 17 行的 Fehleranalyse 在照片底部截断。部分模型列未拍全，表中对应位置参考 `Korrigierte GT&ZGT` 的记录，待核对。
+
+| Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
+|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 16 | 5 | 0 | `0804HZ8350` | `AS90317924` | E1 | Multi-Achs-System (Gantry) | — | Kombinierte Einheit | — | — | Kombinierte Einheit | — | Kombinierte Einheit | Kombinierte Einheit | — | — | Kombinierte Einheit | — | — | [原文](#excel-第-16-行) |
+| 17 | 5 | 0 | `0804KY3585` | `AS00228511/03` | E1 | Multi-Achs-System (Gantry) | — | Lineareinheit | — | — | Kombinierte Einheit | — | Kombinierte Einheit | Lineareinheit | — | — | Lineareinheit | — | — | [原文（不完整）](#excel-第-17-行) |
+
+### Excel 第 16 行
+
+GT vor Review: Multi-Achs-System (Gantry) | LLM: Kombinierte Einheit
+Analyse: Eindeutiges 3-Achs-Gantry (R=0, T=3): Das Rexroth-Mehrachssystem (Pos. 0100, R115.800.975) besteht aus einer beidseitig geführten Portal-Basisachse (2x MKR-140 mit Synchronwelle, Hub 1750 mm), einer darüber als Brücke gelagerten Querachse (CKR-200, Hub 3220 mm) und einer vertikalen Z-Achse (CKK-145, Hub 420 mm). Das LLM scheitert aus zwei Gründen: Entweder übersieht es in der Unterstückliste die beiden MKR-140-Basismodule komplett und zählt nur T=2 (CKR-200 + CKK-145), oder es erkennt zwar T=3 inklusive 2x MKR-140, schließt aber aus dem Bauteilnamen „Kreuzplatte“ (Verbindung Y zu Z) fälschlicherweise auf eine einseitige Auslegerbauweise der Querachse und verneint so Kriterium (c).
+Revidierte GT: Gantry (LLM korrekt: nein).
+
+### Excel 第 17 行（未完）
+
+GT vor Review: Multi-Achs-System (Gantry) | LLM: Kombinierte Einheit / Lineareinheit
+Analyse: Eindeutiges 3-Achs-Gantry (R=0, T=3) auf 6 Ständern (Pos. 0010, H=1400 mm) mit X-Achse (Pos. 0020, beidseitig geführt über Fest- und Losseitenschlitten Pos. 0055–0070), zwei Y-Achsen (Pos. 0030, 0804.KX6.886) und einer Z-Achse (Pos. 0035, 0804.KX3.877). Das LLM scheitert an zwei typischen Fallstricken: Entweder betrachtet es isoliert nur die Unterstückliste der Z-Achse (0804.KX3.877 mit 1x Rexroth-Achse + Siemens-Motor → T=1) und klassifiziert fälschlich Lineareinheit, oder es erkennt zwar **［照片到此截断］**
