@@ -126,7 +126,7 @@ EN7325、306221、HZ8350、KY3585、GT5112（龙门判断错误）；CC2134、EK
 | `0804BN2123` | Haiku | Actuator miscounting（多数） | 根据 aligning part 和渲染图虚构出 X、Y 两根轴 |
 | `0804EM7937` | Haiku | Actuator miscounting（多数） | 把两根钢轴（导向件）算作旋转轴 |
 | `0804JW4969` | DeepSeek | 信息过载 | 只描述了快换装置 SWS-020，判为无搬运功能（同 CC2134 模式） |
-| `0804KF8538` | DeepSeek | CAD 与 BOM 不一致（待确认） | BOM 只有机架、板件等，没有机器人本体，模型找不到执行器；需确认机器人本体是否未列入 BOM |
+| `0804KF8538` | DeepSeek | 资料不完整或不一致 | DFC 结构图确认：BOM 只有机器人底座（Robotergestell）、板件、定心套、夹子、软管附件和销钉螺钉，机器人本体不在 BOM 中；图纸无访问权限。模型据此判为没有执行器 |
 | `0804LD6387` | Haiku | Actuator miscounting（多数） | 把机架型材看成门架和直线轴 |
 | `0804LM7661` | Pro | 其他（S1 判断错误） | 把主功能判为“Dosieren”，S1 直接得出非搬运，虽然自己认出 R=0、T=3 的门架 |
 | `0804LS4641` | Haiku | Actuator miscounting（多数） | 把导轨算作平移轴 |
@@ -158,3 +158,7 @@ EN7325、306221、HZ8350、KY3585、GT5112（龙门判断错误）；CC2134、EK
 | CAD 与 BOM 不一致 | 3 | 5 | 5 |
 | 其他（S1 判断错误） | 0 | 2 | 2 |
 | 合计 | 44 | 38 | 58 |
+
+### 类别名称调整（2026-11-11）
+
+“CAD 与 BOM 不一致”改为 **资料不完整或不一致**（英文 Incomplete or inconsistent documentation）：除图纸与 BOM 矛盾（JX6656、KW8391、LK3617）和 3D 模型有误（GT0312）外，也包括决定类别的部件不在资料中（KF8538：机器人本体未列入 BOM）。数量不变。
