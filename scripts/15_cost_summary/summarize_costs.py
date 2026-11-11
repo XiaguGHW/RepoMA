@@ -38,7 +38,7 @@ PRICES = {
     "opus":       dict(inp=5.00, out=25.00, cache_read=0.10, cache_write=1.25),   # nur Schätzung (Haiku-Token)
     "gemini-pro": dict(inp=1.25, out=10.00, inp_long=2.50, out_long=15.00, long_from=200_000, cache_read=0.10),
     "gpt-5.5":    dict(inp=5.00, out=30.00, cache_read=0.10),
-    "deepseek":   dict(inp=0.14, out=0.28, cache_read=0.02),   # DeepSeek-API: Cache-Hit 0,0028 USD = 2 % von 0,14
+    "deepseek":   dict(inp=0.19, out=0.51, cache_read=0.10),   # Azure AI Foundry (Global Standard); DeepSeek-API direkt: 0,14 / 0,28
 }
 
 
