@@ -15,3 +15,12 @@ python summarize_costs.py --dir $HOME\Downloads\Token
 
 Ausgabe `Kosten_5_8.xlsx`: Zusammenfassung, Je_Baugruppe, Preise, Hinweise.
 **Preise vor der Verwendung prüfen** (Stand der Experimente, Zugangsweg).
+
+Zeit aus den Läufen: `--runs <Ordner mit den 10-Lauf-Ordnern>` nimmt je Ergebnisdatei die Startzeit
+(`Run_Time`) und teilt den Abstand zum Start des nächsten Laufs derselben Konfiguration durch die Zahl
+der Baugruppen (nur Abstände unter 6 h). Setzt voraus, dass die Läufe direkt nacheinander gestartet
+wurden; Blatt `Zeit_aus_Laeufen` zeigt jeden Abstand zur Kontrolle.
+
+```powershell
+python summarize_costs.py --dir $HOME\Downloads\Token --runs .
+```

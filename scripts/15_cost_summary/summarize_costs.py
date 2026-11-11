@@ -116,10 +116,48 @@ def find_col(cols, *names):
     return None
 
 
+def run_times(main_dir, max_hours=6):
+    """Je Konfiguration: Startzeit (Run_Time) jedes Lauf-Files; Abstand zum nächsten Lauf / Anzahl BG."""
+    out = []
+    for key, cfg, _pk in CONFIGS:
+        folders = [d for d in main_dir.iterdir() if d.is_dir() and key in d.name.lower()
+                   and ("flash" not in d.name.lower() or key == "deepseek")]
+        starts = []
+        for d in folders:
+            for f in d.glob("*.xlsx"):
+                if f.name.startswith("~$"):
+                    continue
+                df = pd.read_excel(f, sheet_name=0, dtype=str)
+                c_run = find_col(df.columns, "run_time")
+                c_gt = find_col(df.columns, "ground truth")
+                if c_run is None:
+                    continue
+                ts = pd.to_datetime(df[c_run], errors="coerce").dropna()
+                n = int(df[c_gt].notna().sum()) if c_gt is not None else len(df)
+                if len(ts):
+                    starts.append((ts.min(), n, f.name))
+        starts.sort()
+        per_bg = []
+        for (t0, n, name), (t1, _, _) in zip(starts, starts[1:]):
+            h = (t1 - t0).total_seconds() / 3600
+            ok = 0 < h < max_hours
+            out.append({"Konfiguration": cfg, "Abstand": name, "Start": t0, "Nächster Start": t1,
+                        "Stunden": round(h, 2), "BG": n, "s je BG": round(h * 3600 / n, 1) if ok else None,
+                        "verwendet": "ja" if ok else f"nein (> {max_hours} h oder ≤ 0)"})
+            if ok:
+                per_bg.append(h * 3600 / n)
+        if per_bg:
+            out.append({"Konfiguration": cfg, "Abstand": "Zusammenfassung", "Start": None, "Nächster Start": None,
+                        "Stunden": None, "BG": None, "s je BG": round(st.median(per_bg), 1),
+                        "verwendet": f"Median aus {len(per_bg)} Läufen (von {len(starts)} Dateien)"})
+    return pd.DataFrame(out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", action="append", required=True, help="Ordner mit Ergebnisdateien (mehrfach möglich)")
     ap.add_argument("--out", default="Kosten_5_8.xlsx")
+    ap.add_argument("--runs", help="Ordner mit den 10-Lauf-Ordnern (115 BG): Zeit je BG aus den Startzeiten aufeinanderfolgender Läufe")
     a = ap.parse_args()
 
     rows, notes = [], []
@@ -185,18 +223,24 @@ def main():
                      "Zeit-Quelle": ", ".join(sorted(g.Zeit_Quelle.dropna().unique())),
                      "Format": ", ".join(sorted(g.Format.unique()))})
     summ = pd.DataFrame(summ)
+    zeit = run_times(Path(a.runs)) if a.runs else pd.DataFrame()
     prices = pd.DataFrame([{"Preis-Schlüssel": k, **v} for k, v in PRICES.items()])
     with pd.ExcelWriter(a.out, engine="openpyxl") as xw:
         summ.to_excel(xw, sheet_name="Zusammenfassung", index=False)
         df.to_excel(xw, sheet_name="Je_Baugruppe", index=False)
         prices.to_excel(xw, sheet_name="Preise", index=False)
         pd.DataFrame(notes).to_excel(xw, sheet_name="Hinweise", index=False)
+        if len(zeit):
+            zeit.to_excel(xw, sheet_name="Zeit_aus_Laeufen", index=False)
     pd.set_option("display.width", 250, "display.max_columns", 20)
     kurz = pd.DataFrame({"Konfiguration": summ["Konfiguration"], "n": summ["Anfragen"],
                          "Input-Token": summ["Input-Token Mittel"],
                          "Output-Token": summ["Output-Token Mittel (inkl. Reasoning)"],
                          "USD je BG": summ["Kosten je BG Mittel (USD)"]})
     print(kurz.to_string(index=False))
+    if len(zeit):
+        print("\nZeit je Baugruppe aus den Startzeiten aufeinanderfolgender Läufe (115 BG):")
+        print(zeit[zeit["Abstand"] == "Zusammenfassung"][["Konfiguration", "s je BG", "verwendet"]].to_string(index=False))
     print(f"\nAusgabe: {Path(a.out).resolve()}")
 
 
