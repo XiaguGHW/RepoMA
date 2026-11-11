@@ -406,3 +406,15 @@ Analyse (Grenzfall zwischen linearer Positioniereinheit und Messfunktion nach S1
 (Pos. 0100, Aventics MSC-MG-HM, Hub 100 mm, R=0, T=1), der das in der 2D-Zeichnung nur als Referenzgeometrie angedeutete Messgerät (3843AY6685) linear verfährt (→ Lineareinheit). Das LLM hat den Minischlitten (R-0, T=1) zwar korrekt erkannt, die übergeordnete Hauptfunktion wegen des im 3D-CAD sichtbaren PowerMeters und der Benennung Sensor jedoch als „Messen/Prüfen" eingestuft und gemäß Schritt S1 ausgeschlossen. Da im Codebook sowohl die Einstufung als lineare Positioniereinheit eines Messkopfs als auch der Ausschluss als Messapplikation (S1) gut begründbar sind, sind beide
 Labels vertretbar.
 Revidierte GT: Lineareinheit, Keine der verfügbaren Klassen (LLM korrekt: ja - sowohl die Einstufung als lineare Zustelleinheit T-1 als auch der Ausschluss als Messbaugruppe nach S1 sind vertretbar).
+
+
+## 第十六部分 · Excel 第 48–51 行（待照片核对）
+
+以下编号配对与 `corrected_gt_zgt_error_records.md` 一致。第 48、49 行根据用户给出的顺序匹配；第 50、51 行的文字次序交错，暂参考修正表顺序匹配，行号须由照片确认。用户提供的 0、1 未能可靠归属到具体行和列，暂不填写。Register E1 为用户提供；Ground Truth 和模型信息来自修正表，尚未与本工作表核对。修正表标记 `0804KT1289` 为黄色高亮；本工作表的颜色待确认。`—` 与明确标记的 `[EMPTY]` 不等同。错误分析待提供。
+
+| Excel 行 | SAP-Nummer | Teamcenter | Register（用户提供） | Ground Truth（修正表） | 其他允许类别（修正表） | 非空模型记录（修正表） | Fehleranalyse |
+|---:|---|---|---|---|---|---|---|
+| 48 | `0804KK0664` | `AS00127924` | E1 | Greifer | — | gemini-2.5-flash (pdf): Kombinierte Einheit | 待提供 |
+| 49 | `0804KM8175` | `AS00145823` | E1 | Lineareinheit | — | gemini-2.5-flash (image): Kombinierte Einheit | 待提供 |
+| 50（待核对） | `0804KS8037` | `AS00164441` | E1 | Multi-Achs-System (Gantry) | — | claude-opus-4-8 (image): Kombinierte Einheit | 待提供 |
+| 51（待核对） | `0804KT1289` | `AS00177742` | E1 | Lineareinheit | — | claude-haiku-4-5_20251001 (pdf): `[EMPTY]` | 待提供 |
