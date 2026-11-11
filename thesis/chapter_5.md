@@ -94,7 +94,7 @@ Allowed Macro-Precision and Allowed Macro-Recall are the equally weighted averag
 
 Only strict F1 is reported because precision and recall under the allowed criterion can refer to different classes for a single prediction. Strict Macro-F1 is the mean of the class-wise F1 values (Opitz & Burst, 2019):
 
-$$\text{Strict Macro-F1} = \frac{1}{|C|}\sum_{c \in C} \frac{2\,\mathrm{P}_c\,\mathrm{R}_c}{\mathrm{P}_c + \mathrm{R}_c} \qquad (5.3)$$
+$$\text{Strict Macro-F1} = \frac{1}{|C|}\sum_{c \in C} \frac{2 \cdot \mathrm{P}_c \cdot \mathrm{R}_c}{\mathrm{P}_c + \mathrm{R}_c} \qquad (5.3)$$
 
 where $\mathrm{P}_c$ and $\mathrm{R}_c$ follow from Equations 5.2a and 5.2b with $A_i$ replaced by $\lbrace y_i \rbrace$. This metric reflects how often predictions match the primary label and supports comparison with studies that use a single correct label. For configurations with ten runs, each metric is calculated per run and averaged across the runs.
 
