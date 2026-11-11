@@ -251,3 +251,41 @@ Revidierte GT: Rotationseinheit, Greifer (LLM korrekt: nein – Fingerhub der Gr
 GT vor Review: Multi-Achs-System (Gantry) | LLM: Keine der verfügbaren Klassen
 Analyse (Widerspruch zwischen 3D-CAD und Stückliste): Im 3D-CAD ist ein komplettes Portal (Gantry) samt Motoren sichtbar, weshalb die ursprüngliche GT Gantry lautet. In der 2D-Zeichnung sind die Achsen jedoch nur als Referenzgeometrie (Strich-Zweipunkt-Linien) angedeutet, und die Stückliste (machining parts and hardware for gantry system) enthält ausschließlich das passive Montagegestell (Alu-Profile Pos. 0001, Auflagebleche Pos. 0002–0007, Schrauben; R=0, T=0). Da 3D-Modell und Stückliste widersprüchlich sind, sind sowohl Gantry als auch Keine der verfügbaren Klassen (Schritt S1 / Grenzfall 6.8) vertretbar (analog zu 0804KW8391).
 Revidierte GT: Gantry, Keine der verfügbaren Klassen (LLM korrekt: ja – wegen Diskrepanz zwischen 3D-Ansicht und Stückliste sind beide Labels korrekt).
+
+
+## 第十一部分 · Excel 第 30–34 行
+
+来源为 `Fehler_Analyse` 工作表照片，按行顺序及共同列对应。未拍全的模型输出参考已整理的 `Korrigierte GT&ZGT` 对应记录补录，待核对。`—` 表示来源中为空，不等同于明确显示的 `[EMPTY]`。第 31 行黄色高亮，T 列照片中为空；第 34 行的错误分析被照片下边缘截断，以下只记录可见文字。
+
+| Excel 行 | A · Error_Count | B · 表头未完整显示 | C · SAP-Nummer | D · Teamcenter | E · Register | F · Ground Truth | G · Weitere zulässige Ground Truth | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) | T · Fehleranalyse |
+|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 30 | 2 | 0 | `0804KB7256` | `AS00097350` | E2 | Rotationseinheit | — | — | — | — | Kombinierte Einheit | — | — | — | — | — | Kombinierte Einheit | — | — | [原文](#excel-第-30-行) |
+| 31 | 2 | 0 | `0804KU2401` | `AS00177443` | E1 | Lineareinheit | — | — | `[EMPTY]` | — | — | — | — | — | `[EMPTY]` | — | — | — | — | 空白（黄色高亮） |
+| 32 | 2 | 0 | `0804KY7179` | `AS00221603` | E1 | Lineareinheit | — | Kombinierte Einheit | `[EMPTY]` | — | — | — | — | — | — | — | — | — | — | [原文](#excel-第-32-行) |
+| 33 | 2 | 0 | `0804KZ9488` | `AS00231836` | E2 | Kombinierte Einheit | — | Rotationseinheit | — | — | — | — | — | Rotationseinheit | — | — | — | — | — | [原文](#excel-第-33-行) |
+| 34 | 2 | 0 | `0804LA7293` | `AS00242009` | E2 | Kombinierte Einheit | — | Greifer | — | — | — | — | — | Greifer | — | — | — | — | — | [部分原文](#excel-第-34-行) |
+
+### Excel 第 30 行
+
+GT vor Review: Rotationseinheit | LLM: Kombinierte Einheit
+Analyse (Visuelle Fehlinterpretation der 2D-Zeichnung): Die Baugruppe besteht nur aus einem Servomotor (Pos. 0100), der über eine gelagerte Welle (Pos. 0002, 0105) einen Drei-Finger-Greifer (Pos. 0108, Endeffektor zählt nicht) dreht (R=1, T=0 → Rotationseinheit). Wegen der vertikalen 2D-Darstellung hat das LLM jedoch den Servomotor (Pos. 100) samt Stangen (Pos. 020) fälschlicherweise als vertikalen Hubzylinder (T=1) und die Flanschplatte (Pos. 001) als Drehantrieb interpretiert. Ein Linearaktor existiert nicht; die Einstufung als Hub-Schwenk-Einheit (R=1, T=1, Grenzfall 6.3) ist ein reiner Ablesefehler.
+Revidierte GT: Rotationseinheit (LLM korrekt: nein – Servomotor Pos. 100 wurde in der 2D-Zeichnung als Hubzylinder T=1 fehlinterpretiert).
+
+### Excel 第 32 行
+
+GT vor Review: Lineareinheit | LLM: Kombinierte Einheit
+Analyse (Visuelle Halluzination einer Schwenkachse): Die Baugruppe (lifter / Ausheber) besitzt nur einen vertikalen Pneumatikzylinder (Pos. 0100, Festo DSBC-40-80, R=0, T=1) mit zwei passiven Führungsstangen (Pos. 0002, 0006 → Lineareinheit). Im 3D-Bild hat das LLM jedoch die Führungsstangen als zwei Zylinder gedeutet und ein rötliches Anbauteil (Rückschlagventil Pos. 0103 bzw. Kupplung Pos. 0003/0004) fälschlicherweise als „Schwenkplatte mit Drehgelenk“ (R=1, Grenzfall 6.3) halluziniert. Ein Drehantrieb existiert nicht.
+Revidierte GT: Lineareinheit (LLM korrekt: nein – rötliches Anbauteil wurde im 3D-Modell als Rotationsachse R=1 halluziniert).
+
+### Excel 第 33 行
+
+GT vor Review: Kombinierte Einheit | LLM: Rotationseinheit
+Analyse (Dateninput-Bug): Die Baugruppe besteht aus einem Linearmodul (Pos. 0100, T=1), einer Schwenkeinheit (Pos. 0101, Schunk SRU-plus) und einer Greiferdreheinheit (Pos. 0102, R ≥ 1 → Kombinierte Einheit, Grenzfall 6.3). Da beim Export das Hersteller-Datenblatt der Schwenkeinheit (SRU-plus) mitgeschickt wurde, hat das LLM die Hauptzeichnung samt Linearmodul übersehen und nur das Unterbauteil Pos. 0101 (R=1, T=0) bewertet (analog zu 0804FH4760).
+Revidierte GT: Kombinierte Einheit (LLM korrekt: nein – Hauptzeichnung ging im Datenblatt des Unterbauteils Pos. 0101 unter).
+
+### Excel 第 34 行
+
+GT vor Review: Kombinierte Einheit | LLM: Greifer
+Analyse (Fehlinterpretation der 2D-Endlagenansichten): Die Baugruppe besteht aus einem Linearmodul (Pos. 0100, T=1), einer 180°-Schwenkeinheit (Pos. 0105, R=1) und einem Parallelgreifer (Pos. 0106 → Kombinierte Einheit, Grenzfall 6.3). Da die 2D-Zeichnung dieselbe Einheit zweimal in ihren beiden
+
+[后续文字被照片下边缘截断，待补充。]
