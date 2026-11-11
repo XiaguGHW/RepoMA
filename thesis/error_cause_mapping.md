@@ -7,7 +7,7 @@
 - **龙门判断错误**：龙门测试（Codebook 第 4 节）判断错误，例如把双侧导向和单侧悬臂混淆，或被零件名称误导。
 - **信息过载**：主图纸淹没在供应商目录、手册、报价或数据表中，模型评价的不是主装配体。
 - **资料不一致（CAD/BOM）**：图纸 / CAD 与 BOM 互相矛盾，或 3D 模型本身有误。
-- **执行器计数错误**：执行器计数（Codebook 第 3 节）出错，包括把被动零件或末端执行器里的驱动算作主轴、虚构驱动、漏看或合并轴。原幻灯片中的“Antriebs-Halluzination”只覆盖虚构驱动，这里扩展为整个计数步骤。
+- **执行器计数错误**：执行器计数（Codebook 第 3 节）出错，包括把被动零件或末端执行器里的驱动算作主轴、虚构驱动、漏看或合并轴。英文名称 **Actuator miscounting**（德语 Fehlerhafte Aktorzählung）。分两个子类型：多数（over-counting，16 个，相当于原幻灯片的“Antriebs-Halluzination”）和少数（under-counting，4 个：EB6690、LA7293、CE5532、GY2577）。
 - **其他**：GT 本身有争议或其他原因。目前没有装配体归入此类。
 - **待定**：原文无法判断。
 
@@ -44,13 +44,13 @@
 | `0804EK1683` | 19 | Roboter | — | Rotationseinheit ×1, Keine der verfügbaren Klassen ×3 | 图片 4 | 信息过载 | 同 CC2134，只看到快换装置的资料 | 确定 |
 | `0804GD6171` | 21 | Roboter | — | Keine der verfügbaren Klassen ×4 | 图片 4 | 信息过载 | 65 张图片，主装配体的 1–2 页淹没在快换装置目录里 | 确定 |
 | `0804FH4760` | 22 | Roboter | — | Keine der verfügbaren Klassen ×3 | 图片 3 | 信息过载 | 快换装置的长篇手册一起发送，主图纸被忽略 | 确定 |
-| `0804KE7723` | 25 | Multi-Achs-System (Gantry) | — | Kombinierte Einheit ×3 | 图片 1, 文本 2 | 信息过载 | 9 页报价文本盖过了 1 页主图纸；其次还把横梁误读为悬臂（龙门） | 主要原因定为信息过载，次要原因为龙门判断 |
+| `0804KE7723` | 25 | Multi-Achs-System (Gantry) | — | Kombinierte Einheit ×3 | 图片 1, 文本 2 | 信息过载 | 9 页报价文本盖过了 1 页主图纸；其次还把横梁误读为悬臂（龙门） | 确定（作者确认；次要原因为龙门判断） |
 | `0804KZ9488` | 33 | Kombinierte Einheit | — | Rotationseinheit ×2 | 图片 2 | 信息过载 | 摆动单元的厂商数据表一起发送，主图纸和直线模块被忽略 | 确定 |
-| `0804FT6844` | 41 | Kombinierte Einheit | — | Lineareinheit ×1 | 图片 1 | 信息过载 | 原文给出两种解释：漏看第二根轴，或 Festo 数据表盖过主图纸；只在图片输入下出错 | 待确认：也可归为执行器计数错误 |
+| `0804FT6844` | 41 | Kombinierte Einheit | — | Lineareinheit ×1 | 图片 1 | 信息过载 | 原文给出两种解释：漏看第二根轴，或 Festo 数据表盖过主图纸；只在图片输入下出错 | 确定（作者确认） |
 | `0804KK0664` | 48 | Greifer | — | Kombinierte Einheit ×1 | PDF 1 | 信息过载 | 按数据表封面的应用示例图分类，而不是实际装配体 | 确定 |
 | `0804JX6656` | 12 | Multi-Achs-System (Gantry) | Kombinierte Einheit, Keine der verfügbaren Klassen | Lineareinheit ×3 | 文本 1, PDF 1, 图片 1 | 资料不一致（CAD/BOM） | 图纸里画有两根带电机的轴（作为参考轮廓），BOM 里却没有这些驱动 | 确定 |
 | `0804KW8391` | 14 | Multi-Achs-System (Gantry) | Kombinierte Einheit, Keine der verfügbaren Klassen | Lineareinheit ×4 | PDF 2, 文本 2 | 资料不一致（CAD/BOM） | 同 JX6656：第二个执行器不属于本装配体，实际没有执行器 | 确定 |
-| `0804GT0312` | 7 | Kombinierte Einheit | — | Lineareinheit ×4, Multi-Achs-System (Gantry) ×4 | 图片 3, PDF 3, 文本 2 | 资料不一致（CAD/BOM） | 原文：“eindeutig KE, aber 3D fehlerhaft”，3D 模型有误导致难以判断 | 待确认：也可归为“其他” |
+| `0804GT0312` | 7 | Kombinierte Einheit | — | Lineareinheit ×4, Multi-Achs-System (Gantry) ×4 | 图片 3, PDF 3, 文本 2 | 资料不一致（CAD/BOM） | 原文：“eindeutig KE, aber 3D fehlerhaft”，3D 模型有误导致难以判断 | 确定（作者确认） |
 | `0804EB6690` | 10 | Kombinierte Einheit | — | Greifer ×4, Rotationseinheit ×2 | 图片 4, PDF 1, 文本 1 | 执行器计数错误 | 被名称“Rotationseinheit”和夹爪误导，漏看升降轴与摆动轴的组合 | 确定 |
 | `0804KM9359` | 13 | Rotationseinheit | — | Kombinierte Einheit ×6 | PDF 2, 文本 2, 图片 2 | 执行器计数错误 | 把平行夹爪或手动调节板当成平移轴（T=1） | 确定 |
 | `0804FT0436` | 20 | Lineareinheit | — | Kombinierte Einheit ×4 | 图片 3, PDF 1 | 执行器计数错误 | 把三爪夹爪的圆柱外壳看成摆动单元，或被名称“Handling”误导 | 确定 |
@@ -73,9 +73,7 @@
 | `3842998383` | 57 | Keine der verfügbaren Klassen | — | Lineareinheit ×1 | 图片 1 | 执行器计数错误 | 把被动滚道的输送方向算作平移轴，违反边界案例 6.8 | 确定 |
 
 
-## 待作者确认
+## 状态
 
-1. `0804FC1588`、`0804GE7738`：已按作者补充的各次运行推理归为信息过载。
-2. `0804FT6844`（信息过载或执行器计数错误）、`0804GT0312`（资料不一致或其他）、`0804KE7723`（信息过载或龙门判断错误）的主要原因。
-3. 执行器计数错误这一类是否沿用原幻灯片的名称“Antriebs-Halluzination”，还是按扩展后的范围改名（例如“Fehler bei der Aktorzählung”）。
-4. 本表只覆盖输入形式比较的运行；最终配置中 GPT-5.5 和 DeepSeek-V4-Flash 新出现的出错装配体（脚本 12 的 `Fehler_BG` 中标为 NEU）尚需另行归类。
+- 44 个装配体的归类已全部由作者确认。
+- 尚未覆盖：最终配置中 GPT-5.5 和 DeepSeek-V4-Flash 新出现的出错装配体，以及补充数据集的 8 条错误（脚本 12 的 `Fehler_BG` 中标为 NEU 的），需要另行归类。
