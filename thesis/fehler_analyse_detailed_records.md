@@ -485,10 +485,25 @@ Revidierte GT: Greifer, Kombinierte Einheit (LLM korrekt: nein - fester Grundkö
 
 ## 第十八部分 · Excel 第 56–58 行（待照片核对）
 
-行号、SAP 和 Teamcenter 由用户按顺序提供，编号配对均与 `corrected_gt_zgt_error_records.md` 一致；第 56、57 行 Register 由用户提供，第 58 行 Register 尚未提供。下表修正表信息尚未与 `Fehler_Analyse` 本工作表核对。修正表标记 `3843CE1617` 黄色高亮，本工作表颜色待核对。`—` 表示修正表中为空，与明确显示的 `[EMPTY]` 不同，不能据此推断模型没有输出。错误分析待提供。
+行号、SAP 和 Teamcenter 由用户按顺序提供，编号配对均与 `corrected_gt_zgt_error_records.md` 一致；第 56、57 行 Register 由用户提供，第 58 行 Register 尚未提供。下表修正表信息尚未与 `Fehler_Analyse` 本工作表核对。修正表标记 `3843CE1617` 黄色高亮，本工作表颜色待核对。`—` 表示修正表中为空，与明确显示的 `[EMPTY]` 不同，不能据此推断模型没有输出。第 56、57 行错误分析按用户提供的文字原样补录，第 58 行据用户说明为空。第 56 行的 `Winke getriebe` 及第 57 行的 `R=O` 按用户文字保留，待核对。
 
 | Excel 行 | SAP-Nummer | Teamcenter | Register（用户提供） | Register / Ground Truth（修正表） | 其他允许类别（修正表） | 非空模型记录（修正表） | Fehleranalyse |
 |---:|---|---|---|---|---|---|---|
-| 56 | `0804LZ1241` | `AS00379611` | E1 | E1 / Rotationseinheit | — | gemini-2.5-flash (pdf): Kombinierte Einheit | 待提供 |
-| 57 | `3842998383` | `PT00412992` | E2 | E2 / Keine der verfügbaren Klassen | — | claude-haiku-4-5_20251001 (image): Lineareinheit | 待提供 |
-| 58 | `3843CE1617` | `AS00277646/01` | 未提供 | E1 / Multi-Achs-System (Gantry) | — | gemini-2.5-flash (pdf): `[EMPTY]` | 待提供 |
+| 56 | `0804LZ1241` | `AS00379611` | E1 | E1 / Rotationseinheit | — | gemini-2.5-flash (pdf): Kombinierte Einheit | [原文](#excel-第-56-行) |
+| 57 | `3842998383` | `PT00412992` | E2 | E2 / Keine der verfügbaren Klassen | — | claude-haiku-4-5_20251001 (image): Lineareinheit | [原文](#excel-第-57-行) |
+| 58 | `3843CE1617` | `AS00277646/01` | 未提供 | E1 / Multi-Achs-System (Gantry) | — | gemini-2.5-flash (pdf): `[EMPTY]` | 空白（用户确认） |
+
+
+### Excel 第 56 行
+
+GT vor Review: Rotationseinheit | LLM: Kombinierte Einheit
+Analyse (Normschrauben als zweiter Antrieb halluziniert): Die Baugruppe (rotation unit) besteht nur aus einem Servomotor (Pos. 0100) mit Winke getriebe (Pos. 0101, R=1, T=0 → Rotationseinheit). Das LLM hat die Normschrauben (Pos. 0200, 0201) fälschlicherweise als zweiten Servomotor mit Getriebe für eine Linearachse
+(T=1) halluziniert.
+Revidierte GT: Rotationseinheit (LLM korrekt: nein - Schrauben Pos. 0200/0201 wurden als Linearantrieb T=1 halluziniert).
+
+### Excel 第 57 行
+
+GT vor Review: Keine der verfügbaren Klassen | LLM: Lineareinheit
+Analyse (Verstoß gegen Grenzfall 6.8 / Passive Rollenbahn als T=1 gezählt): Die Baugruppe (Rollenbahn) ist eine rein passive Schwerkraft-Förderbahn ohne Aktor (R=0, T=0 → Keine der verfügbaren Klassen nach Grenzfall 6.8). Obwohl das LLM erkannt hat, dass die Rollen keine Aktoren sind, hat es die bloße Förderrichtung regelwidrig als translatorische Achse (T=1) gewertet.
+Revidierte GT: Keine der verfügbaren Klassen (LLM korrekt: nein - passive Rollenbahn ohne Aktor nach
+Grenzfall 6.8, R=O, T=0).
