@@ -6,7 +6,7 @@ werden die Rohdaten in `raw_usage` verwendet) und rechnet mit der Preistabelle `
 Gemini-Thinking-Token zählen als Output. Für Claude Opus 4.8 wird eine Schätzung mit den Token von
 Claude Haiku 4.5 ausgegeben.
 
-Zeit: Falls keine Dauer-Spalte existiert, wird der Abstand zwischen den Zeitstempeln (`Run_Time`)
+Zeit: Vorrang hat die von der API gemeldete Latenz (`latency_checkpoint.service_ttlt_ms`, nur GPT-5.5 über Azure). Sonst, falls keine Dauer-Spalte existiert, wird der Abstand zwischen den Zeitstempeln (`Run_Time`)
 aufeinanderfolgender Anfragen verwendet (nur Abstände unter 15 min); Median robuster als Mittel.
 
 ```powershell

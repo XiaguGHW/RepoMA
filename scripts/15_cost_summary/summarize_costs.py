@@ -43,6 +43,11 @@ PRICES = {
 
 
 def parse_usage(cell):
+    u = _parse_usage(cell)
+    return u
+
+
+def _parse_usage(cell):
     """-> dict(input, cached, cache_write, output, reasoning, fmt) oder None."""
     if cell is None or (isinstance(cell, float) and pd.isna(cell)) or not str(cell).strip():
         return None
@@ -56,9 +61,11 @@ def parse_usage(cell):
     if not isinstance(d, dict):
         return None
     if isinstance(d.get("raw_usage"), dict) and d["raw_usage"]:  # Hülle des Connectors: Rohdaten bevorzugen
-        u = parse_usage(json.dumps(d["raw_usage"]))
+        u = _parse_usage(json.dumps(d["raw_usage"]))
         if u is not None:
             return u
+    lat = d.get("latency_checkpoint") if isinstance(d.get("latency_checkpoint"), dict) else {}
+    lat_s = (lat.get("service_ttlt_ms") or 0) / 1000 or None  # Azure: Zeit bis zum letzten Token
     if "usageMetadata" in d:
         d = d["usageMetadata"]
     if "usage" in d and isinstance(d["usage"], dict):
@@ -68,28 +75,28 @@ def parse_usage(cell):
     if "promptTokenCount" in d:  # Gemini: thoughts zählen als Output
         return dict(input=g("promptTokenCount"), cached=g("cachedContentTokenCount"), cache_write=0,
                     output=g("candidatesTokenCount") + g("thoughtsTokenCount"),
-                    reasoning=g("thoughtsTokenCount"), fmt="Gemini")
+                    reasoning=g("thoughtsTokenCount"), fmt="Gemini", latency=lat_s)
     if "prompt_cache_hit_tokens" in d or "prompt_cache_miss_tokens" in d:  # DeepSeek
         hit = g("prompt_cache_hit_tokens")
         return dict(input=g("prompt_tokens") or hit + g("prompt_cache_miss_tokens"), cached=hit, cache_write=0,
                     output=g("completion_tokens"), reasoning=sub("completion_tokens_details", "reasoning_tokens"),
-                    fmt="DeepSeek")
+                    fmt="DeepSeek", latency=lat_s)
     if "prompt_tokens" in d:  # OpenAI Chat Completions (completion_tokens enthält Reasoning)
         return dict(input=g("prompt_tokens"), cached=sub("prompt_tokens_details", "cached_tokens"), cache_write=0,
                     output=g("completion_tokens"), reasoning=sub("completion_tokens_details", "reasoning_tokens"),
-                    fmt="OpenAI-Chat")
+                    fmt="OpenAI-Chat", latency=lat_s)
     if "cache_creation_input_tokens" in d or "cache_read_input_tokens" in d:  # Anthropic: input ohne Cache
         cr, cw = g("cache_read_input_tokens"), g("cache_creation_input_tokens")
         return dict(input=g("input_tokens") + cr + cw, cached=cr, cache_write=cw,
-                    output=g("output_tokens"), reasoning=0, fmt="Anthropic")
+                    output=g("output_tokens"), reasoning=0, fmt="Anthropic", latency=lat_s)
     if "provider" in d and "input_tokens" in d:  # Hülle ohne Rohdaten: input_tokens ohne Cache angenommen
         cr = g("cached_tokens")
         return dict(input=g("input_tokens"), cached=0, cache_write=g("cache_creation_input_tokens"),
-                    output=g("output_tokens"), reasoning=g("reasoning_tokens"), fmt="Connector-Hülle")
+                    output=g("output_tokens"), reasoning=g("reasoning_tokens"), fmt="Connector-Hülle", latency=lat_s)
     if "input_tokens" in d:  # OpenAI Responses (input enthält Cache) oder Anthropic ohne Cache-Felder
         return dict(input=g("input_tokens"), cached=sub("input_tokens_details", "cached_tokens"), cache_write=0,
                     output=g("output_tokens"), reasoning=sub("output_tokens_details", "reasoning_tokens"),
-                    fmt="OpenAI-Responses/Anthropic")
+                    fmt="OpenAI-Responses/Anthropic", latency=lat_s)
     return None
 
 
@@ -144,15 +151,16 @@ def main():
             if u is None:
                 n_bad += 1
                 continue
-            t = gap[i] if pd.notna(gap[i]) else None
+            t, quelle = (u["latency"], "API-Latenz") if u.get("latency") else (
+                (gap[i], "Zeitstempel-Abstand") if pd.notna(gap[i]) else (None, None))
             if c_time is not None:
                 try:
-                    t = float(str(r[c_time]).replace(",", "."))
+                    t, quelle = float(str(r[c_time]).replace(",", ".")), "Zeitspalte"
                 except ValueError:
                     pass
             row = dict(Konfiguration=cfg, Datei=f.name, SAP=None if c_sap is None else r[c_sap], Format=u["fmt"],
                        Input=u["input"], Cached=u["cached"], Cache_Write=u["cache_write"], Output=u["output"],
-                       Reasoning=u["reasoning"], Kosten_USD=cost(u, PRICES[pk]), Zeit_s=t)
+                       Reasoning=u["reasoning"], Kosten_USD=cost(u, PRICES[pk]), Zeit_s=t, Zeit_Quelle=quelle)
             rows.append(row)
             if pk == "haiku":  # Schätzung Opus 4.8 mit denselben Token
                 rows.append({**row, "Konfiguration": "Claude Opus 4.8 (PDF) – Schätzung mit Haiku-Token",
@@ -176,6 +184,7 @@ def main():
                      "Kosten für 185 BG (USD, hochgerechnet)": round(g.Kosten_USD.mean() * 185, 2),
                      "Zeit je BG Median (s)": None if g.Zeit_s.isna().all() else round(g.Zeit_s.median(), 1),
                      "Zeit je BG Mittel (s)": None if g.Zeit_s.isna().all() else round(g.Zeit_s.mean(), 1),
+                     "Zeit-Quelle": ", ".join(sorted(g.Zeit_Quelle.dropna().unique())),
                      "Format": ", ".join(sorted(g.Format.unique()))})
     summ = pd.DataFrame(summ)
     prices = pd.DataFrame([{"Preis-Schlüssel": k, **v} for k, v in PRICES.items()])
