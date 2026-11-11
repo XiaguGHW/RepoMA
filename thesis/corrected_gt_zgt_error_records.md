@@ -1,13 +1,13 @@
 # Korrigierte GT&ZGT | 装配体错误记录
 
-## Excel 第 2–41 行
+## Excel 第 2–58 行
 
-来源为 Excel 工作表 `Korrigierte GT&ZGT` 的两批截图。Excel 第 1 行为表头，第 2–21 行和第 22–41 行按原表顺序合并为一张表，共 40 条装配体记录，涵盖 A–S 列。模型列按截图中的模型标识和输入形式命名。
+来源为 Excel 工作表 `Korrigierte GT&ZGT` 的三批截图。Excel 第 1 行为表头，第 2–58 行按原表顺序合并为一张表，共 57 条装配体记录，涵盖 A–S 列。模型列按截图中的模型标识和输入形式命名。
 
 - `—` 表示截图中的空白单元格，`[EMPTY]` 是工作表中明确记录的值。模型输出中的 `Gantry` 按原文转录。
-- 已录入的黄色高亮行对应 `0804DN9616`、`0804KU2401` 和 `0804AF9667`。截图中 Ground Truth 和其他允许类别的粗体已保留。
+- 已录入的黄色高亮行对应 `0804DN9616`、`0804KU2401`、`0804AF9667`、`0804FU6515`、`0804JU56371`、`0804KT1289` 和 `3843CE1617`。截图中 Ground Truth 和其他允许类别的粗体已保留。
 - `0804306221 | AS90101734` 在原表 `BG_ID` 中带前导零，独立的 `SAP-Nummer` 列显示 `804306221`，两列分别照录。
-- 这份表保留该工作表中的 Register、Ground Truth 和其他允许类别。每行 12 个模型与输入形式列中的非空值数量均与 `Error_Count` 一致，前 20 条有 133 个非空值，其中 9 个为 `[EMPTY]`。后 20 条有 40 个非空值，其中 5 个为 `[EMPTY]`。累计 173 个非空值，其中 14 个为 `[EMPTY]`。
+- 这份表保留该工作表中的 Register、Ground Truth 和其他允许类别。每行 12 个模型与输入形式列中的非空值数量均与 `Error_Count` 一致，前 20 条有 133 个非空值，其中 9 个为 `[EMPTY]`。第 22–41 行有 40 个非空值，其中 5 个为 `[EMPTY]`。第 42–58 行有 17 个非空值，其中 4 个为 `[EMPTY]`。累计 190 个非空值，其中 18 个为 `[EMPTY]`。
 
 | Error_Count | BG_ID | SAP-Nummer | Teamcenter | Register | Ground Truth | Weitere zulässige Ground Truth | claude-haiku-4-5_20251001 (image) | claude-haiku-4-5_20251001 (pdf) | claude-haiku-4-5_20251001 (text) | claude-opus-4-8 (image) | claude-opus-4-8 (pdf) | claude-opus-4-8 (text) | gemini-2.5-flash (image) | gemini-2.5-flash (pdf) | gemini-2.5-flash (text) | gemini-2.5-pro (image) | gemini-2.5-pro (pdf) | gemini-2.5-pro (text) |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -51,3 +51,29 @@
 | 1 | `0804EV7706 \| AS90158200/01` | `0804EV7706` | `AS90158200/01` | E1 | Roboter | — | — | — | — | — | — | Kombinierte Einheit | — | — | — | — | — | — |
 | 1 | `0804FK2694 \| AS90037183` | `0804FK2694` | `AS90037183` | E2 | Multi-Achs-System (Gantry) | — | — | — | — | — | — | — | Kombinierte Einheit | — | — | — | — | — |
 | 1 | `0804FT6844 \| AS90412772` | `0804FT6844` | `AS90412772` | E2 | Kombinierte Einheit | — | Lineareinheit | — | — | — | — | — | — | — | — | — | — | — |
+| 1 | `0804FU6515 \| AS90303031` | `0804FU6515` | `AS90303031` | E2 | Kombinierte Einheit | — | — | — | — | — | — | — | `[EMPTY]` | — | — | — | — | — |
+| 1 | `0804GA4441 \| AS90245290` | `0804GA4441` | `AS90245290` | E1 | Keine der verfügbaren Klassen | — | — | Kombinierte Einheit | — | — | — | — | — | — | — | — | — | — |
+| 1 | `0804GY2577 \| AS90283974` | `0804GY2577` | `AS90283974` | E2 | Kombinierte Einheit | — | Rotationseinheit | — | — | — | — | — | — | — | — | — | — | — |
+| 1 | `0804GZ3046 \| AS90390673/00` | `0804GZ3046` | `AS90390673/00` | E1 | Rotationseinheit | — | — | — | — | Kombinierte Einheit | — | — | — | — | — | — | — | — |
+| 1 | `0804JL5526 \| AS00016496` | `0804JL5526` | `AS00016496` | E2 | Lineareinheit | **Keine der verfügbaren Klassen** | Keine der verfügbaren Klassen | — | — | — | — | — | — | — | — | — | — | — |
+| 1 | `0804JU56371 \| AS00049479` | `0804JU56371` | `AS00049479` | M | Roboter | Kombinierte Einheit | — | — | — | — | — | — | — | `[EMPTY]` | — | — | — | — |
+| 1 | `0804KK0664 \| AS00127924` | `0804KK0664` | `AS00127924` | E1 | Greifer | — | — | — | — | — | — | — | — | Kombinierte Einheit | — | — | — | — |
+| 1 | `0804KM8175 \| AS00145823` | `0804KM8175` | `AS00145823` | E1 | Lineareinheit | — | — | — | — | — | — | — | Kombinierte Einheit | — | — | — | — | — |
+| 1 | `0804KS8037 \| AS00164441` | `0804KS8037` | `AS00164441` | E1 | Multi-Achs-System (Gantry) | — | — | — | — | Kombinierte Einheit | — | — | — | — | — | — | — | — |
+| 1 | `0804KT1289 \| AS00177742` | `0804KT1289` | `AS00177742` | E1 | Lineareinheit | — | — | `[EMPTY]` | — | — | — | — | — | — | — | — | — | — |
+| 1 | `0804KV2157 \| AS00190354` | `0804KV2157` | `AS00190354` | E2 | Kombinierte Einheit | — | — | — | — | — | — | — | — | — | — | Gantry | — | — |
+| 1 | `0804KZ8712 \| AS00231951` | `0804KZ8712` | `AS00231951` | E1 | Lineareinheit | — | Kombinierte Einheit | — | — | — | — | — | — | — | — | — | — | — |
+| 1 | `0804LB3626 \| AS00245227` | `0804LB3626` | `AS00245227` | E1 | Lineareinheit | — | — | — | — | — | — | — | — | — | — | Kombinierte Einheit | — | — |
+| 1 | `0804LE2661 \| AS00260156` | `0804LE2661` | `AS00260156` | M | Greifer | Kombinierte Einheit | — | — | — | — | — | — | Rotationseinheit | — | — | — | — | — |
+| 1 | `0804LZ1241 \| AS00379611` | `0804LZ1241` | `AS00379611` | E1 | Rotationseinheit | — | — | — | — | — | — | — | — | Kombinierte Einheit | — | — | — | — |
+| 1 | `3842998383 \| PT00412992` | `3842998383` | `PT00412992` | E2 | Keine der verfügbaren Klassen | — | Lineareinheit | — | — | — | — | — | — | — | — | — | — | — |
+| 1 | `3843CE1617 \| AS00277646/01` | `3843CE1617` | `AS00277646/01` | E1 | Multi-Achs-System (Gantry) | — | — | — | — | — | — | — | — | `[EMPTY]` | — | — | — | — |
+
+## 原表图例
+
+Excel 第 59 行为空。第 60–61 行为图例。
+
+| Excel 行 | 底色 | 原文 |
+|---:|---|---|
+| 60 | 浅绿色 | GT/ZGT Falsch/unvollständig, LLM korrekt |
+| 61 | 浅米色 | GT/ZGT korrekt, LLM falsch |
