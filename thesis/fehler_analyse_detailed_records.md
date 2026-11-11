@@ -372,3 +372,15 @@ GT vor Review: Keine der verfügbaren Klassen | LLM: Kombinierte Einheit
 Analyse (Passiver HMI-Tragarm als Aktorik fehlinterpretiert): Die Baugruppe (control panel fixing) ist ein rein passiver Bedienpult-Tragarm ohne Aktoren (R=0, T=0 → Keine der verfügbaren Klassen, Grenzfall 6.8, analog zu 0804LH9239). Das LLM hat das vertikale Tragprofil (Pos. 0002/0901) fälschlicherweise als Hubzylinder (T=1) und die manuell drehbare Kupplung (Pos. 0104, 0-320deg rotable) als Drehaktor (R=1) gewertet.
 Revidierte GT: Keine der verfügbaren Klassen (LLM korrekt: nein - passiver HMI-Tragarm ohne Aktoren,
 R=O, T=O).
+
+
+## 第十五部分 · Excel 第 44–47 行（待照片核对）
+
+行号、SAP、Teamcenter 及下表注明的字段由用户提供；编号配对均与 `corrected_gt_zgt_error_records.md` 一致。第 44 行 Ground Truth 用户提供为截断的 `Kombinierte Ei`；完整名称仅按修正表记录。第 47 行 Register 未提供，其 SAP 编号前的 `0` 所属列未确认。修正表记录该装配体黄色高亮，仍需核对 `Fehler_Analyse` 工作表行颜色。以下修正表的其他允许类别及模型记录尚未通过本工作表照片核对；空白与 `[EMPTY]` 不混同。错误分析待提供。
+
+| Excel 行 | SAP-Nummer | Teamcenter | 用户提供 Register | 用户提供 Ground Truth | 修正表 Register / Ground Truth | 修正表其他允许类别 | 修正表非空模型记录 | Fehleranalyse |
+|---:|---|---|---|---|---|---|---|---|
+| 44 | `0804GY2577` | `AS90283974` | E2 | Kombinierte Ei（截断） | E2 / Kombinierte Einheit | — | claude-haiku-4-5_20251001 (image): Rotationseinheit | 待提供 |
+| 45 | `0804GZ3046` | `AS90390673/00` | E1 | Rotationseinheit | E1 / Rotationseinheit | — | claude-opus-4-8 (image): Kombinierte Einheit | 待提供 |
+| 46 | `0804JL5526` | `AS00016496` | E2 | Lineareinheit | E2 / Lineareinheit | Keine der verfügbaren Klassen | claude-haiku-4-5_20251001 (image): Keine der verfügbaren Klassen | 待提供 |
+| 47 | `0804JU56371` | `AS00049479` | 未提供 | Roboter | M / Roboter | Kombinierte Einheit | gemini-2.5-flash (pdf): `[EMPTY]` | 待提供 |
