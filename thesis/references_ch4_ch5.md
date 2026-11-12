@@ -67,3 +67,84 @@ arXiv:2310.11324
 第三步：其余 6 条没有可用的 DOI，用浏览器的 Zotero Connector 保存，或在 Zotero 中点绿色加号手动新建：Berg-Kirkpatrick et al.（Konferenz-Paper）、Koehn（Konferenz-Paper）、Cawley & Talbot（Zeitschriftenartikel）、Shankar et al.（Konferenz-Paper）、Google 和 Anthropic（Webseite，填访问日期）。链接见上表。
 
 导入后检查：Efron & Tibshirani（年份 1993/1994）、Opitz & Burst（2019/2021）、Sclar et al.（改为 ICLR 2024 会议论文）、Atil et al.（年份 2024）、Smith（来源与 DOI）。
+
+## 其余 6 条：从剪贴板导入 RIS（无需 Connector）
+
+复制下面整个代码框的内容，在 Zotero 中选 Datei → Aus Zwischenablage importieren（快捷键 Strg + Umschalt + Alt + I）。导入后检查 Google 和 Anthropic 的作者是否为单栏的机构名，类型是否为 Webseite；访问日期按实际核对日期修改。
+
+```
+TY  - CPAPER
+AU  - Berg-Kirkpatrick, Taylor
+AU  - Burkett, David
+AU  - Klein, Dan
+TI  - An Empirical Investigation of Statistical Significance in NLP
+T2  - Proceedings of the 2012 Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning
+PY  - 2012
+SP  - 995
+EP  - 1005
+CY  - Jeju Island, Korea
+PB  - Association for Computational Linguistics
+UR  - https://aclanthology.org/D12-1091/
+ER  - 
+
+TY  - CPAPER
+AU  - Koehn, Philipp
+TI  - Statistical Significance Tests for Machine Translation Evaluation
+T2  - Proceedings of the 2004 Conference on Empirical Methods in Natural Language Processing
+PY  - 2004
+SP  - 388
+EP  - 395
+CY  - Barcelona, Spain
+PB  - Association for Computational Linguistics
+UR  - https://aclanthology.org/W04-3250/
+ER  - 
+
+TY  - JOUR
+AU  - Cawley, Gavin C.
+AU  - Talbot, Nicola L. C.
+TI  - On Over-fitting in Model Selection and Subsequent Selection Bias in Performance Evaluation
+JO  - Journal of Machine Learning Research
+PY  - 2010
+VL  - 11
+IS  - 70
+SP  - 2079
+EP  - 2107
+UR  - https://jmlr.org/papers/v11/cawley10a.html
+ER  - 
+
+TY  - CPAPER
+AU  - Shankar, Vaishaal
+AU  - Roelofs, Rebecca
+AU  - Mania, Horia
+AU  - Fang, Alex
+AU  - Recht, Benjamin
+AU  - Schmidt, Ludwig
+TI  - Evaluating Machine Accuracy on ImageNet
+T2  - Proceedings of the 37th International Conference on Machine Learning
+T3  - Proceedings of Machine Learning Research
+VL  - 119
+PY  - 2020
+SP  - 8634
+EP  - 8644
+PB  - PMLR
+UR  - https://proceedings.mlr.press/v119/shankar20c.html
+ER  - 
+
+TY  - ELEC
+AU  - Google
+TI  - Document understanding
+T2  - Gemini API Docs
+PY  - 2026
+UR  - https://ai.google.dev/gemini-api/docs/document-processing
+Y2  - 2026/11/12
+ER  - 
+
+TY  - ELEC
+AU  - Anthropic
+TI  - PDF support
+T2  - Claude Docs
+PY  - 2026
+UR  - https://platform.claude.com/docs/en/build-with-claude/pdf-support
+Y2  - 2026/11/12
+ER  - 
+```
