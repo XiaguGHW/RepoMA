@@ -62,6 +62,8 @@ arXiv:2310.11324
 10.1109/ICDAR.2007.4376991
 ```
 
+结果（2026-11-12）：Smith 的 DOI 10.1109/ICDAR.2007.4376991 导入成功；Holm 的 10.2307/4615733 找不到，改为手动新建（Zeitschriftenartikel）：Holm, Sture (1979). A Simple Sequentially Rejective Multiple Test Procedure. Scandinavian Journal of Statistics, 6(2), 65–70. URL https://www.jstor.org/stable/4615733
+
 第三步：其余 6 条没有可用的 DOI，用浏览器的 Zotero Connector 保存，或在 Zotero 中点绿色加号手动新建：Berg-Kirkpatrick et al.（Konferenz-Paper）、Koehn（Konferenz-Paper）、Cawley & Talbot（Zeitschriftenartikel）、Shankar et al.（Konferenz-Paper）、Google 和 Anthropic（Webseite，填访问日期）。链接见上表。
 
 导入后检查：Efron & Tibshirani（年份 1993/1994）、Opitz & Burst（2019/2021）、Sclar et al.（改为 ICLR 2024 会议论文）、Atil et al.（年份 2024）、Smith（来源与 DOI）。
