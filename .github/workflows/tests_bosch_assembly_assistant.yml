@@ -1,0 +1,63 @@
+name: Tests Bosch Assembly Assistant
+
+# Runs on every push and pull request that touches the program or a workflow.
+# Thesis-only commits (and the packaging bot's ZIP commit) do not trigger it.
+on:
+  push:
+    paths:
+      - "local_llm_chat_bot/**"
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - "local_llm_chat_bot/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # mypy may not get worse than this. Lower it when errors are fixed.
+  MYPY_BASELINE: "10"
+
+jobs:
+  tests:
+    # Playwright 1.51 (pinned in requirements-dev.txt) does not support Ubuntu 26.04.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: local_llm_chat_bot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: local_llm_chat_bot/requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+      - name: ruff
+        run: ruff check .
+      - name: mypy (no more errors than the baseline)
+        run: |
+          set +e
+          python -m mypy > mypy.txt 2>&1
+          set -e
+          cat mypy.txt
+          count=$(grep -c ': error:' mypy.txt || true)
+          echo "mypy errors: $count (baseline $MYPY_BASELINE)"
+          if [ "$count" -gt "$MYPY_BASELINE" ]; then
+            echo "::error::mypy found $count errors, baseline is $MYPY_BASELINE"
+            exit 1
+          fi
+      - name: unittest
+        run: python -m unittest discover -s tests -p 'test_*.py'
+      - name: Browser tests
+        run: python tests/browser_release.py
