@@ -1104,11 +1104,13 @@ class BrowserRelease(unittest.TestCase):
         self.page.wait_for_function("lastCodebookTask?.state === 'succeeded' && lastCodebookProfile?.status === 'locked'")
         self.assertEqual(dialogs, [])
 
-    def test_rule_page_three_max_tokens_is_explained_and_old_rules_stay_in_effect(self):
+    def test_rule_page_three_max_tokens_is_explained_and_retry_recovers(self):
+        # Locked rules make the path, picker and parser model read-only (replacing
+        # them deletes the old set first), so this starts without prepared rules.
+        # That a failed new preparation keeps old locked rules in effect is
+        # covered at API level (test_codebook_preparation).
         self.language("en")
         self.page.context.grant_permissions(["clipboard-read", "clipboard-write"])
-        self.prepare_rules()
-        self.lock_rules()
         dialogs = self.record_dialogs()
         long_text = "Page three table: " + " ".join(f"Rule{index} Rotationseinheit Drehung" for index in range(260))
         path = self.make_pdf("Codebook_Baugruppenklassifikation_v2_3.pdf", ["Rotationseinheit.", "Gantry.", long_text])
@@ -1122,7 +1124,7 @@ class BrowserRelease(unittest.TestCase):
         self.page.wait_for_function("lastCodebookTask?.state === 'failed'", timeout=20000)
         panel = self.page.locator("#rulejobpanel").inner_text()
         for text in ["Preparation failed", "Page 3 is too long", "after 2 attempts", "Parsing the rules",
-                     "This failure did not change the existing rules.", "claude-haiku-5-5"]:
+                     "claude-haiku-5-5"]:
             self.assertIn(text, panel)
         self.assertTrue(self.page.locator("#rulejobretry").is_enabled())
         self.assertTrue(self.page.locator("#ruleprepare").is_enabled())
@@ -1131,10 +1133,9 @@ class BrowserRelease(unittest.TestCase):
         self.assertIn("incomplete Claude response (max_tokens)", self.page.locator("#rulejobdetails").inner_text())
         self.assertIn("retrying in smaller parts", self.page.locator(".rulejob-log").inner_text())
         self.assertEqual(self.page.locator("#rulejobdiagnostics").count(), 0)  # log only, no diagnostics dump
-        self.assertTrue(self.page.locator("#rulereplace").is_visible())  # the kept locked rules stay manageable
         self.close_drawer()
         expected = ("Preparation failed: Page 3: output limit reached\n"
-                    f"Rules in effect: {self.f.rules.name} (Locked and in use for classification)")
+                    "No locked rules are available for classification")
         self.assertEqual(self.card(), expected)
         clipped = self.page.eval_on_selector("#context-rule-summary", "n=>n.scrollHeight>n.clientHeight+1||getComputedStyle(n).webkitLineClamp!=='none'")
         self.assertFalse(clipped, "rule card text is clipped")
@@ -1146,18 +1147,15 @@ class BrowserRelease(unittest.TestCase):
         self.open_drawer("rules")
         self.assertIn("Seite 3 ist zu lang", self.page.locator("#rulejobpanel").inner_text())
         self.language("zh")
-        self.assertIn("第 3 页内容过长，已尝试 4 次仍无法完成", self.page.locator("#rulejobpanel").inner_text())
+        self.assertIn("第 3 页内容过长，已尝试 2 次仍无法完成", self.page.locator("#rulejobpanel").inner_text())
         self.language("en")
-        self.close_drawer()
-        # The previously locked rules still classify.
+        # Retry from the failure panel; the new draft can then be locked.
         self.f.response_transform = None
-        self.select_bg(self.f.bg_a)
-        self.ask("Classify this Baugruppe")
-        self.assertIn("Rotationseinheit", self.page.locator(".classification-card").first.inner_text())
-        # Retry from the failure panel.
-        self.open_drawer("rules")
         self.page.locator("#rulejobretry").click()
         self.page.wait_for_function("lastCodebookTask?.state === 'succeeded'", timeout=20000)
+        self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
+        self.lock_rules()
+        self.assertIn("Locked and in use for classification", self.card())
         self.assertEqual(dialogs, [])
 
     def test_rule_model_validation_and_scope_bar_are_in_page_controls(self):

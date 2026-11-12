@@ -2278,7 +2278,8 @@ def reading_hints(data: dict[str, Any], selected: list[dict]) -> dict[str, Any]:
         for chunk in item.get("chunks", []):
             bom_terms |= part_numbers(str(chunk.get("text", "")))
     rule_terms: set[str] = set()
-    profile = ((data.get("state").data.get("bg_context") or {}).get("locked_profile") if data.get("state") else None) or {}
+    state = data.get("state")
+    profile = ((state.data.get("bg_context") or {}).get("locked_profile") if state else None) or {}
     for item in profile.get("classes", []) if isinstance(profile, dict) else []:
         if not isinstance(item, dict):
             continue
@@ -2476,7 +2477,9 @@ def preread_groups(documents: "LocalDocumentLibrary", document: dict, read_chunk
         return str(output)
 
     def finish(text: str, images: list[str], labels: list[str]) -> dict:
-        kept, kept_labels, used = [], [], 0
+        kept: list[str] = []
+        kept_labels: list[str] = []
+        used = 0
         for path, label in zip(images, labels):
             size = Path(path).stat().st_size
             if len(kept) >= PREREAD_IMAGES_PER_CALL or used + size > PREREAD_IMAGE_BYTES_PER_CALL:
@@ -2492,7 +2495,8 @@ def preread_groups(documents: "LocalDocumentLibrary", document: dict, read_chunk
 
     if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
         source = Path(str(document.get("path", "")))
-        manifest = document.get("dfc_structure") if isinstance(document.get("dfc_structure"), dict) else {}
+        structure = document.get("dfc_structure")
+        manifest: dict[str, Any] = structure if isinstance(structure, dict) else {}
         segments = [item for item in manifest.get("segments", []) if isinstance(item, dict) and item.get("path")]
         base = "\n".join(f"--- {traceable_label(document, chunk.get('label', name), folder)} ---\n{chunk.get('text', '')}"
                          for chunk in read_chunks)
@@ -2517,7 +2521,7 @@ def preread_groups(documents: "LocalDocumentLibrary", document: dict, read_chunk
         return groups, skipped
 
     texts = summary_groups(document, read_chunks, folder=folder)
-    pages_of = [set() for _ in texts]
+    pages_of: list[set[int]] = [set() for _ in texts]
     # Same grouping walk as summary_groups, recording which pages each group holds.
     index, current = 0, ""
     for chunk in read_chunks:
@@ -4821,11 +4825,13 @@ async function changeLanguage(){uiLanguage=$('language').value;applyLanguage();r
 // A rule preparation holds the model slot, so /api/setup would be refused as
 // busy after a reload.  The running job belongs to the session the saved
 // settings describe: attach to it read-only and keep following the job.
+// The page no longer fills #workspace on restore (the server opens the
+// automatic session folder), so an empty field matches the server's session.
 let codebookAttachedTaskId=null;
 async function attachToRunningRulePreparation(){
   try{
     let job=await api('/api/codebook/task');if(!job.running||!job.task)return false;
-    let s=await api('/api/status');if(s.workspace!==$('workspace').value.trim())return false;
+    let s=await api('/api/status'),chosen=$('workspace').value.trim();if(chosen&&s.workspace!==chosen)return false;
     renderStatus(s);codebookAttachedTaskId=job.task.task_id;await restoreSessionContext();
     await Promise.all([loadDocs(),loadSessions(),loadHistory()]);
     setUIMessage($('setupmsg'),{message_key:'workspace.opened'});refreshAppChrome();$('startupnotice')?.remove();return true;

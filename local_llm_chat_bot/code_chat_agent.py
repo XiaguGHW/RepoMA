@@ -230,35 +230,31 @@ class PricingCatalog:
             "cost_usd": float(cost),
         }
 
+    def partial_estimate(self, model: str, usage) -> dict | None:
+        """Price what can be priced; name the token types that have no price.
 
-def _partial_estimate(self, model: str, usage) -> dict | None:
-    """Price what can be priced; name the token types that have no price.
-
-    Bosch Farm publishes no cache prices, so cache tokens are reported by type
-    and count instead of being guessed.  None when the model has no price or
-    the provider returned incomplete usage."""
-    usage = normalize_usage(usage)
-    if not usage["usage_complete"]:
-        return None
-    price = self.price_for(model)
-    if not price:
-        return None
-    known = Decimal(usage["uncached_input_tokens"]) * Decimal(str(price["input_price"]))
-    known += Decimal(usage["output_tokens"]) * Decimal(str(price["output_price"]))
-    unpriced = {}
-    for field, key in (("cache_read", "cache_read_input_tokens"), ("cache_write", "cache_creation_input_tokens")):
-        count = usage[key]
-        if not count:
-            continue
-        rate = price.get(field + "_price")
-        if rate is None:
-            unpriced[field] = count
-        else:
-            known += Decimal(count) * Decimal(str(rate))
-    return {"known_cost_usd": float(known / Decimal(1_000_000)), "unpriced_tokens": unpriced}
-
-
-PricingCatalog.partial_estimate = _partial_estimate
+        Bosch Farm publishes no cache prices, so cache tokens are reported by type
+        and count instead of being guessed.  None when the model has no price or
+        the provider returned incomplete usage."""
+        usage = normalize_usage(usage)
+        if not usage["usage_complete"]:
+            return None
+        price = self.price_for(model)
+        if not price:
+            return None
+        known = Decimal(usage["uncached_input_tokens"]) * Decimal(str(price["input_price"]))
+        known += Decimal(usage["output_tokens"]) * Decimal(str(price["output_price"]))
+        unpriced = {}
+        for field, key in (("cache_read", "cache_read_input_tokens"), ("cache_write", "cache_creation_input_tokens")):
+            count = usage[key]
+            if not count:
+                continue
+            rate = price.get(field + "_price")
+            if rate is None:
+                unpriced[field] = count
+            else:
+                known += Decimal(count) * Decimal(str(rate))
+        return {"known_cost_usd": float(known / Decimal(1_000_000)), "unpriced_tokens": unpriced}
 
 
 def format_cost(cost: float) -> str:
