@@ -31,10 +31,17 @@ class UsageLedger(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
-    def bg(self):
+    def bg(self, with_dossier=False):
         self.post('/api/codebook/prepare', {'path': str(self.f.rules)})
         self.post('/api/codebook/lock', {})
-        self.post('/api/target', {'target': str(self.f.bg_a), 'selected_paths': ['facts.txt']})
+        paths = ['facts.txt']
+        if with_dossier:
+            # A BG dossier is only built when several files are selected; a single
+            # file uses its pre-read summary directly (see test_token_savings).
+            (self.f.bg_a / 'drawing.txt').write_text('FIXTURE_DRAWING: bracket, two bolts, gear housing.',
+                                                     encoding='utf-8')
+            paths.append('drawing.txt')
+        self.post('/api/target', {'target': str(self.f.bg_a), 'selected_paths': paths})
 
     def reconcile(self):
         usage = w.ACTIVE['state'].data['usage']
@@ -52,10 +59,11 @@ class UsageLedger(unittest.TestCase):
         self.assertAlmostEqual(usage['estimated_cost_usd'], 0.000406)
 
     def test_preread_dossier_main_followup_and_cache_reuse(self):
-        self.bg()
+        self.bg(with_dossier=True)
         first = self.post('/api/chat', {'question': 'classify'})
-        self.assertEqual(first['turn_usage']['requests'], 3)
-        self.assertEqual(first['turn_usage']['input'], 60)
+        # Two pre-reads (one per selected file), one dossier, one main call.
+        self.assertEqual(first['turn_usage']['requests'], 4)
+        self.assertEqual(first['turn_usage']['input'], 80)
         self.reconcile()
         second = self.post('/api/chat', {'question': 'Explain', 'require_classification': False})
         self.assertEqual(second['turn_usage']['requests'], 1)
@@ -115,7 +123,7 @@ class UsageLedger(unittest.TestCase):
         for location in ('codebook', 'main', 'dossier'):
             with self.subTest(location=location):
                 if location != 'codebook':
-                    self.bg()
+                    self.bg(with_dossier=location == 'dossier')
                     if location == 'dossier':
                         coverage = w.prepare_coverage(w.ACTIVE)
                         w.bg_dossier_cache_path(coverage, w.ACTIVE['model']).unlink(missing_ok=True)
@@ -156,8 +164,9 @@ class UsageLedger(unittest.TestCase):
         restored = ProjectState(old.private_state_root, old.workspace, old.root.name)
         self.assertEqual(restored.data['usage'], old.data['usage'])
         exported = w.write_session_export(w.ACTIVE).read_text(encoding='utf-8')
-        self.assertIn('未知', exported)
-        self.assertIn('小计', exported)
+        # The export follows the session's UI language (default: German).
+        self.assertIn(str(w.ui_message(w.ACTIVE, 'state.unknown')), exported)
+        self.assertIn(str(w.ui_message(w.ACTIVE, 'export.known_tokens')), exported)
 
     def test_actual_response_model_controls_price(self):
         self.f.response_transform = lambda response, *_: {**response, 'modelVersion': 'gemini-2.5-flash'}

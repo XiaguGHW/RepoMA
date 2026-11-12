@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient  # noqa: E402
 import chat_workbench as w  # noqa: E402
 from code_chat_agent import PricingCatalog, ProjectState  # noqa: E402
-from release_safety import PROMPT_CACHE_BREAK, summarize_usage  # noqa: E402
+from release_safety import summarize_usage  # noqa: E402
 from fixture_support import FixtureEnvironment  # noqa: E402
 
 ANSWER_SYSTEM = "careful local workspace"
