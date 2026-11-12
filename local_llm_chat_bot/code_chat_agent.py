@@ -18,7 +18,8 @@ from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TypedDict
-from release_safety import context_state_error, normalize_usage
+from release_safety import PROMPT_CACHE_BREAK, context_state_error, normalize_usage
+from price_page import merge_page_prices
 
 try:
     from dotenv import load_dotenv
@@ -61,8 +62,8 @@ Rules:
 - Write the natural-language answer in the response language requested in the user prompt.
   Keep official Codebook category names, filenames, part numbers, source quotations,
   supplied table labels, and supplied technical evidence exactly as provided.
-- Exception — when the supplied prompt contains BG CLASSIFICATION MODE, give an
-  evidence-led assessment of at most about 1500 Chinese characters (or equivalent).
+- Exception — when the supplied prompt contains BG CLASSIFICATION MODE and you return a
+  non-null classification object, give an evidence-led assessment of at most about 1500 Chinese characters (or equivalent).
   Use concise equivalent sections in the requested response language: recommendation;
   Codebook decision path; evidence (file/page/sheet/row); alternatives; uncertainty.
   At most 4 short points per section; cite evidence labels instead of quoting long
@@ -154,6 +155,7 @@ class PricingCatalog:
         self.path = path
         self.entries: list[dict[str, Any]] = []
         self.error: str | None = None
+        self.source: dict[str, Any] = {"kind": "bundled"}
         if not path:
             return
         try:
@@ -164,6 +166,8 @@ class PricingCatalog:
             self.entries = [e for e in self.entries if isinstance(e, dict)]
         except (OSError, json.JSONDecodeError) as exc:
             self.error = str(exc)
+        # A Docupedia pricing page saved next to the program overrides the bundled prices.
+        self.entries, self.source = merge_page_prices(self.entries, path.parent)
 
     def price_for(self, model: str):
         name = model.lower()
@@ -225,6 +229,32 @@ class PricingCatalog:
             "output_tokens": output_tokens,
             "cost_usd": float(cost),
         }
+
+    def partial_estimate(self, model: str, usage) -> dict | None:
+        """Price what can be priced; name the token types that have no price.
+
+        Bosch Farm publishes no cache prices, so cache tokens are reported by type
+        and count instead of being guessed.  None when the model has no price or
+        the provider returned incomplete usage."""
+        usage = normalize_usage(usage)
+        if not usage["usage_complete"]:
+            return None
+        price = self.price_for(model)
+        if not price:
+            return None
+        known = Decimal(usage["uncached_input_tokens"]) * Decimal(str(price["input_price"]))
+        known += Decimal(usage["output_tokens"]) * Decimal(str(price["output_price"]))
+        unpriced = {}
+        for field, key in (("cache_read", "cache_read_input_tokens"), ("cache_write", "cache_creation_input_tokens")):
+            count = usage[key]
+            if not count:
+                continue
+            rate = price.get(field + "_price")
+            if rate is None:
+                unpriced[field] = count
+            else:
+                known += Decimal(count) * Decimal(str(rate))
+        return {"known_cost_usd": float(known / Decimal(1_000_000)), "unpriced_tokens": unpriced}
 
 
 def format_cost(cost: float) -> str:
@@ -509,6 +539,17 @@ class ProjectState:
             aggregate["estimated_cost_usd"] = float(Decimal(str(aggregate["estimated_cost_usd"])) + Decimal(str(estimate["cost_usd"])))
         else:
             aggregate["unpriced_requests"] += 1
+            detail = aggregate.setdefault("unpriced_detail", {})
+            partial = pricing.partial_estimate(model, usage) if hasattr(pricing, "partial_estimate") else None
+            if partial:
+                aggregate["estimated_cost_usd"] = float(Decimal(str(aggregate["estimated_cost_usd"])) + Decimal(str(partial["known_cost_usd"])))
+                for kind, count in partial["unpriced_tokens"].items():
+                    detail[kind] = detail.get(kind, 0) + count
+                estimate = {"cost_usd": None, **partial}
+            elif not usage["usage_complete"]:
+                detail["usage_missing_requests"] = detail.get("usage_missing_requests", 0) + 1
+            else:
+                detail["model_requests"] = detail.get("model_requests", 0) + 1
         aggregate["cost_complete"] = not aggregate["unpriced_requests"]
         self.save()
         return estimate
@@ -655,7 +696,8 @@ def classification_manifest(evidence, context):
 def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], full_files: dict[str, str] | None = None,
                document_snippets: list[dict] | None = None, bg_context: dict | None = None,
                coverage_summaries: list[dict] | None = None, bg_dossier: dict | None = None,
-               response_language: str = "zh", require_classification: bool = True):
+               response_language: str = "zh", require_classification: bool | None = True,
+               focus_name: str = ""):
     recent = "\n".join(f"{turn['role']}: {turn['content']}" for turn in state.data["history"][-HISTORY_MESSAGES_PER_REQUEST:]) or "(new conversation)"
     memories = state.search_memory(question)
     memory_text = "\n".join(f"- [{item['id']}] {item['content']}" for item in memories) or "(No relevant confirmed long-term memory.)"
@@ -672,22 +714,43 @@ def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], ful
     ) or "(No complete per-file coverage summary has been prepared.)"
     dossier_text = str((bg_dossier or {}).get("summary", "")).strip() or "(No BG comprehensive evidence dossier has been prepared.)"
     bg_instruction = ""
+    stable = ""
     if bg_context:
         locked_profile = bg_context.get("locked_profile") or {}
         profile_text = json.dumps(locked_profile, ensure_ascii=False) if locked_profile else "(No locked structured profile available.)"
         manifest = json.dumps(classification_manifest(document_snippets or [], bg_context), ensure_ascii=False)
-        response_mode = "CLASSIFICATION REQUIRED: return a complete classification object." if require_classification else "EXPLANATION MODE: classification may be null; any non-null classification must meet every validation rule."
+        if require_classification is None:
+            response_mode = ("AUTO MODE: decide from the user request. If the user asks to classify, determine, confirm or "
+                             "re-check the Baugruppe class, return a complete classification object and use the detailed "
+                             "classification format. Otherwise answer exactly what was asked in the normal answer shape, set "
+                             "classification to null, and treat earlier classification results in the conversation as background only.")
+        elif require_classification:
+            response_mode = "CLASSIFICATION REQUIRED: return a complete classification object."
+        else:
+            response_mode = ("EXPLANATION MODE: answer the user's question directly; classification should be null unless the user "
+                             "explicitly asks for a classification. Any non-null classification must meet every validation rule.")
+        focus = (f"- FOCUS FILE: the user restricted this turn to the single file '{focus_name}'. Only its excerpts were supplied. "
+                 "Answer about this file; do not draw conclusions from other files except earlier results in the conversation "
+                 "or the BG dossier at the top as background, and say so when you use them.\n") if focus_name else ""
+        # Stable for the whole Baugruppe context and therefore first: identical
+        # across turns, so Claude reads it from cache and other providers can
+        # reuse the common prefix.
+        stable = f"""BG CLASSIFICATION RULES (identical in every turn of this Baugruppe):
+- Codebook: {bg_context.get('codebook_name', 'unknown')}
+- Locked Codebook profile (user-confirmed; use this as the primary rule source): {profile_text}
+
+BG comprehensive evidence dossier (compiled from the selected files' local summaries; citations and limitations must be retained):
+{dossier_text}{PROMPT_CACHE_BREAK}"""
         bg_instruction = f"""
 BG CLASSIFICATION MODE (active):
-- Codebook: {bg_context.get('codebook_name', 'unknown')}
+- Codebook: {bg_context.get('codebook_name', 'unknown')} (locked profile and dossier: see BG CLASSIFICATION RULES at the top)
 - Baugruppe folder: {bg_context.get('folder', 'unknown')}
-- Locked Codebook profile (user-confirmed; use this as the primary rule source): {profile_text}
 - Classification reference manifest: {manifest}
 - {response_mode}
-- Give the full detailed classification format required by the system prompt.
+{focus}- When you return a classification, give the full detailed classification format required by the system prompt.
 - Treat the Codebook as the rule source. Cite evidence labels exactly as supplied.
 - A source marked visual/scanned may require visual inspection; do not infer text that was not supplied.
-- In CLASSIFICATION REQUIRED mode include this `classification` object; in EXPLANATION MODE it may be null:
+- In CLASSIFICATION REQUIRED mode include this `classification` object; in AUTO or EXPLANATION MODE it may be null:
   {{"label": "exact Codebook class name", "confidence": "high|medium|low", "alternative_label": "exact Codebook class name or empty", "codebook_rule_ids": ["exact rule id from the locked profile"], "codebook_rule_pages": [], "codebook_rule_refs": ["exact codebook_labels entry"], "evidence_labels": ["exact supplied document label"], "bg_evidence_pages": ["exact bg_labels entry"], "uncertainties": []}}.
 - Copy the class and evidence-label spelling exactly. Use only evidence labels supplied in this prompt. A non-empty evidence_labels list is mandatory for a classification.
 - A non-empty codebook_rule_ids list is mandatory; it must name the actual locked rule(s) used for the decision. Keep Codebook-rule pages and BG-evidence pages separate.
@@ -695,25 +758,26 @@ BG CLASSIFICATION MODE (active):
 - bg_evidence_pages must copy supplied BG labels, including their actual page/sheet/row/chunk range. Codebook labels are not BG evidence.
 """
     language_name = {"zh": "Chinese", "en": "English", "de": "German"}.get(str(response_language).lower(), "Chinese")
-    return f"""Workspace: {state.workspace}
-Project summary: {state.data['summary'] or '(none)'}
+    dossier_block = "" if stable else f"""BG comprehensive evidence dossier (compiled from the selected files' local summaries; citations and limitations must be retained):\n{dossier_text}
+
+"""
+    # Code context only when a code workspace is actually indexed; the
+    # Bosch Assembly Assistant uses an empty session folder, so nothing is sent.
+    has_code = bool(state.data["files"] or snippets or full_files)
+    workspace_line = f"Workspace: {state.workspace}\n" if has_code else ""
+    code_block = (f"Indexed files and symbols (local metadata only):\n{indexed}\n\n"
+                  f"Relevant code excerpts:\n{shown}\n\n") if has_code else ""
+    complete_block = f"Complete current files supplied in this turn:\n{complete}\n\n" if has_code else ""
+    return f"""{stable}{workspace_line}Project summary: {state.data['summary'] or '(none)'}
 Recent conversation:\n{recent}
 
 Relevant confirmed long-term memory (local, user-confirmed):\n{memory_text}
 
-Indexed files and symbols (local metadata only):\n{indexed}
+{code_block}Relevant locally extracted document excerpts:\n{document_text}
 
-Relevant code excerpts:\n{shown}
+{dossier_block}Prepared per-file evidence summaries (fallback only when no dossier is available; do not claim unread pages were inspected):\n{coverage_text}
 
-Relevant locally extracted document excerpts:\n{document_text}
-
-BG comprehensive evidence dossier (compiled from the selected files' local summaries; citations and limitations must be retained):\n{dossier_text}
-
-Prepared per-file evidence summaries (fallback only when no dossier is available; do not claim unread pages were inspected):\n{coverage_text}
-
-Complete current files supplied in this turn:\n{complete}
-
-Response language: Write the natural-language `answer` primarily in {language_name}.
+{complete_block}Response language: Write the natural-language `answer` primarily in {language_name}.
 Do not translate official Codebook category names, filenames, part numbers, source quotations,
 table labels, or the supplied material evidence; preserve their original spelling verbatim.
 
@@ -993,13 +1057,13 @@ def main():
         stream_handler, streamed = streamed_answer_handler()
         raw = llm.ask_about_files(
             visual_paths, prompt_for(state, question, snippets, document_snippets=document_snippets, bg_context=bg_context), SYSTEM,
-            {"maxOutputTokens": 4096, "temperature": 0},
+            {"maxOutputTokens": 8192, "temperature": 0},
             stream=True, event_handler=stream_handler,
         )
         if streamed["started"]:
             print()
         estimate = state.note_usage(llm.get_last_token_usage(), pricing, args.model)
-        if estimate:
+        if estimate and estimate.get("cost_usd") is not None:
             turn_estimates.append(estimate)
         try:
             action = parse_json(raw)
@@ -1017,13 +1081,13 @@ def main():
                 stream_handler, streamed = streamed_answer_handler()
                 raw = llm.ask_about_files(
                     visual_paths, prompt_for(state, question, snippets, full_files, document_snippets, bg_context), SYSTEM,
-                    {"maxOutputTokens": 3000, "temperature": 0},
+                    {"maxOutputTokens": 8192, "temperature": 0},
                     stream=True, event_handler=stream_handler,
                 )
                 if streamed["started"]:
                     print()
                 estimate = state.note_usage(llm.get_last_token_usage(), pricing, args.model)
-                if estimate:
+                if estimate and estimate.get("cost_usd") is not None:
                     turn_estimates.append(estimate)
                 action = parse_json(raw)
             if not streamed["started"]:

@@ -24,6 +24,26 @@ OUTPUT = Path(
 CHECKS = []
 
 
+# The page asks with in-page dialogs (#appconfirm), never native ones. Like the
+# native handler, tests answer them automatically: window.__appDialogAuto is
+# 'accept' (default), 'dismiss', or '' to answer by hand.
+AUTO_APP_DIALOGS = """
+window.__appDialogAuto = 'accept';
+new MutationObserver(() => {
+  const box = document.getElementById('appconfirm');
+  if (!box || !window.__appDialogAuto || box.dataset.answered) return;
+  box.dataset.answered = '1';
+  const button = box.querySelector(window.__appDialogAuto === 'accept' ? '#appconfirmok' : '#appconfirmcancel')
+    || box.querySelector('#appconfirmok');
+  setTimeout(() => button && button.click(), 0);
+}).observe(document, {childList: true, subtree: true});
+"""
+
+
+def auto_app_dialogs(page):
+    page.add_init_script(AUTO_APP_DIALOGS)
+
+
 class BrowserRelease(unittest.TestCase):
     def setUp(self):
         self.stage = self._testMethodName
@@ -67,6 +87,7 @@ class BrowserRelease(unittest.TestCase):
                 else dialog.accept()
             )
         self.page.on('dialog', self.handle_dialog)
+        auto_app_dialogs(self.page)
         self.page.goto(f"http://127.0.0.1:{port}")
         self.page.wait_for_function('typeof materialDraftDirty !== "undefined"')
         self.open_workspace()
@@ -89,12 +110,20 @@ class BrowserRelease(unittest.TestCase):
     def button(self, handler, root=""):
         return self.page.locator(f'{root} button[onclick="{handler}"]')
 
+    def accept_confirm_if_shown(self):
+        """Re-confirming materials with an existing conversation asks first."""
+        try:
+            self.page.locator("#appconfirmok").click(timeout=1500)
+        except Exception:
+            pass
+
     def close_drawer(self):
-        self.button("closeContextDrawer()", ".context-drawer-head").click()
+        self.button("dismissContextDrawer()", ".context-drawer-head").click()
 
     def open_drawer(self, kind):
         if kind == "workspace":
-            self.page.locator("#workspaceshortcut").click()
+            # No visible chooser any more: the session folder is automatic.
+            self.page.evaluate("openContextDrawer('workspace')")
         elif self.page.viewport_size['width'] < 1180 and kind in {'materials', 'rules'}:
             self.page.locator('#contextshortcut-' + kind).click()
         else:
@@ -103,13 +132,17 @@ class BrowserRelease(unittest.TestCase):
             ).click()
 
     def open_workspace(self):
-        self.open_drawer("workspace")
-        self.page.locator("#contextworkspacepath").fill(str(self.f.workspace))
-        self.button("contextOpenWorkspace()").click()
-        # renderStatus is earlier than restoreSessionContext; await setup's final signal.
+        """The page opens its automatic session by itself; (re)open it deterministically."""
+        try:
+            self.page.wait_for_function(
+                "document.getElementById('setupmsg').textContent === t('workspace.opened')", timeout=8000)
+        except Exception:
+            pass
+        self.page.evaluate("() => setup()")
         self.page.wait_for_function(
             "document.getElementById('setupmsg').textContent === t('workspace.opened')"
         )
+        self.auto_workspace = Path(self.page.evaluate("lastStatusSnapshot.workspace"))
 
     def language(self, language):
         self.page.select_option("#language", language)
@@ -118,34 +151,51 @@ class BrowserRelease(unittest.TestCase):
             "(l)=>document.documentElement.lang===l", arg=language
         )
 
+    def rule_model(self, model):
+        """Pick a listed model, or "other" and type the ID."""
+        listed = self.page.eval_on_selector_all("#rulemodelselect option", "els => els.map(e => e.value)")
+        if model in listed:
+            self.page.select_option("#rulemodelselect", model)
+            return
+        self.page.select_option("#rulemodelselect", "__custom__")
+        self.page.locator("#rulemodel").fill(model)
+        self.page.locator("#rulemodelconfirm").click()
+
     def prepare_rules(self, path=None, model="gemini-2.5-pro"):
         self.open_drawer("rules")
         self.page.locator("#contextcodebookpath").fill(str(path or self.f.rules))
-        # The rule-parsing model is an in-page field (no native prompt()).
-        self.page.locator("#rulemodel").fill(model)
+        # The rule-parsing model is an in-page list with "other" for a typed ID.
+        self.rule_model(model)
         self.button("contextSyncRule();prepareCodebook()").click()
+        # The review opens beside the rules drawer, which stays open.
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
-        self.close_drawer()
 
     def lock_rules(self):
         label = self.page.evaluate("t('rulews.lock_action')")
         self.page.get_by_role("button", name=label, exact=True).click()
-        # Locking asks for confirmation in the page itself, not a browser dialog.
-        self.page.locator("#appconfirmok").click()
-        self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
+        # Locking asks for confirmation in the page itself, not a browser dialog;
+        # the test watcher answers it (see AUTO_APP_DIALOGS).
+        # The review closes after locking; the rules drawer stays.
+        self.page.wait_for_function('lastCodebookProfile?.status === "locked" && !document.getElementById("chat").classList.contains("codebook-workspace")')
+        self.close_drawer()
 
     def select_bg(self, folder):
         self.open_drawer("materials")
         self.page.locator("#contexttargetpath").fill(str(folder))
-        self.button("contextSyncTarget();loadTargetTree()").click()
+        # The folder tree loads by itself once the path is entered.
+        self.page.locator("#contexttargetpath").press("Enter")
         self.page.wait_for_function(
             "(path)=>lastTargetTreePayload?.tree?.path===path", arg=str(folder)
         )
         self.page.locator("input.tree-file").first.wait_for(state="attached")
-        self.button("contextSyncTarget();analyzeTarget()").click()
+        self.page.locator("#confirmmaterials").click()
+        self.accept_confirm_if_shown()
         self.page.wait_for_function(
             "(path)=>lastStatusSnapshot.bg_context?.folder===path", arg=str(folder)
         )
+        # Confirming opens the scan report above the drawer; close it first.
+        self.page.wait_for_function("$('scanbackdrop').classList.contains('open')")
+        self.page.evaluate("closeScanReport()")
         self.close_drawer()
 
     def ask(self, question):
@@ -178,7 +228,6 @@ class BrowserRelease(unittest.TestCase):
         self.stage = "prepare lock select classify follow-up"
         self.prepare_rules()
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         self.select_bg(self.f.bg_a)
         self.ask("Classify this Baugruppe")
         # Coverage and classification share a CSS class; identify them by their own heading.
@@ -205,7 +254,6 @@ class BrowserRelease(unittest.TestCase):
         self.open_drawer("rules")
         self.button("viewCodebook()", "#contextdrawerbody").click()
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
-        self.close_drawer()
         self.button("editCodebookDraft()").click()
         draft = json.loads(self.page.input_value("#ruleeditor"))
         draft["classes"][0]["name"] = "Fixture Class B"
@@ -213,7 +261,6 @@ class BrowserRelease(unittest.TestCase):
         self.button("saveCodebookDraft()").click()
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         self.select_bg(self.f.bg_b)
         self.ask("Classify this Baugruppe again")
         self.assertIn("Fixture Class B", card.inner_text())
@@ -227,7 +274,7 @@ class BrowserRelease(unittest.TestCase):
         self.page.wait_for_function(
             "document.getElementById('targetpath').value.endsWith('BG_B')"
         )
-        self.assertEqual(self.page.input_value("#workspace"), str(self.f.workspace))
+        self.assertEqual(self.page.evaluate("lastStatusSnapshot.workspace"), str(self.auto_workspace))
         self.assertEqual(self.page.evaluate("selectedModel()"), "gemini-2.5-pro")
         self.assertEqual(self.page.input_value("#language"), "en")
         self.completed(self.stage)
@@ -238,23 +285,24 @@ class BrowserRelease(unittest.TestCase):
         self.page.wait_for_function('lastStatusSnapshot.model === "gemini-2.5-pro"')
         self.prepare_rules()
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         self.select_bg(self.f.bg_a)
         self.ask("Classify this Baugruppe")
         self.open_drawer("rules")
-        alternate = str(self.f.root / "not prepared ü.docx")
-        self.page.locator("#contextcodebookpath").fill(alternate)
-        self.assertIn(
-            str(self.f.rules), self.page.locator("#contextrulemsg").inner_text()
-        )
+        # Locked rules: path, file picker and parser model are read-only until
+        # "Replace"; preparing again only reports that the rules are ready.
+        for control in ["#contextcodebookpath", "#rulefilepick", "#rulemodel", "#rulemodelselect"]:
+            self.assertTrue(self.page.locator(control).is_disabled(), control)
+        self.assertEqual(self.page.input_value("#contextcodebookpath"), str(self.f.rules))
         self.assertIn(
             str(self.f.rules), self.page.locator("#codebookstatus").inner_text()
         )
-        self.page.locator("#contextcodebookpath").fill(str(self.f.rules))
-        self.assertEqual(self.page.locator("#contextrulemsg").inner_text(), "")
+        calls = len(self.f.calls)
+        self.page.locator("#ruleprepare").click()
+        self.assertIn(self.f.rules.name, self.page.locator("#contextrulemsg").inner_text())
+        self.assertEqual(len(self.f.calls), calls)
+        self.assertTrue(self.page.locator("#rulereplace").is_enabled())
         self.button("viewCodebook()", "#contextdrawerbody").click()
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "locked"')
-        self.close_drawer()
         self.button("editCodebookDraft()").click()
         draft = json.loads(self.page.input_value("#ruleeditor"))
         draft["classes"][0]["name"] = "New same-BG fixture class"
@@ -262,7 +310,6 @@ class BrowserRelease(unittest.TestCase):
         self.button("saveCodebookDraft()").click()
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         self.page.wait_for_function("document.getElementById('question').disabled")
         self.assertIn("Confirm", self.page.locator("#contextguard").inner_text())
         count = len(self.f.calls)
@@ -289,9 +336,12 @@ class BrowserRelease(unittest.TestCase):
         with self.page.expect_response(
             lambda response: response.url.endswith("/api/target")
         ) as response:
-            self.button("contextSyncTarget();analyzeTarget()").click()
+            self.page.locator("#confirmmaterials").click()
+            self.accept_confirm_if_shown()
         self.assertEqual(response.value.status, 200)
         self.page.wait_for_function("!document.getElementById('question').disabled")
+        self.page.wait_for_function("$('scanbackdrop').classList.contains('open')")
+        self.page.evaluate("closeScanReport()")
         self.close_drawer()
         self.ask("Classify this Baugruppe")
         card = self.page.locator(".classification-card").filter(
@@ -303,15 +353,15 @@ class BrowserRelease(unittest.TestCase):
         )
         self.assertIn("New same-BG fixture class", card.inner_text())
 
-    def test_explicit_explanation_mode_and_nonpaged_rule_references(self):
+    def test_auto_mode_and_nonpaged_rule_references(self):
         self.language("en")
         self.page.select_option("#model", "gemini-2.5-pro")
         self.page.wait_for_function('lastStatusSnapshot.model === "gemini-2.5-pro"')
         self.prepare_rules()
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         self.select_bg(self.f.bg_a)
-        self.assertEqual(self.page.input_value("#answermode"), "classification")
+        # There is no answer-mode switch; the server decides per question.
+        self.assertEqual(self.page.locator("#answermodegroup").count(), 0)
         self.ask("Classify this Baugruppe")
         card = self.page.locator(".classification-card").filter(
             has=self.page.get_by_role(
@@ -320,25 +370,27 @@ class BrowserRelease(unittest.TestCase):
         )
         self.assertIn("Section/chunk references", card.inner_text())
         self.assertIn(self.f.rules.name, card.inner_text())
-        self.page.locator('#answermodegroup button[data-mode="explanation"]').click()
         self.language("de")
-        self.assertEqual(self.page.input_value("#answermode"), "explanation")
         with self.page.expect_response(
             lambda response: response.url.endswith("/api/chat/stream")
         ) as response:
             self.ask("Erläutere die Motorfunktion")
-        self.assertFalse(
-            response.value.request.post_data_json["require_classification"]
-        )
+        payload = response.value.request.post_data_json
+        # A typed question is always an explanation turn; only the button classifies.
+        self.assertIs(payload["require_classification"], False)
+        self.assertEqual(payload["focus_source_id"], "")
+        # A follow-up explanation adds no second classification card.
         self.assertEqual(self.page.locator('.classification-card').filter(
             has=self.page.get_by_role('heading', name=self.page.evaluate("t('classification.title')"), exact=True)
         ).count(), 1)
+        self.assertIn(self.page.evaluate("t('scope.kind_answer')"),
+                      self.page.locator(".scope-tag").last.inner_text())
         self.assertNotIn(
             "classification",
             self.page.locator("#chat .message.error").all_text_contents(),
         )
         self.select_bg(self.f.bg_b)
-        self.assertEqual(self.page.input_value("#answermode"), "classification")
+        self.assertEqual(self.page.evaluate("scopeFocusId"), "")
 
     def test_answer_preview_stop_keeps_busy_until_worker_exits_then_retry(self):
         self.language('en')
@@ -437,9 +489,8 @@ class BrowserRelease(unittest.TestCase):
             key: value for key, value in response.items() if key != 'usageMetadata'
         }
         self.prepare_rules()
-        self.lock_rules()
         self.assertIn('Unknown', self.page.locator('.codebook-workspace').inner_text())
-        self.button('leaveCodebookWorkspace()').click()
+        self.lock_rules()
         self.select_bg(self.f.bg_a)
         self.page.locator('#question').fill('classify')
         self.button('openCompareDrawer()').click()
@@ -456,7 +507,6 @@ class BrowserRelease(unittest.TestCase):
         self.language("en")
         self.prepare_rules()
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         for width in [1440, 800, 390]:
             with self.subTest(width=width):
                 self.stage = f"materials drawer geometry and clicks at {width}px"
@@ -470,7 +520,7 @@ class BrowserRelease(unittest.TestCase):
                 self.assertGreaterEqual(box["x"], -1, box)
                 self.assertLessEqual(box["x"] + box["width"], width + 1, box)
                 self.page.locator("#contexttargetpath").fill(str(self.f.bg_a))
-                self.button("contextSyncTarget();loadTargetTree()").click()
+                self.page.locator("#contexttargetpath").press("Enter")
                 self.page.locator("input.tree-file").first.wait_for(state="attached")
                 # Expand/collapse the actual tree and change a checkbox, then restore it.
                 toggle = self.page.locator("#targettree summary").first
@@ -480,7 +530,7 @@ class BrowserRelease(unittest.TestCase):
                 checkbox = self.page.locator("input.tree-file").first
                 checkbox.uncheck()
                 checkbox.check()
-                confirm = self.button("contextSyncTarget();analyzeTarget()")
+                confirm = self.page.locator("#confirmmaterials")
                 confirm.scroll_into_view_if_needed()
                 rect = confirm.bounding_box()
                 self.assertGreaterEqual(rect["x"], 0, rect)
@@ -492,6 +542,8 @@ class BrowserRelease(unittest.TestCase):
                 ) as response:
                     confirm.click()
                 self.assertEqual(response.value.status, 200)
+                self.page.wait_for_function("$('scanbackdrop').classList.contains('open')")
+                self.page.evaluate("closeScanReport()")
                 self.close_drawer()
                 self.page.wait_for_function(
                     "!document.getElementById('contextbackdrop').classList.contains('open')"
@@ -558,7 +610,6 @@ class BrowserRelease(unittest.TestCase):
                 if index == 0:
                     self.prepare_rules()
                     self.lock_rules()
-                    self.button("leaveCodebookWorkspace()").click()
                     self.select_bg(self.f.bg_a)
                 self.ask("Classify this Baugruppe")
                 self.assertEqual(self.visible_han_text(), [], "after classification")
@@ -575,7 +626,7 @@ class BrowserRelease(unittest.TestCase):
                 self.page.locator("#diagnosticsresult .card").first.wait_for()
                 self.assertEqual(self.visible_han_text(), [], "diagnostics drawer")
                 self.close_drawer()
-                self.page.evaluate("openScanReport();setTimeout(loadCacheAudit,80)")
+                self.page.evaluate("openAuditDetail()")
                 self.page.wait_for_timeout(400)
                 self.assertEqual(self.visible_han_text(), [], "scan report and cache audit")
                 self.page.evaluate("closeScanReport()")
@@ -625,7 +676,7 @@ class BrowserRelease(unittest.TestCase):
                     const found=[];
                     for(let node;node=walker.nextNode();){
                       const text=node.nodeValue.trim(), parent=node.parentElement;
-                      if(text && forbidden.test(text) && !parent.closest('script,style,option,input,textarea,select,#workspaceshortcut')) found.push(text);
+                      if(text && forbidden.test(text) && !parent.closest('script,style,option,input,textarea,select,#workspaceshortcut,.ui-path')) found.push(text);
                     }
                     return found;
                 }""")
@@ -650,32 +701,30 @@ class BrowserRelease(unittest.TestCase):
             self.assertEqual(self.page.eval_on_selector('#ruleeditor', '(n)=>[n.selectionStart,n.selectionEnd,n.selectionDirection,n.scrollTop]'), state)
             self.assertIn(self.page.evaluate("t('rules.invalid_json',{detail:''})").strip(), self.page.locator('#ruleediterror').inner_text())
             self.assertEqual(self.page.locator('#ruledirty').inner_text(), self.page.evaluate("t('rules.unsaved')"))
-        # A rejected discard leaves the same editing context intact.
+        # A rejected discard leaves the same editing context intact: closing the
+        # rules drawer (which would close the editor too) and preparing again.
         self.page.remove_listener('dialog', self.handle_dialog)
-        session = self.page.evaluate('lastStatusSnapshot.session_name')
-        self.page.once('dialog', lambda dialog: dialog.dismiss())
-        self.page.locator('#newsessionbutton').click()
-        self.assertEqual(self.page.evaluate('lastStatusSnapshot.session_name'), session)
-        self.assertEqual(self.page.input_value('#ruleeditor'), raw)
-        self.open_drawer('workspace')
-        self.page.locator('#contextworkspacepath').fill(str(self.f.root))
-        self.page.once('dialog', lambda dialog: dialog.dismiss())
-        self.button('contextOpenWorkspace()').click()
-        self.assertEqual(self.page.evaluate('lastStatusSnapshot.workspace'), str(self.f.workspace))
-        self.assertEqual(self.page.input_value('#ruleeditor'), raw)
+        self.page.evaluate("window.__appDialogAuto='dismiss'")
         self.close_drawer()
-        self.open_drawer('rules')
-        self.page.once('dialog', lambda dialog: dialog.dismiss())
+        self.assertTrue(self.page.evaluate("$('contextbackdrop').classList.contains('open') && activeContextDrawer==='rules'"))
+        self.assertEqual(self.page.input_value('#ruleeditor'), raw)
+        self.page.evaluate("window.__appDialogAuto='dismiss'")
         self.button('contextSyncRule();prepareCodebook()').click()
-        self.close_drawer()
         self.assertEqual(self.page.input_value('#ruleeditor'), raw)
-        self.page.once('dialog', lambda dialog: dialog.dismiss())
+        self.page.evaluate("window.__appDialogAuto='dismiss'")
         self.button('cancelRuleDraft()').click()
         self.assertEqual(self.page.input_value('#ruleeditor'), raw)
-        self.page.once('dialog', lambda dialog: dialog.accept())
+        self.page.evaluate("window.__appDialogAuto='accept'")
         self.button('cancelRuleDraft()').click()
-        self.assertEqual(self.page.locator('#ruleeditor').count(), 0)
+        self.page.wait_for_function("!document.getElementById('ruleeditor')")
         self.assertEqual(self.f.rules.read_bytes(), original)
+        # Accepting the discard while closing the drawer closes editor and review with it.
+        self.button('editCodebookDraft()').click()
+        self.page.locator('#ruleeditor').fill(raw + ' ')
+        self.page.evaluate("window.__appDialogAuto='accept'")
+        self.close_drawer()
+        self.page.wait_for_function("!document.getElementById('ruleeditor') && !$('chat').classList.contains('codebook-workspace') && !$('contextbackdrop').classList.contains('open')")
+        self.assertTrue(self.page.locator('#composer').is_visible())
 
     def test_draft_save_confirmation_and_stale_context_preserve_raw_input(self):
         self.prepare_rules()
@@ -686,10 +735,10 @@ class BrowserRelease(unittest.TestCase):
         raw = json.dumps(draft, ensure_ascii=False, indent=3)
         self.page.locator('#ruleeditor').fill(raw)
         self.page.remove_listener('dialog', self.handle_dialog)
-        self.page.once('dialog', lambda dialog: dialog.dismiss())
+        self.page.evaluate("window.__appDialogAuto='dismiss'")
         self.button('saveCodebookDraft()').click()
         self.assertEqual(self.page.input_value('#ruleeditor'), raw)
-        self.page.once('dialog', lambda dialog: dialog.accept())
+        self.page.evaluate("window.__appDialogAuto='accept'")
         self.button('saveCodebookDraft()').click()
         self.page.wait_for_function('ruleEditState===null')
         self.assertEqual(self.page.evaluate('lastCodebookWorkspaceProfile.draft.classes[0].definition'), draft['classes'][0]['definition'])
@@ -703,7 +752,7 @@ class BrowserRelease(unittest.TestCase):
             'profile_version': self.page.evaluate('lastCodebookWorkspaceProfile.version'),
         })
         self.assertEqual(response.status, 200)
-        self.page.once('dialog', lambda dialog: dialog.accept())
+        self.page.evaluate("window.__appDialogAuto='accept'")
         self.button('saveCodebookDraft()').click()
         self.page.wait_for_function('ruleEditState?.error?.message_key === "rules.version_changed"')
         self.language('de')
@@ -735,7 +784,7 @@ class BrowserRelease(unittest.TestCase):
     def test_german_mobile_drawer_long_error_folder_selection_and_close(self):
         self.language('de')
         self.prepare_rules()
-        self.button('leaveCodebookWorkspace()').click()
+        self.close_drawer()  # closing the rules drawer also closes the review
         nested = self.f.bg_a / ('Unterlagen_' + 'lang_' * 18)
         nested.mkdir()
         (nested / ('Zeichnung_' + 'x' * 110 + '.txt')).write_text('Fixture material', encoding='utf-8')
@@ -759,7 +808,7 @@ class BrowserRelease(unittest.TestCase):
             self.page.route('**/api/target-tree?*', lambda route: route.fulfill(status=400, content_type='application/json', body=json.dumps({
                 'detail': detail, 'message_key': 'error.operation_failed', 'params': {'detail': detail}})))
             self.page.locator('#contexttargetpath').fill(str(nested / 'missing'))
-            self.button('contextSyncTarget();loadTargetTree()').click()
+            self.page.locator('#contexttargetpath').press('Enter')
             self.page.locator('#treestatus .error').wait_for()
             self.assertIn(detail, self.page.locator('#treestatus').text_content())
             self.page.screenshot(path=str(OUTPUT / f'de-long-error-{width}.png'))
@@ -768,7 +817,7 @@ class BrowserRelease(unittest.TestCase):
             self.assertLessEqual(box['x'] + box['width'], width + 1)
             self.page.unroute('**/api/target-tree?*')
             self.page.locator('#contexttargetpath').fill(str(self.f.bg_a))
-            self.button('contextSyncTarget();loadTargetTree()').click()
+            self.page.locator('#contexttargetpath').press('Enter')
             self.page.locator('input.tree-folder').first.wait_for()
             folder = self.page.locator('input.tree-folder').first
             folder.uncheck()
@@ -803,7 +852,7 @@ class BrowserRelease(unittest.TestCase):
                     self.assertTrue(self.page.locator('#contextworkspacemsg').is_visible())
                     if code == 'startup.state_unwritable' and language == 'de':
                         self.page.screenshot(path=str(OUTPUT / 'startup-recovery-de-390.png'))
-                    self.assertEqual(self.page.input_value('#contextworkspacepath'), str(self.f.workspace))
+                    self.assertEqual(self.page.input_value('#contextworkspacepath'), str(self.auto_workspace))
             self.button('contextOpenWorkspace()').click()
             self.page.wait_for_function('activeContextDrawer===null && !document.getElementById("startupnotice")')
 
@@ -812,9 +861,12 @@ class BrowserRelease(unittest.TestCase):
         self.open_drawer("workspace")
         self.page.locator("#contextworkspacepath").fill(payload)
         self.button("contextOpenWorkspace()").click()
-        self.page.locator('#contextworkspacemsg .error').wait_for()
-        self.assertEqual(self.page.evaluate('lastStatusSnapshot.workspace'), str(self.f.workspace))
+        # The typed path is no longer used (the session folder is automatic); what
+        # matters here is that the attribute value cannot become an event handler.
+        self.page.wait_for_function("document.getElementById('setupmsg').textContent === t('workspace.opened')")
+        self.assertEqual(self.page.evaluate('lastStatusSnapshot.workspace'), str(self.auto_workspace))
         self.close_drawer()
+        self.page.evaluate("(v)=>document.getElementById('workspace').value=v", payload)
         self.open_drawer("workspace")
         field = self.page.locator("#contextworkspacepath")
         field.dispatch_event("pointerover")
@@ -858,10 +910,13 @@ class BrowserRelease(unittest.TestCase):
         control.dispatch_event("pointerover")
         self.assertFalse(self.page.evaluate("window.__attributeProbe===1"))
 
+    @unittest.skip("Code change plans need a code workspace; the Bosch Assembly Assistant has none "
+                   "(its automatic session folder is private state, so writes there are refused).")
     def test_two_pages_confirm_only_their_displayed_plan(self):
         other = self.browser.new_page(viewport={"width": 1440, "height": 1000})
         self.addCleanup(other.close)
         other.on("dialog", lambda dialog: dialog.accept())
+        auto_app_dialogs(other)
         other.on("pageerror", lambda error: self.errors.append(str(error)))
         other.goto(self.page.url)
         other.wait_for_function(
@@ -902,13 +957,13 @@ class BrowserRelease(unittest.TestCase):
             first_page.locator(".change-plan button[data-plan-id]").click()
         self.assertEqual(response.value.request.post_data_json["plan_id"], first_id)
         self.assertEqual(response.value.status, 409)
-        self.assertFalse((self.f.workspace / "page_A.txt").exists())
-        self.assertFalse((self.f.workspace / "page_B.txt").exists())
+        self.assertFalse((self.auto_workspace / "page_A.txt").exists())
+        self.assertFalse((self.auto_workspace / "page_B.txt").exists())
         with other.expect_response(lambda r: r.url.endswith("/api/apply")) as response:
             other.locator(".change-plan button[data-plan-id]").click()
         self.assertEqual(response.value.request.post_data_json["plan_id"], second_id)
         self.assertEqual(response.value.status, 200)
-        self.assertEqual((self.f.workspace / "page_B.txt").read_text(), "page_B")
+        self.assertEqual((self.auto_workspace / "page_B.txt").read_text(), "page_B")
 
     def test_stale_tab_cannot_classify_another_tabs_session_or_bg(self):
         self.language("en")
@@ -916,12 +971,12 @@ class BrowserRelease(unittest.TestCase):
         self.page.wait_for_function('lastStatusSnapshot.model === "gemini-2.5-pro"')
         self.prepare_rules()
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         self.select_bg(self.f.bg_a)
         session_a = self.page.evaluate("lastStatusSnapshot.session_name")
         other = self.browser.new_page(viewport={"width": 1440, "height": 1000})
         self.addCleanup(other.close)
         other.on("dialog", self.handle_dialog)
+        auto_app_dialogs(other)
         other.on("pageerror", lambda error: self.errors.append(str(error)))
         other.goto(self.page.url)
         other.wait_for_function(
@@ -979,7 +1034,7 @@ class BrowserRelease(unittest.TestCase):
     def start_rules(self, path, model):
         self.open_drawer("rules")
         self.page.locator("#contextcodebookpath").fill(str(path))
-        self.page.locator("#rulemodel").fill(model)
+        self.rule_model(model)
         self.button("contextSyncRule();prepareCodebook()").click()
 
     def card(self):
@@ -999,14 +1054,18 @@ class BrowserRelease(unittest.TestCase):
         self.f.response_transform = slow
         self.open_drawer("rules")
         self.page.locator("#contextcodebookpath").fill(str(path))
-        self.page.locator("#rulemodel").fill("gemini-2.5-pro")
+        self.rule_model("gemini-2.5-pro")
         self.assertEqual(self.page.locator("#rulemodelhint").inner_text(), "This run will use: gemini-2.5-pro")
         self.button("contextSyncRule();prepareCodebook()").click()
         self.page.wait_for_function("document.getElementById('rulejobpanel')?.innerText.includes('Parsing page')")
         panel = self.page.locator("#rulejobpanel").inner_text()
-        for text in ["Preparing", "gemini-2.5-pro", "Codebook 3 pages.pdf", "PDF", " of 3"]:
+        for text in ["Preparing", "gemini-2.5-pro", "Codebook 3 pages.pdf", " of 3", "Parse rules", "Elapsed"]:
             self.assertIn(text, panel)
         self.assertNotIn("%", panel)  # no invented percentage
+        # While running only what the user follows: no start time, file type or call count rows.
+        self.assertEqual(self.page.locator("#rulejobpanel dl").count(), 0)
+        self.assertIn("Parse rules", self.page.locator("#rulejobpanel .rulejob-steps li.current").inner_text())
+        self.assertEqual(self.page.locator("#rulejobpanel .rulejob-steps li.done").count(), 1)
         # Switching the GUI language during the job is immediate (the language
         # save must not wait for the job's lock) and redraws the live panel.
         for language, fragment in [("de", "Seite"), ("zh", "页"), ("en", "Parsing page")]:
@@ -1015,8 +1074,10 @@ class BrowserRelease(unittest.TestCase):
             self.assertLess(time.monotonic() - started, 3, language)
             self.page.wait_for_function("(f)=>document.getElementById('rulejobpanel').innerText.includes(f)", arg=fragment)
             self.assertEqual(self.page.evaluate("lastCodebookTask.state"), "running")
-        for selector in ["#ruleprepare", "#rulefilepick", "#contextcodebookpath", "#rulemodel", "#ruleview", "#rulereplace"]:
+        for selector in ["#ruleprepare", "#rulefilepick", "#contextcodebookpath", "#rulemodel"]:
             self.assertTrue(self.page.locator(selector).is_disabled(), selector)
+        for selector in ["#ruleview", "#rulereplace", "#ruledelete"]:  # only for prepared rules
+            self.assertEqual(self.page.locator(selector).count(), 0, selector)
         self.close_drawer()
         self.page.wait_for_function("/^Preparing: page [123] of 3$/.test(document.getElementById('context-rule-summary').innerText)")
         # A reload while the job runs resumes the same server-side status.
@@ -1034,9 +1095,8 @@ class BrowserRelease(unittest.TestCase):
             self.assertIn(text, panel)
         self.assertEqual(self.page.locator("#rulejobpanel dt:text-is('Pages') + dd").inner_text(), "3")
         self.assertFalse(self.page.locator("#ruleprepare").is_disabled())
-        self.page.locator("#rulejobview").click()
+        self.page.locator("#ruleview").click()
         self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
-        self.close_drawer()
         self.lock_rules()
         self.assertEqual(self.card(), "Locked and in use for classification · Codebook 3 pages.pdf")
         # A second reload shows the last final state.
@@ -1044,12 +1104,13 @@ class BrowserRelease(unittest.TestCase):
         self.page.wait_for_function("lastCodebookTask?.state === 'succeeded' && lastCodebookProfile?.status === 'locked'")
         self.assertEqual(dialogs, [])
 
-    def test_rule_page_three_max_tokens_is_explained_and_old_rules_stay_in_effect(self):
+    def test_rule_page_three_max_tokens_is_explained_and_retry_recovers(self):
+        # Locked rules make the path, picker and parser model read-only (replacing
+        # them deletes the old set first), so this starts without prepared rules.
+        # That a failed new preparation keeps old locked rules in effect is
+        # covered at API level (test_codebook_preparation).
         self.language("en")
         self.page.context.grant_permissions(["clipboard-read", "clipboard-write"])
-        self.prepare_rules()
-        self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         dialogs = self.record_dialogs()
         long_text = "Page three table: " + " ".join(f"Rule{index} Rotationseinheit Drehung" for index in range(260))
         path = self.make_pdf("Codebook_Baugruppenklassifikation_v2_3.pdf", ["Rotationseinheit.", "Gantry.", long_text])
@@ -1062,22 +1123,19 @@ class BrowserRelease(unittest.TestCase):
         self.start_rules(path, "claude-haiku-5-5")
         self.page.wait_for_function("lastCodebookTask?.state === 'failed'", timeout=20000)
         panel = self.page.locator("#rulejobpanel").inner_text()
-        for text in ["Preparation failed", "Page 3 is too long", "after 4 attempts", "Parsing the rules",
-                     "This failure did not change the existing rules.", "claude-haiku-5-5"]:
+        for text in ["Preparation failed", "Page 3 is too long", "after 2 attempts", "Parsing the rules",
+                     "claude-haiku-5-5"]:
             self.assertIn(text, panel)
         self.assertTrue(self.page.locator("#rulejobretry").is_enabled())
         self.assertTrue(self.page.locator("#ruleprepare").is_enabled())
         self.assertNotIn("incomplete Claude response", panel.split(self.page.evaluate("t('rulejob.details.title')"))[0])
         self.page.locator("#rulejobdetails summary").click()
-        self.assertIn("incomplete Claude response (max_tokens)", self.page.locator("#rulejobdiagnostics").inner_text())
+        self.assertIn("incomplete Claude response (max_tokens)", self.page.locator("#rulejobdetails").inner_text())
         self.assertIn("retrying in smaller parts", self.page.locator(".rulejob-log").inner_text())
-        self.page.locator("button[onclick='copyCodebookDiagnostics()']").click()
-        self.page.wait_for_function("document.getElementById('rulejobcopymsg').innerText.length > 0")
-        self.assertEqual(self.page.locator("#rulejobcopymsg").inner_text(), "Copied")
-        self.assertIn("max_tokens", self.page.evaluate("navigator.clipboard.readText()"))
+        self.assertEqual(self.page.locator("#rulejobdiagnostics").count(), 0)  # log only, no diagnostics dump
         self.close_drawer()
         expected = ("Preparation failed: Page 3: output limit reached\n"
-                    f"Rules in effect: {self.f.rules.name} (Locked and in use for classification)")
+                    "No locked rules are available for classification")
         self.assertEqual(self.card(), expected)
         clipped = self.page.eval_on_selector("#context-rule-summary", "n=>n.scrollHeight>n.clientHeight+1||getComputedStyle(n).webkitLineClamp!=='none'")
         self.assertFalse(clipped, "rule card text is clipped")
@@ -1089,41 +1147,36 @@ class BrowserRelease(unittest.TestCase):
         self.open_drawer("rules")
         self.assertIn("Seite 3 ist zu lang", self.page.locator("#rulejobpanel").inner_text())
         self.language("zh")
-        self.assertIn("第 3 页内容过长，已尝试 4 次仍无法完成", self.page.locator("#rulejobpanel").inner_text())
+        self.assertIn("第 3 页内容过长，已尝试 2 次仍无法完成", self.page.locator("#rulejobpanel").inner_text())
         self.language("en")
-        self.close_drawer()
-        # The previously locked rules still classify.
+        # Retry from the failure panel; the new draft can then be locked.
         self.f.response_transform = None
-        self.select_bg(self.f.bg_a)
-        self.ask("Classify this Baugruppe")
-        self.assertIn("Rotationseinheit", self.page.locator(".classification-card").first.inner_text())
-        # Retry from the failure panel.
-        self.open_drawer("rules")
         self.page.locator("#rulejobretry").click()
         self.page.wait_for_function("lastCodebookTask?.state === 'succeeded'", timeout=20000)
+        self.page.wait_for_function('lastCodebookWorkspaceProfile?.status === "draft"')
+        self.lock_rules()
+        self.assertIn("Locked and in use for classification", self.card())
         self.assertEqual(dialogs, [])
 
-    def test_rule_model_validation_and_answer_mode_are_in_page_controls(self):
+    def test_rule_model_validation_and_scope_bar_are_in_page_controls(self):
         self.language("en")
         dialogs = self.record_dialogs()
-        self.assertEqual(self.page.locator("select#answermode").count(), 0)
-        self.assertTrue(self.page.locator("#answermodestatic").is_visible())
-        self.assertFalse(self.page.locator("#answermodegroup").is_visible())
-        self.assertEqual(self.page.locator("#answermodestatic").inner_text(), "Current mode: Ordinary questions")
-        self.assertEqual(self.page.locator("#answermodehelp").inner_text(), self.page.evaluate("t('answer.unavailable_help')"))
+        self.assertEqual(self.page.locator("#answermodegroup").count(), 0)
+        # Without confirmed materials the scope bar stays hidden.
+        self.assertFalse(self.page.locator("#scopebar").is_visible())
         calls = len(self.f.calls)
         self.open_drawer("rules")
         self.page.locator("#contextcodebookpath").fill(str(self.f.rules))
-        self.page.locator("#rulemodel").fill("not a model")
+        self.rule_model("not a model")
         self.assertIn("is invalid", self.page.locator("#rulemodelhint").inner_text())
         self.button("contextSyncRule();prepareCodebook()").click()
         self.assertIn("is invalid", self.page.locator("#contextrulemsg").inner_text())
-        self.page.locator("#rulemodel").fill("")
+        self.rule_model("")
         self.button("contextSyncRule();prepareCodebook()").click()
         self.assertEqual(self.page.locator("#contextrulemsg").inner_text(), "Enter a rule-parsing model ID.")
         self.assertIsNone(self.page.evaluate("lastCodebookTask"))
         self.assertEqual(len(self.f.calls), calls)
-        self.page.locator("#rulemodelrecommended").click()
+        self.page.select_option("#rulemodelselect", "claude-haiku-5-5")
         self.assertEqual(self.page.input_value("#rulemodel"), "claude-haiku-5-5")
         # A refused start (another model task is active) is explained in the page
         # and leaves no running state or disabled controls behind.
@@ -1139,18 +1192,115 @@ class BrowserRelease(unittest.TestCase):
         self.close_drawer()
         self.prepare_rules()
         self.lock_rules()
-        self.button("leaveCodebookWorkspace()").click()
         self.select_bg(self.f.bg_a)
-        self.assertTrue(self.page.locator("#answermodegroup").is_visible())
-        self.assertFalse(self.page.locator("#answermodestatic").is_visible())
-        chosen = self.page.locator('#answermodegroup button[aria-checked="true"]')
-        self.assertEqual(chosen.get_attribute("data-mode"), "classification")
-        self.assertEqual(self.page.locator("#answermodehelp").inner_text(), self.page.evaluate("t('answer.classification_help')"))
-        self.page.locator('#answermodegroup button[data-mode="explanation"]').click()
-        self.assertEqual(self.page.input_value("#answermode"), "explanation")
-        self.assertEqual(chosen.get_attribute("data-mode"), "explanation")
-        self.assertEqual(self.page.locator("#answermodehelp").inner_text(), self.page.evaluate("t('answer.explanation_help')"))
+        # One confirmed file: no scope to choose, but the bar carries the classify button.
+        self.assertTrue(self.page.locator("#scopebar").is_visible())
+        self.assertEqual(self.page.locator("#scopebar .scope-chip").count(), 0)
+        self.assertTrue(self.page.locator("#classifybutton").is_visible())
         self.assertEqual(dialogs, [])
+
+    def test_ready_card_guides_to_the_classify_button_and_suggests_questions(self):
+        self.language("en")
+        self.prepare_rules()
+        self.lock_rules()
+        self.select_bg(self.f.bg_a)
+        card = self.page.locator("#chat .ready-card")
+        card.wait_for()
+        self.assertIn("facts.txt", card.locator("h3").inner_text())
+        # The card only points to the one classify button above the input.
+        self.assertEqual(self.page.locator("#classifybutton").count(), 1)
+        self.assertEqual(card.locator(".ready-classify").inner_text().strip(),
+                         self.page.evaluate("t('classify.start')"))
+        questions = card.locator(".ready-question")
+        self.assertGreaterEqual(questions.count(), 1)
+        self.language("de")
+        self.assertIn("ist bereit", card.locator("h3").inner_text())
+        self.language("en")
+        # A suggested question is an ordinary explanation turn.
+        question = questions.first.inner_text().strip()
+        with self.page.expect_response(lambda r: r.url.endswith("/api/chat/stream")) as response:
+            questions.first.click()
+            self.page.wait_for_function("!busy")
+        payload = response.value.request.post_data_json
+        self.assertEqual(payload["question"], question)
+        self.assertIs(payload["require_classification"], False)
+        self.assertEqual(self.page.locator(".classification-card").count(), 0)
+        # The inline chip starts the same classification as the button.
+        with self.page.expect_response(lambda r: r.url.endswith("/api/chat/stream")) as response:
+            card.locator(".ready-classify").click()
+            self.page.wait_for_function("!busy")
+        self.assertIs(response.value.request.post_data_json["require_classification"], True)
+        self.page.locator(".classification-card").first.wait_for()
+
+    def test_classify_button_is_the_only_classification_trigger(self):
+        self.language("en")
+        # Without a confirmed assembly there is no classify button.
+        self.assertEqual(self.page.locator("#classifybutton").count(), 0)
+        self.prepare_rules()
+        self.lock_rules()
+        self.select_bg(self.f.bg_a)
+        button = self.page.locator("#classifybutton")
+        self.assertEqual(button.inner_text().strip(), self.page.evaluate("t('classify.start')"))
+        self.assertIn("start", button.get_attribute("class"))
+        # A typed first question no longer classifies by itself.
+        with self.page.expect_response(lambda r: r.url.endswith("/api/chat/stream")) as response:
+            self.ask("Explain the motor evidence")
+        self.assertIs(response.value.request.post_data_json["require_classification"], False)
+        self.assertEqual(self.page.locator(".classification-card").count(), 0)
+        self.assertEqual(button.inner_text().strip(), self.page.evaluate("t('classify.start')"))
+        # The button sends a fixed request for all files and keeps a typed draft.
+        self.page.locator("#question").fill("draft stays")
+        with self.page.expect_response(lambda r: r.url.endswith("/api/chat/stream")) as response:
+            button.click()
+            self.page.wait_for_function("!busy")
+        payload = response.value.request.post_data_json
+        self.assertIs(payload["require_classification"], True)
+        self.assertEqual(payload["focus_source_id"], "")
+        self.assertEqual(payload["question"], self.page.evaluate("t('classify.request')"))
+        self.assertEqual(self.page.input_value("#question"), "draft stays")
+        self.assertEqual(self.page.locator("#chat .classify-request").count(), 1)
+        self.assertNotIn(payload["question"], self.page.locator("#chat .message.user").all_inner_texts())
+        self.assertIn("Rotationseinheit", self.page.locator(".classification-card").first.inner_text())
+        # Classified: the result stays beside the button, which becomes secondary.
+        self.page.wait_for_function("lastStatusSnapshot.last_classification?.label==='Rotationseinheit'")
+        self.assertIn("Rotationseinheit", self.page.locator("#scopebar .classify-result").inner_text())
+        self.assertEqual(button.inner_text().strip(), self.page.evaluate("t('classify.again')"))
+        self.assertIn("again", button.get_attribute("class"))
+        cards = self.page.locator(".classification-card").count()
+        self.page.locator("#question").fill("")
+        self.ask("Explain the motor evidence again")
+        self.assertEqual(self.page.locator(".classification-card").count(), cards)
+        self.assertIn("Rotationseinheit", self.page.locator("#scopebar .classify-result").inner_text())
+        # Reload and language switch keep the request as a tag, not a user message.
+        self.page.reload()
+        self.page.wait_for_function("lastStatusSnapshot?.last_classification?.label==='Rotationseinheit'")
+        self.page.locator("#chat .classify-request").first.wait_for()
+        self.assertEqual(self.page.locator("#chat .message.user").filter(
+            has_text=self.page.evaluate("t('classify.request')")).count(), 0)
+        self.language("de")
+        self.assertIn(self.page.evaluate("t('classify.request_tag')"),
+                      self.page.locator("#chat .classify-request").first.inner_text())
+        self.assertEqual(self.page.locator("#classifybutton").inner_text().strip(), "Erneut klassifizieren")
+
+    def test_typed_rule_model_needs_confirmation_before_preparing(self):
+        self.language("en")
+        self.open_drawer("rules")
+        self.page.locator("#contextcodebookpath").fill(str(self.f.rules))
+        self.page.select_option("#rulemodelselect", "__custom__")
+        self.page.locator("#rulemodel").fill("gemini-3.5-flash")
+        # Typed but not confirmed: no "this run will use" yet, and preparing is refused.
+        self.assertEqual(self.page.locator("#rulemodelhint").inner_text(), self.page.evaluate("t('rulejob.model_confirm_needed')"))
+        calls = len(self.f.calls)
+        self.button("contextSyncRule();prepareCodebook()").click()
+        self.assertEqual(self.page.locator("#contextrulemsg").inner_text(), self.page.evaluate("t('rulejob.model_confirm_first')"))
+        self.assertIsNone(self.page.evaluate("lastCodebookTask"))
+        self.assertEqual(len(self.f.calls), calls)
+        # Enter confirms as well as the button.
+        self.page.locator("#rulemodel").press("Enter")
+        self.assertEqual(self.page.locator("#rulemodelhint").inner_text(), "This run will use: gemini-3.5-flash")
+        # Without prepared rules the status panel says so; there is no second box.
+        self.assertEqual(self.page.locator("#ruleeffective").count(), 0)
+        self.assertIn(self.page.evaluate("t('rulews.not_prepared')"), self.page.locator("#rulejobpanel").inner_text())
 
     def test_txt_rules_prepare_and_show_text_block_references(self):
         self.language("de")

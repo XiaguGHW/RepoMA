@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 import importlib.util
+import json
 import os
 from pathlib import Path
 import shlex
@@ -13,6 +14,10 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+import urllib.request
+import webbrowser
 
 
 APP_DIRECTORY = Path(__file__).resolve().parent
@@ -41,6 +46,8 @@ class StartupConfig:
     env_file: Path = field(default_factory=lambda: APP_DIRECTORY / '.env')
     env_explicit: bool = False
     port: int = 8765
+    # Only the command line turns this on, so tests and embedded use never open a browser.
+    open_browser: bool = False
 
 
 def port_number(value: str) -> int:
@@ -57,6 +64,7 @@ def parse_options(argv: Sequence[str] | None = None) -> StartupConfig:
     parser = argparse.ArgumentParser(description='Local Bosch Workbench (127.0.0.1 only). Python 3.10+ is required.')
     parser.add_argument('--env-file', metavar='PATH', help='UTF-8 Farm configuration; default: .env beside the program. Relative paths use the launch directory.')
     parser.add_argument('--port', type=port_number, default=8765, help='local TCP port, default: 8765')
+    parser.add_argument('--no-browser', action='store_true', help='do not open the browser automatically')
     args = parser.parse_args(argv)
     if args.env_file is not None and not args.env_file.strip():
         parser.error('--env-file must not be empty')
@@ -64,7 +72,8 @@ def parse_options(argv: Sequence[str] | None = None) -> StartupConfig:
         path = Path(args.env_file).expanduser().resolve() if args.env_file is not None else APP_DIRECTORY / '.env'
     except (OSError, ValueError):
         parser.error('cannot resolve --env-file; use a valid file path')
-    return StartupConfig(env_file=path, env_explicit=args.env_file is not None, port=args.port)
+    return StartupConfig(env_file=path, env_explicit=args.env_file is not None, port=args.port,
+                         open_browser=not args.no_browser)
 
 
 def install_command() -> str:
@@ -176,3 +185,35 @@ def check_port(port: int) -> None:
             listener.bind((HOST, port))
     except OSError:
         raise StartupError('startup.port_busy', port=port) from None
+
+
+def workbench_url(port: int) -> str:
+    return f'http://{HOST}:{port}'
+
+
+def running_workbench(port: int, timeout: float = 1.5) -> bool:
+    """True when a Workbench (not another program) already answers on this port."""
+    try:
+        with urllib.request.urlopen(workbench_url(port) + '/api/settings', timeout=timeout) as response:
+            data = json.loads(response.read().decode('utf-8'))
+        return isinstance(data, dict) and {'workspace', 'session', 'model'} <= set(data)
+    except Exception:
+        return False
+
+
+def open_browser_when_ready(port: int, timeout: float = 30.0, opener=webbrowser.open) -> threading.Thread:
+    """Open the page once the local server accepts connections (one-click start)."""
+    def wait_and_open() -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                with socket.create_connection((HOST, port), timeout=0.5):
+                    break
+            except OSError:
+                time.sleep(0.2)
+        else:
+            return
+        opener(workbench_url(port))
+    thread = threading.Thread(target=wait_and_open, name='open-browser', daemon=True)
+    thread.start()
+    return thread

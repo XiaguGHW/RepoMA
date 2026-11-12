@@ -460,10 +460,12 @@ class LocalDocumentLibrary:
             self._save()
         return snippets
 
-    def ensure_document_ocr(self, document: dict) -> None:
-        """Prepare every visual/mixed page locally for an exhaustive reading pass."""
+    def ensure_document_ocr(self, document: dict, pages=None) -> None:
+        """Prepare visual/mixed pages locally for a reading pass; only `pages` when given."""
         snippets = [{"text": "", "visual": chunk.get("visual")} for chunk in document.get("chunks", [])
-                    if (chunk.get("visual") or {}).get("kind") in {"pdf_page", "dfc_structure_screenshot"}]
+                    if (chunk.get("visual") or {}).get("kind") in {"pdf_page", "dfc_structure_screenshot"}
+                    and (pages is None or (chunk.get("visual") or {}).get("kind") != "pdf_page"
+                         or (chunk.get("visual") or {}).get("page") in pages)]
         self.ensure_ocr_for_snippets(snippets, classification=True)
 
     def bilder_image_paths(self, allowed_ids=None) -> builtins.list[Path]:
@@ -608,7 +610,8 @@ class LocalDocumentLibrary:
         self._save()
         return count
 
-    def search(self, question: str, limit: int = 6, preferred_ids=None, classification=False, allowed_ids=None):
+    def search(self, question: str, limit: int = 6, preferred_ids=None, classification=False, allowed_ids=None,
+               extra_terms=None, preferred_pages=None):
         """Return local evidence. Preferred documents are kept in the result.
 
         Chinese questions and German technical material rarely share literal
@@ -628,7 +631,9 @@ class LocalDocumentLibrary:
                 text = chunk["text"].lower()
                 word_score = sum(1 for word in words if word in text)
                 char_score = min(8, len(chars & set(re.findall(r"[\u4e00-\u9fff]", text))))
-                score = word_score * 10 + char_score
+                # BOM part numbers and rule words from the session count less than the question's own words.
+                extra_score = min(15, 3 * sum(1 for term in (extra_terms or ()) if term in text))
+                score = word_score * 10 + char_score + extra_score
                 if score:
                     scored.append((score, document, index, chunk))
         scored.sort(key=lambda item: (-item[0], item[1]["name"], item[2]))
@@ -649,7 +654,12 @@ class LocalDocumentLibrary:
                 if document["id"] not in preferred or not document.get("chunks"):
                     continue
                 candidates = [(score, doc, index, chunk) for score, doc, index, chunk in scored if doc["id"] == document["id"]]
-                item = candidates[0] if candidates else (0, document, 0, document["chunks"][0])
+                # Prefer the pages this file's pre-read covers over its first chunk.
+                pages = set((preferred_pages or {}).get(document["id"]) or ())
+                in_pages = [item for item in candidates if (item[3].get("visual") or {}).get("page") in pages]
+                fallback = next(((0, document, index, chunk) for index, chunk in enumerate(document["chunks"])
+                                 if (chunk.get("visual") or {}).get("page") in pages), (0, document, 0, document["chunks"][0]))
+                item = (in_pages or candidates or [fallback])[0]
                 key = (item[1]["id"], item[2])
                 if key not in used:
                     selected.append(item)
@@ -683,7 +693,8 @@ class LocalDocumentLibrary:
             for item in selected[:result_limit]
         ]
 
-    def visual_paths(self, snippets, cache_dir: Path, limit: int = MAX_VISUALS_PER_REQUEST, bilder_images=None):
+    def visual_paths(self, snippets, cache_dir: Path, limit: int = MAX_VISUALS_PER_REQUEST, bilder_images=None,
+                     first_per_file_ids=None):
         """Make upload-safe visual evidence for only the current request.
 
         A small-page-count technical drawing is treated differently from a long
@@ -721,6 +732,8 @@ class LocalDocumentLibrary:
             if not output or not output.is_file():
                 skipped.append(f"{description} 无法转换")
                 return False
+            if str(output) in paths:
+                return True  # the same picture is sent once
             size = output.stat().st_size
             if len(paths) >= limit or used_bytes + size > MAX_VISUAL_BYTES_PER_REQUEST:
                 skipped.append(f"{description} 超出本轮视觉附件预算")
@@ -729,6 +742,42 @@ class LocalDocumentLibrary:
             used_bytes += size
             return True
 
+        # One picture per selected file first, so no file is left without any
+        # picture while another sends several (each file also has a summary).
+        if first_per_file_ids is not None:
+            wanted, represented = set(first_per_file_ids), set()
+            for snippet in snippets:
+                visual = snippet.get("visual") or {}
+                kind, source = visual.get("kind"), Path(visual.get("path", ""))
+                if snippet.get("id") not in wanted or not source.is_file() or str(source) in represented:
+                    continue
+                if kind == "image" and source in grouped_image_sources:
+                    continue
+                try:
+                    if kind == "dfc_structure_screenshot":
+                        parts = visual.get("dfc_segments") or []
+                        output = (self._prepare_image(Path(str(parts[0]["path"])), cache_dir, max_bytes=520_000, max_edge=2600)
+                                  if parts else self._prepare_image(source, cache_dir))
+                    elif kind == "image":
+                        output = self._prepare_image(source, cache_dir)
+                    elif kind == "pdf_page":
+                        output = self._render_pdf_page(source, int(visual["page"]), cache_dir)
+                    else:
+                        continue
+                except Exception:
+                    continue
+                represented.add(str(source))
+                attach(output, source.name)
+            folders: dict[Path, builtins.list[Path]] = {}
+            for source in grouped_image_sources:
+                folders.setdefault(source.parent, []).append(source)
+            for folder, sources in sorted(folders.items(), key=lambda item: str(item[0]).casefold()):
+                sources = sorted(sources, key=lambda item: item.name.casefold())
+                try:
+                    output = self._prepare_image(sources[0], cache_dir) if len(sources) <= 4 else self._render_contact_sheet(sources, cache_dir)
+                except Exception:
+                    continue
+                attach(output, folder.name)
         # DFC is a priority-1 structural source, not another CAD screenshot.
         # Attach its selected original-image crops before visual overviews use
         # the request budget.  OCR text for the same numbered crops is already

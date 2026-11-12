@@ -212,7 +212,7 @@ def main():
         results = memory.search(question)
         prompt = make_prompt(memory, question, results)
         print("assistant> ", end="", flush=True)
-        answer = llm.ask_about_files(memory.attachments(results), prompt, SYSTEM, {"maxOutputTokens": 4096})
+        answer = llm.ask_about_files(memory.attachments(results), prompt, SYSTEM, {"maxOutputTokens": 8192})
         print(answer)
         memory.add_turn("user", question)
         memory.add_turn("assistant", answer)

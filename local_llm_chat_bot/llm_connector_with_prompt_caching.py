@@ -16,6 +16,7 @@ from typing import Any, Callable
 import requests
 from request_runtime import RequestControl, RequestStopped, ResponseLimitExceeded
 from workbench_i18n import UIMessage
+from release_safety import PROMPT_CACHE_BREAK
 
 try:
     from openai import OpenAI
@@ -111,6 +112,8 @@ class LLMConnector:
         self.usage_attempts = []
         self._control = self.request_control or RequestControl()
         self._control.check()
+        if self._family != "claude":  # Only Claude needs an explicit cache mark.
+            user_prompt = user_prompt.replace(PROMPT_CACHE_BREAK, "\n\n")
         if self._family == "openai":
             return self._call_openai(file_paths, user_prompt, system_prompt, generation_config,
                                      stream=stream, event_handler=event_handler, thinking=thinking)
@@ -205,6 +208,11 @@ class LLMConnector:
         headers = self._get_common_headers()
         headers.update({"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"})
         content = []
+        stable, marker, user_prompt = user_prompt.partition(PROMPT_CACHE_BREAK)
+        if not marker:
+            stable, user_prompt = "", stable
+        if stable:  # Same in every turn: cached (read at the cache price later).
+            content.append({"type": "text", "text": stable, "cache_control": {"type": "ephemeral"}})
         for fp in file_paths:
             block = self._file_to_claude_block(fp)
             if isinstance(block, list):
@@ -260,7 +268,7 @@ class LLMConnector:
         messages.append({"role": "user", "content": content})
         config = generation_config or {}
         reasoning = name.startswith(("gpt-5", "gpt-6", "o1", "o3", "deepseek-r1"))
-        tokens = int(config.get("maxOutputTokens", 4096))
+        tokens = int(config.get("maxOutputTokens", 8192))
         from openai import _base_client
         transport = getattr(_base_client, "httpx2", None) or _base_client.httpx
         control = self._control

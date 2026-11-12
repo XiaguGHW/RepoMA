@@ -146,8 +146,12 @@
       "match": [
         "gemini-3.6-flash"
       ],
-      "input_usd_per_million": 1.5,
-      "output_usd_per_million": 7.5
+      "input_usd_per_million": 0.75,
+      "output_usd_per_million": 3.75,
+      "pricing_note": "Promotional price valid until 2026-12-31; then USD 1.50 input / USD 7.50 output per 1M tokens.",
+      "standard_input_usd_per_million": 1.5,
+      "standard_output_usd_per_million": 7.5,
+      "promotion_ends": "2026-12-31"
     },
     {
       "display_name": "Gemini 3.5 Flash",

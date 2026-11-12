@@ -51,7 +51,7 @@ class AnswerOutputLimit(unittest.TestCase):
         result = self.post("/api/chat", {"question": "根据分类规则判断当前Baugruppe类别"})
         self.assertEqual(result["classification"]["label"], "Rotationseinheit")
         calls = self.answer_calls(before)
-        self.assertEqual([call["max_tokens"] for call in calls], [4096, w.ANSWER_RETRY_OUTPUT_TOKENS])
+        self.assertEqual([call["max_tokens"] for call in calls], [w.ANSWER_OUTPUT_TOKENS, w.ANSWER_RETRY_OUTPUT_TOKENS])
         self.assertNotIn("exceeded the output limit", json.dumps(calls[0]))
         self.assertIn("exceeded the output limit and was discarded", json.dumps(calls[1]))
         self.assertIn("notice.answer_shortened", [item["message_key"] for item in result["notice_messages"]])

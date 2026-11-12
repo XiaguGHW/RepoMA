@@ -1,5 +1,11 @@
 # Bosch Farm Workbench and Terminal Chat
 
+The downloadable `Bosch_Assembly_Assistant.zip` (repository root) contains only the
+Bosch Assembly Assistant web app (files listed in `PACKAGE_MANIFEST.txt`; see
+`README_Bosch_Assembly_Assistant.md`).
+The terminal and Excel tools described below are available in this repository
+folder.
+
 Download the complete `local_llm_chat_bot` folder anywhere on your Bosch computer.
 Use Python 3.10 or newer and keep the complete folder together, including all
 Python/JSON files and requirements.txt. The graphical workbench also needs
@@ -48,6 +54,28 @@ cd .\local_llm_chat_bot
 python -m pip install -r requirements.txt
 python .\chat_workbench.py
 ```
+
+### One-click start (no VS Code needed)
+
+After the packages are installed once, double-click `Bosch_Assembly_Assistant.bat` in
+the `local_llm_chat_bot` folder. It starts the Bosch Assembly Assistant,
+opens `http://127.0.0.1:8765` in the default browser and restores rules,
+materials, chats, model and language. Keep the black window open; closing it stops the
+Workbench. Double-clicking again while it runs only opens the browser page.
+
+For a desktop icon: right-click `Bosch_Assembly_Assistant.bat` → *Send to* → *Desktop
+(create shortcut)*. Flags: `--port`, `--env-file`, `--no-browser`.
+No workspace needs to be chosen; settings, rules, materials and chats are kept
+in `AI_Bot_State` inside the program folder (override: `WORKBENCH_STATE_DIR`).
+
+The launcher finds a Python that has the Workbench packages by itself, in this
+order: `WORKBENCH_PYTHON` (a full path to `python.exe`), the Python used last
+time, a `.venv` next to or above the folder, `python` on PATH, every conda
+environment registered in `%USERPROFILE%\.conda\environments.txt`, the usual
+Anaconda/Miniconda/Miniforge folders, then `py -3`. A conda environment is used
+directly — no `conda activate` needed. The choice is remembered in
+`AI_Bot_State\python_path.txt`. If nothing suitable exists, the window offers to
+create a private `.venv` in the folder and install `requirements.txt` once.
 
 Put your existing Farm `.env` file in this downloaded tool folder (or provide
 its location with `--env-file`). Do not put its secret into any Python file:

@@ -92,8 +92,10 @@ class DraftAndProgress(unittest.TestCase):
             result = next(e['data'] for e in events if e['type'] == 'result')
             self.assertTrue(result['notice_messages'])
             self.assertTrue(all(n.get('message_key') for n in result['notice_messages']))
-            if language == 'de':
-                self.assertIn('notice.dossier_reused', [n['message_key'] for n in result['notice_messages']])
+            # One selected file: its pre-read summary is used directly, no dossier.
+            keys = [n['message_key'] for n in result['notice_messages']]
+            self.assertNotIn('notice.dossier_created', keys)
+            self.assertNotIn('notice.dossier_reused', keys)
             for item in result['coverage_summary']['files']:
                 self.assertEqual(item['scope_message']['message_key'], 'material.scope_full')
 
