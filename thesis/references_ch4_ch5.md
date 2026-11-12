@@ -24,3 +24,32 @@ Zotero 导入方式：
 | 14 | Shankar et al., 2020 | Evaluating Machine Accuracy on ImageNet. *ICML 2020*, PMLR 119, 8634–8644. | https://proceedings.mlr.press/v119/shankar20c.html | |
 | 15 | Smith, 2007 | An Overview of the Tesseract OCR Engine. *ICDAR 2007*, 629–633. | https://ieeexplore.ieee.org/document/4376991 | 不同数据库给出的 DOI 不一致，建议用 IEEE Xplore 页面导入 |
 | 16 | Sokolova & Lapalme, 2009 | A systematic analysis of performance measures for classification tasks. *Information Processing & Management*, 45(4), 427–437. | DOI 10.1016/j.ipm.2009.03.002 | |
+
+## Zotero 批量导入（魔术棒 “Eintrag über Identifier hinzufügen”）
+
+第一步：以下 8 条一次粘贴（先按 Shift + Enter 展开多行输入框），回车导入。依次为 Bender & Lange、Efron & Tibshirani、Sokolova & Lapalme、Atil et al.、Beyer et al.、Miller、Opitz & Burst、Sclar et al.
+
+```
+10.1016/S0895-4356(00)00314-0
+10.1201/9780429246593
+10.1016/j.ipm.2009.03.002
+arXiv:2408.04667
+arXiv:2006.07159
+arXiv:2411.00640
+arXiv:1911.03347
+arXiv:2310.11324
+```
+
+第二步：以下 2 条逐条尝试（Holm；Smith），找不到时改用第三步。
+
+```
+10.2307/4615733
+```
+
+```
+10.1109/ICDAR.2007.4376991
+```
+
+第三步：其余 6 条没有可用的 DOI，用浏览器的 Zotero Connector 保存，或在 Zotero 中点绿色加号手动新建：Berg-Kirkpatrick et al.（Konferenz-Paper）、Koehn（Konferenz-Paper）、Cawley & Talbot（Zeitschriftenartikel）、Shankar et al.（Konferenz-Paper）、Google 和 Anthropic（Webseite，填访问日期）。链接见上表。
+
+导入后检查：Efron & Tibshirani（年份 1993/1994）、Opitz & Burst（2019/2021）、Sclar et al.（改为 ICLR 2024 会议论文）、Atil et al.（年份 2024）、Smith（来源与 DOI）。
