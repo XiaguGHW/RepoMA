@@ -181,9 +181,13 @@ class StartupSubprocess(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.app = self.root / 'Programm ü'
         self.app.mkdir()
-        for pattern in ['*.py', '*.json', 'requirements.txt']:
-            for source in APP.glob(pattern):
-                shutil.copy2(source, self.app / source.name)
+        # Exactly what the release ZIP ships (PACKAGE_MANIFEST.txt), subfolders included.
+        for line in (APP / 'PACKAGE_MANIFEST.txt').read_text(encoding='utf-8').splitlines():
+            relative = line.strip()
+            if not relative or relative.startswith('#'):
+                continue
+            (self.app / relative).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(APP / relative, self.app / relative)
         self.cwd = self.root / 'BG 原始资料'
         self.cwd.mkdir()
         self.source = self.cwd / 'facts.txt'

@@ -13,6 +13,10 @@ price_page.py
 release_safety.py
 request_runtime.py
 requirements.txt
+static/workbench.css
+static/workbench.html
+static/workbench.js
+workbench_frontend.py
 workbench_i18n.json
 workbench_i18n.py
 workbench_startup.py
