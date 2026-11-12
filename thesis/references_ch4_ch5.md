@@ -40,6 +40,18 @@ arXiv:1911.03347
 arXiv:2310.11324
 ```
 
+结果（2026-11-12）：3 条 DOI 导入成功（Bender & Lange、Efron & Tibshirani、Sokolova & Lapalme）；5 条 arXiv 编号未能导入（可能是公司网络屏蔽了 arXiv 接口）。改用 arXiv 的 DOI 再试：
+
+```
+10.48550/arXiv.2408.04667
+10.48550/arXiv.2006.07159
+10.48550/arXiv.2411.00640
+10.48550/arXiv.1911.03347
+10.48550/arXiv.2310.11324
+```
+
+依次为 Atil et al.、Beyer et al.、Miller、Opitz & Burst、Sclar et al.。导入后检查文献类型（可能显示为 Preprint 或 Dataset）和年份。若仍失败：在浏览器中打开 arXiv 页面用 Zotero Connector 保存，或点绿色加号手动新建（Preprint；Sclar et al. 选 Konferenz-Paper）。
+
 第二步：以下 2 条逐条尝试（Holm；Smith），找不到时改用第三步。
 
 ```
