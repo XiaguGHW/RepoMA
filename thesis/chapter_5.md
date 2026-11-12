@@ -381,6 +381,32 @@ Allowed Accuracy 最高的 Gemini 2.5 Pro（表 5.6），成本是第二低的�
 
 注：每个装配体的平均值，每个装配体一次请求。输出 token 包含推理 token。token 数量指实际发送的输入，即截断后的输入。185 个装配体的成本由每个装配体的平均成本推算。
 
+## 5.9 Summary | 小结
+
+The experiments evaluated LLM-based classification of handling assemblies against the revised ground truth, from the selection of prompt and input representation to the final configurations on all 185 assemblies. The main results are as follows:
+
+本章以修订后的 Ground Truth 为参考，评价了基于 LLM 的操作类装配体分类，从 Prompt 和输入形式的选择，一直到最终配置在全部 185 个装配体上的表现。主要结果如下：
+
+- **Prompt and input.** Adding the decision logic (P3) raised Allowed Accuracy by 2.6 to 8.8 percentage points, whereas examples and exceptions (P4) gave no consistent further improvement. PDF and text input performed similarly, while image input was 9 to 14 percentage points below PDF input.
+
+  **Prompt 与输入形式。** 加入决策逻辑（P3）使 Allowed Accuracy 提高了 2.6 至 8.8 个百分点，而例子和例外（P4）没有带来一致的进一步提升。PDF 和文本输入的结果相近，图片输入则比 PDF 输入低 9 至 14 个百分点。
+
+- **Final configurations.** On the 115 assemblies of the primary set, the four final configurations reached an Allowed Accuracy between 89.7 % and 96.4 %, with Gemini 2.5 Pro achieving the highest value. After Holm correction, only one difference between configurations was significant. The results were stable across ten runs, with standard deviations of at most 0.93 percentage points.
+
+  **最终配置。** 在主数据集的 115 个装配体上，四种最终配置的 Allowed Accuracy 在 89.7% 至 96.4% 之间，其中 Gemini 2.5 Pro 最高。经 Holm 校正后，配置之间只有一处差异显著。十次运行之间的结果稳定，标准差不超过 0.93 个百分点。
+
+- **Ambiguity regimes.** All configurations performed worse in regime E2 than in E1, by 3.0 to 9.0 percentage points, so the models encountered difficulties with the same assemblies as the human annotators. In regime M, Allowed Accuracy was high for all configurations, but the share of predictions of another allowed label ranged from 6.5 % to 39.4 %.
+
+  **歧义类别。** 所有配置在 E2 上的准确率都比 E1 低 3.0 至 9.0 个百分点，模型和人工标注者在同样的装配体上遇到了困难。在 M 上，所有配置的 Allowed Accuracy 都很高，但预测为其他允许标签的比例在 6.5% 至 39.4% 之间。
+
+- **Errors.** Half of the 58 assemblies that were misclassified at least once were affected by errors in counting the actuators. Information overload occurred more often with image input, and five errors resulted from deficient documentation. Most errors thus arose before the decision matrix was applied.
+
+  **错误。** 至少出错一次的 58 个装配体中，有一半的错误出在执行器计数上。信息过载在图片输入中出现得更多，另有五个错误来自资料本身的缺陷。因此，大多数错误发生在应用决策矩阵之前。
+
+- **Cost.** The final configurations cost between USD 0.004 and USD 0.098 per assembly. Gemini 2.5 Pro, the most accurate configuration, was also the second least expensive.
+
+  **成本。** 最终配置每个装配体的成本在 0.004 至 0.098 美元之间。准确率最高的 Gemini 2.5 Pro，成本也是第二低的。
+
 ## 待处理
 
 ### 5.1 待办
