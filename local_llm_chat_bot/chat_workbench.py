@@ -4825,11 +4825,13 @@ async function changeLanguage(){uiLanguage=$('language').value;applyLanguage();r
 // A rule preparation holds the model slot, so /api/setup would be refused as
 // busy after a reload.  The running job belongs to the session the saved
 // settings describe: attach to it read-only and keep following the job.
+// The page no longer fills #workspace on restore (the server opens the
+// automatic session folder), so an empty field matches the server's session.
 let codebookAttachedTaskId=null;
 async function attachToRunningRulePreparation(){
   try{
     let job=await api('/api/codebook/task');if(!job.running||!job.task)return false;
-    let s=await api('/api/status');if(s.workspace!==$('workspace').value.trim())return false;
+    let s=await api('/api/status'),chosen=$('workspace').value.trim();if(chosen&&s.workspace!==chosen)return false;
     renderStatus(s);codebookAttachedTaskId=job.task.task_id;await restoreSessionContext();
     await Promise.all([loadDocs(),loadSessions(),loadHistory()]);
     setUIMessage($('setupmsg'),{message_key:'workspace.opened'});refreshAppChrome();$('startupnotice')?.remove();return true;
