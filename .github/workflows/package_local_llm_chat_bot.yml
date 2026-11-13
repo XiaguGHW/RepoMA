@@ -26,6 +26,7 @@ jobs:
           while IFS= read -r path; do
             case "$path" in ''|'#'*) continue ;; esac
             test -f "local_llm_chat_bot/$path"
+            mkdir -p "Bosch_Assembly_Assistant/$(dirname "$path")"
             cp "local_llm_chat_bot/$path" "Bosch_Assembly_Assistant/$path"
           done < local_llm_chat_bot/PACKAGE_MANIFEST.txt
           zip -qr Bosch_Assembly_Assistant.zip Bosch_Assembly_Assistant

@@ -9,7 +9,8 @@ folder.
 Download the complete `local_llm_chat_bot` folder anywhere on your Bosch computer.
 Use Python 3.10 or newer and keep the complete folder together, including all
 Python/JSON files and requirements.txt. The graphical workbench also needs
-chat_workbench.py, workbench_startup.py, workbench_i18n.py/workbench_i18n.json,
+chat_workbench.py, workbench_frontend.py with the static/ folder (browser page),
+workbench_startup.py, workbench_i18n.py/workbench_i18n.json,
 request_runtime.py, release_safety.py, code_chat_agent.py and
 local_document_library.py. The terminal/Excel entry points include:
 

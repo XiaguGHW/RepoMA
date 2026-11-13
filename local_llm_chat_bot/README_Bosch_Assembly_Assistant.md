@@ -97,6 +97,7 @@ status card says so. To return to the bundled prices, delete the saved page.
 |---|---|
 | `Bosch_Assembly_Assistant.bat` | One-click start (Windows) |
 | `chat_workbench.py` | Web app and server |
+| `workbench_frontend.py`, `static/` | Browser page (HTML, CSS, JavaScript) |
 | `workbench_startup.py` | Start options and checks |
 | `code_chat_agent.py` | Prompts, session state, pricing |
 | `local_document_library.py` | Local reading of PDF, Word, Excel, images, OCR |

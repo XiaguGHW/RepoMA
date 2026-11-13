@@ -14,12 +14,18 @@ workbench_i18n = importlib.import_module("workbench_i18n")
 load_catalog = workbench_i18n.load_catalog
 validate_catalog = workbench_i18n.validate_catalog
 catalog_script_json = workbench_i18n.catalog_script_json
+# The browser code lives in static/; backend copy stays in chat_workbench.py.
+UI_SOURCES = ('chat_workbench.py', 'static/workbench.html', 'static/workbench.css', 'static/workbench.js')
+
+
+def ui_source():
+    return '\n'.join((ROOT / name).read_text(encoding='utf-8') for name in UI_SOURCES)
 
 
 class CatalogTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Node.js required for UI handler checks')
     def test_material_confirmation_preserves_current_selection(self):
-        source = (ROOT / 'chat_workbench.py').read_text(encoding='utf-8')
+        source = ui_source()
         handler = source.split('function contextSyncTarget(){', 1)[1].split('\nfunction ', 1)[0]
         handler = 'function contextSyncTarget(){' + handler
         # Confirming in the materials drawer syncs the drawer's path before analysing.
@@ -74,7 +80,7 @@ assert.equal(materialDraftDirty,true);
                 validate_catalog(catalog)
 
     def test_literal_translation_calls_have_keys(self):
-        source = (ROOT / 'chat_workbench.py').read_text(encoding='utf-8')
+        source = ui_source()
         source = '\n'.join(line for line in source.splitlines()
                            if not line.lstrip().startswith('//'))
         keys = load_catalog()['messages']['zh']
@@ -82,7 +88,7 @@ assert.equal(materialDraftDirty,true);
             self.assertIn(key, keys)
 
     def test_translation_does_not_observe_or_reclassify_runtime_text(self):
-        source = (ROOT / 'chat_workbench.py').read_text(encoding='utf-8')
+        source = ui_source()
         self.assertIn('function bindInitialStaticI18n()', source)
         self.assertIn('const initialStaticText=[],initialStaticAttributes=[]', source)
         self.assertNotIn('initLegacyDynamicTranslations', source)
@@ -90,7 +96,7 @@ assert.equal(materialDraftDirty,true);
         self.assertNotIn('__legacyTranslationObserver', source)
 
     def test_language_switch_rebuilds_dynamic_ui_from_data_snapshots(self):
-        source = (ROOT / 'chat_workbench.py').read_text(encoding='utf-8')
+        source = ui_source()
         self.assertIn('function rerenderLanguageSensitiveUI()', source)
         self.assertIn('rerenderLanguageSensitiveUI();', source)
         self.assertIn('lastStatusSnapshot', source)
@@ -107,7 +113,7 @@ assert.equal(materialDraftDirty,true);
 
     def test_dynamic_controls_have_explicit_language_refresh(self):
         """Late-created controls cannot rely on the initial DOM text scan."""
-        source = (ROOT / 'chat_workbench.py').read_text(encoding='utf-8')
+        source = ui_source()
         self.assertIn('function localizeComposerControls()', source)
         self.assertIn("setI18nText($('composermodelnote'),'model.current')", source)
         self.assertIn("setI18nText($('modeltestbutton'),'model.test')", source)
@@ -124,8 +130,7 @@ assert.equal(materialDraftDirty,true);
 
     @unittest.skipUnless(shutil.which('node'), 'Node.js required for JavaScript checks')
     def test_javascript_syntax_and_translator(self):
-        source = (ROOT / 'chat_workbench.py').read_text(encoding='utf-8')
-        script = source.split('<script>', 1)[1].split('</script>', 1)[0]
+        script = (ROOT / 'static' / 'workbench.js').read_text(encoding='utf-8')
         script = script.replace('__WORKBENCH_I18N_JSON__', catalog_script_json())
         subprocess.run(['node', '--check'], input=script, text=True, check=True,
                        capture_output=True)

@@ -9,9 +9,11 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import chat_workbench as w
 
+from workbench_frontend import load_frontend_html  # noqa: E402
+
 SOURCE = (Path(__file__).resolve().parents[1] / "chat_workbench.py").read_text(encoding="utf-8")
-# The page template before the i18n catalog is embedded: script code only.
-TEMPLATE = SOURCE[SOURCE.index("HTML = r'''"):SOURCE.index("'''", SOURCE.index("HTML = r'''") + 11)]
+# The page template (static/) before the i18n catalog is embedded.
+TEMPLATE = load_frontend_html()
 
 PUBLIC_RENDERERS = ["renderCoverageReport", "renderScanDrawer", "renderCacheAudit", "renderStatus",
                     "renderUsageDetail", "renderEvidenceSources", "renderCompareSlots", "renderSessionRows",
