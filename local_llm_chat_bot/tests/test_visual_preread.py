@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 import chat_workbench as w  # noqa: E402
+import workbench_materials  # noqa: E402
 from local_document_library import LocalDocumentLibrary  # noqa: E402
 from fixture_support import FixtureEnvironment  # noqa: E402
 
@@ -57,7 +58,7 @@ class VisualPreread(unittest.TestCase):
         facts = [body for body in calls if "facts.txt" in text_of(body)]
         self.assertTrue(shot and images_in(shot[0]) == 1)
         self.assertIn("随附图片", text_of(shot[0]))
-        self.assertTrue(dfc and all(1 <= images_in(body) <= w.PREREAD_DFC_SEGMENTS_PER_CALL for body in dfc))
+        self.assertTrue(dfc and all(1 <= images_in(body) <= workbench_materials.PREREAD_DFC_SEGMENTS_PER_CALL for body in dfc))
         self.assertIn("Antriebseinheit Motor M1", text_of(dfc[0]))  # DFC OCR now reaches the pre-read
         self.assertTrue(facts and images_in(facts[0]) == 0)  # plain text stays text only
         report = self.client.get("/api/coverage").json()
@@ -84,11 +85,11 @@ class VisualPreread(unittest.TestCase):
         document = {"name": "Zeichnung.pdf", "path": "/x/Zeichnung.pdf", "material_role": "technical_drawing",
                     "chunks": [{"label": f"Zeichnung.pdf — page {n}", "text": "Maßstab 1:2",
                                 "visual": {"kind": "pdf_page", "path": "/x/Zeichnung.pdf", "page": n}} for n in (1, 2)]}
-        self.assertEqual(w.pdf_preread_pages(document, [1, 2]), [1, 2])
+        self.assertEqual(workbench_materials.pdf_preread_pages(document, [1, 2]), [1, 2])
         manual = {"name": "Handbuch.pdf", "material_role": "other",
                   "chunks": [{"label": f"p{n}", "text": "x", "visual": {"kind": "pdf_page", "page": n}} for n in range(1, 41)],
                   "page_inventory": [{"page": n, "page_type": "visual" if n in (7, 9) else "text"} for n in range(1, 41)]}
-        self.assertEqual(w.pdf_preread_pages(manual, list(range(1, 16))), [7, 9])
+        self.assertEqual(workbench_materials.pdf_preread_pages(manual, list(range(1, 16))), [7, 9])
         library = LocalDocumentLibrary(self.f.root / "docs.json")
         rendered = self.f.root / "page.jpg"
         Image.new("RGB", (800, 600), "white").save(rendered)

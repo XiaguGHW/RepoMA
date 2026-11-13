@@ -16,7 +16,13 @@ requirements.txt
 static/workbench.css
 static/workbench.html
 static/workbench.js
+workbench_classification.py
 workbench_frontend.py
 workbench_i18n.json
 workbench_i18n.py
+workbench_materials.py
+workbench_messages.py
+workbench_model_calls.py
+workbench_models.py
+workbench_rules.py
 workbench_startup.py
