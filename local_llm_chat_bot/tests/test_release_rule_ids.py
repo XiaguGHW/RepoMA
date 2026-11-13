@@ -9,11 +9,12 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient
 import chat_workbench as w
+import workbench_rules
 from fixture_support import FixtureEnvironment, PROFILE
 
 
 def all_ids(draft):
-    return [rule["id"] for _owner, rule in w.profile_rules_in_order(draft)]
+    return [rule["id"] for _owner, rule in workbench_rules.profile_rules_in_order(draft)]
 
 
 class RuleIds(unittest.TestCase):

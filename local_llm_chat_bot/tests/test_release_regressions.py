@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import chat_workbench as w
+import workbench_classification
 from code_chat_agent import ProjectState, PricingCatalog, safe_name, parse_json
 from local_document_library import LocalDocumentLibrary
 from llm_connector_with_prompt_caching import LLMConnector
@@ -95,7 +96,7 @@ class ReleaseRegressionTests(unittest.TestCase):
         profile = {'classes': [{'name': 'Rotationseinheit', 'definition': 'rotary motion'}]}
         action = {'classification': {'label': 'Rotation', 'confidence': 'high', 'evidence_labels': ['file A'],
                                      'bg_evidence_pages': ['file A'], 'uncertainties': []}}
-        self.assertIsNotNone(w.validate_classification(action, [{'label': 'file A'}], 'Rotationseinheit', profile))
+        self.assertIsNotNone(workbench_classification.validate_classification(action, [{'label': 'file A'}], 'Rotationseinheit', profile))
 
     def test_bad_json_action_field_types_are_rejected(self):
         for field, value in [('read_files', None), ('changes', {}), ('answer', ['wrong'])]:
