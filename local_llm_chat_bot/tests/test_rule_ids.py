@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 import chat_workbench as w
 import workbench_rules
 from fixture_support import FixtureEnvironment, PROFILE
+from api_cases import DirectSessionCase  # noqa: E402
 
 
 def all_ids(draft):
@@ -106,6 +107,14 @@ class RuleIds(unittest.TestCase):
                 self.assertEqual(response.status_code, 409, response.text)
                 self.assertEqual(response.json()["message_key"], "rules.duplicate_ids")
         self.assertEqual(len(self.f.calls), calls)
+
+
+class RuleDefinitions(DirectSessionCase):
+    def test_codebook_rejects_duplicates_and_missing_definitions(self):
+        for classes in ([{'name': 'Gantry', 'definition': 'A'}, {'name': 'Gantry', 'definition': 'B'}],
+                        [{'name': 'Gantry', 'definition': ''}]):
+            with self.subTest(classes=classes), self.assertRaises(ValueError):
+                w.parse_codebook_draft(json.dumps({'classes': classes}))
 
 
 if __name__ == "__main__":

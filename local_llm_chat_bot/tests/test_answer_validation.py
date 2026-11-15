@@ -1,17 +1,22 @@
-"""R09/R10: one repair budget and source-grounded classification references."""
+"""Model answers: JSON action rounds, reference schema, classification validation."""
 
-import copy
-import json
 from pathlib import Path
 import sys
-import unittest
-from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from fastapi.testclient import TestClient
-import chat_workbench as w
-import workbench_classification
-from fixture_support import FixtureEnvironment
+APP = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(APP), str(APP / "tests")]
+
+import copy  # noqa: E402
+import json  # noqa: E402
+import unittest  # noqa: E402
+from unittest.mock import patch  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+import chat_workbench as w  # noqa: E402
+import workbench_classification  # noqa: E402
+from fixture_support import FixtureEnvironment  # noqa: E402
+from fixture_support import PROFILE  # noqa: E402
+from code_chat_agent import parse_json  # noqa: E402
+from api_cases import DirectSessionCase, EnglishApiCase  # noqa: E402
 
 
 class ResponseRounds(unittest.TestCase):
@@ -373,6 +378,52 @@ class ReferenceSchema(unittest.TestCase):
         for refs in [[], ["rules.docx section 999"], ["facts.txt block 1"]]:
             cls["codebook_rule_refs"] = refs
             self.assertIsNotNone(self.check())
+
+
+class ClassificationRevalidation(EnglishApiCase):
+    def test_followup_repair_must_revalidate_classification(self):
+        self.bg()
+        result = self.client.post(
+            "/api/chat", json={"question": "TEST_UNKNOWN explain the motor evidence"}
+        )
+        self.assertNotEqual(
+            result.status_code,
+            200,
+            f"accepted unknown class: {result.json().get('classification')}",
+        )
+
+    def test_evidence_pages_must_reference_supplied_pages(self):
+        action = {
+            "classification": {
+                "label": "Rotationseinheit",
+                "confidence": "high",
+                "evidence_labels": ["facts.txt block 1"],
+                "codebook_rule_ids": ["rotation-1"],
+                "codebook_rule_pages": [999999],
+                "bg_evidence_pages": ["never-supplied.pdf p999"],
+                "alternative_label": "",
+                "uncertainties": [],
+            }
+        }
+        self.assertIsNotNone(
+            workbench_classification.validate_classification(
+                action, [{"label": "facts.txt block 1"}], "", PROFILE
+            ),
+            "fabricated Codebook and BG page references accepted",
+        )
+
+
+class ActionValidation(DirectSessionCase):
+    def test_classification_requires_exact_member_not_substring(self):
+        profile = {'classes': [{'name': 'Rotationseinheit', 'definition': 'rotary motion'}]}
+        action = {'classification': {'label': 'Rotation', 'confidence': 'high', 'evidence_labels': ['file A'],
+                                     'bg_evidence_pages': ['file A'], 'uncertainties': []}}
+        self.assertIsNotNone(workbench_classification.validate_classification(action, [{'label': 'file A'}], 'Rotationseinheit', profile))
+
+    def test_bad_json_action_field_types_are_rejected(self):
+        for field, value in [('read_files', None), ('changes', {}), ('answer', ['wrong'])]:
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                parse_json(json.dumps({field: value}))
 
 
 if __name__ == "__main__":

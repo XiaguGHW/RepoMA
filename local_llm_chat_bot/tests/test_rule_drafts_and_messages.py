@@ -1,17 +1,19 @@
-"""R13/R14: synthetic draft isolation and explicit localized message records."""
+"""Rule drafts and edits; localized error messages and progress notices."""
 
-import copy
-import json
-import re
 from pathlib import Path
 import sys
-import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from fastapi.testclient import TestClient
-import chat_workbench as w
-from fixture_support import FixtureEnvironment
-from workbench_i18n import UIMessage, localize_message
+APP = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(APP), str(APP / "tests")]
+
+import copy  # noqa: E402
+import json  # noqa: E402
+import re  # noqa: E402
+import unittest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+import chat_workbench as w  # noqa: E402
+from fixture_support import FixtureEnvironment  # noqa: E402
+from workbench_i18n import UIMessage, localize_message  # noqa: E402
 
 
 class LocalizedMessages(unittest.TestCase):
@@ -127,5 +129,5 @@ class DraftAndProgress(unittest.TestCase):
                 self.assertNotRegex(str(notice).replace(folder.name, ''), r'[\u4e00-\u9fff]')
 
 
-if __name__ == '__main__':
-    unittest.main()
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

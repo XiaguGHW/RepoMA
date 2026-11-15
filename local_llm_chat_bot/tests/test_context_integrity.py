@@ -1,20 +1,29 @@
-"""R05–R08 scope recovery, transactional selection and shared model guards."""
+"""Rules, BG selection and sessions stay consistent: changes, stale results, corrupt state."""
 
-import copy
-import json
+from __future__ import annotations
+
 from pathlib import Path
 import sys
-import unittest
-from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from fastapi.testclient import TestClient
-import chat_workbench as w
-from fixture_support import FixtureEnvironment, PROFILE
-from local_document_library import LocalDocumentLibrary
+APP = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(APP), str(APP / "tests")]
+
+import copy  # noqa: E402
+import json  # noqa: E402
+import unittest  # noqa: E402
+from unittest.mock import patch  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+import chat_workbench as w  # noqa: E402
+from fixture_support import FixtureEnvironment, PROFILE  # noqa: E402
+from local_document_library import LocalDocumentLibrary  # noqa: E402
+import asyncio  # noqa: E402
+from code_chat_agent import ProjectState  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+import chat_workbench as workbench  # noqa: E402
+from api_cases import DirectSessionCase, EnglishApiCase  # noqa: E402
 
 
-class StepThree(unittest.TestCase):
+class ContextIntegrity(unittest.TestCase):
     def setUp(self):
         self.f = FixtureEnvironment().__enter__()
         self.addCleanup(self.f.__exit__, None, None, None)
@@ -351,6 +360,261 @@ class StepThree(unittest.TestCase):
             "/api/compare",
             {"question": "classify", "models": ["gemini-2.5-pro", "gemini-2.5-flash"]},
         )
+
+
+class StaleResults(unittest.TestCase):
+    def setUp(self):
+        self.f = FixtureEnvironment().__enter__()
+        self.addCleanup(self.f.__exit__, None, None, None)
+        self.client = TestClient(w.app, raise_server_exceptions=False)
+        self.addCleanup(self.client.close)
+        self.post("/api/setup", {"workspace": str(self.f.workspace), "model": "gemini-2.5-pro", "language": "en"})
+
+    def post(self, path, body):
+        response = self.client.post(path, json=body)
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def prepare_bg(self):
+        self.post("/api/codebook/prepare", {"path": str(self.f.rules)})
+        self.post("/api/codebook/lock", {})
+        self.post("/api/target", {"target": str(self.f.bg_a), "selected_paths": ["facts.txt"]})
+
+    def test_comparison_never_uses_a_completed_but_stale_coverage_summary(self):
+        self.prepare_bg()
+        self.post("/api/coverage", {})
+        coverage = w.load_coverage(w.ACTIVE["state"])
+        coverage["context_revision"] = "stale-context-revision"
+        coverage["files"][0]["summary"] = "STALE_COVERAGE_SENTINEL"
+        w.write_json_atomically(w.coverage_path(w.ACTIVE["state"]), coverage)
+
+        before = len(self.f.calls)
+        self.post("/api/compare", {"question": "Classify this Baugruppe", "models": ["gemini-2.5-pro", "gemini-2.5-flash"]})
+        prompts = str(self.f.calls[before:])
+        self.assertNotIn("STALE_COVERAGE_SENTINEL", prompts)
+
+    def test_changed_source_after_model_response_cannot_commit_old_result(self):
+        self.prepare_bg()
+        state = w.ACTIVE["state"]
+        history = copy.deepcopy(state.data["history"])
+        original = w.ACTIVE["llm"].ask_about_files
+
+        def mutate_source_then_answer(*args, **kwargs):
+            (self.f.bg_a / "facts.txt").write_text("Changed while the model was running.", encoding="utf-8")
+            return original(*args, **kwargs)
+
+        with patch.object(w.ACTIVE["llm"], "ask_about_files", side_effect=mutate_source_then_answer):
+            response = self.client.post("/api/chat", json={"question": "Classify this Baugruppe"})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(state.data["history"], history)
+        self.assertEqual(w.ACTIVE["pending"], [])
+        self.assertIsNone(state.data.get("last_bg_analysis"))
+
+    def test_base_exception_in_worker_always_releases_model_slot(self):
+        class NeverDisconnect:
+            async def is_disconnected(self):
+                return False
+
+        class SynchronousThread:
+            def __init__(self, *, target=None, daemon=False):
+                self.target = target
+                self.daemon = daemon
+                self._alive = False
+
+            def start(self):
+                self._alive = True
+                try:
+                    self.target()
+                except BaseException:
+                    pass
+                finally:
+                    self._alive = False
+
+            def join(self):
+                return None
+
+            def is_alive(self):
+                return self._alive
+
+        with patch.object(w, "call_model", side_effect=KeyboardInterrupt("fixture")), patch.object(w.threading, "Thread", SynchronousThread):
+            asyncio.run(w.chat_stream(w.ChatRequest(question="Explain the workspace"), NeverDisconnect()))
+        self.assertTrue(w.CHAT_TASK["done"].is_set())
+        self.assertEqual(w.CHAT_TASK["state"], "failed")
+        self.assertFalse(w.MODEL_WORK_IN_PROGRESS.is_set())
+
+    def test_rule_edits_require_the_current_profile_version(self):
+        profile = self.post("/api/codebook/prepare", {"path": str(self.f.rules)})
+        before = w.codebook_profile_path().read_bytes()
+        body = {"draft": profile["draft"], "confirmed": True}
+
+        missing = self.client.post("/api/codebook/edit", json=body)
+        self.assertEqual(missing.status_code, 400, missing.text)
+        self.assertEqual(missing.json()["message_key"], "rules.version_required")
+        self.assertEqual(w.codebook_profile_path().read_bytes(), before)
+
+        stale = self.client.post("/api/codebook/edit", json={**body, "profile_version": "old-version"})
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertEqual(stale.json()["message_key"], "rules.version_changed")
+        self.assertEqual(w.codebook_profile_path().read_bytes(), before)
+
+
+class ContextChanges(EnglishApiCase):
+    def test_compare_must_reject_changed_sources_before_call(self):
+        self.bg()
+        (self.f.bg_a / "facts.txt").write_text("CHANGED_FIXTURE_BG_A", encoding="utf-8")
+        count = len(self.f.calls)
+        response = self.client.post(
+            "/api/compare",
+            json={
+                "question": "classify",
+                "models": ["gemini-2.5-pro", "gemini-2.5-flash"],
+            },
+        )
+        self.assertEqual(
+            (response.status_code, len(self.f.calls) - count),
+            (409, 0),
+            "comparison used stale indexed source and contacted mock models",
+        )
+
+    def test_relocked_rules_must_not_silently_disable_bg_classification(self):
+        self.bg()
+        draft = copy.deepcopy(PROFILE)
+        draft["classes"][0]["name"] = "New fixture class"
+        self.post("/api/codebook/edit", {"draft": draft, "confirmed": True,
+                                         "profile_version": w.load_codebook_profile()["version"]})
+        self.post("/api/codebook/lock", {})
+        response = self.client.post(
+            "/api/chat", json={"question": "Classify this Baugruppe"}
+        )
+        body = response.json()
+        self.assertTrue(
+            response.status_code == 409
+            or (body.get("classification") or {}).get("label") == "New fixture class",
+            f"locked rules + selected BG returned {response.status_code}, classification={body.get('classification')}",
+        )
+
+    def test_failed_target_change_must_preserve_old_conversation(self):
+        self.bg()
+        self.post("/api/chat", {"question": "classify"})
+        old = copy.deepcopy(w.ACTIVE["state"].data["history"])
+        with self.f.rules.open("ab") as handle:
+            handle.write(b"fixture changed")
+        response = self.client.post(
+            "/api/target",
+            json={"target": str(self.f.bg_b), "selected_paths": ["facts.txt"]},
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            w.ACTIVE["state"].data["history"],
+            old,
+            "rejected target switch already erased history",
+        )
+
+    def test_corrupt_nested_context_must_require_reconfirmation(self):
+        state = w.ACTIVE["state"]
+        state.data["bg_context"] = ["legacy-invalid"]
+        state.save()
+        self.post(
+            "/api/setup",
+            {
+                "workspace": str(self.f.workspace),
+                "model": "gemini-2.5-pro",
+                "language": "en",
+            },
+        )
+        count = len(self.f.calls)
+        response = self.client.post("/api/chat", json={"question": "fixture"})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(len(self.f.calls), count)
+
+
+class SessionState(DirectSessionCase):
+    def test_single_file_without_codebook(self):
+        source = self.root / 'Bauteil 中文 ü.txt'
+        source.write_text('linear motor evidence', encoding='utf-8')
+        result = w.analyze_target(w.TargetRequest(target=str(source)))
+        self.assertFalse(result['classification'])
+
+    def test_target_switch_clears_old_prompt_and_export(self):
+        state = w.ACTIVE['state']
+        state.add_turn('assistant', 'OLD_BG_SECRET')
+        state.data['last_bg_analysis'] = {'answer': 'OLD_BG_SECRET'}
+        source = self.root / 'BG_B.txt'
+        source.write_text('New assembly')
+        try:
+            w.analyze_target(w.TargetRequest(target=str(source)))
+        except UnboundLocalError:
+            pass  # independent regression for context isolation
+        self.assertEqual(state.data['history'], [])
+        self.assertNotIn('last_bg_analysis', state.data)
+
+    def test_setup_invalid_model_preserves_active_session(self):
+        before = w.ACTIVE['state']
+        with self.assertRaises(Exception):
+            w.setup(w.Setup(workspace=str(self.workspace), state_dir='', model='unknown'))
+        self.assertIs(w.ACTIVE.get('state'), before)
+
+    def test_corrupt_state_types_and_legacy_missing_fields(self):
+        state = w.ACTIVE['state']
+        for value in ([], {'workspace': str(self.workspace)}, {'workspace': str(self.workspace), 'usage': None}):
+            with self.subTest(value=value):
+                state.path.write_text(json.dumps(value))
+                loaded = ProjectState(w.app_state_home(), self.workspace, 'default')
+                self.assertIsInstance(loaded.data['history'], list)
+                self.assertIsInstance(loaded.data['files'], dict)
+                self.assertIsInstance(loaded.data['usage'], dict)
+
+
+class ModelSlot(unittest.TestCase):
+    def setUp(self):
+        self.old_active = dict(workbench.ACTIVE)
+        workbench.ACTIVE.clear()
+        workbench.MODEL_WORK_IN_PROGRESS.clear()
+
+    def tearDown(self):
+        workbench.ACTIVE.clear()
+        workbench.ACTIVE.update(self.old_active)
+        workbench.MODEL_WORK_IN_PROGRESS.clear()
+
+    def test_begin_model_work_blocks_a_second_model_task(self):
+        workbench.ACTIVE.update({"state": object()})
+        workbench.begin_model_work()
+        with self.assertRaises(workbench.HTTPException) as blocked:
+            workbench.begin_model_work()
+        self.assertEqual(blocked.exception.status_code, 409)
+
+    def test_rebuild_releases_slot_after_success_and_exception(self):
+        state = SimpleNamespace(data={}, note_usage=lambda *_args, **_kwargs: None)
+        workbench.ACTIVE.update({"state": state, "model": "test-model", "pricing": object(),
+                                 "documents": SimpleNamespace(list=lambda: [])})
+        originals = (workbench.load_coverage, workbench.coverage_matches_current_selection,
+                     workbench.prepare_bg_dossier, workbench.cache_audit)
+        workbench.load_coverage = lambda _state: {"files": [{"summary": "ready"}]}
+        workbench.coverage_matches_current_selection = lambda _data, _coverage: True
+        workbench.cache_audit = lambda _data: {"dossier": {"ready": True}}
+        try:
+            def successful_rebuild(_data, _coverage, *, force=False):
+                self.assertTrue(force)
+                self.assertTrue(workbench.MODEL_WORK_IN_PROGRESS.is_set())
+                with self.assertRaises(workbench.HTTPException):
+                    workbench.begin_model_work()
+                return {"summary": "fresh"}, None, True
+
+            workbench.prepare_bg_dossier = successful_rebuild
+            result = workbench.rebuild_bg_dossier(workbench.CacheConfirmRequest(confirmed=True))
+            self.assertEqual(result["dossier"]["summary"], "fresh")
+            self.assertFalse(workbench.MODEL_WORK_IN_PROGRESS.is_set())
+
+            def failed_rebuild(_data, _coverage, *, force=False):
+                raise RuntimeError("simulated model failure")
+
+            workbench.prepare_bg_dossier = failed_rebuild
+            with self.assertRaisesRegex(RuntimeError, "simulated model failure"):
+                workbench.rebuild_bg_dossier(workbench.CacheConfirmRequest(confirmed=True))
+            self.assertFalse(workbench.MODEL_WORK_IN_PROGRESS.is_set())
+        finally:
+            (workbench.load_coverage, workbench.coverage_matches_current_selection,
+             workbench.prepare_bg_dossier, workbench.cache_audit) = originals
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """F-08: exports and new sessions use the active UI language deterministically."""
 
 from pathlib import Path
+import json
 import sys
 import unittest
 
@@ -8,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient
 import chat_workbench as w
 from fixture_support import FixtureEnvironment
+from api_cases import EnglishApiCase  # noqa: E402
 
 
 class I18nResiduals(unittest.TestCase):
@@ -63,6 +65,23 @@ class I18nResiduals(unittest.TestCase):
         current = next(item for item in rows if item["name"] == created["session_name"])
         self.assertEqual(current["title_key"], "session.new_title")
         self.assertTrue(w.is_new_session_title("新聊天"))
+
+
+class EnglishProgressNotices(EnglishApiCase):
+    def test_english_progress_and_notices_must_not_contain_chinese_ui(self):
+        self.bg()
+        text = self.client.post("/api/chat/stream", json={"question": "classify"}).text
+        events = [
+            json.loads(line[6:])
+            for line in text.splitlines()
+            if line.startswith("data: ")
+        ]
+        ui = [e["text"] for e in events if e["type"] == "progress"]
+        ui += [n for e in events if e["type"] == "result" for n in e["data"]["notices"]]
+        foreign = [s for s in ui if any("\u4e00" <= c <= "\u9fff" for c in s)]
+        self.assertEqual(
+            foreign, [], f"English UI exposes Chinese processing text: {foreign}"
+        )
 
 
 if __name__ == "__main__":

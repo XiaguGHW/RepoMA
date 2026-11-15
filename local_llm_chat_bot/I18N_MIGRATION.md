@@ -47,7 +47,7 @@ classification, drawers and scan reports, for Chinese UI residue.
 
 New status messages must use `setUIMessage` or `uiMessageNode`; do not build a
 one-shot status message with `innerHTML` and `t()`. The source checks in
-`tests/test_release_frontend_cleanup.py` enforce this rule.
+`tests/test_frontend_cleanup.py` enforce this rule.
 
 Catalog and browser tests cannot establish operating-system rendering. The
 remaining manual checks are Windows-provided fonts, the actual system file

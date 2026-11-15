@@ -1,27 +1,31 @@
-"""R16: real dotenv files, isolated subprocess startup and recovery; no Bosch calls."""
+"""Startup: .env and configuration, command line, startup subprocess."""
+
 from __future__ import annotations
 
-from contextlib import redirect_stderr, redirect_stdout
-import io
-import os
 from pathlib import Path
-import shutil
-import socket
-import subprocess
 import sys
-import tempfile
-import time
-import unittest
-from unittest.mock import patch
 
 APP = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(APP))
-from dotenv import load_dotenv  # noqa: E402 - locate sibling application modules
+sys.path[:0] = [str(APP), str(APP / "tests")]
+
+from contextlib import redirect_stderr, redirect_stdout  # noqa: E402
+import io  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import socket  # noqa: E402
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+import time  # noqa: E402
+import unittest  # noqa: E402
+from unittest.mock import patch  # noqa: E402
+from dotenv import load_dotenv  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 import httpx  # noqa: E402
 import chat_workbench as w  # noqa: E402
 from fixture_support import FixtureEnvironment  # noqa: E402
 from workbench_startup import FarmEnvironment, StartupConfig, StartupError, check_state_directory, check_dependencies  # noqa: E402
+import runpy  # noqa: E402
+from api_cases import EnglishApiCase  # noqa: E402
 
 
 SECRET = 'synthetic-step8-key-never-log'
@@ -315,5 +319,49 @@ class StartupSubprocess(unittest.TestCase):
             self.assertNotIn(SECRET, path.read_text(encoding='utf-8'))
 
 
-if __name__ == '__main__':
-    unittest.main()
+class CommandLineAndEnvFile(EnglishApiCase):
+    def test_gui_cli_must_honor_explicit_port(self):
+        with (
+            patch("uvicorn.run") as serve,
+            patch("workbench_startup.check_state_directory"),
+            patch("workbench_startup.check_port"),
+            patch.object(
+                sys, "argv", [str(APP / "chat_workbench.py"), "--port", "8877"]
+            ),
+        ):
+            runpy.run_path(str(APP / "chat_workbench.py"), run_name="__main__")
+        self.assertEqual(serve.call_args.kwargs.get("port"), 8877)
+
+    def test_gui_cli_must_reject_unknown_option(self):
+        with (
+            patch("uvicorn.run") as serve,
+            patch.object(
+                sys,
+                "argv",
+                [str(APP / "chat_workbench.py"), "--fixture-invalid-option"],
+            ),
+        ):
+            with self.assertRaises(SystemExit) as error:
+                runpy.run_path(str(APP / "chat_workbench.py"), run_name="__main__")
+        self.assertEqual(error.exception.code, 2)
+        serve.assert_not_called()
+
+    def test_explicit_env_file_must_be_loaded(self):
+        env = self.f.root / "custom ü.env"
+        env.write_text(
+            "BOSCH_FARM_SUBSCRIPTION_KEY=offline-fixture-only\\n", encoding="utf-8"
+        )
+        with patch.object(w, "load_dotenv") as load:
+            self.post(
+                "/api/setup",
+                {
+                    "workspace": str(self.f.workspace),
+                    "model": "gemini-2.5-pro",
+                    "env_file": str(env),
+                },
+            )
+        self.assertEqual(Path(load.call_args.args[0]).resolve(), env.resolve())
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
