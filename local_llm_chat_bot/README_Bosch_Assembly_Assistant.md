@@ -98,6 +98,10 @@ status card says so. To return to the bundled prices, delete the saved page.
 | `Bosch_Assembly_Assistant.bat` | One-click start (Windows) |
 | `chat_workbench.py` | Web app and server |
 | `workbench_frontend.py`, `static/` | Browser page (HTML, CSS, JavaScript) |
+| `workbench_rules.py` | Rule file parsing helpers |
+| `workbench_materials.py` | Material reading plan and pre-read groups |
+| `workbench_classification.py` | Rule evidence and answer validation |
+| `workbench_model_calls.py`, `workbench_messages.py`, `workbench_models.py` | Model-call accounting, interface messages, API request models |
 | `workbench_startup.py` | Start options and checks |
 | `code_chat_agent.py` | Prompts, session state, pricing |
 | `local_document_library.py` | Local reading of PDF, Word, Excel, images, OCR |

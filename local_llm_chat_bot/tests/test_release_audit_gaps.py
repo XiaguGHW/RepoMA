@@ -12,6 +12,7 @@ APP = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(APP), str(APP / "tests")]
 from fastapi.testclient import TestClient  # noqa: E402 - portable direct runner path
 import chat_workbench as w  # noqa: E402 - import after locating the application
+import workbench_classification  # noqa: E402
 from fixture_support import FixtureEnvironment, PROFILE  # noqa: E402
 
 
@@ -120,7 +121,7 @@ class AuditGaps(unittest.TestCase):
             }
         }
         self.assertIsNotNone(
-            w.validate_classification(
+            workbench_classification.validate_classification(
                 action, [{"label": "facts.txt block 1"}], "", PROFILE
             ),
             "fabricated Codebook and BG page references accepted",

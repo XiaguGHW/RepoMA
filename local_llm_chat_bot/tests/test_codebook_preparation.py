@@ -19,6 +19,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient  # noqa: E402
 import chat_workbench as w  # noqa: E402
+import workbench_rules  # noqa: E402
 from fixture_support import FixtureEnvironment  # noqa: E402
 from workbench_i18n import UIMessage, localize_message, runtime_messages  # noqa: E402
 
@@ -569,7 +570,7 @@ class CodebookPreparation(unittest.TestCase):
     # 10. Every new message is complete in all three languages
     def test_every_failure_message_is_complete_in_three_languages(self):
         messages = runtime_messages()
-        for reason in sorted(w.CODEBOOK_FAILURE_REASONS):
+        for reason in sorted(workbench_rules.CODEBOOK_FAILURE_REASONS):
             for unit in [None, {"kind": "page", "number": 3}, {"kind": "blocks", "first": 4, "last": 6}]:
                 error = w.CodebookPrepareError(reason, "parsing", unit=unit, attempts=4,
                                                params={"status": "503", "limit": 9, "detail": UIMessage("rules.classes_empty"),

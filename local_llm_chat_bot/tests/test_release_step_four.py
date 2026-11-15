@@ -10,6 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient
 import chat_workbench as w
+import workbench_classification
 from fixture_support import FixtureEnvironment
 
 
@@ -297,7 +298,7 @@ class ReferenceSchema(unittest.TestCase):
         }
 
     def check(self, action=None):
-        return w.validate_classification(
+        return workbench_classification.validate_classification(
             action or self.action, self.evidence, "", self.profile, self.scope
         )
 

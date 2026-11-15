@@ -27,8 +27,6 @@ import uuid
 from contextvars import ContextVar
 from functools import wraps
 from queue import Empty, Full, Queue
-from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -39,19 +37,46 @@ FARM_ENVIRONMENT = FarmEnvironment()
 try:
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
-    from pydantic import BaseModel, Field
     import uvicorn
 
-    from release_safety import (safe_error, normalize_usage, summarize_usage, context_state_error, valid_rule_profile,
-                                redact_secrets)
+    from release_safety import (safe_error, summarize_usage, context_state_error, valid_rule_profile)
     from dotenv import load_dotenv
     from workbench_i18n import catalog_script_json, UIMessage, localize_message
     from workbench_frontend import load_frontend_html
-    from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative, classification_manifest,
-                                 excerpt, parse_json, prompt_for, safe_name, sha256)
+    from workbench_messages import (UIRequestError, UIValidationError, error_copy, message_payload, redact_value,
+                                    ui_message)
+    from workbench_models import (ApplyRequest, BGRequest, CacheConfirmRequest, CacheFileRequest, ChatCancelRequest,
+                                  ChatRequest, CodebookEditRequest, CodebookPrepareRequest, CompareRequest,
+                                  CoverageRequest, LanguageRequest, ModelSwitchRequest, ModelTestRequest,
+                                  OperationCancelRequest, PathRequest, SessionDeleteRequest, SessionOpenRequest,
+                                  SessionPinRequest, SessionRenameRequest, Setup, TargetRequest)
+    from workbench_model_calls import (accounted_model_call, check_answer_size, check_request, commit_answer,
+                                       connector_failure, require_model_success)
+    from workbench_rules import (CODEBOOK_FILE_TYPES, CODEBOOK_JOB_LOG_LIMIT, CODEBOOK_JSON_REPAIR_SYSTEM,
+                                 CODEBOOK_MERGE_SYSTEM, CODEBOOK_PAGE_SYSTEM, CODEBOOK_RECOMMENDED_MODEL,
+                                 CODEBOOK_SECTION_SYSTEM, CodebookParseBudget, CodebookPrepareError,
+                                 classify_model_failure, codebook_notes_text, codebook_piece_request,
+                                 codebook_text_units, codebook_unit_key, codebook_unit_label, json_error_detail,
+                                 load_codebook_note_cache, local_timestamp, namespace_duplicate_rule_ids,
+                                 nonpaged_references, parse_codebook_note, rule_id_conflicts, split_codebook_piece,
+                                 with_blocks)
+    from workbench_materials import (BG_DOSSIER_CACHE_VERSION, BG_DOSSIER_TOKENS, MATERIAL_GROUP_FORMAT,
+                                     MATERIAL_GROUP_NOTE_VERSION, MATERIAL_GROUP_TOKENS, MATERIAL_KIND_LINE,
+                                     MATERIAL_MERGE_FORMAT, MATERIAL_MERGE_TOKENS, MATERIAL_SUMMARY_CACHE_VERSION,
+                                     MATERIAL_SUMMARY_SYSTEM, PREREAD_VISUAL_INSTRUCTION, bg_dossier_identity,
+                                     coverage_summary_for_answer, document_ocr_audit, document_pages,
+                                     guess_document_kind, material_folder, material_retry_limit, model_document_kind,
+                                     preread_groups, reading_hints, reading_plan, scope_message,
+                                     selected_reading_chunks, selected_target_files, split_material_group,
+                                     summary_groups, target_tree, traceable_evidence)
+    from workbench_classification import (ANSWER_OUTPUT_TOKENS, ANSWER_RETRY_OUTPUT_TOKENS,
+                                          ANSWER_SHORTEN_INSTRUCTION, ClassificationValidationError,
+                                          classification_scope, image_group_notices, relevant_codebook_page_evidence,
+                                          validated_model_action)
+    from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative,
+                                 excerpt, prompt_for, safe_name, sha256)
     from local_document_library import (LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS, TextDecodingError,
-                                        decode_text_bytes, material_is_recommended, material_role, material_role_label,
-                                        MAX_SHORT_PDF_PAGES, MAX_VISUAL_BYTES_PER_FILE, MAX_CHUNKS_PER_DOCUMENT)
+                                        decode_text_bytes, material_role_label, MAX_CHUNKS_PER_DOCUMENT)
     from llm_connector_with_prompt_caching import LLMConnector, farm_base_url
     from request_runtime import (RequestControl, RequestStopped, RequestCancelled, RequestTimedOut,
                                  ResponseLimitExceeded, AnswerPreview, looks_like_action)
@@ -78,7 +103,6 @@ CHAT_TASK: dict[str, Any] = {}
 # dossier rebuild) that a browser Stop can cancel by request_id.
 OPERATION_GUARD = threading.Lock()
 OPERATIONS: dict[str, RequestControl] = {}
-REQUEST_ID = r"^(?:[a-f0-9]{32})?$"
 # The session/context a browser page displays (X-Workbench-Context). Requests
 # that act on the current context are rejected when it no longer matches, so a
 # stale tab can never run in, or change, another tab's session or material scope.
@@ -349,140 +373,10 @@ def save_workbench_settings(workspace: Path, session_name: str, model: str, lang
     })
 
 
-class Setup(BaseModel):
-    workspace: str = ""
-    state_dir: str = ""
-    model: str = "gpt-5.5"
-    session: str = "default"
-    env_file: str = ""
-    language: str = "de"
-
-
-class PathRequest(BaseModel):
-    path: str
-
-
-class ModelTestRequest(BaseModel):
-    model: str
-
-
-class ModelSwitchRequest(BaseModel):
-    model: str
-
-
-class LanguageRequest(BaseModel):
-    language: str
-
-
-class SessionRenameRequest(BaseModel):
-    name: str
-    source: str = ""
-
-
-class SessionDeleteRequest(BaseModel):
-    confirmed: bool = False
-    name: str = ""
-
-
-class SessionOpenRequest(BaseModel):
-    name: str
-
-
-class SessionPinRequest(BaseModel):
-    name: str
-    pinned: bool
-
-
-class BGRequest(BaseModel):
-    codebook: str
-    folder: str
-
-
-class TargetRequest(BaseModel):
-    target: str
-    codebook: str = ""
-    selected_paths: list[str] = []
-
-
-class CodebookPrepareRequest(BaseModel):
-    path: str
-    model: str = ""
-    request_id: str = Field(default="", pattern=REQUEST_ID)
-    # The browser starts a background job and follows /api/codebook/task.
-    # API callers that omit it keep the original blocking response.
-    background: bool = False
-
-
-class ChatRequest(BaseModel):
-    request_id: str = Field(default="", pattern=r"^(?:[a-f0-9]{32})?$")
-    question: str = Field(max_length=50000)
-    # None = decide from the question (the UI no longer offers a mode switch).
-    require_classification: bool | None = None
-    # Optional single active material this turn is restricted to.
-    focus_source_id: str = Field(default="", max_length=200)
-
-
-class CompareRequest(BaseModel):
-    question: str = Field(max_length=50000)
-    models: list[str]
-    request_id: str = Field(default="", pattern=REQUEST_ID)
-
-
-class CoverageRequest(BaseModel):
-    full: bool = False
-    request_id: str = Field(default="", pattern=REQUEST_ID)
-
-
-class CacheFileRequest(BaseModel):
-    document_id: str
-    confirmed: bool = False
-
-
-class CacheConfirmRequest(BaseModel):
-    confirmed: bool = False
-    request_id: str = Field(default="", pattern=REQUEST_ID)
-
-
-class OperationCancelRequest(BaseModel):
-    request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
-
-
 def session() -> dict[str, Any]:
     if not ACTIVE:
         raise HTTPException(400, ui_message(ACTIVE, 'error.workspace_required'))
     return ACTIVE
-
-
-def ui_message(data, key, **params):
-    language = data.get('language', 'zh') if isinstance(data, dict) else data
-    return UIMessage(key, language, **params)
-
-
-def message_payload(value):
-    return value.payload() if isinstance(value, UIMessage) else {'text': str(value)}
-
-
-class UIRequestError(RuntimeError):
-    def __init__(self, message):
-        super().__init__(message)
-        self.ui_message = message
-
-
-class UIValidationError(ValueError):
-    def __init__(self, message):
-        super().__init__(message)
-        self.ui_message = message
-
-
-def error_copy(error, data):
-    value = error.detail if isinstance(error, HTTPException) else getattr(error, 'ui_message', str(error))
-    if isinstance(error, StartupError):
-        value = ui_message(data, error.code, **error.params)
-    def redact(item):
-        if isinstance(item, UIMessage):
-            return UIMessage(item.message_key, item.language, **{key: redact(part) for key, part in item.params.items()})
-        return safe_error(item) if isinstance(item, str) else item
-    return localize_message(redact(value), data.get('language', 'zh'))
 
 
 def ui_state(data, value):
@@ -505,19 +399,6 @@ def protect_configuration(state: ProjectState, env_file: Any = None) -> ProjectS
     """Keep every configuration file the app reads outside the model's file access."""
     state.protect(env_file, STARTUP_CONFIG.env_file, Path(__file__).resolve().parent / ".env")
     return state
-
-
-def redact_value(value: Any, key: Any = None) -> Any:
-    """Recursively redact the active Farm key from model input/output structures."""
-    if isinstance(value, UIMessage):
-        return value  # Structured, application-generated UI copy.
-    if isinstance(value, str):
-        return redact_secrets(value, key)
-    if isinstance(value, list):
-        return [redact_value(item, key) for item in value]
-    if isinstance(value, dict):
-        return {name: redact_value(item, key) for name, item in value.items()}
-    return value
 
 
 def context_token(data: dict[str, Any]) -> str:
@@ -661,160 +542,6 @@ def safe_file(value: str) -> Path:
     return path
 
 
-def connector_failure(raw: Any) -> str | None:
-    """Return a connector-level failure message, if a connector returned one.
-
-    The Bosch Farm connector intentionally returns transport failures as text so
-    callers can still display them in simple scripts.  A workbench answer must
-    not mistake that text for an LLM answer, however.
-    """
-    text = str(raw or "").strip()
-    if not text:
-        return UIMessage("model.empty")
-    normalized = text.casefold()
-    if normalized.startswith(("error:", "http error", "error after ")):
-        return text
-    if normalized.startswith("(no text content"):
-        return UIMessage("model.empty_endpoint", detail=text)
-    return None
-
-
-def require_model_success(raw: Any, context=None) -> str:
-    """Return a non-empty model answer or raise a user-visible failure."""
-    text = str(raw or "").strip()
-    failure = connector_failure(text)
-    if failure:
-        context = context or UIMessage('model.context_main')
-        language = getattr(context, 'language', 'zh')
-        raise UIRequestError(UIMessage('model.request_failed', language, context=context,
-                                        detail=localize_message(failure, language)))
-    return text
-
-
-def target_tree(folder: Path, maximum_nodes: int = 5000) -> tuple[dict, bool]:
-    """Return a read-only, local folder tree without indexing any material."""
-    count, truncated = 0, False
-
-    def visit(path: Path) -> dict | None:
-        nonlocal count, truncated
-        if count >= maximum_nodes:
-            truncated = True
-            return None
-        try:
-            is_folder = path.is_dir()
-        except OSError:
-            return None
-        count += 1
-        if not is_folder:
-            suffix = path.suffix.lower()
-            try:
-                size = path.stat().st_size
-            except OSError:
-                size = 0
-            role = material_role(path)
-            return {"type": "file", "name": path.name, "path": str(path),
-                    "relative": path.relative_to(folder).as_posix(),
-                    "supported": suffix in SUPPORTED_DOCUMENT_EXTENSIONS, "bytes": size,
-                    "material_role": role, "material_role_label": material_role_label(role),
-                    "recommended": suffix in SUPPORTED_DOCUMENT_EXTENSIONS and material_is_recommended(path)}
-        children = []
-        try:
-            entries = sorted(path.iterdir(), key=lambda item: (not item.is_dir(), item.name.casefold()))
-        except OSError:
-            entries = []
-        for child in entries:
-            # Do not follow junctions/symlinks outside the selected BG folder.
-            if child.is_symlink():
-                continue
-            item = visit(child)
-            if item is not None:
-                children.append(item)
-        return {"type": "folder", "name": path.name, "path": str(path),
-                "relative": "." if path == folder else path.relative_to(folder).as_posix(), "children": children}
-
-    tree = visit(folder)
-    return tree or {"type": "folder", "name": folder.name, "path": str(folder), "children": []}, truncated
-
-
-def selected_target_files(folder: Path, values: list[str]) -> list[Path]:
-    """Validate explicit UI selections and keep them inside the picked folder."""
-    selected, seen = [], set()
-    for value in values:
-        candidate = Path(value).expanduser()
-        candidate = candidate if candidate.is_absolute() else folder / candidate
-        try:
-            path = candidate.resolve()
-            path.relative_to(folder)
-            paths = sorted(path.rglob('*')) if path.is_dir() else [path]
-            for item in paths:
-                if item.is_symlink():
-                    continue
-                item = item.resolve()
-                item.relative_to(folder)
-                if item.is_file() and item.suffix.lower() in SUPPORTED_DOCUMENT_EXTENSIONS and str(item) not in seen:
-                    selected.append(item)
-                    seen.add(str(item))
-        except (OSError, ValueError):
-            continue
-    return selected
-
-
-def codebook_page_groups(document: dict, pages_per_group: int = 3) -> list[list[dict]]:
-    pages: dict[int, list[dict]] = {}
-    for chunk in document.get("chunks", []):
-        visual = chunk.get("visual") or {}
-        page = visual.get("page")
-        if isinstance(page, int):
-            pages.setdefault(page, []).append(chunk)
-    # PDF chunks carry a page number and are grouped page-wise so that every
-    # original page (including visual-only/table pages) reaches the model.
-    # DOCX does not have PDF page metadata; its extracted paragraphs/tables are
-    # still useful and must not make Codebook preparation silently fail.
-    ordered = [pages[number] for number in sorted(pages)]
-    if not ordered:
-        chunks = document.get("chunks", [])
-        ordered = [chunks[index:index + pages_per_group]
-                   for index in range(0, len(chunks), pages_per_group)]
-        return ordered
-    return [sum(ordered[index:index + pages_per_group], []) for index in range(0, len(ordered), pages_per_group)]
-
-
-def with_blocks(record: dict, values: object, key: str = "blocks") -> dict:
-    """Keep text-block references of nonpaged Codebooks (TXT/DOCX) when present.
-
-    The key is added only when the source carried it, so a PDF profile and an
-    unchanged edit round-trip keep exactly their previous shape.
-    """
-    if isinstance(values, list):
-        record[key] = [int(value) for value in values if str(value).isdigit() and int(value) > 0]
-    return record
-
-
-def nonpaged_references(draft: dict) -> dict:
-    """A TXT/DOCX Codebook has no physical pages: record block numbers instead.
-
-    Models sometimes put block numbers into ``pages``.  For a nonpaged source
-    those are moved to ``blocks`` so no rule ever claims a fabricated page.
-    """
-    def move(record: dict, pages_key: str, blocks_key: str) -> None:
-        pages = [page for page in record.get(pages_key, []) if type(page) is int and page > 0]
-        existing = record.get(blocks_key)
-        blocks = [value for value in existing if type(value) is int and value > 0] if isinstance(existing, list) else []
-        record[blocks_key] = sorted(set(blocks) | set(pages))
-        record[pages_key] = []
-    for item in draft.get("classes", []):
-        move(item, "evidence_pages", "evidence_blocks")
-        for key in ("decision_rules", "boundaries"):
-            for rule in item.get(key, []):
-                if isinstance(rule, dict):
-                    move(rule, "pages", "blocks")
-    for key in ("global_rules", "table_rules"):
-        for rule in draft.get(key, []):
-            if isinstance(rule, dict):
-                move(rule, "pages", "blocks")
-    return draft
-
-
 def parse_codebook_draft(raw: str) -> dict:
     text = raw.strip()
     if text.startswith("```"):
@@ -884,187 +611,13 @@ def parse_codebook_draft(raw: str) -> dict:
             "table_rules": profile_rules(draft.get("table_rules", []), "table"), "uncertainties": draft.get("uncertainties", [])}
 
 
-def profile_rules_in_order(draft: dict):
-    """Yield (owner, rule) for every rule; owner is a class key or '' for global/table rules."""
-    for key in ("global_rules", "table_rules"):
-        for rule in draft.get(key, []) if isinstance(draft.get(key), list) else []:
-            if isinstance(rule, dict):
-                yield "", rule
-    for item in draft.get("classes", []) if isinstance(draft.get("classes"), list) else []:
-        if not isinstance(item, dict):
-            continue
-        owner = re.sub(r"[^a-z0-9]+", "-", str(item.get("name", "")).casefold()).strip("-") or "class"
-        for key in ("decision_rules", "boundaries"):
-            for rule in item.get(key, []) if isinstance(item.get(key), list) else []:
-                if isinstance(rule, dict):
-                    yield owner, rule
-
-
-def rule_id_conflicts(draft: dict | None) -> list[str]:
-    """Rule IDs used more than once anywhere in the profile, in first-seen order."""
-    counts: dict[str, int] = {}
-    for _owner, rule in profile_rules_in_order(draft or {}):
-        if isinstance(rule.get("id"), str):
-            counts[rule["id"]] = counts.get(rule["id"], 0) + 1
-    return [rule_id for rule_id, count in counts.items() if count > 1]
-
-
 def require_unique_rule_ids(draft: dict | None, status: int = 400) -> None:
     conflicts = rule_id_conflicts(draft)
     if conflicts:
         raise HTTPException(status, ui_message(ACTIVE, 'rules.duplicate_ids', ids=", ".join(conflicts[:20])))
 
 
-def namespace_duplicate_rule_ids(draft: dict) -> list[dict]:
-    """Deterministically rename model-generated duplicate IDs; the first use keeps its ID."""
-    conflicts = set(rule_id_conflicts(draft))
-    if not conflicts:
-        return []
-    used = {rule["id"] for _owner, rule in profile_rules_in_order(draft) if isinstance(rule.get("id"), str)}
-    seen: set[str] = set()
-    renames = []
-    for owner, rule in profile_rules_in_order(draft):
-        rule_id = rule.get("id")
-        if rule_id not in conflicts:
-            continue
-        if rule_id not in seen:
-            seen.add(rule_id)
-            continue
-        base = f"{owner or 'global'}:{rule_id}"
-        candidate, number = base, 2
-        while candidate in used:
-            candidate, number = f"{base}-{number}", number + 1
-        used.add(candidate)
-        rule["id"] = candidate
-        renames.append({"from": rule_id, "to": candidate})
-    return renames
-
-
-CODEBOOK_PAGE_SYSTEM = """You transcribe exactly one technical classification Codebook page, one part of a page, or one group of text blocks into compact rule notes, using the supplied native text, OCR text and page image. Return ONLY minified JSON: {\"source\":\"page 3\",\"official_names\":[\"exact wording\"],\"definitions\":[\"...\"],\"decision_rules\":[\"...\"],\"boundaries\":[\"...\"],\"tables\":[{\"title\":\"...\",\"columns\":[\"...\"],\"rows\":[[\"cell\"]]}],\"uncertainties\":[\"...\"]}. Keep official class names verbatim. State every definition, decision rule and boundary once, as one short sentence. For a table keep its title, its column names and only the rows that carry classification meaning, with short cells. Do not copy the page verbatim, do not repeat prose that carries no rule, do not invent text and omit empty fields. When the request covers only part of a page or of the text, cover only that part. Use the page or block numbers supplied in the prompt."""
-CODEBOOK_MERGE_SYSTEM = """You consolidate page-by-page Codebook transcriptions. Return ONLY JSON: {\"classes\":[{\"name\":\"exact official class name\",\"definition\":\"...\",\"decision_rules\":[{\"id\":\"class-rule-1\",\"text\":\"...\",\"pages\":[1]}],\"boundaries\":[{\"id\":\"class-boundary-1\",\"text\":\"...\",\"pages\":[1]}],\"evidence_pages\":[1]}],\"global_rules\":[{\"id\":\"global-1\",\"text\":\"...\",\"pages\":[1]}],\"table_rules\":[{\"id\":\"table-1\",\"text\":\"meaning of the table rule\",\"pages\":[1],\"table\":{\"columns\":[\"...\"],\"rows\":[[\"...\"]]}}],\"uncertainties\":[\"...\"]}. Preserve exact names, rule IDs and page numbers. Do not invent missing rules. Keep each text short and state each rule once. For a Codebook without physical pages (TXT/DOCX) put the supplied text block numbers in \"blocks\" (and \"evidence_blocks\" for classes) and leave \"pages\" and \"evidence_pages\" empty; never invent page numbers."""
-CODEBOOK_SECTION_SYSTEM = """You merge Codebook page notes into a classification rule profile, one section per request. The complete notes of the whole Codebook follow below. Return ONLY one minified JSON object in exactly the shape the request asks for. Preserve exact official class names, rule IDs and page numbers, keep each text short, state each rule once and do not invent rules. For a Codebook without physical pages (TXT/DOCX) put the text block numbers in \"blocks\" (and \"evidence_blocks\" for a class) and leave \"pages\" and \"evidence_pages\" empty; never invent page numbers.
-
---- CODEBOOK NOTES ---
-"""
-CODEBOOK_JSON_REPAIR_SYSTEM = """Return ONLY one complete, valid JSON object. Do not use Markdown fences or commentary. Preserve every fact, class name, rule, table value and page number from the supplied candidate; only repair JSON syntax such as missing commas, quotes, brackets or escaping."""
-
-# Codebook rule files the workbench can prepare, by lower-case suffix.
-CODEBOOK_FILE_TYPES = {".pdf": "pdf", ".docx": "docx", ".txt": "txt"}
-# Offered first when no rule-parsing model was used before (UI default only).
-CODEBOOK_RECOMMENDED_MODEL = "claude-haiku-5-5"
-
-
-@dataclass(frozen=True)
-class CodebookParseBudget:
-    """Output-token budget and call bounds for Codebook rule parsing only.
-
-    A *unit* is one PDF page or one group of DOCX/TXT text blocks.  Every
-    request starts at the same 8192-token ceiling as chat answers (a ceiling,
-    not a charge).  When a unit still stops at the output limit (Claude
-    ``max_tokens``, Gemini ``MAX_TOKENS``, OpenAI ``length``), only that unit
-    is retried once as two halves; if a half is cut too, or the unit cannot
-    be split (e.g. a visual-only page), preparation fails for that unit.  A
-    truncated response is never parsed, merged or saved.  Every model call of
-    one preparation is counted against ``call_limit`` so a pathological file
-    cannot cause unbounded cost.
-
-    The merge first tries one request.  If that is cut (a large Codebook does
-    not fit one response, and a multi-minute generation is cut by corporate
-    proxies), the profile is merged section by section: a class outline, one
-    request per class, general rules and table rules, each one request.
-    Sections are assembled locally.
-    """
-    unit_output_tokens: int = 8192
-    part_output_tokens: int = 8192
-    max_split_depth: int = 1
-    min_split_chars: int = 400
-    merge_output_tokens: tuple[int, ...] = (8192,)
-    section_output_tokens: tuple[int, ...] = (8192,)
-    max_merge_classes: int = 40
-    repair_output_tokens: int = 8192
-    max_total_calls: int = 300
-
-    @property
-    def max_attempts_per_unit(self) -> int:
-        """Strategy levels per unit: whole unit, then its halves."""
-        return self.max_split_depth + 1
-
-    @property
-    def max_calls_per_unit(self) -> int:
-        """Worst case: the whole unit plus its two halves."""
-        return 2 ** (self.max_split_depth + 1) - 1
-
-    def call_limit(self, units: int) -> int:
-        sectioned = len(self.section_output_tokens) * (self.max_merge_classes + 3)
-        planned = max(1, units) * self.max_calls_per_unit + len(self.merge_output_tokens) + sectioned + 1
-        return min(self.max_total_calls, planned)
-
-
 CODEBOOK_BUDGET = CodebookParseBudget()
-
-
-def accounted_model_call(data, connector, *args, usage_records=None, **kwargs):
-    """Record dispatches before response validation; failed output still costs."""
-    check_request(data)
-    connector.last_usage = None
-    connector.last_response_model = None
-    connector.usage_attempts = None
-    old_control = getattr(connector, "request_control", None)
-    connector.request_control = data.get("request_control")
-    # Defense in depth: the Farm key never leaves in a prompt, whatever its source.
-    key = connector.api_key
-    args = tuple(redact_value(item, key) if index else item for index, item in enumerate(args))
-    handler = kwargs.get("event_handler")
-    if handler:  # Streamed previews/reasoning are shown live: redact them too.
-        kwargs["event_handler"] = lambda kind, text: handler(kind, redact_secrets(text, key))
-    try:
-        result = redact_secrets(connector.ask_about_files(*args, **kwargs), key)
-        check_request(data)
-        if data.get("request_control"):
-            data["request_control"].limit(len(result))
-        return result
-    finally:
-        connector.request_control = old_control
-        attempts = connector.usage_attempts
-        if attempts is None:  # Custom/test connector with no transport ledger.
-            attempts = [{"usage": connector.get_last_token_usage(),
-                         "model": connector.last_response_model or connector.model_name}]
-        elif attempts and connector.last_response_model:
-            attempts[-1]["model"] = connector.last_response_model
-        for attempt in attempts:
-            usage = normalize_usage(attempt["usage"])
-            estimate = data["state"].note_usage(usage, data["pricing"], attempt["model"])
-            usage["cost_usd"] = estimate["cost_usd"] if estimate else None
-            if estimate and estimate.get("cost_usd") is None:  # priced only in part
-                usage["known_cost_usd"] = estimate["known_cost_usd"]
-                usage["unpriced_tokens"] = estimate["unpriced_tokens"]
-            if usage_records is not None:
-                usage_records.append(usage)
-
-
-def check_request(data):
-    control = data.get("request_control")
-    if control:
-        control.check()
-    elif data.get("cancel_event") and data["cancel_event"].is_set():
-        raise RequestCancelled("Request cancelled")
-
-
-@contextmanager
-def commit_answer(data):
-    control = data.get("request_control")
-    if control:
-        with control.commit():
-            yield
-    else:
-        check_request(data)
-        yield
-
-
-def check_answer_size(data, answer):
-    control = data.get("request_control")
-    if control and len(answer) > control.policy.max_answer_chars:
-        raise ResponseLimitExceeded("Answer exceeds the configured size limit")
 
 
 def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data, usage_records=None,
@@ -1106,83 +659,10 @@ def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data,
 # ---------------------------------------------------------------------------
 CODEBOOK_JOB_GUARD = threading.Lock()
 CODEBOOK_JOB: dict[str, Any] = {}
-CODEBOOK_JOB_LOG_LIMIT = 200
-CODEBOOK_FAILURE_REASONS = {
-    "output_limit", "timeout", "network", "http", "invalid_json", "empty", "model_error",
-    "cancelled", "call_limit", "no_rules", "empty_file", "encoding", "binary", "unreadable", "interrupted", "internal",
-    "proxy", "section_output_limit", "connect_timeout",
-}
 
 
 def codebook_job_path() -> Path:
     return app_state_home() / "codebook_task.json"
-
-
-def local_timestamp() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
-
-
-def codebook_unit_label(unit: dict | None):
-    """Localized, user-facing name of one page or text-block range."""
-    if not unit:
-        return None
-    if unit.get("kind") == "page":
-        return UIMessage("rulejob.unit.page", "zh", number=unit["number"])
-    if unit.get("first") == unit.get("last"):
-        return UIMessage("rulejob.unit.block", "zh", number=unit["first"])
-    return UIMessage("rulejob.unit.blocks", "zh", first=unit["first"], last=unit["last"])
-
-
-class CodebookPrepareError(RuntimeError):
-    """A classified Codebook preparation failure with a user-explainable reason."""
-
-    def __init__(self, reason: str, stage: str, *, unit: dict | None = None, attempts: int | None = None,
-                 technical: Any = "", params: dict | None = None):
-        technical_text = safe_error(technical if isinstance(technical, str) else str(technical or ""))
-        super().__init__(technical_text or reason)
-        self.reason = reason if reason in CODEBOOK_FAILURE_REASONS else "internal"
-        self.stage, self.unit, self.attempts = stage, unit, attempts
-        self.technical, self.params = technical_text, dict(params or {})
-
-    def messages(self) -> tuple[UIMessage, UIMessage]:
-        """(full message, short card text); both re-localized by the browser."""
-        params = dict(self.params)
-        where = codebook_unit_label(self.unit) or UIMessage(f"rulejob.where.{self.stage}", "zh")
-        params.setdefault("where", where)
-        params.setdefault("unit", where)
-        if self.attempts is not None:
-            params.setdefault("attempts", self.attempts)
-        full = UIMessage(f"rulejob.reason.{self.reason}", "zh", **{
-            key: params[key] for key in re_placeholders(f"rulejob.reason.{self.reason}") if key in params})
-        short = UIMessage(f"rulejob.short.{self.reason}", "zh", **{
-            key: params[key] for key in re_placeholders(f"rulejob.short.{self.reason}") if key in params})
-        return full, short
-
-
-def re_placeholders(key: str) -> set[str]:
-    from workbench_i18n import runtime_messages
-    return set(re.findall(r"\{(\w+)\}", runtime_messages()["zh"][key]))
-
-
-def classify_model_failure(failure: Any) -> tuple[str, dict[str, Any]]:
-    """Map a connector failure text to a stable reason code."""
-    if isinstance(failure, UIMessage) and failure.message_key in {"model.empty", "model.empty_endpoint"}:
-        return "empty", {}
-    text = str(failure or "").casefold()
-    if "max_tokens" in text or "(length)" in text or "max tokens" in text:
-        return "output_limit", {}
-    if "proxyerror" in text or "proxy error" in text:
-        return "proxy", {}
-    if "connecttimeout" in text:
-        return "connect_timeout", {}
-    if "no complete response within" in text or "timed out" in text or "timeout" in text:
-        return "timeout", {}
-    if text.startswith("http error"):
-        match = re.search(r"\d{3}", text)
-        return "http", {"status": match.group(0) if match else "?"}
-    if "connection" in text or text.startswith("error after"):
-        return "network", {}
-    return "model_error", {}
 
 
 class CodebookJob:
@@ -1308,106 +788,6 @@ def load_codebook_job() -> dict | None:
     return record
 
 
-def parse_codebook_note(raw: str) -> dict | None:
-    """One JSON object from a complete page/block or section response, or None.
-
-    Tolerates what models commonly add around otherwise valid JSON: Markdown
-    fences, text after the object, a second object and trailing commas.  The
-    response itself is already known to be complete (its stop reason was
-    checked), so this never turns a truncated answer into rules.
-    """
-    text = str(raw or "").strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I)
-    start = text.find("{")
-    if start < 0:
-        return None
-    candidates = [text[start:]]
-    without_trailing_commas = re.sub(r",(\s*[}\]])", r"\1", text[start:])
-    if without_trailing_commas != candidates[0]:
-        candidates.append(without_trailing_commas)
-    for candidate in candidates:
-        try:
-            note, _end = json.JSONDecoder().raw_decode(candidate)
-        except ValueError:
-            continue
-        if isinstance(note, dict):
-            return note
-    return None
-
-
-def json_error_detail(raw: str) -> str:
-    """Where a response stopped being valid JSON, for the diagnostics only."""
-    text = str(raw or "")
-    start = max(0, text.find("{"))
-    try:
-        json.JSONDecoder().raw_decode(text[start:])
-    except ValueError as exc:
-        position = start + getattr(exc, "pos", 0)
-        return f"{exc}; near: {text[max(0, position - 80):position + 80]!r}"
-    return ""
-
-
-def split_text_in_half(text: str) -> tuple[str, str]:
-    """Split near the middle, preferring a line break, then a space."""
-    middle = len(text) // 2
-    window = max(80, len(text) // 5)
-    for separator in ("\n\n", "\n", " "):
-        left = text.rfind(separator, max(0, middle - window), middle + 1)
-        right = text.find(separator, middle, min(len(text), middle + window))
-        candidates = [index for index in (left, right) if index > 0]
-        if candidates:
-            cut = min(candidates, key=lambda index: abs(index - middle))
-            return text[:cut].strip(), text[cut:].strip()
-    return text[:middle].strip(), text[middle:].strip()
-
-
-def split_codebook_piece(piece: dict, minimum: int) -> list[dict] | None:
-    """Two smaller pieces of the same unit, or None when it cannot be split."""
-    k, n = piece["part"]
-    parts = [(2 * k - 1, 2 * n), (2 * k, 2 * n)]
-    if "chunks" in piece:
-        chunks = piece["chunks"]
-        if len(chunks) > 1:
-            middle = len(chunks) // 2
-            return [dict(piece, chunks=chunks[:middle], part=parts[0]), dict(piece, chunks=chunks[middle:], part=parts[1])]
-        number, label, text = chunks[0]
-        if len(text) < 2 * minimum:
-            return None
-        first, second = split_text_in_half(text)
-        return [dict(piece, chunks=[(number, label, first)], part=parts[0]),
-                dict(piece, chunks=[(number, label, second)], part=parts[1])]
-    native, ocr = piece.get("native", ""), piece.get("ocr", "")
-    if max(len(native), len(ocr)) < 2 * minimum:
-        return None
-    native_parts = split_text_in_half(native) if len(native) >= 2 * minimum else (native, "")
-    ocr_parts = split_text_in_half(ocr) if len(ocr) >= 2 * minimum else (ocr, "")
-    return [dict(piece, native=native_parts[0], ocr=ocr_parts[0], part=parts[0]),
-            dict(piece, native=native_parts[1], ocr=ocr_parts[1], part=parts[1])]
-
-
-def codebook_piece_request(unit: dict, piece: dict, total: int, file_type: str) -> tuple[list[str], str, str]:
-    """(files, prompt, source label) for one page/text piece."""
-    k, n = piece["part"]
-    if unit["kind"] == "page":
-        source = f"page {unit['number']}" + (f" part {k}/{n}" if n > 1 else "")
-        prompt = f"Codebook page {unit['number']} of {total}. Page type: {unit['page_type']}."
-        if n > 1:
-            prompt += (f" This request covers only part {k}/{n} of this page's text: extract only the rules stated in "
-                       "this part and use the page image only to understand its layout.")
-        prompt += (f"\n--- NATIVE TEXT ---\n{piece.get('native') or '[none]'}"
-                   f"\n--- OCR TEXT ({unit['ocr_status']}) ---\n{piece.get('ocr') or '[none]'}")
-        return [unit["image_path"]], prompt, source
-    numbers = [number for number, _label, _text in piece["chunks"]]
-    source = f"blocks {numbers[0]}-{numbers[-1]}" + (f" part {k}/{n}" if n > 1 else "")
-    prompt = (f"Codebook {file_type.upper()} text blocks {unit['first']}-{unit['last']} of {unit['blocks_total']}. "
-              "This Codebook has no physical pages: cite block numbers, never page numbers.")
-    if n > 1:
-        prompt += f" This request covers only part {k}/{n} of these blocks: extract only the rules stated in this part."
-    prompt += "\n\n" + "\n\n".join(f"--- BLOCK {number}: {label} ---\n{text}" for number, label, text in piece["chunks"])
-    return [], prompt, source
-
-
 def parse_codebook_unit(job: CodebookJob, data: dict[str, Any], connector: LLMConnector, unit: dict,
                         total: int, file_type: str) -> list[dict]:
     """Parse one unit within CODEBOOK_BUDGET; returns complete JSON notes only."""
@@ -1465,13 +845,6 @@ def parse_codebook_unit(job: CodebookJob, data: dict[str, Any], connector: LLMCo
     else:
         piece = {"chunks": unit["chunks"], "part": (1, 1)}
     return run(piece, 0)
-
-
-def codebook_notes_text(notes: list[list[dict]], nonpaged: bool) -> str:
-    label = "TEXT BLOCK GROUP" if nonpaged else "PAGE GROUP"
-    return "\n\n".join(
-        f"--- {label} {index} ---\n{json.dumps(unit_notes[0] if len(unit_notes) == 1 else unit_notes, ensure_ascii=False, separators=(',', ':'))}"
-        for index, unit_notes in enumerate(notes, start=1))
 
 
 def merge_codebook_notes(job: CodebookJob, data: dict[str, Any], connector: LLMConnector,
@@ -1607,33 +980,6 @@ CODEBOOK_NOTES_VERSION = hashlib.sha256(json.dumps([
 def codebook_note_cache_path(file_sha: str, model: str) -> Path:
     identity = hashlib.sha256(f"{model}\0{CODEBOOK_NOTES_VERSION}".encode("utf-8")).hexdigest()[:12]
     return app_state_home() / "codebook_note_cache" / f"{file_sha[:20]}_{identity}.json"
-
-
-def codebook_unit_key(unit: dict) -> str:
-    if unit["kind"] == "page":
-        content = f"{unit['native_text']}\0{unit['ocr_text']}\0{unit['page_type']}"
-        return f"page:{unit['number']}:" + hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
-    content = "\0".join(text for _number, _label, text in unit["chunks"])
-    return f"blocks:{unit['first']}-{unit['last']}:" + hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
-
-
-def load_codebook_note_cache(path: Path) -> dict[str, list[dict]]:
-    try:
-        cached = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(cached, dict):
-        return {}
-    return {key: value for key, value in cached.items()
-            if isinstance(value, list) and value and all(isinstance(note, dict) for note in value)}
-
-
-def codebook_text_units(chunks: list[dict], per_unit: int = 3) -> list[dict]:
-    """Group nonpaged text blocks; block numbers match the material section labels."""
-    numbered = [(index, str(chunk.get("label", "")), str(chunk.get("text", "")))
-                for index, chunk in enumerate(chunks, start=1) if str(chunk.get("text", "")).strip()]
-    return [{"kind": "blocks", "first": group[0][0], "last": group[-1][0], "blocks_total": len(chunks), "chunks": group}
-            for group in (numbered[index:index + per_unit] for index in range(0, len(numbered), per_unit))]
 
 
 def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str, job: CodebookJob | None = None) -> dict:
@@ -1892,10 +1238,6 @@ def coverage_path(state: ProjectState) -> Path:
     return state.root / "analysis_coverage.json"
 
 
-MATERIAL_SUMMARY_CACHE_VERSION = "material-summary-v3"  # v2: pictures read with the text; v3: page choice, kinds, data-keeping format
-BG_DOSSIER_CACHE_VERSION = "bg-dossier-v1"
-
-
 def material_summary_cache_path(document: dict, model: str, full: bool, read_pages: list[int]) -> Path:
     """A content-addressed local cache, never written beside BG source files."""
     digest = str(document.get("sha256") or "unknown")
@@ -1906,73 +1248,7 @@ def material_summary_cache_path(document: dict, model: str, full: bool, read_pag
     return app_state_home() / "material_cache" / digest / f"{key}.json"
 
 
-# Material pre-reading prompts.  Output is bounded by form (number and length
-# of bullet points) so a dense group fits its token budget instead of being cut.
-MATERIAL_SUMMARY_SYSTEM = "You are a careful technical evidence extractor. Use only the supplied file content. Write concise Chinese factual notes. Do not classify the Baugruppe and do not invent missing information."
-# Output ceilings are high on purpose: thinking models (e.g. Gemini 2.5 Pro)
-# count their reasoning against maxOutputTokens, so a small ceiling cuts the
-# answer before it starts.  The format rules below keep the notes short.
-MATERIAL_GROUP_TOKENS = 8192
-MATERIAL_MERGE_TOKENS = 8192
-BG_DOSSIER_TOKENS = 8192
 MODEL_CHECK_TOKENS = 4096
-# Summaries keep the data a classification needs: part numbers and
-# parameters are listed in full; only the prose parts are bounded.
-PREREAD_SUMMARY_CHARS = 600
-PREREAD_PARAMETER_LINES = 40
-DOCUMENT_KINDS = {"datasheet": "数据表", "offer": "报价单", "catalog": "目录", "manual": "手册", "drawing": "图纸",
-                  "bom": "BOM", "dfc": "DFC 结构图", "cad": "CAD 截图", "other": "其他"}
-MATERIAL_KIND_LINE = ("第一行必须写：文件类型：<" + "/".join(DOCUMENT_KINDS.values()) + "> — <一句话说明主要内容>。")
-MATERIAL_GROUP_FORMAT = ("输出格式（按以下栏目，没有内容的栏目省略，不写引言或总结）：\n"
-                         "型号/订货号/制造商：原样列出，不翻译。\n"
-                         f"关键参数：每行一项“名称：数值 单位 [来源标签]”，如行程、负载、力、速度、尺寸、电压、压力；不限条数，最多 {PREREAD_PARAMETER_LINES} 行。\n"
-                         "结构与功能：最多 10 条要点，每条一句，句末用方括号注明来源页面/表格/图片标签。\n"
-                         "不确定处：看不清、缺失或互相矛盾的信息。\n"
-                         "只写文件中的事实，相同事实只写一次，表格只摘取关键行。")
-MATERIAL_MERGE_FORMAT = ("输出格式：" + MATERIAL_KIND_LINE + "然后依次为“型号/订货号/制造商”“关键参数”“结构与功能”“不确定处”栏目；"
-                         "型号和参数去重后全部保留，并保留来源标签；"
-                         f"“结构与功能”和“不确定处”合计不超过约 {PREREAD_SUMMARY_CHARS} 字；必须保留冲突与不确定处；不写引言或总结。")
-
-
-def guess_document_kind(document: dict) -> str:
-    """Local first guess from file name, role and the first pages' words."""
-    role = document.get("material_role")
-    if role == "dfc_structure":
-        return "dfc"
-    if role == "cad_screenshot":
-        return "cad"
-    first = " ".join(str(chunk.get("text", "")) for chunk in document.get("chunks", [])
-                     if (chunk.get("visual") or {}).get("page") in (None, 1, 2))[:6000]
-    text = (str(document.get("name", "")) + " " + first).casefold()
-    if role == "bom" or re.search(r"st(ü|ue)ckliste|parts? list|\batb\b", text):
-        return "bom"
-    if re.search(r"angebot|quotation|\boffer\b|offerte", text) or ("menge" in text and "preis" in text):
-        return "offer"
-    if re.search(r"datenblatt|data ?sheet|technische daten|technical data", text):
-        return "datasheet"
-    if re.search(r"katalog|catalog", text):
-        return "catalog"
-    if re.search(r"betriebsanleitung|bedienungsanleitung|manual|handbuch|montageanleitung", text):
-        return "manual"
-    if role == "technical_drawing" or re.search(r"zeichnungsnummer|zeichnungs-nr|ma(ß|ss)stab|drawing no", text):
-        return "drawing"
-    return "other"
-
-
-def model_document_kind(summary: str) -> str | None:
-    match = re.search(r"文件类型\s*[:：]\s*([^\n—]+)", summary or "")
-    if not match:
-        return None
-    value = match.group(1)
-    for key, label in sorted(DOCUMENT_KINDS.items(), key=lambda item: -len(item[1])):
-        if label.casefold() in value.casefold():
-            return key
-    return None
-# Changing a prompt or budget above invalidates cached group notes, never a
-# completed per-file summary (those stay tied to source hash, model and scope).
-MATERIAL_GROUP_NOTE_VERSION = hashlib.sha256(json.dumps(
-    ["material-group-v2-visual", MATERIAL_SUMMARY_SYSTEM, MATERIAL_GROUP_FORMAT, MATERIAL_GROUP_TOKENS],
-    ensure_ascii=False).encode("utf-8")).hexdigest()[:12]
 
 
 def material_group_note_path(document: dict, model: str, group: str) -> Path:
@@ -2006,44 +1282,6 @@ def save_material_group_note(document: dict, model: str, group: str, note: str) 
         pass  # Reuse is an optimisation; the pre-reading result is unaffected.
 
 
-# Output-limit recovery for material pre-reading.  Only a group that was cut
-# at its output limit is split, exactly once, into two halves that keep the
-# same budget; no group is split twice and no budget is raised.  Each split
-# costs two extra calls, and one scan may spend at most material_retry_limit()
-# extra calls; beyond that a cut group stays an honestly reported gap.
-MATERIAL_MIN_SPLIT_CHARS = 800
-MATERIAL_RETRY_SHARE = 0.2
-MATERIAL_RETRY_MIN_CALLS = 2
-MATERIAL_RETRY_MAX_CALLS = 10
-
-
-def material_retry_limit(total_groups: int) -> int:
-    """Extra calls one scan may spend: 20 % of its groups, at least 2, at most 10."""
-    share = -(-max(0, total_groups) * MATERIAL_RETRY_SHARE // 1)
-    return int(min(MATERIAL_RETRY_MAX_CALLS, max(MATERIAL_RETRY_MIN_CALLS, share)))
-
-
-def split_material_group(group: str) -> tuple[str, str] | None:
-    """Two halves of one summary group, each keeping its evidence label.
-
-    Split between labelled chunks near the middle; a single long chunk is
-    split in its text and its label line is repeated on the second half.
-    """
-    headers = [match.start() for match in re.finditer(r"(?m)^--- .+ ---$", group)]
-    if len(headers) >= 2:
-        middle = len(group) // 2
-        cut = min(headers[1:], key=lambda index: abs(index - middle))
-        return group[:cut], group[cut:]
-    if len(group) < 2 * MATERIAL_MIN_SPLIT_CHARS:
-        return None
-    header, _newline, body = group.partition("\n") if group.startswith("--- ") else ("", "", group)
-    first, second = split_text_in_half(body)
-    if not first or not second:
-        return None
-    prefix = header + "\n" if header else ""
-    return prefix + first + "\n", prefix + second + "\n"
-
-
 def load_material_summary_cache(document: dict, model: str, full: bool, read_pages: list[int]) -> dict | None:
     path = material_summary_cache_path(document, model, full, read_pages)
     try:
@@ -2066,16 +1304,6 @@ def save_material_summary_cache(document: dict, model: str, full: bool, read_pag
                "sha256": document.get("sha256"), "model": model, "full": full, "pages": read_pages,
                "record": record}
     write_json_atomically(path, payload)
-
-
-def bg_dossier_identity(coverage: dict, model: str) -> dict:
-    """Only source facts belong here; Codebook stays independently versioned."""
-    files = [{"sha256": item.get("sha256"), "name": item.get("name"),
-              "pages_read": item.get("pages_read", []), "pages_unread": item.get("pages_unread", []),
-              "reading_scope": item.get("reading_scope", "")}
-             for item in coverage.get("files", []) if isinstance(item, dict)]
-    return {"version": BG_DOSSIER_CACHE_VERSION, "model": model,
-            "files": sorted(files, key=lambda item: (str(item["sha256"]), str(item["name"]))) }
 
 
 def bg_dossier_cache_path(coverage: dict, model: str) -> Path:
@@ -2152,23 +1380,6 @@ def material_cache_entries(document: dict) -> list[dict]:
     return entries
 
 
-def document_ocr_audit(document: dict) -> str:
-    if document.get("image_type") == "dfc_structure_screenshot":
-        audit = LocalDocumentLibrary.dfc_audit(document) or {}
-        return "DFC " + str(audit.get("ocr_status", "not requested"))
-    pages = document.get("page_inventory", [])
-    if not pages:
-        return "不需要 / 无 PDF 页"
-    statuses = [str(item.get("ocr_status", "not_requested")) for item in pages if item.get("page_type") != "text"]
-    if not statuses:
-        return "不需要（原生文字页）"
-    if all(status == "ok" for status in statuses):
-        return "已完成"
-    if any(status == "ok" for status in statuses):
-        return "部分完成"
-    return statuses[0]
-
-
 def cache_audit(data: dict[str, Any]) -> dict:
     state, documents = data["state"], data["documents"]
     active = set(state.data.get("active_source_ids") or [])
@@ -2234,320 +1445,6 @@ def coverage_for_ui(data: dict[str, Any]) -> dict:
             dossier = load_bg_dossier_cache(coverage, data["model"])
             coverage["bg_dossier"] = {"ready": bool(dossier), "created_at": dossier.get("created_at", "") if dossier else ""}
     return coverage
-
-
-def document_pages(document: dict) -> list[int]:
-    pages = []
-    for chunk in document.get("chunks", []):
-        page = (chunk.get("visual") or {}).get("page")
-        if isinstance(page, int) and page not in pages:
-            pages.append(page)
-    return sorted(pages)
-
-
-# Long PDFs: what decides how much is read is the page count and the content,
-# never the file name (names are often unclear).  Up to LONG_PDF_PAGES pages
-# everything is read; longer files read LONG_PDF_READ_PAGES chosen pages.
-LONG_PDF_PAGES = 20
-LONG_PDF_READ_PAGES = 15
-LONG_PDF_START_PAGES = 3
-LONG_PDF_GRAPHIC_PAGES = 3
-SCOPE_FULL = "完整文本预读"
-SCOPE_SELECTED = "长文件挑页预读"
-_PART_NUMBER = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9./-]{3,}[A-Za-z0-9](?![A-Za-z0-9])")
-_RULE_STOPWORDS = {"baugruppe", "baugruppen", "function", "funktion", "primary", "object", "objekt", "werden",
-                   "wird", "einer", "eines", "diese", "dieser", "durch", "sowie", "assembly", "component", "komponente"}
-
-
-def part_numbers(text: str) -> set[str]:
-    """Order codes and type keys as they appear in a BOM: 8941234567, DSBC-32-100-PPVA, R412010286."""
-    found = set()
-    for token in _PART_NUMBER.findall(text):
-        digits = sum(ch.isdigit() for ch in token)
-        letters = sum(ch.isalpha() for ch in token)
-        if digits >= 6 or (digits >= 2 and letters >= 2 and len(token) >= 6 and any(ch in token for ch in "-./")):
-            if not re.fullmatch(r"(19|20)\d{2}[-./]\d{1,2}[-./]\d{1,2}", token):  # dates are not part numbers
-                found.add(token.casefold())
-    return found
-
-
-def reading_hints(data: dict[str, Any], selected: list[dict]) -> dict[str, Any]:
-    """Local signals for choosing pages of long files: BOM part numbers and rule words."""
-    bom = [item for item in selected if item.get("material_role") == "bom"]
-    bom_terms: set[str] = set()
-    for item in bom:
-        for chunk in item.get("chunks", []):
-            bom_terms |= part_numbers(str(chunk.get("text", "")))
-    rule_terms: set[str] = set()
-    state = data.get("state")
-    profile = ((state.data.get("bg_context") or {}).get("locked_profile") if state else None) or {}
-    for item in profile.get("classes", []) if isinstance(profile, dict) else []:
-        if not isinstance(item, dict):
-            continue
-        for word in re.findall(r"[A-Za-zÄÖÜäöüß]{4,}", str(item.get("name", ""))):
-            rule_terms.add(word.casefold())
-        texts = [str(item.get("definition", ""))] + [str(rule.get("text", "")) for rule in item.get("decision_rules", []) if isinstance(rule, dict)]
-        for word in re.findall(r"[A-Za-zÄÖÜäöüß]{8,}", " ".join(texts)):
-            rule_terms.add(word.casefold())
-    rule_terms -= _RULE_STOPWORDS
-    return {"bom_terms": bom_terms, "rule_terms": set(sorted(rule_terms)[:300]), "bom_found": bool(bom)}
-
-
-def page_texts(document: dict) -> dict[int, str]:
-    pages: dict[int, str] = {}
-    for chunk in document.get("chunks", []):
-        page = (chunk.get("visual") or {}).get("page")
-        if isinstance(page, int):
-            pages[page] = pages.get(page, "") + "\n" + str(chunk.get("text", ""))
-    return pages
-
-
-def choose_long_pages(document: dict, hints: dict[str, Any] | None) -> tuple[list[int], dict[int, list[str]]]:
-    """Up to LONG_PDF_READ_PAGES pages of a long PDF, each with the reasons it was chosen."""
-    hints = hints or {}
-    texts = page_texts(document)
-    pages = sorted(texts)
-    inventory = {item.get("page"): item for item in document.get("page_inventory", []) if isinstance(item, dict)}
-    reasons: dict[int, list[str]] = {}
-    order: list[int] = []
-
-    def take(page: int, reason: str, limit: int = LONG_PDF_READ_PAGES) -> None:
-        reasons.setdefault(page, [])
-        if reason not in reasons[page]:
-            reasons[page].append(reason)
-        if page not in order and len(order) < limit:
-            order.append(page)
-
-    for page in pages[:LONG_PDF_START_PAGES]:
-        take(page, "start")
-    bom_terms, rule_terms = hints.get("bom_terms") or set(), hints.get("rule_terms") or set()
-    if bom_terms:
-        scored = sorted(((sum(1 for term in bom_terms if term in texts[page].casefold()), page) for page in pages), key=lambda item: (-item[0], item[1]))
-        for score, page in scored:
-            if score:
-                take(page, "bom")
-    if rule_terms:
-        scored = sorted(((sum(1 for term in rule_terms if term in texts[page].casefold()), page) for page in pages), key=lambda item: (-item[0], item[1]))
-        for score, page in scored[:LONG_PDF_READ_PAGES]:
-            if score >= 2:
-                take(page, "rules")
-    graphic = [page for page in pages if (inventory.get(page) or {}).get("page_type") in {"visual", "mixed"}]
-    taken_graphic = 0
-    for page in graphic:
-        if page in order:
-            take(page, "graphic")  # already chosen: only note that it is a graphic page
-            continue
-        if taken_graphic >= LONG_PDF_GRAPHIC_PAGES or len(order) >= LONG_PDF_READ_PAGES:
-            break
-        take(page, "graphic")
-        taken_graphic += 1
-    for page in sorted(pages, key=lambda page: (-len(texts[page].strip()), page)):
-        if len(order) >= LONG_PDF_READ_PAGES:
-            break
-        take(page, "dense")
-    chosen = sorted(order)
-    return chosen, {page: reasons[page] for page in chosen}
-
-
-def reading_plan(document: dict, full: bool = False, hints: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Which chunks/pages of one file are pre-read, and why (local, no model call)."""
-    chunks = list(document.get("chunks", []))
-    all_pages = document_pages(document)
-    if full or len(all_pages) <= LONG_PDF_PAGES:
-        return {"chunks": chunks, "scope": SCOPE_FULL, "read": all_pages, "unread": [], "reasons": {}}
-    chosen, reasons = choose_long_pages(document, hints)
-    picked = set(chosen)
-    selected = [chunk for chunk in chunks if (chunk.get("visual") or {}).get("page") in picked]
-    return {"chunks": selected, "scope": SCOPE_SELECTED, "read": chosen,
-            "unread": [page for page in all_pages if page not in picked], "reasons": reasons}
-
-
-def scope_message(plan: dict[str, Any], total: int) -> dict:
-    if plan["scope"] == SCOPE_SELECTED:
-        return UIMessage("material.scope_selected", read=len(plan["read"]), total=total).payload()
-    return UIMessage("material.scope_full").payload()
-
-
-def selected_reading_chunks(document: dict, full: bool = False, hints: dict[str, Any] | None = None) -> tuple[list[dict], str, list[int], list[int]]:
-    plan = reading_plan(document, full, hints)
-    return plan["chunks"], plan["scope"], plan["read"], plan["unread"]
-
-
-def material_folder(data: dict[str, Any]) -> Path | None:
-    """The confirmed BG/material folder that evidence labels are relative to."""
-    state = data["state"].data
-    folder = (state.get("bg_context") or {}).get("folder")
-    target = state.get("selected_target") or {}
-    if not folder and target.get("kind") == "文件夹":
-        folder = target.get("path")
-    return Path(folder) if folder else None
-
-
-def traceable_label(document: dict, label: str, folder: Path | None) -> str:
-    """Prefix a file-name label with its path inside the material folder.
-
-    Same-named files in different subfolders (e.g. two notes.txt) otherwise
-    produce identical, untraceable citations.
-    """
-    name = str(document.get("name", ""))
-    if not folder or not name or not isinstance(label, str) or not label.startswith(name):
-        return label
-    try:
-        relative = Path(str(document.get("path", ""))).relative_to(folder).as_posix()
-    except ValueError:
-        return label
-    return relative + label[len(name):] if relative != name else label
-
-
-def traceable_evidence(data: dict[str, Any], evidence: list[dict]) -> list[dict]:
-    folder = material_folder(data)
-    if not folder:
-        return evidence
-    documents = {item.get("id"): item for item in data["documents"].list()}
-    result = []
-    for item in evidence:
-        document = documents.get(item.get("id"))
-        label = traceable_label(document, item.get("label", ""), folder) if document else item.get("label")
-        result.append(dict(item, label=label) if label != item.get("label") else item)
-    return result
-
-
-def summary_groups(document: dict, chunks: list[dict], limit: int = 24_000, folder: Path | None = None) -> list[str]:
-    groups, current = [], ""
-    for chunk in chunks:
-        label = traceable_label(document, chunk.get('label', document.get('name', 'file')), folder)
-        part = f"--- {label} ---\n{chunk.get('text', '')}\n"
-        if current and len(current) + len(part) > limit:
-            groups.append(current)
-            current = part
-        else:
-            current += part
-    if current:
-        groups.append(current)
-    return groups
-
-
-# Pictures read together with the text during pre-reading.  The same
-# per-request budget as an answer (count and bytes) keeps Farm uploads safe.
-PREREAD_IMAGES_PER_CALL = 5
-PREREAD_IMAGE_BYTES_PER_CALL = 2_400_000
-PREREAD_PDF_IMAGE_PAGES = 5
-PREREAD_DFC_SEGMENTS_PER_CALL = 4
-PREREAD_VISUAL_INSTRUCTION = ("本组随附 {count} 张图片（清单见文本开头）。请同时描述图中可见的视图、零件、结构层级、"
-                              "标题栏信息（图号、名称、版本）和关键尺寸；来自图片的要点请标注对应的图片标签。")
-
-
-def pdf_preread_pages(document: dict, read_pages: list[int]) -> list[int]:
-    """Which read pages of a PDF are also looked at as pictures.
-
-    A short PDF or a technical drawing: every page (its views, title block
-    and BOM can sit on different sheets).  Otherwise the pages whose local
-    inventory says they are mostly graphics (drawings, scans, mixed pages)."""
-    inventory = {item.get("page"): item for item in document.get("page_inventory", []) if isinstance(item, dict)}
-    total = len(document_pages(document))
-    if total <= MAX_SHORT_PDF_PAGES or document.get("material_role") == "technical_drawing":
-        pages = list(read_pages)
-    else:
-        pages = [page for page in read_pages if (inventory.get(page) or {}).get("page_type") in {"visual", "mixed"}]
-        if total > LONG_PDF_PAGES:
-            return pages[:LONG_PDF_GRAPHIC_PAGES]
-    return pages[:PREREAD_PDF_IMAGE_PAGES]
-
-
-def preread_groups(documents: "LocalDocumentLibrary", document: dict, read_chunks: list[dict],
-                   folder: Path | None, cache_dir: Path) -> tuple[list[dict], list[str]]:
-    """Pre-read groups of one file: text plus the pictures that belong to it.
-
-    Returns ([{"text", "images": [path], "labels": [str]}], skipped labels).
-    Text is grouped exactly as before; a PDF page picture rides with the
-    group that holds that page, an image file or DFC crop forms its own
-    group.  The picture list is written into the group text, so a cached
-    note is only reused for the same text and the same pictures."""
-    skipped: list[str] = []
-    suffix = Path(str(document.get("path", ""))).suffix.casefold()
-    name = document.get("name", "file")
-
-    def prepared(make, label, max_bytes=MAX_VISUAL_BYTES_PER_FILE) -> str | None:
-        try:
-            output = make()
-        except Exception:
-            output = None
-        if not output or not Path(output).is_file() or Path(output).stat().st_size > max(max_bytes, PREREAD_IMAGE_BYTES_PER_CALL):
-            skipped.append(label)
-            return None
-        return str(output)
-
-    def finish(text: str, images: list[str], labels: list[str]) -> dict:
-        kept: list[str] = []
-        kept_labels: list[str] = []
-        used = 0
-        for path, label in zip(images, labels):
-            size = Path(path).stat().st_size
-            if len(kept) >= PREREAD_IMAGES_PER_CALL or used + size > PREREAD_IMAGE_BYTES_PER_CALL:
-                skipped.append(label)
-                continue
-            kept.append(path)
-            kept_labels.append(label)
-            used += size
-        if kept:
-            listing = "; ".join(f"图{i} = {label}" for i, label in enumerate(kept_labels, start=1))
-            text = f"[随附图片：{listing}]\n{text}"
-        return {"text": text, "images": kept, "labels": kept_labels}
-
-    if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
-        source = Path(str(document.get("path", "")))
-        structure = document.get("dfc_structure")
-        manifest: dict[str, Any] = structure if isinstance(structure, dict) else {}
-        segments = [item for item in manifest.get("segments", []) if isinstance(item, dict) and item.get("path")]
-        base = "\n".join(f"--- {traceable_label(document, chunk.get('label', name), folder)} ---\n{chunk.get('text', '')}"
-                         for chunk in read_chunks)
-        if not segments:
-            image = prepared(lambda: documents._prepare_image(source, cache_dir), name)
-            return [finish(base, [image] if image else [], [name] if image else [])], skipped
-        groups = []
-        for start in range(0, len(segments), PREREAD_DFC_SEGMENTS_PER_CALL):
-            batch = segments[start:start + PREREAD_DFC_SEGMENTS_PER_CALL]
-            images, labels, texts = [], [], [base]
-            for segment in batch:
-                label = f"{name} DFC Abschnitt {segment.get('part')}"
-                image = prepared(lambda: documents._prepare_image(Path(str(segment["path"])), cache_dir,
-                                                                 max_bytes=520_000, max_edge=2600), label, 520_000)
-                if image:
-                    images.append(image)
-                    labels.append(label)
-                ocr = str(segment.get("ocr_text", "")).strip()
-                if ocr:  # the DFC OCR now reaches the pre-read, not only answers
-                    texts.append(f"[DFC Struktur OCR, Abschnitt {segment.get('part')}]\n{ocr}")
-            groups.append(finish("\n\n".join(texts), images, labels))
-        return groups, skipped
-
-    texts = summary_groups(document, read_chunks, folder=folder)
-    pages_of: list[set[int]] = [set() for _ in texts]
-    # Same grouping walk as summary_groups, recording which pages each group holds.
-    index, current = 0, ""
-    for chunk in read_chunks:
-        part = f"--- {traceable_label(document, chunk.get('label', name), folder)} ---\n{chunk.get('text', '')}\n"
-        if current and len(current) + len(part) > 24_000:
-            index, current = index + 1, part
-        else:
-            current += part
-        page = (chunk.get("visual") or {}).get("page")
-        if isinstance(page, int) and index < len(pages_of):
-            pages_of[index].add(page)
-    images_of: list[list[str]] = [[] for _ in texts]
-    labels_of: list[list[str]] = [[] for _ in texts]
-    if suffix == ".pdf":
-        read_pages = sorted(set().union(*pages_of)) if pages_of else []
-        for page in pdf_preread_pages(document, read_pages):
-            label = f"{name} — page {page}"
-            image = prepared(lambda: documents._render_pdf_page(Path(str(document["path"])), page, cache_dir), label)
-            if not image:
-                continue
-            target = next((i for i, pages in enumerate(pages_of) if page in pages), None)
-            if target is not None:
-                images_of[target].append(image)
-                labels_of[target].append(label)
-    return [finish(text, images_of[i], labels_of[i]) for i, text in enumerate(texts)], skipped
 
 
 def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, usage_records=None) -> dict:
@@ -2756,303 +1653,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
     return report
 
 
-def coverage_summary_for_answer(coverage: dict | None) -> dict | None:
-    """Local, auditable reading facts shown next to a classification answer."""
-    if not coverage or not coverage.get("files"):
-        return None
-    files = []
-    for item in coverage.get("files", []):
-        if not isinstance(item, dict):
-            continue
-        files.append({
-            "name": item.get("name", "未知文件"),
-            "scope": item.get("reading_scope", "已读取"),
-            "scope_message": item.get("reading_scope_message"),
-            "pages_total": item.get("pages_total", 0),
-            "pages_read": item.get("pages_read", []),
-            "pages_unread": item.get("pages_unread", []),
-            "cache_status": item.get("cache_status", ""),
-            "complete": bool(item.get("complete")),
-        })
-    return {"files": files, "complete": bool(coverage.get("complete")),
-            "reused_files": int(coverage.get("reused_files", 0)),
-            "created_files": int(coverage.get("created_files", 0)),
-            "model_calls": int(coverage.get("model_calls", 0))}
-
-
-def codebook_text(documents: LocalDocumentLibrary, bg_context: dict | None) -> str:
-    profile = (bg_context or {}).get("locked_profile") or {}
-    profile_text = json.dumps(profile, ensure_ascii=False)
-    codebook_id = (bg_context or {}).get("codebook_id")
-    document = next((item for item in documents.list() if item.get("id") == codebook_id), None)
-    return profile_text + "\n" + "\n".join(str(chunk.get("text", "")) for chunk in (document or {}).get("chunks", []))
-
-
-CODEBOOK_CLASS_ALIASES = {
-    "linear einheit": ("linear einheit", "lineareinheit", "linear unit", "linear axis", "线性单元", "直线单元", "平移单元"),
-    "gantry": ("gantry", "gantry system", "portal", "portalachse", "龙门", "桁架"),
-    "roboter": ("roboter", "robot", "robotic", "机器人"),
-    "greifer/endeffektor": ("greifer/endeffektor", "greifer", "endeffektor", "end-effektor", "end effector", "gripper", "夹爪", "末端执行器"),
-    "handhabungsbaugruppe": ("handhabungsbaugruppe", "handhabung", "handling assembly", "handling module", "搬运装配体", "搬运模块", "搬运单元"),
-    "rotationseinheit": ("rotationseinheit", "rotation unit", "rotary unit", "旋转单元", "转动单元"),
-    "kombinierte einheit": ("kombinierte einheit", "combined unit", "combined assembly", "组合单元", "组合装配体", "复合单元"),
-}
-
-
-def _codebook_name_key(value: Any) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold().replace("ä", "a").replace("ö", "o").replace("ü", "u").replace("ß", "ss")).strip()
-
-
-def _codebook_aliases(class_name: str) -> tuple[str, ...]:
-    key = _codebook_name_key(class_name)
-    aliases = [class_name]
-    for known_name, known_aliases in CODEBOOK_CLASS_ALIASES.items():
-        if key == _codebook_name_key(known_name):
-            aliases.extend(known_aliases)
-            break
-    return tuple(dict.fromkeys(alias.casefold() for alias in aliases if str(alias).strip()))
-
-
-def _rule_pages(rule: dict) -> list[int]:
-    return [int(page) for page in rule.get("pages", []) if str(page).isdigit() and int(page) > 0]
-
-
-def relevant_codebook_page_evidence(question: str, bg_context: dict | None, maximum_pages: int = 3) -> list[dict]:
-    """Attach original pages for the rules most relevant to this question.
-
-    The locked profile remains the normal prompt context.  These page images
-    are a targeted audit trail for the model, not a repeated full Codebook
-    upload.
-    """
-    profile = (bg_context or {}).get("locked_profile") or {}
-    path = Path(str((bg_context or {}).get("codebook_path", "")))
-    if not path.is_file() or path.suffix.lower() != ".pdf":
-        return []
-    limit = max(0, int(maximum_pages))
-    if not limit:
-        return []
-    query = question.casefold()
-    words = {word for word in re.findall(r"[\wäöüß-]{3,}", query)}
-    # Candidate tuples retain their source relation.  This allows a Chinese
-    # question to select a German source page through a class alias, while the
-    # visual page label remains strictly grounded in the locked profile.
-    candidates: list[tuple[int, float, list[int], str, str]] = []
-    for class_index, cls in enumerate(profile.get("classes", [])):
-        if not isinstance(cls, dict):
-            continue
-        name = str(cls.get("name", "")).strip()
-        aliases = _codebook_aliases(name)
-        alias_hits = sum(1 for alias in aliases if alias and alias in query)
-        class_text = " ".join([name, str(cls.get("definition", ""))] + [str(rule.get("text", "")) for group in ("decision_rules", "boundaries") for rule in cls.get(group, []) if isinstance(rule, dict)])
-        lexical_hits = sum(word in class_text.casefold() for word in words)
-        class_score = alias_hits * 100 + lexical_hits
-        definition_pages = [int(page) for page in cls.get("evidence_pages", []) if str(page).isdigit() and int(page) > 0]
-        # A named class is the strongest signal. Its evidence/definition page
-        # is deliberately considered before narrower rules to yield an
-        # explainable, stable fallback for short multilingual questions.
-        if definition_pages:
-            candidates.append((class_score, class_index * 10, definition_pages, f"class {name}", str(cls.get("definition", ""))))
-        for group_index, group_name in enumerate(("decision_rules", "boundaries"), start=1):
-            for rule_index, rule in enumerate(cls.get(group_name, [])):
-                if not isinstance(rule, dict):
-                    continue
-                pages = _rule_pages(rule)
-                if not pages:
-                    continue
-                rule_id, text = str(rule.get("id", "")).strip(), str(rule.get("text", ""))
-                rule_id_hit = bool(rule_id and rule_id.casefold() in query)
-                rule_hits = sum(word in text.casefold() for word in words)
-                score = class_score + (80 if rule_id_hit else 0) + rule_hits
-                candidates.append((score, class_index * 10 + group_index + rule_index / 1000,
-                                   pages, f"class {name}, {group_name[:-1]} {rule_id or rule_index + 1}", text))
-    for group_offset, group_name in enumerate(("global_rules", "table_rules"), start=1000):
-        for rule_index, rule in enumerate(profile.get(group_name, [])):
-            if not isinstance(rule, dict):
-                continue
-            pages = _rule_pages(rule)
-            if not pages:
-                continue
-            rule_id, text = str(rule.get("id", "")).strip(), str(rule.get("text", ""))
-            score = (80 if rule_id and rule_id.casefold() in query else 0) + sum(word in text.casefold() for word in words)
-            candidates.append((score, group_offset + rule_index / 1000, pages,
-                               f"{group_name[:-1]} {rule_id or rule_index + 1}", text))
-
-    # When there is no reliable hit, retain only definition/core-rule pages in
-    # profile order.  This is deterministic and meaningful, unlike selecting
-    # arbitrary rule IDs merely because their lexical scores all equal zero.
-    reliable = [item for item in candidates if item[0] > 0]
-    ranked = sorted(reliable or candidates, key=lambda item: (-item[0], item[1]))
-    selected, seen = [], set()
-    for _score, _order, pages, relation, text in ranked:
-        for page in pages:
-            if page in seen:
-                continue
-            selected.append({"id": "locked-codebook-page", "name": path.name,
-                             "label": f"{path.name} — Codebook {relation}, page {page}",
-                             "text": text, "visual": {"kind": "pdf_page", "path": str(path), "page": page}})
-            seen.add(page)
-            if len(selected) >= limit:
-                return selected
-    return selected
-
-
-def classification_scope(documents, context):
-    if not context:
-        return None
-    scope = dict(context)
-    source = next((item for item in documents.list() if item["id"] == context["codebook_id"]), None)
-    scope["_codebook_pages"] = document_pages(source) if source else []
-    return scope
-
-
-def validate_classification(action: dict, evidence: list[dict], codebook: str,
-                            profile: dict | None = None, bg_context: dict | None = None) -> str | None:
-    """Check schema, fixed labels and provenance, not engineering semantics."""
-    classification = action.get("classification")
-    if not isinstance(classification, dict):
-        return "Missing classification object"
-    if not isinstance(profile, dict):
-        return "No locked Codebook rules are available"
-    names = {item["name"] for item in profile.get("classes", [])
-             if isinstance(item, dict) and isinstance(item.get("name"), str)}
-    label = classification.get("label")
-    if not isinstance(label, str) or not label or label not in names:
-        return "Class label must exactly match one locked Codebook class"
-    confidence = classification.get("confidence")
-    if not isinstance(confidence, str) or confidence not in {"high", "medium", "low"}:
-        return "confidence must be high, medium or low"
-    alternative = classification.get("alternative_label", "")
-    if not isinstance(alternative, str) or (alternative and alternative not in names):
-        return "alternative_label must be empty or one exact locked class"
-    uncertainties = classification.get("uncertainties", [])
-    if not isinstance(uncertainties, list) or any(not isinstance(item, str) for item in uncertainties):
-        return "uncertainties must be a string list"
-
-    manifest = classification_manifest(evidence, bg_context)
-    supplied = {item.get("label") for item in evidence if isinstance(item.get("label"), str)}
-    labels = classification.get("evidence_labels")
-    if not isinstance(labels, list) or not labels or any(not isinstance(item, str) or item not in supplied for item in labels):
-        return "evidence_labels must copy supplied evidence labels exactly"
-    bg_refs = classification.get("bg_evidence_pages")
-    if not isinstance(bg_refs, list) or not bg_refs or any(
-        not isinstance(item, str) or item not in manifest["bg_labels"] or item not in labels for item in bg_refs
-    ):
-        return "bg_evidence_pages must copy cited BG page/sheet/row/chunk labels; Codebook-only evidence is not BG evidence"
-
-    rules: dict[str, dict] = {}
-    groups = [profile.get("global_rules", []), profile.get("table_rules", [])]
-    for item in profile.get("classes", []):
-        if isinstance(item, dict):
-            groups.extend([item.get("decision_rules", []), item.get("boundaries", [])])
-    for group in groups:
-        for rule in group if isinstance(group, list) else []:
-            if isinstance(rule, dict) and isinstance(rule.get("id"), str) and rule["id"]:
-                if rule["id"] in rules and rules[rule["id"]] != rule:
-                    return "The locked profile contains an ambiguous rule ID"
-                rules[rule["id"]] = rule
-    rule_ids = classification.get("codebook_rule_ids")
-    if not isinstance(rule_ids, list) or not rule_ids or any(not isinstance(item, str) or item not in rules for item in rule_ids):
-        return "codebook_rule_ids must reference existing string IDs from the locked rules"
-
-    pages = classification.get("codebook_rule_pages")
-    if not isinstance(pages, list) or any(type(page) is not int or page < 1 for page in pages):
-        return "codebook_rule_pages must be positive integer pages, or an empty list for nonpaged rules"
-    rule_refs = classification.get("codebook_rule_refs", [])
-    if not isinstance(rule_refs, list) or any(not isinstance(item, str) or item not in manifest["codebook_labels"] for item in rule_refs):
-        return "codebook_rule_refs must copy supplied Codebook source labels"
-    if bg_context and manifest["codebook_source_kind"] == "nonpaged":
-        if pages or not rule_refs:
-            return "Nonpaged Codebooks require actual section/chunk refs and empty codebook_rule_pages"
-    else:
-        allowed_pages = {page for rule_id in rule_ids for page in rules[rule_id].get("pages", [])
-                         if type(page) is int and page > 0}
-        if not pages or not set(pages).issubset(allowed_pages):
-            return "Codebook pages must belong to the cited rule or boundary-rule sources"
-        if bg_context and not set(pages).issubset(set(bg_context.get("_codebook_pages", []))):
-            return "Codebook page reference is outside the actual source document"
-    return None
-
-
-class ClassificationValidationError(ValueError):
-    """An unvalidated classification must never become a fallback answer/plan."""
-
-
-def classification_repair_prompt(base_prompt: str, reason: str, *, required: bool = True) -> str:
-    obligation = ("A complete valid classification object is required; do not omit it."
-                  if required else "Classification may be null in explanation mode; any non-null object must pass all rules.")
-    return base_prompt + f"""
-
-IMPORTANT: The preceding JSON action was rejected locally: {reason}.
-Return the complete valid JSON action again. {obligation}
-Copy exact locked class names, existing string rule IDs, and supplied reference-manifest labels.
-Use physical Codebook pages only for PDF sources and only for the cited rule pages.
-For nonpaged Codebooks use actual section/chunk labels in codebook_rule_refs, with codebook_rule_pages=[].
-BG evidence must use BG labels, not Codebook labels. Do not add commentary outside JSON.
-"""
-
-
-def complete_model_action(raw):
-    """Require the whole action, rather than extracting a complete inner object."""
-    text = raw.strip()
-    if text.startswith("```"):
-        fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.I | re.S)
-        if not fenced:
-            raise ValueError("Incomplete fenced JSON action")
-        text = fenced.group(1)
-    if not isinstance(json.loads(text), dict):
-        raise ValueError("Model action must be one complete object")
-    return parse_json(text)
-
-
-def validated_model_action(raw, prompt, *, evidence, scope, validation, repair, notices, language="zh"):
-    """One validator for every round; one repair budget for the entire answer."""
-    while True:
-        action = None
-        try:
-            action = complete_model_action(raw)
-            stray = action.get("classification")
-            if not scope and stray is not None and (not isinstance(stray, dict) or not stray):
-                # An empty/non-object value outside BG mode is not a classification:
-                # keep the ordinary answer. A real object is still rejected below.
-                action["classification"] = None
-                notices.append(UIMessage('notice.classification_ignored', language))
-            if action.get("classification") is not None:
-                validation["required"] = True
-            problem = validate_classification(
-                action, evidence, "", (scope or {}).get("locked_profile"), scope
-            ) if validation["required"] else None
-        except (ValueError, TypeError) as exc:
-            problem = str(exc)
-        if not problem:
-            return action
-        if not scope and not validation["required"]:
-            raise ValueError(problem)
-        if validation["repairs"] >= 1 or not scope:
-            raise ClassificationValidationError("Classification/action validation failed: " + problem)
-        validation["repairs"] += 1
-        notices.append(UIMessage('notice.repair', language, detail=problem))
-        raw = repair(classification_repair_prompt(prompt, problem, required=validation["required"]))
         # No success notice until this same validator accepts the repaired action.
-
-
-def image_group_notices(data, report):
-    return [ui_message(data, 'notice.image_group_overview' if item['overview'] else 'notice.image_group_full',
-                       name=item['name'], count=item['count'], details=item.get('details', 0))
-            for item in report.get('image_group_details', [])]
-
-
-# Answer output limits.  max_tokens is a ceiling, not a charge: only generated
-# tokens cost.  Answers start at the full 8192 ceiling.  An answer cut at that
-# ceiling is never used; it is asked for once more, explicitly shortened.
-# That bounded retry is the only extra call, and only for an answer that was
-# actually cut.
-ANSWER_OUTPUT_TOKENS = 8192
-ANSWER_RETRY_OUTPUT_TOKENS = 8192
-ANSWER_SHORTEN_INSTRUCTION = (
-    "\n\nIMPORTANT: Your previous reply to this request exceeded the output limit and was discarded. "
-    "Reply again with the same JSON fields, but keep \"answer\" within about 800 Chinese characters "
-    "(or equivalent) and at most 3 short points per section. The JSON, including any classification "
-    "object, must be complete.")
 
 
 def call_model(data: dict[str, Any], question: str, progress=None, *, require_classification: bool | None = True,
@@ -4182,12 +2783,6 @@ def codebook_prepare(request: CodebookPrepareRequest):
                                                       'failure': job.record.get('failure')})
 
 
-class CodebookEditRequest(BaseModel):
-    draft: dict
-    confirmed: bool = False
-    profile_version: str | None = None
-
-
 def rules_changed(data, issue="rules_changed"):
     reset_context(data)
     state = data["state"]
@@ -4391,10 +2986,6 @@ def chat(request: ChatRequest):
         MODEL_WORK_IN_PROGRESS.clear()
 
 
-class ChatCancelRequest(BaseModel):
-    request_id: str
-
-
 def chat_task_status(task):
     return {"request_id": task["id"], "done": task["done"].is_set(),
             "state": task["state"], "worker_alive": task["worker"].is_alive()}
@@ -4573,11 +3164,6 @@ def compare(request: CompareRequest):
             return call_comparison(data, question, models)
     finally:
         end_model_work(data)
-
-
-class ApplyRequest(BaseModel):
-    confirmed: bool = False
-    plan_id: str = ""
 
 
 def invalidate_pending(data):

@@ -9,6 +9,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient  # noqa: E402
 import chat_workbench as w  # noqa: E402
+import workbench_materials  # noqa: E402
 from fixture_support import FixtureEnvironment  # noqa: E402
 
 GROUP_SYSTEM = "careful technical evidence extractor"
@@ -171,7 +172,7 @@ class MaterialPrereadCache(unittest.TestCase):
         self.assertEqual(self.group_calls()[0]["body"]["generationConfig"]["maxOutputTokens"], w.MATERIAL_GROUP_TOKENS)
         merge = self.merge_calls()[0]["body"]
         merged = json.dumps(merge, ensure_ascii=False)
-        self.assertIn(f"合计不超过约 {w.PREREAD_SUMMARY_CHARS} 字", merged)  # prose is bounded,
+        self.assertIn(f"合计不超过约 {workbench_materials.PREREAD_SUMMARY_CHARS} 字", merged)  # prose is bounded,
         self.assertIn("型号和参数去重后全部保留", merged)  # part numbers and parameters are not
         self.assertEqual(merge["generationConfig"]["maxOutputTokens"], w.MATERIAL_MERGE_TOKENS)
         # A stored note from another prompt version is ignored, not reused.
