@@ -28,3 +28,4 @@ workbench_rules.py
 workbench_session.py
 workbench_startup.py
 workbench_state_files.py
+workbench_tasks.py

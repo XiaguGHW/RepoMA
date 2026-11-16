@@ -44,6 +44,7 @@ try:
     from workbench_i18n import catalog_script_json, UIMessage, localize_message
     from workbench_frontend import load_frontend_html
     from workbench_session import Session
+    from workbench_tasks import ModelSlot
     import workbench_state_files as state_files
     from workbench_messages import (UIRequestError, UIValidationError, error_copy, message_payload, redact_value,
                                     ui_message)
@@ -91,20 +92,20 @@ except ImportError as exc:
 
 
 app = FastAPI(title="Bosch Assembly Assistant", docs_url=None, redoc_url=None)
+# LOCK serializes requests that change the session or its context, and the
+# short moment in which a model task captures that context.  It is never held
+# while a model call runs: the model slot (MODEL_SLOT) marks a running task, and
+# context changes are refused while it is taken.
 LOCK = threading.RLock()
 ACTIVE: Session = {}
-# A streamed request runs in a background thread.  Keep an explicit marker in
-# addition to LOCK so a second browser action cannot replace ACTIVE while that
-# request is queued for the lock or is using a captured session context.
-MODEL_WORK_IN_PROGRESS = threading.Event()
+# At most one model task at a time; each stoppable by its operation ID
+# (/api/operation/cancel).  MODEL_WORK_IN_PROGRESS is the slot's busy Event.
+MODEL_SLOT = ModelSlot()
+MODEL_WORK_IN_PROGRESS = MODEL_SLOT.busy
 CHAT_TASK_GUARD = threading.Lock()
-# Serializes small settings writes that may run while LOCK is held by model work.
+# Serializes small settings writes that may run while model work runs.
 SETTINGS_GUARD = threading.Lock()
 CHAT_TASK: dict[str, Any] = {}
-# Synchronous long model operations (Codebook preparation, coverage, comparison,
-# dossier rebuild) that a browser Stop can cancel by request_id.
-OPERATION_GUARD = threading.Lock()
-OPERATIONS: dict[str, RequestControl] = {}
 # The session/context a browser page displays (X-Workbench-Context). Requests
 # that act on the current context are rejected when it no longer matches, so a
 # stale tab can never run in, or change, another tab's session or material scope.
@@ -439,10 +440,9 @@ def begin_model_work(request_id: str = "") -> Session:
         data["request_control"] = RequestControl()
         data["cancel_event"] = data["request_control"].cancel_event
         data["operation_id"] = request_id
-        if request_id:
-            with OPERATION_GUARD:
-                OPERATIONS[request_id] = data["request_control"]
-        MODEL_WORK_IN_PROGRESS.set()
+        if not MODEL_SLOT.reserve():  # cannot happen while LOCK is held; kept as a guard
+            raise HTTPException(409, ui_message(ACTIVE, 'error.busy'))
+        MODEL_SLOT.register(request_id, data["request_control"])
         return data
     finally:
         LOCK.release()
@@ -450,9 +450,8 @@ def begin_model_work(request_id: str = "") -> Session:
 
 def end_model_work(data: Session) -> None:
     """Release a synchronous operation only after its work returned or raised."""
-    with OPERATION_GUARD:
-        OPERATIONS.pop(data.get("operation_id") or "", None)
-    MODEL_WORK_IN_PROGRESS.clear()
+    MODEL_SLOT.forget(data.get("operation_id") or "")
+    MODEL_SLOT.release()
 
 
 def status_data(data: Session) -> dict[str, Any]:
@@ -1114,18 +1113,17 @@ def run_codebook_job(data: Session, job: CodebookJob, path: Path, model: str) ->
     the final state is published, so a finished state never meets a busy server.
     """
     try:
-        with LOCK:
-            profile = prepare_codebook_profile(data, path, model, job)
-            job.event("saving", "rulejob.stage.saving")
-            with commit_answer(data):  # A Stop that wins here saves no profile.
-                save_codebook_profile(profile)
-                rules_changed(data)
-                data["state"].data["selected_codebook_path"] = str(path)
-                data["state"].save()
-            # Saving rules changes the context revision.  The page that started
-            # the job (and was current then) may adopt the new token; any other
-            # page stays stale exactly as with every other context change.
-            job.record["context_after"] = context_token(data)
+        profile = prepare_codebook_profile(data, path, model, job)
+        job.event("saving", "rulejob.stage.saving")
+        with commit_answer(data):  # A Stop that wins here saves no profile.
+            save_codebook_profile(profile)
+            rules_changed(data)
+            data["state"].data["selected_codebook_path"] = str(path)
+            data["state"].save()
+        # Saving rules changes the context revision.  The page that started
+        # the job (and was current then) may adopt the new token; any other
+        # page stays stale exactly as with every other context change.
+        job.record["context_after"] = context_token(data)
         job.succeed(profile)
         return profile
     except Exception as exc:
@@ -2020,6 +2018,31 @@ def call_comparison(data: Session, question: str, models: list[str]) -> dict[str
             "sources": [str(item.get("label", item.get("name", "未知来源"))) for item in evidence]}
 
 
+def saved_session_change(function):
+    """Pin, rename or delete a saved session folder.
+
+    Unlike context_mutation this may run while a model task holds the slot,
+    as long as it does not touch the active session: the task writes only the
+    active session's folder.  The endpoint calls reject_active_session_while_busy().
+    """
+    @wraps(function)
+    def guarded(*args, **kwargs):
+        if not LOCK.acquire(blocking=False):
+            raise HTTPException(409, ui_message(ACTIVE, 'error.busy'))
+        try:
+            ensure_current_page()
+            return function(*args, **kwargs)
+        finally:
+            LOCK.release()
+    return guarded
+
+
+def reject_active_session_while_busy(folder: Path) -> None:
+    active = ACTIVE.get("state")
+    if MODEL_WORK_IN_PROGRESS.is_set() and active is not None and folder == active.root:
+        raise HTTPException(409, ui_message(ACTIVE, 'error.busy'))
+
+
 def context_mutation(function):
     @wraps(function)
     def guarded(*args, **kwargs):
@@ -2290,13 +2313,13 @@ def activate_local_session(data: Session, session_name: str) -> dict:
 
 
 @app.post("/api/session/rename")
-@context_mutation
+@saved_session_change
 def rename_session(request: SessionRenameRequest):
     with LOCK:
-        reject_context_change_while_processing()
         data = session()
         name = safe_name(request.name.strip())
         state = data["state"] if not request.source.strip() else ProjectState(app_state_home(), data["state"].workspace, safe_name(request.source.strip()))
+        reject_active_session_while_busy(state.root)
         if not state.root.is_dir():
             raise HTTPException(404, ui_message(ACTIVE, 'error.session_missing'))
         target = state.root.parent / name
@@ -2312,14 +2335,14 @@ def rename_session(request: SessionRenameRequest):
 
 
 @app.post("/api/session/delete")
-@context_mutation
+@saved_session_change
 def delete_session(request: SessionDeleteRequest):
     with LOCK:
-        reject_context_change_while_processing()
         if not request.confirmed:
             raise HTTPException(400, ui_message(ACTIVE, 'error.confirmation'))
         data = session()
         state = data["state"] if not request.name.strip() else ProjectState(app_state_home(), data["state"].workspace, safe_name(request.name.strip()))
+        reject_active_session_while_busy(state.root)
         if not state.root.is_dir():
             raise HTTPException(404, ui_message(ACTIVE, 'error.session_missing'))
         current = state.root
@@ -2394,12 +2417,12 @@ def create_session():
 
 
 @app.post("/api/session/pin")
-@context_mutation
+@saved_session_change
 def pin_session(request: SessionPinRequest):
-    reject_context_change_while_processing()
     data = session()
     name = safe_name(request.name.strip())
     target = data["state"].root.parent / name
+    reject_active_session_while_busy(target)
     if not target.is_dir():
         raise HTTPException(404, ui_message(ACTIVE, 'error.session_missing'))
     saved = ProjectState(app_state_home(), data["state"].workspace, name)
@@ -2873,8 +2896,7 @@ def coverage_status():
 def create_coverage(request: CoverageRequest = CoverageRequest()):
     data = begin_model_work(request.request_id)
     try:
-        with LOCK:
-            return prepare_coverage(data, full=request.full)
+        return prepare_coverage(data, full=request.full)
     finally:
         end_model_work(data)
 
@@ -2917,12 +2939,11 @@ def rebuild_bg_dossier(request: CacheConfirmRequest):
         coverage = load_coverage(data["state"])
         if not coverage_matches_current_selection(data, coverage):
             raise HTTPException(409, ui_message(ACTIVE, 'error.coverage_missing'))
-        with LOCK:
-            # Do not unlink an existing dossier first.  The replacement is
-            # written atomically only after the new model response succeeded,
-            # so a failed rebuild cannot masquerade as a completed cache or
-            # discard a previously valid audit record.
-            dossier, usage, _created = prepare_bg_dossier(data, coverage, force=True)
+        # Do not unlink an existing dossier first.  The replacement is
+        # written atomically only after the new model response succeeded,
+        # so a failed rebuild cannot masquerade as a completed cache or
+        # discard a previously valid audit record.
+        dossier, usage, _created = prepare_bg_dossier(data, coverage, force=True)
         message = ui_message(data, 'cache.dossier_rebuilt')
         return {"message": str(message), **message_payload(message), "dossier": dossier,
                 "usage": usage or summarize_usage([]), "audit": cache_audit(data)}
@@ -2980,9 +3001,8 @@ def chat(request: ChatRequest):
         raise HTTPException(400, ui_message(ACTIVE, 'error.question'))
     data = begin_model_work()
     try:
-        with LOCK:
-            return call_model(data, request.question.strip(), require_classification=request.require_classification,
-                              focus_source_id=request.focus_source_id)
+        return call_model(data, request.question.strip(), require_classification=request.require_classification,
+                          focus_source_id=request.focus_source_id)
     finally:
         MODEL_WORK_IN_PROGRESS.clear()
 
@@ -3016,8 +3036,7 @@ def cancel_chat(request: ChatCancelRequest):
 @app.post("/api/operation/cancel")
 def cancel_operation(request: OperationCancelRequest):
     """Stop a running Codebook preparation, coverage, comparison or dossier rebuild."""
-    with OPERATION_GUARD:
-        control = OPERATIONS.get(request.request_id)
+    control = MODEL_SLOT.control(request.request_id)
     if control is None:
         raise HTTPException(404, ui_message(ACTIVE, 'error.unknown_task'))
     return {"request_id": request.request_id, "cancelled": bool(control.cancel())}
@@ -3060,10 +3079,9 @@ async def chat_stream(request: ChatRequest, http_request: Request):
 
     def worker():
         try:
-            with LOCK:
-                task["result"] = call_model(data, question, progress=publish,
-                                            require_classification=request.require_classification,
-                                            focus_source_id=request.focus_source_id)
+            task["result"] = call_model(data, question, progress=publish,
+                                        require_classification=request.require_classification,
+                                        focus_source_id=request.focus_source_id)
         except Exception as exc:
             code = ("cancelled" if isinstance(exc, RequestCancelled) else
                     "timeout" if isinstance(exc, RequestTimedOut) else
@@ -3161,8 +3179,7 @@ def compare(request: CompareRequest):
         raise HTTPException(400, ui_message(ACTIVE, 'compare.models_required'))
     data = begin_model_work(request.request_id)
     try:
-        with LOCK:
-            return call_comparison(data, question, models)
+        return call_comparison(data, question, models)
     finally:
         end_model_work(data)
 
