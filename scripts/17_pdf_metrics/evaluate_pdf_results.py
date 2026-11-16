@@ -69,6 +69,13 @@ def model_name(path):
     return Path(path).stem
 
 
+def is_output_or_backup(p):
+    """Excel-Sperrdateien, eigene Ausgaben (*_Metriken_Konfusion.xlsx) und Sicherungskopien überspringen."""
+    p = Path(p)
+    return (p.name.startswith("~$") or p.name.endswith("_Metriken_Konfusion.xlsx")
+            or "Backup_Original" in p.parts)
+
+
 def model_rank(name):
     names = [n for _, n in MODELS]
     return names.index(name) if name in names else len(names)
@@ -417,7 +424,7 @@ def main(argv=None):
 
     files = [Path(f) for f in a.files]
     if a.dir:
-        files += sorted(p for p in Path(a.dir).glob("*.xlsx") if not p.name.startswith("~$"))
+        files += sorted(p for p in Path(a.dir).glob("*.xlsx") if not is_output_or_backup(p))
     if not files:
         ap.error("keine Dateien angegeben (Dateien oder --dir)")
 

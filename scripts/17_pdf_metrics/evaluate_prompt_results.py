@@ -258,8 +258,7 @@ def main(argv=None):
     out = Path(a.out)
     files = [Path(f) for f in a.files]
     if a.dir:
-        files += sorted(p for p in Path(a.dir).rglob("*.xlsx")
-                        if not p.name.startswith("~$") and out.resolve() not in p.resolve().parents)
+        files += sorted(p for p in Path(a.dir).rglob("*.xlsx") if not E.is_output_or_backup(p))
     if not files:
         ap.error("keine Dateien angegeben (Dateien oder --dir)")
 
