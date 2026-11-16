@@ -29,7 +29,7 @@ from functools import wraps
 from queue import Empty, Full, Queue
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 STARTUP_CONFIG = bootstrap() if __name__ == '__main__' else StartupConfig()
 FARM_ENVIRONMENT = FarmEnvironment()
@@ -43,6 +43,7 @@ try:
     from dotenv import load_dotenv
     from workbench_i18n import catalog_script_json, UIMessage, localize_message
     from workbench_frontend import load_frontend_html
+    from workbench_session import Session
     import workbench_state_files as state_files
     from workbench_messages import (UIRequestError, UIValidationError, error_copy, message_payload, redact_value,
                                     ui_message)
@@ -91,7 +92,7 @@ except ImportError as exc:
 
 app = FastAPI(title="Bosch Assembly Assistant", docs_url=None, redoc_url=None)
 LOCK = threading.RLock()
-ACTIVE: dict[str, Any] = {}
+ACTIVE: Session = {}
 # A streamed request runs in a background thread.  Keep an explicit marker in
 # addition to LOCK so a second browser action cannot replace ACTIVE while that
 # request is queued for the lock or is using a captured session context.
@@ -374,13 +375,13 @@ def save_workbench_settings(workspace: Path, session_name: str, model: str, lang
     }))
 
 
-def session() -> dict[str, Any]:
+def session() -> Session:
     if not ACTIVE:
         raise HTTPException(400, ui_message(ACTIVE, 'error.workspace_required'))
     return ACTIVE
 
 
-def ui_state(data, value):
+def ui_state(data: Session, value):
     keys = {'ok': 'state.ok', 'not_needed': 'state.not_needed', 'partial': 'state.partial', 'not_requested': 'state.not_requested', 'unknown': 'state.unknown',
             'not_applicable': 'state.not_applicable', 'not applicable': 'state.not_applicable',
             '已完成': 'state.complete', '部分完成': 'state.partial', '不需要（原生文字页）': 'state.native_text',
@@ -402,7 +403,7 @@ def protect_configuration(state: ProjectState, env_file: Any = None) -> ProjectS
     return state
 
 
-def context_token(data: dict[str, Any]) -> str:
+def context_token(data: Session) -> str:
     """Opaque binding of one session directory and its material/rule revision."""
     state = data["state"]
     identity = f"{state.root}\0{state.data.get('context_revision', '')}"
@@ -422,7 +423,7 @@ def reject_context_change_while_processing() -> None:
         raise HTTPException(409, ui_message(ACTIVE, 'error.busy'))
 
 
-def begin_model_work(request_id: str = "") -> dict[str, Any]:
+def begin_model_work(request_id: str = "") -> Session:
     """Reserve the single model slot and capture its complete request context.
 
     A nonempty request_id makes a synchronous operation stoppable through
@@ -434,7 +435,7 @@ def begin_model_work(request_id: str = "") -> dict[str, Any]:
         if MODEL_WORK_IN_PROGRESS.is_set():
             raise HTTPException(409, ui_message(ACTIVE, 'error.busy'))
         ensure_current_page()
-        data = dict(session())
+        data = cast(Session, dict(session()))
         data["request_control"] = RequestControl()
         data["cancel_event"] = data["request_control"].cancel_event
         data["operation_id"] = request_id
@@ -447,14 +448,14 @@ def begin_model_work(request_id: str = "") -> dict[str, Any]:
         LOCK.release()
 
 
-def end_model_work(data: dict[str, Any]) -> None:
+def end_model_work(data: Session) -> None:
     """Release a synchronous operation only after its work returned or raised."""
     with OPERATION_GUARD:
         OPERATIONS.pop(data.get("operation_id") or "", None)
     MODEL_WORK_IN_PROGRESS.clear()
 
 
-def status_data(data: dict[str, Any]) -> dict[str, Any]:
+def status_data(data: Session) -> dict[str, Any]:
     state = data["state"]
     usage = state.data["usage"]
     return {
@@ -621,7 +622,7 @@ def require_unique_rule_ids(draft: dict | None, status: int = 400) -> None:
 CODEBOOK_BUDGET = CodebookParseBudget()
 
 
-def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data, usage_records=None,
+def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data: Session, usage_records=None,
                                      on_call=None, output_tokens: int | None = None) -> tuple[dict, dict | None]:
     """Parse the final Codebook JSON, making one syntax-only repair attempt if needed."""
     try:
@@ -789,7 +790,7 @@ def load_codebook_job() -> dict | None:
     return record
 
 
-def parse_codebook_unit(job: CodebookJob, data: dict[str, Any], connector: LLMConnector, unit: dict,
+def parse_codebook_unit(job: CodebookJob, data: Session, connector: LLMConnector, unit: dict,
                         total: int, file_type: str) -> list[dict]:
     """Parse one unit within CODEBOOK_BUDGET; returns complete JSON notes only."""
     budget = CODEBOOK_BUDGET
@@ -848,7 +849,7 @@ def parse_codebook_unit(job: CodebookJob, data: dict[str, Any], connector: LLMCo
     return run(piece, 0)
 
 
-def merge_codebook_notes(job: CodebookJob, data: dict[str, Any], connector: LLMConnector,
+def merge_codebook_notes(job: CodebookJob, data: Session, connector: LLMConnector,
                          notes: list[list[dict]], nonpaged: bool,
                          cache: tuple[dict, Path] | None = None) -> str:
     """Merge every unit's notes into profile JSON.
@@ -879,7 +880,7 @@ def merge_codebook_notes(job: CodebookJob, data: dict[str, Any], connector: LLMC
     return json.dumps(merge_codebook_sections(job, data, connector, notes_text, cache), ensure_ascii=False)
 
 
-def merge_codebook_sections(job: CodebookJob, data: dict[str, Any], connector: LLMConnector, notes_text: str,
+def merge_codebook_sections(job: CodebookJob, data: Session, connector: LLMConnector, notes_text: str,
                             cache: tuple[dict, Path] | None = None) -> dict:
     """Outline, one request per class, general rules and table rules; assembled locally.
 
@@ -983,7 +984,7 @@ def codebook_note_cache_path(file_sha: str, model: str) -> Path:
     return app_state_home() / "codebook_note_cache" / f"{file_sha[:20]}_{identity}.json"
 
 
-def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str, job: CodebookJob | None = None) -> dict:
+def prepare_codebook_profile(data: Session, path: Path, model: str, job: CodebookJob | None = None) -> dict:
     """Read, parse, merge and validate a Codebook into an unsaved draft profile."""
     file_type = CODEBOOK_FILE_TYPES.get(path.suffix.lower())
     if not file_type:
@@ -1106,7 +1107,7 @@ def prepare_codebook_profile(data: dict[str, Any], path: Path, model: str, job: 
             "ocr_runtime": ocr_runtime, "rule_id_renames": rule_id_renames}
 
 
-def run_codebook_job(data: dict[str, Any], job: CodebookJob, path: Path, model: str) -> dict:
+def run_codebook_job(data: Session, job: CodebookJob, path: Path, model: str) -> dict:
     """Prepare and save a draft; on any failure record it and keep existing rules.
 
     Owns the model slot reserved by begin_model_work(): it is released before
@@ -1138,7 +1139,7 @@ def run_codebook_job(data: dict[str, Any], job: CodebookJob, path: Path, model: 
         job.publish()
 
 
-def write_session_export(data: dict[str, Any]) -> Path:
+def write_session_export(data: Session) -> Path:
     state = data["state"]
     exports = state.root / "exports"
     exports.mkdir(parents=True, exist_ok=True)
@@ -1323,7 +1324,7 @@ def load_bg_dossier_cache(coverage: dict, model: str) -> dict | None:
     return payload if str(payload.get("summary", "")).strip() else None
 
 
-def prepare_bg_dossier(data: dict[str, Any], coverage: dict, *, force: bool = False, usage_records=None) -> tuple[dict | None, dict | None, bool]:
+def prepare_bg_dossier(data: Session, coverage: dict, *, force: bool = False, usage_records=None) -> tuple[dict | None, dict | None, bool]:
     """Consolidate reusable per-file facts once; raw evidence remains query-specific."""
     ensure_current_sources(data)
     if not coverage_matches_current_selection(data, coverage):
@@ -1381,7 +1382,7 @@ def material_cache_entries(document: dict) -> list[dict]:
     return entries
 
 
-def cache_audit(data: dict[str, Any]) -> dict:
+def cache_audit(data: Session) -> dict:
     state, documents = data["state"], data["documents"]
     active = set(state.data.get("active_source_ids") or [])
     selected = [item for item in documents.list() if item.get("id") in active]
@@ -1414,13 +1415,13 @@ def load_coverage(state: ProjectState) -> dict:
         return {}
 
 
-def coverage_matches_current_selection(data: dict[str, Any], coverage: dict | None = None) -> bool:
+def coverage_matches_current_selection(data: Session, coverage: dict | None = None) -> bool:
     """A session report is usable only when complete and made for the exact selected material hashes/model."""
     coverage = coverage if coverage is not None else load_coverage(data["state"])
     return bool(coverage.get("complete")) and coverage_is_for_current_selection(data, coverage)
 
 
-def coverage_is_for_current_selection(data: dict[str, Any], coverage: dict) -> bool:
+def coverage_is_for_current_selection(data: Session, coverage: dict) -> bool:
     """True when the report belongs to the current materials and model, complete or not.
 
     An incomplete report of the current selection must still be shown with its
@@ -1436,7 +1437,7 @@ def coverage_is_for_current_selection(data: dict[str, Any], coverage: dict) -> b
     return bool(expected) and actual == expected
 
 
-def coverage_for_ui(data: dict[str, Any]) -> dict:
+def coverage_for_ui(data: Session) -> dict:
     coverage = load_coverage(data["state"])
     if coverage:
         coverage = dict(coverage)
@@ -1447,7 +1448,7 @@ def coverage_for_ui(data: dict[str, Any]) -> dict:
     return coverage
 
 
-def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, usage_records=None) -> dict:
+def prepare_coverage(data: Session, full: bool = False, progress=None, usage_records=None) -> dict:
     """Prepare auditable, document-aware evidence before a BG classification question."""
     ensure_current_sources(data)
     state, documents, llm = data["state"], data["documents"], data["llm"]
@@ -1656,7 +1657,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
         # No success notice until this same validator accepts the repaired action.
 
 
-def call_model(data: dict[str, Any], question: str, progress=None, *, require_classification: bool | None = True,
+def call_model(data: Session, question: str, progress=None, *, require_classification: bool | None = True,
                focus_source_id: str = "") -> dict[str, Any]:
     state, documents, llm = data["state"], data["documents"], data["llm"]
     ensure_current_sources(data)
@@ -1712,7 +1713,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
     reasoning, notices = [], []
     turn_scope = ({"kind": "file", "id": focus["id"], "name": focus["name"]} if focus
                   else {"kind": "all", "count": len(material_ids)})
-    visual_report = documents.last_visual_report
+    visual_report: dict[str, Any] = documents.last_visual_report
     if visual_report.get("short_drawings"):
         names = "、".join(str(name) for name in visual_report["short_drawings"])
         notices.append(ui_message(data, 'notice.short_drawings', names=names, count=visual_report.get("attachments", 0), kb=int(visual_report.get("bytes", 0)) // 1024))
@@ -1942,7 +1943,7 @@ def call_model(data: dict[str, Any], question: str, progress=None, *, require_cl
             "usage": status_data(data)}
 
 
-def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> dict[str, Any]:
+def call_comparison(data: Session, question: str, models: list[str]) -> dict[str, Any]:
     """Run an isolated, read-only answer for each model against identical BG evidence."""
     ensure_current_sources(data)
     state, documents = data["state"], data["documents"]
@@ -1958,7 +1959,7 @@ def call_comparison(data: dict[str, Any], question: str, models: list[str]) -> d
     evidence = documents.ensure_ocr_for_snippets(evidence, question, classification=True)
     visuals = documents.visual_paths(evidence, state.root / "visual_cache",
                                      bilder_images=documents.bilder_image_paths(preferred))
-    visual_report = documents.last_visual_report
+    visual_report: dict[str, Any] = documents.last_visual_report
     coverage = load_coverage(state)
     dossier = load_bg_dossier_cache(coverage, data["model"]) if coverage_matches_current_selection(data, coverage) else None
     prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
@@ -2033,7 +2034,7 @@ def context_mutation(function):
     return guarded
 
 
-def reset_context(data):
+def reset_context(data: Session):
     state = data["state"]
     if state.transcript_path.exists():
         archive = state.root / "archives"
@@ -2048,7 +2049,7 @@ def reset_context(data):
     state.save()
 
 
-def context_issue(data):
+def context_issue(data: Session):
     state = data["state"]
     if context_state_error(state.data):
         return "restored_invalid"
@@ -2074,7 +2075,7 @@ def source_binding(documents, ids):
             for item in documents.list() if item["id"] in set(ids)]
 
 
-def restore_context_binding(data):
+def restore_context_binding(data: Session):
     state = data["state"]
     if "source_binding" not in state.data:
         try:
@@ -2085,7 +2086,7 @@ def restore_context_binding(data):
             state.data["source_binding"] = source_binding(data["documents"], state.data.get("active_source_ids", []))
 
 
-def ensure_current_sources(data):
+def ensure_current_sources(data: Session):
     state = data["state"]
     if context_issue(data):
         raise HTTPException(409, ui_message(ACTIVE, 'context.reconfirm'))
@@ -2231,7 +2232,7 @@ def setup(request: Setup):
             language = normalize_language(request.language)
             model = canonical_model_id(request.model)
             connector = LLMConnector(model, key, session_id=state.data["session_id"])
-            candidate = {"state": state, "documents": documents, "model": model, "language": language,
+            candidate: Session = {"state": state, "documents": documents, "model": model, "language": language,
                          "llm": connector, "env_file": str(env_file), "env_explicit": explicit,
                          "pricing": PricingCatalog(price_file), "pending": []}
             restore_context_binding(candidate)
@@ -2239,7 +2240,7 @@ def setup(request: Setup):
             state.data["selected_model"] = model
             state.save()
             save_workbench_settings(workspace, state.root.name, model, language)
-            ACTIVE.clear()
+            cast(dict, ACTIVE).clear()  # TypedDict has no clear() for mypy; same dict
             ACTIVE.update(candidate)
             return status_data(ACTIVE)
     except OSError:
@@ -2273,7 +2274,7 @@ def switch_model(request: ModelSwitchRequest):
         return status_data(data)
 
 
-def activate_local_session(data: dict[str, Any], session_name: str) -> dict:
+def activate_local_session(data: Session, session_name: str) -> dict:
     with LOCK:
         reject_context_change_while_processing()
         state = protect_configuration(ProjectState(app_state_home(), data["state"].workspace, session_name),
@@ -2783,7 +2784,7 @@ def codebook_prepare(request: CodebookPrepareRequest):
                                                       'failure': job.record.get('failure')})
 
 
-def rules_changed(data, issue="rules_changed"):
+def rules_changed(data: Session, issue="rules_changed"):
     reset_context(data)
     state = data["state"]
     state.data.pop("bg_context", None)
@@ -3037,7 +3038,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
         raise
     control = data["request_control"]
     events: Queue[dict[str, Any]] = Queue(maxsize=64)
-    task = {"id": request.request_id or uuid.uuid4().hex, "control": control, "done": threading.Event(),
+    task: dict[str, Any] = {"id": request.request_id or uuid.uuid4().hex, "control": control, "done": threading.Event(),
             "state": "running", "result": None, "error": None}
 
     def emit(event):
@@ -3166,7 +3167,7 @@ def compare(request: CompareRequest):
         end_model_work(data)
 
 
-def invalidate_pending(data):
+def invalidate_pending(data: Session):
     data["pending"] = []
     data.pop("pending_plan", None)
     if ACTIVE.get("state") is data.get("state") and ACTIVE is not data:
@@ -3179,7 +3180,7 @@ def plan_digest(changes):
                              separators=(",", ":")).encode("utf-8"))
 
 
-def plan_context(data):
+def plan_context(data: Session):
     state = data["state"]
     rules = load_codebook_profile()
     rule_path = Path(str(rules.get("source_path", "")))
@@ -3198,7 +3199,7 @@ def plan_context(data):
     })
 
 
-def publish_pending(data, changes):
+def publish_pending(data: Session, changes):
     """Bind the exact displayed ordered plan to this session and context."""
     with LOCK:
         invalidate_pending(data)

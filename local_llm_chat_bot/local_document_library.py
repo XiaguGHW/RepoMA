@@ -245,6 +245,9 @@ def _chunks(label, text):
 class LocalDocumentLibrary:
     """Documents and extracted chunks stay in one local JSON file."""
 
+    # Set on a staged copy (chat_workbench) to postpone save() until it is committed.
+    _defer_save: bool
+
     def __init__(self, path: Path):
         self.path = path
         self.data = self._load()

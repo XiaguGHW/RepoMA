@@ -15,6 +15,7 @@ from typing import Any
 from local_document_library import LocalDocumentLibrary, MAX_SHORT_PDF_PAGES, MAX_VISUAL_BYTES_PER_FILE, SUPPORTED_DOCUMENT_EXTENSIONS, material_is_recommended, material_role, material_role_label
 from workbench_i18n import UIMessage
 from workbench_rules import split_text_in_half
+from workbench_session import Session
 
 
 def target_tree(folder: Path, maximum_nodes: int = 5000) -> tuple[dict, bool]:
@@ -299,7 +300,7 @@ def part_numbers(text: str) -> set[str]:
     return found
 
 
-def reading_hints(data: dict[str, Any], selected: list[dict]) -> dict[str, Any]:
+def reading_hints(data: Session, selected: list[dict]) -> dict[str, Any]:
     """Local signals for choosing pages of long files: BOM part numbers and rule words."""
     bom = [item for item in selected if item.get("material_role") == "bom"]
     bom_terms: set[str] = set()
@@ -401,7 +402,7 @@ def selected_reading_chunks(document: dict, full: bool = False, hints: dict[str,
     return plan["chunks"], plan["scope"], plan["read"], plan["unread"]
 
 
-def material_folder(data: dict[str, Any]) -> Path | None:
+def material_folder(data: Session) -> Path | None:
     """The confirmed BG/material folder that evidence labels are relative to."""
     state = data["state"].data
     folder = (state.get("bg_context") or {}).get("folder")
@@ -427,7 +428,7 @@ def traceable_label(document: dict, label: str, folder: Path | None) -> str:
     return relative + label[len(name):] if relative != name else label
 
 
-def traceable_evidence(data: dict[str, Any], evidence: list[dict]) -> list[dict]:
+def traceable_evidence(data: Session, evidence: list[dict]) -> list[dict]:
     folder = material_folder(data)
     if not folder:
         return evidence

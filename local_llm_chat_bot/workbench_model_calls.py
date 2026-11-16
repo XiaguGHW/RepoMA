@@ -12,6 +12,7 @@ from release_safety import normalize_usage, redact_secrets
 from request_runtime import RequestCancelled, ResponseLimitExceeded
 from workbench_i18n import UIMessage, localize_message
 from workbench_messages import UIRequestError, redact_value
+from workbench_session import Session
 
 
 def connector_failure(raw: Any) -> str | None:
@@ -44,7 +45,7 @@ def require_model_success(raw: Any, context=None) -> str:
     return text
 
 
-def accounted_model_call(data, connector, *args, usage_records=None, **kwargs):
+def accounted_model_call(data: Session, connector, *args, usage_records=None, **kwargs):
     """Record dispatches before response validation; failed output still costs."""
     check_request(data)
     connector.last_usage = None
@@ -83,7 +84,7 @@ def accounted_model_call(data, connector, *args, usage_records=None, **kwargs):
                 usage_records.append(usage)
 
 
-def check_request(data):
+def check_request(data: Session):
     control = data.get("request_control")
     if control:
         control.check()
@@ -92,7 +93,7 @@ def check_request(data):
 
 
 @contextmanager
-def commit_answer(data):
+def commit_answer(data: Session):
     control = data.get("request_control")
     if control:
         with control.commit():
@@ -102,7 +103,7 @@ def commit_answer(data):
         yield
 
 
-def check_answer_size(data, answer):
+def check_answer_size(data: Session, answer):
     control = data.get("request_control")
     if control and len(answer) > control.policy.max_answer_chars:
         raise ResponseLimitExceeded("Answer exceeds the configured size limit")

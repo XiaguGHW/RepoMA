@@ -103,6 +103,7 @@ status card says so. To return to the bundled prices, delete the saved page.
 | `workbench_classification.py` | Rule evidence and answer validation |
 | `workbench_model_calls.py`, `workbench_messages.py`, `workbench_models.py` | Model-call accounting, interface messages, API request models |
 | `workbench_state_files.py` | Format versions and migrations of the state files |
+| `workbench_session.py` | Type of the active session |
 | `workbench_startup.py` | Start options and checks |
 | `code_chat_agent.py` | Prompts, session state, pricing |
 | `local_document_library.py` | Local reading of PDF, Word, Excel, images, OCR |
