@@ -1,11 +1,18 @@
 @echo off
 REM Prueft, ob conda und Git noch installiert sind und ob sie im PATH stehen.
 REM Ausgabe erscheint im Fenster und wird zusaetzlich in env_check_log.txt (gleicher Ordner) gespeichert.
+REM Hinweis: Wegen Bosch AppLocker nicht aus "Downloads" starten (z. B. Desktop verwenden).
 
 setlocal
 set "LOG=%~dp0env_check_log.txt"
+call :checks > "%LOG%" 2>&1
+type "%LOG%"
+echo.
+echo Log gespeichert: %LOG%
+pause
+exit /b
 
-(
+:checks
 echo ===== env check %DATE% %TIME% =====
 echo.
 echo --- Git ---
@@ -30,10 +37,5 @@ where git
 where conda
 echo.
 echo --- PATH ---
-echo %PATH%
-) > "%LOG%" 2>&1
-
-type "%LOG%"
-echo.
-echo Log gespeichert: %LOG%
-pause
+echo "%PATH%"
+exit /b

@@ -4,7 +4,7 @@
 
 ## 用法
 
-双击 `check_conda_git.bat`（或在 cmd 里运行）。结果会显示在窗口里，同时保存到同目录下的 `env_check_log.txt`。
+把 `check_conda_git.bat` 放到桌面等非 Downloads 目录（Bosch AppLocker 会拦截 Downloads 里的 .bat），然后双击（或在 cmd 里运行）。结果会显示在窗口里，同时保存到同目录下的 `env_check_log.txt`。
 
 ## 怎么看结果
 
