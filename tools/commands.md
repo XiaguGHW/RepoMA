@@ -24,6 +24,12 @@ VS Code：Select Python Interpreter → Enter interpreter path → 粘贴：
 C:\Users\wdu4fe\.conda\envs\thesis\python.exe
 ```
 
+给 thesis 环境装包（不需要 conda）：
+
+```
+C:\Users\wdu4fe\.conda\envs\thesis\python.exe -m pip install 包名
+```
+
 检查 Anaconda 安装目录是否还在：
 
 ```
