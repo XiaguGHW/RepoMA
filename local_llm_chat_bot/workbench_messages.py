@@ -11,9 +11,10 @@ from fastapi import HTTPException
 from release_safety import redact_secrets, safe_error
 from workbench_i18n import UIMessage, localize_message
 from workbench_startup import StartupError
+from workbench_session import Session
 
 
-def ui_message(data, key, **params):
+def ui_message(data: Session | str, key: str, **params: Any) -> UIMessage:
     language = data.get('language', 'zh') if isinstance(data, dict) else data
     return UIMessage(key, language, **params)
 
@@ -34,7 +35,7 @@ class UIValidationError(ValueError):
         self.ui_message = message
 
 
-def error_copy(error, data):
+def error_copy(error, data: Session):
     value = error.detail if isinstance(error, HTTPException) else getattr(error, 'ui_message', str(error))
     if isinstance(error, StartupError):
         value = ui_message(data, error.code, **error.params)

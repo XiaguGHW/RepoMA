@@ -16,6 +16,7 @@ from local_document_library import LocalDocumentLibrary
 from workbench_i18n import UIMessage
 from workbench_materials import document_pages
 from workbench_messages import ui_message
+from workbench_session import Session
 
 
 def codebook_text(documents: LocalDocumentLibrary, bg_context: dict | None) -> str:
@@ -272,7 +273,7 @@ def validated_model_action(raw, prompt, *, evidence, scope, validation, repair, 
         raw = repair(classification_repair_prompt(prompt, problem, required=validation["required"]))
 
 
-def image_group_notices(data, report):
+def image_group_notices(data: Session, report):
     return [ui_message(data, 'notice.image_group_overview' if item['overview'] else 'notice.image_group_full',
                        name=item['name'], count=item['count'], details=item.get('details', 0))
             for item in report.get('image_group_details', [])]
