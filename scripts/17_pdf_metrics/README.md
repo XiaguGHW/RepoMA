@@ -42,3 +42,11 @@ python selftest_evaluate_pdf_results.py
 ```
 python evaluate_image_results.py --dir "C:\pdf\image" --out "C:\pdf\Ergebnis_Image"
 ```
+
+## Text-Ergebnisse
+
+`evaluate_text_results.py` wie oben, Titel `(115BG, P3, Text)` / `(Text)`, Ausgabe `Text_Metriken_Konfusion.xlsx` und `konfusion_text_2x2.png`.
+
+```
+python evaluate_text_results.py --dir "C:\pdf\text" --out "C:\pdf\Ergebnis_Text"
+```
