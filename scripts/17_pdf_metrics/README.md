@@ -51,3 +51,11 @@ python evaluate_image_results.py --dir "C:\pdf\image" --out "C:\pdf\Ergebnis_Ima
 ```
 python evaluate_text_results.py --dir "C:\pdf\text" --out "C:\pdf\Ergebnis_Text"
 ```
+
+## Prompt-Vergleich (P1–P4 × 4 Modelle)
+
+`evaluate_prompt_results.py`: 16 Dateien (auch in Unterordnern), Prompt und Modell aus Datei- bzw. Ordnernamen. Ausgabe `Prompt_Metriken_Konfusion.xlsx` mit `Uebersicht` (Allowed Accuracy und Strict Macro-F1 je Modell × Prompt wie Tabelle 5.3, mit n), `Metriken_4x4`, `Konfusion_4x4`, dazu `konfusion_prompt_4x4.png`. Fehlende Kombinationen und Hinweise in der Konsole.
+
+```
+python evaluate_prompt_results.py --dir "C:\pdf\prompt" --out "C:\pdf\Ergebnis_Prompt" [--nur-sheet1]
+```
