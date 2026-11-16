@@ -34,3 +34,11 @@ Optionen: `--subtitle "115BG, P3, PDF"`, `--input-label PDF`, `--lang de`, `--he
 ```
 python selftest_evaluate_pdf_results.py
 ```
+
+## Image-Ergebnisse
+
+`evaluate_image_results.py` ruft `evaluate_pdf_results.py` unverändert auf (gleicher Ordner) und setzt nur Titel `(115BG, P3, Image)` / `(Image)` sowie die Dateinamen `Image_Metriken_Konfusion.xlsx` und `konfusion_image_2x2.png`.
+
+```
+python evaluate_image_results.py --dir "C:\pdf\image" --out "C:\pdf\Ergebnis_Image"
+```
