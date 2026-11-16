@@ -6,6 +6,12 @@
 
 ## 2026-11-16 · Anaconda 被移除后，直接用 thesis 环境
 
+在 VS Code 的 PowerShell 终端里"手动激活" thesis（之后直接输入 `python` 即可，只对当前终端有效）：
+
+```
+$t="C:\Users\wdu4fe\.conda\envs\thesis"; $env:Path="$t;$t\Scripts;$t\Library\bin;"+$env:Path; function prompt {"(thesis) PS $PWD> "}
+```
+
 测试 thesis 环境是否还能用（cmd 或 PowerShell）：
 
 ```
