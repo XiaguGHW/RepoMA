@@ -18,7 +18,7 @@ Benötigt im selben Ordner: evaluate_pdf_results.py, evaluate_70bg_results.py, e
 confusion_human_llm.py, evaluate_validation_regimes.py.
 
 Aufruf (PowerShell):
-    python evaluate_stability_results.py --dir "C:\\...\\pdf" --out "C:\\...\\Ergebnis_Stabilitaet"
+    python evaluate_stability_results.py --dir "C:\\...\\pdf" --out "C:\\...\\Ergebnis_Stabilitaet" [--nur-sheet1]
 """
 
 from __future__ import annotations
@@ -131,6 +131,9 @@ def main(argv=None):
     ap.add_argument("--dir", required=True, help="Ordner mit den Konfigurations-Unterordnern")
     ap.add_argument("--sheet", default="Sheet1")
     ap.add_argument("--out", default="Ergebnis_Stabilitaet")
+    ap.add_argument("--nur-sheet1", action="store_true",
+                    help="danach in allen Lauf-Dateien alle Blätter außer --sheet löschen "
+                         "(Sicherung in <out>/<Konfigurationsordner>/Backup_Original)")
     a = ap.parse_args(argv)
 
     root = Path(a.dir)
@@ -142,7 +145,7 @@ def main(argv=None):
             continue
         name, inp = E.model_name(d), S.input_label(d)
         runs = [E.read_file(f, a.sheet, f"{name} | {f.name}", issues) for f in files]
-        configs.append((name, inp, d, runs))
+        configs.append((name, inp, d, runs, files))
     if not configs:
         sys.exit(f"Keine Unterordner mit Ergebnisdateien in {root.resolve()}")
     configs.sort(key=lambda x: E.model_rank(x[0]))
@@ -154,7 +157,7 @@ def main(argv=None):
     wb.remove(wb.active)
     items = []
     print("Konfigurationen:")
-    for name, inp, d, runs in configs:
+    for name, inp, d, runs, _ in configs:
         st = config_stats(runs)
         items.append((f"{name} (115BG, P3, {inp}, {len(runs)} runs)", st))
         t = st["Total"]
@@ -179,6 +182,10 @@ def main(argv=None):
         for (typ, sap, det), who in groups.items():
             where = f"{len(who)} Dateien" if len(who) > 2 else ", ".join(who)
             print("   - " + " | ".join(str(x) for x in [typ, sap, det, where] if x))
+    if a.nur_sheet1:
+        for name, inp, d, runs, files in configs:
+            # eigener Sicherungsordner je Konfiguration (Dateinamen wie Run_01.xlsx wiederholen sich)
+            E.keep_only_sheet(files, a.sheet, out / d.name)
     return configs
 
 
