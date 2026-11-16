@@ -258,9 +258,19 @@ def main(argv=None):
     out = Path(a.out)
     files = [Path(f) for f in a.files]
     if a.dir:
-        files += sorted(p for p in Path(a.dir).rglob("*.xlsx") if not E.is_output_or_backup(p))
+        files += sorted(p for p in Path(a.dir).rglob("*") if p.suffix.lower() in (".xlsx", ".xlsm") and not E.is_output_or_backup(p))
     if not files:
+        if a.dir:
+            d = Path(a.dir)
+            print(f"Keine Ergebnisdateien gefunden in: {d.resolve()} (existiert: {d.is_dir()})")
+            if d.is_dir():
+                alle = sorted(d.rglob("*"))
+                print(f"  Inhalt ({len(alle)} Einträge, max. 30):")
+                for x in alle[:30]:
+                    grund = " [übersprungen]" if x.suffix.lower() == ".xlsx" and E.is_output_or_backup(x) else ""
+                    print(f"    {x.relative_to(d)}{grund}")
         ap.error("keine Dateien angegeben (Dateien oder --dir)")
+    print(f"Version 2 – {len(files)} Excel-Dateien gefunden")
 
     grid, src, issues, unknown = {}, {}, [], []
     for f in files:
