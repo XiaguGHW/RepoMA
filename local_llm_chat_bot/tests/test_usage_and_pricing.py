@@ -1,21 +1,24 @@
-"""R11: reconcile real loopback requests, unknown usage and configured prices."""
+"""Token usage ledger, export and price estimates."""
 
-import json
-from decimal import Decimal
 from pathlib import Path
 import sys
-from types import SimpleNamespace
-import unittest
-from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from fastapi.testclient import TestClient
-import chat_workbench as w
-from code_chat_agent import PricingCatalog, ProjectState
-from fixture_support import FixtureEnvironment, PROFILE
-from llm_connector_with_prompt_caching import LLMConnector
-from release_safety import normalize_usage, summarize_usage
-from test_stream_progress import OpenAI, complete, httpx, stream_response
+APP = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(APP), str(APP / "tests")]
+
+import json  # noqa: E402
+from decimal import Decimal  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+import unittest  # noqa: E402
+from unittest.mock import patch  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+import chat_workbench as w  # noqa: E402
+from code_chat_agent import PricingCatalog, ProjectState  # noqa: E402
+from fixture_support import FixtureEnvironment, PROFILE  # noqa: E402
+from llm_connector_with_prompt_caching import LLMConnector  # noqa: E402
+from release_safety import normalize_usage, summarize_usage  # noqa: E402
+from test_stream_progress import OpenAI, complete, httpx, stream_response  # noqa: E402
+from api_cases import DirectSessionCase, EnglishApiCase  # noqa: E402
 
 
 class UsageLedger(unittest.TestCase):
@@ -321,5 +324,45 @@ class UsagePricing(unittest.TestCase):
         self.assertEqual(normalize_usage({'input_tokens': 2**54 + 1, 'output_tokens': 0})['input_tokens'], 2**54 + 1)
 
 
-if __name__ == '__main__':
-    unittest.main()
+class UsageCounting(EnglishApiCase):
+    def test_codebook_and_comparison_calls_must_be_counted(self):
+        self.bg()
+        self.post(
+            "/api/compare",
+            {"question": "classify", "models": ["gemini-2.5-pro", "gemini-2.5-flash"]},
+        )
+        usage = w.ACTIVE["state"].data["usage"]
+        self.assertEqual(
+            usage["requests"],
+            len(self.f.calls),
+            f"mock calls={len(self.f.calls)} but accumulated usage={usage}",
+        )
+
+    def test_unknown_usage_must_not_become_free_price(self):
+        usage = w.summarize_usage(
+            [{"input_tokens": None, "output_tokens": None, "usage_complete": False}]
+        )
+        estimate = w.ACTIVE["pricing"].estimate(
+            "gemini-2.5-pro", usage["input"], usage["output"]
+        )
+        self.assertIsNone(estimate, f"unknown usage priced as {estimate}")
+
+
+class UsageEdgeCases(DirectSessionCase):
+    def test_partial_usage_is_unknown_not_zero_cost(self):
+        state = w.ACTIVE['state']
+        before = state.data['usage']['requests']
+        cost = state.note_usage({}, w.ACTIVE['pricing'], 'gemini-2.5-pro')
+        self.assertIsNone(cost)
+        self.assertEqual(state.data['usage']['requests'], before + 1)
+        self.assertEqual(state.data['usage']['unpriced_requests'], 1)
+
+    def test_invalid_pricing_is_safe(self):
+        path = self.root / 'prices.json'
+        for obj in ([], {'entries': None}, {'entries': [{'match': ['gemini'], 'input_usd_per_million': 'bad', 'output_usd_per_million': 2}]}):
+            path.write_text(json.dumps(obj))
+            self.assertIsNone(PricingCatalog(path).estimate('gemini-test', 10, 10))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

@@ -1,13 +1,16 @@
-"""R14 final verification: the native picker receives the current UI title."""
-import os
+"""Native file and folder picker follows the UI language."""
+
 from pathlib import Path
 import sys
-from types import ModuleType
-import unittest
-from unittest.mock import Mock, patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from fastapi.testclient import TestClient  # noqa: E402 - sibling app import
+APP = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(APP), str(APP / "tests")]
+
+import os  # noqa: E402
+from types import ModuleType  # noqa: E402
+import unittest  # noqa: E402
+from unittest.mock import Mock, patch  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 import chat_workbench as w  # noqa: E402
 from workbench_i18n import UIMessage  # noqa: E402
 
@@ -47,5 +50,5 @@ class NativePickerLanguage(unittest.TestCase):
         self.assertEqual(root.destroy.call_count, 7)
 
 
-if __name__ == '__main__':
-    unittest.main()
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

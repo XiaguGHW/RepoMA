@@ -1,26 +1,29 @@
-"""R12: answer-only previews, real disconnects and worker-owned cancellation."""
+"""Streaming answers: decoder, request bounds, stream lifecycle."""
 
-import copy
-import json
-import os
 from pathlib import Path
-import socket
 import sys
-import threading
-import time
-from types import SimpleNamespace
-import unittest
-from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import httpx
-import uvicorn
-import chat_workbench as w
-from fixture_support import FixtureEnvironment
-from llm_connector_with_prompt_caching import LLMConnector
-from request_runtime import (AnswerPreview, RequestControl, RequestPolicy,
+APP = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(APP), str(APP / "tests")]
+
+import copy  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import socket  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+import unittest  # noqa: E402
+from unittest.mock import patch  # noqa: E402
+import httpx  # noqa: E402
+import uvicorn  # noqa: E402
+import chat_workbench as w  # noqa: E402
+from fixture_support import FixtureEnvironment  # noqa: E402
+from llm_connector_with_prompt_caching import LLMConnector  # noqa: E402
+from request_runtime import (AnswerPreview, RequestControl, RequestPolicy,  # noqa: E402
                              RequestCancelled, RequestTimedOut, ResponseLimitExceeded)
-from test_stream_progress import OpenAI, httpx as sdk_httpx
+from test_stream_progress import OpenAI, httpx as sdk_httpx  # noqa: E402
+from api_cases import EnglishApiCase  # noqa: E402
 
 
 def action(answer='Final answer', **extra):
@@ -343,5 +346,32 @@ class StreamLifecycle(unittest.TestCase):
         self.assert_uncommitted()
 
 
-if __name__ == '__main__':
-    unittest.main()
+class StreamChunks(EnglishApiCase):
+    def test_model_content_chunks_must_reach_stream_client(self):
+        def answer(_files, _prompt, *args, **kwargs):
+            handler = kwargs.get("event_handler")
+            if handler:
+                handler("content", '{"answer":"STREAM_FIXTURE_')
+                handler("content", 'ANSWER","changes":[],"read_files":[]}')
+            return json.dumps(
+                {"answer": "STREAM_FIXTURE_ANSWER", "changes": [], "read_files": []}
+            )
+
+        with patch.object(w.ACTIVE["llm"], "ask_about_files", side_effect=answer):
+            text = self.client.post(
+                "/api/chat/stream", json={"question": "Explain fixture"}
+            ).text
+        events = [
+            json.loads(line[6:])
+            for line in text.splitlines()
+            if line.startswith("data: ")
+        ]
+        intermediate = [e for e in events if e["type"] not in {"result", "end"}]
+        self.assertTrue(
+            any("STREAM_FIXTURE_" in json.dumps(e) for e in intermediate),
+            f"content deltas were dropped; event types={[e['type'] for e in events]}",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

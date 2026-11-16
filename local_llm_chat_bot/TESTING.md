@@ -30,6 +30,33 @@ modules, including function bodies. Third-party missing stubs and followed
 imports are excluded, not the application's source files. Mypy 1.15.0 is used
 because 2.4.0 crashed in this container's process discovery before checking code.
 
+## Test layout (since refactor step 3c, 2026-11)
+
+Tests are grouped by feature. Classes that mixed several features were split;
+their setUp/tearDown and helpers live unchanged in `tests/api_cases.py`
+(`ApiCase`, `EnglishApiCase`, `DirectSessionCase`). Files named `test_legacy_*`
+cover code-change plans (`/api/apply`) and the Excel agent and go away with
+those features in refactor step 2. The history below keeps its original
+wording; old file names map as follows:
+
+| Old file | Now |
+|---|---|
+| `test_release_step_two.py` | `test_legacy_apply_plan.py` (plans), `test_path_safety.py` (paths) |
+| `test_release_step_three.py` | `test_context_integrity.py` (`ContextIntegrity`) |
+| `test_release_step_four.py` | `test_answer_validation.py` |
+| `test_release_step_five.py` | `test_usage_and_pricing.py` |
+| `test_release_step_six.py` | `test_answer_stream.py` |
+| `test_release_step_seven.py` | `test_rule_drafts_and_messages.py` |
+| `test_release_step_eight.py` | `test_startup_configuration.py` |
+| `test_release_step_nine.py` | `test_native_picker.py` |
+| `test_release_step_ten.py` | `test_context_integrity.py` (`StaleResults`) |
+| `test_release_audit_gaps.py` | split by feature: `test_context_integrity.py`, `test_answer_validation.py`, `test_usage_and_pricing.py`, `test_startup_configuration.py`, `test_path_safety.py`, `test_answer_stream.py`, `test_i18n_residuals.py`, `test_legacy_apply_plan.py` |
+| `test_release_regressions.py` | split by feature: `test_context_integrity.py`, `test_answer_validation.py`, `test_usage_and_pricing.py`, `test_path_safety.py`, `test_model_connector.py`, `test_document_library.py`, `test_rule_ids.py` |
+| `test_release_matrix.py` | `test_model_connector.py`, `test_api_input_matrix.py`, `test_legacy_apply_plan.py` |
+| `test_workbench_reliability.py` | `test_document_library.py`, `test_context_integrity.py` (`ModelSlot`), `test_rule_page_evidence.py` |
+| `test_excel_formulas.py`, `test_release_excel_plan.py` | `test_legacy_excel_formulas.py`, `test_legacy_excel_plan.py` |
+| other `test_release_<name>.py` | `test_<name>.py` (`test_release_e2e.py` -> `test_end_to_end.py`, `test_release_i18n_residual.py` -> `test_i18n_residuals.py`) |
+
 ## Result interpretation
 
 - Existing tests and new audit assertions are discovered together. At the
@@ -40,7 +67,7 @@ because 2.4.0 crashed in this container's process discovery before checking code
   context corruption, custom env loading, CLI port selection and unknown CLI
   arguments. The historical tools/release_audit scripts remain unchanged.
 - Run a single regression with, for example:
-  `python -m unittest discover -s tests -p test_release_audit_gaps.py -v`.
+  `python -m unittest discover -s tests -p "test_*.py" -v`.
 - Browser tests run separately. They exercise the workspace, custom model,
   six language changes, rules prepare/lock/edit, BG changes, classification,
   follow-up, refresh, tree expansion/selection, and real material confirmation.
@@ -93,27 +120,27 @@ are additional diagnostics, not substitutes for complete backend and browser
 runs.
 
 - F-02 request bounds and cancellation:
-  `python -m unittest discover -s tests -p test_release_request_bounds.py -v`
+  `python -m unittest discover -s tests -p test_request_bounds.py -v`
 - F-04 stale-page context protection:
-  `python -m unittest discover -s tests -p test_release_page_context.py -v`
+  `python -m unittest discover -s tests -p test_page_context.py -v`
 - F-03 unique rule IDs:
-  `python -m unittest discover -s tests -p test_release_rule_ids.py -v`
+  `python -m unittest discover -s tests -p test_rule_ids.py -v`
 - F-01 env-file boundary and redaction:
-  `python -m unittest discover -s tests -p test_release_secret_boundary.py -v`
+  `python -m unittest discover -s tests -p test_secret_boundary.py -v`
 - F-09/F-05 plain mode and rule-removal recovery:
-  `python -m unittest discover -s tests -p test_release_plain_mode_recovery.py -v`
+  `python -m unittest discover -s tests -p test_plain_mode_recovery.py -v`
 - F-07/F-11 traceable labels and ignored runtime files:
-  `python -m unittest discover -s tests -p test_release_traceable_labels.py -v`
+  `python -m unittest discover -s tests -p test_traceable_labels.py -v`
 - S-1–S-4 robustness fixes:
-  `python -m unittest discover -s tests -p test_release_step_ten.py -v`
+  `python -m unittest discover -s tests -p test_context_integrity.py -v`
 - F-06 local-origin access control:
-  `python -m unittest discover -s tests -p test_release_local_access.py -v`
+  `python -m unittest discover -s tests -p test_local_access.py -v`
 - F-08 three-language residual scan:
-  `python -m unittest discover -s tests -p test_release_i18n_residual.py -v`
+  `python -m unittest discover -s tests -p test_i18n_residuals.py -v`
 - F-10 deterministic Excel plans:
-  `python -m unittest discover -s tests -p test_release_excel_plan.py -v`
+  `python -m unittest discover -s tests -p test_legacy_excel_plan.py -v`
 - F-13 dead-code and frontend-cleanup checks:
-  `python -m unittest discover -s tests -p test_release_frontend_cleanup.py -v`
+  `python -m unittest discover -s tests -p test_frontend_cleanup.py -v`
 - F-11 packaging gate (read-only; does not create a ZIP):
   `python -m unittest tests/test_package_manifest.py -v`
 
@@ -128,13 +155,13 @@ chunk silence is 60 s, a whole operation 3600 s. Read timeouts are no longer
 re-dispatched; connection failures and HTTP 429/5xx keep bounded retries.
 Codebook preparation, coverage, comparison and dossier rebuild are stoppable
 via `POST /api/operation/cancel`. Run its regressions with
-`python -m unittest discover -s tests -p test_release_request_bounds.py -v`.
+`python -m unittest discover -s tests -p test_request_bounds.py -v`.
 
 Post-review fix F-04 (2026-10-25): pages send `X-Workbench-Context` (session
 directory + context revision); context and model actions from a stale page get
 409 `context.stale_page` without a model call or state change. Requests without
 the header (API callers, older tests) are not checked. Regressions:
-`python -m unittest discover -s tests -p test_release_page_context.py -v` and
+`python -m unittest discover -s tests -p test_page_context.py -v` and
 the browser method `test_stale_tab_cannot_classify_another_tabs_session_or_bg`.
 
 Post-review fix F-03 (2026-10-25): rule IDs are unique across the whole
@@ -142,20 +169,20 @@ profile. Generated IDs never collide; edit/lock reject explicit duplicates with
 400 `rules.duplicate_ids`; model-merged duplicates are renamed deterministically
 (`<class-key>:<id>`, recorded in `rule_id_renames`); a profile or session locked
 earlier with duplicates gets 409 before material binding or any model call.
-Regressions: `python -m unittest discover -s tests -p test_release_rule_ids.py -v`.
+Regressions: `python -m unittest discover -s tests -p test_rule_ids.py -v`.
 
 Post-review fix F-01 (2026-10-25): the configured env file and any `*.env`
 file are outside the model path boundary (read, diff, apply, index); the active
 key is redacted from prompts, previews/reasoning, answers, plans, evidence
 excerpts and history. Regressions:
-`python -m unittest discover -s tests -p test_release_secret_boundary.py -v`.
+`python -m unittest discover -s tests -p test_secret_boundary.py -v`.
 
 Post-review fixes F-09/F-05 (2026-10-25): outside BG mode an empty or
 non-object `classification` is ignored with notice `notice.classification_ignored`
 (a real classification object is still rejected); deleting the Codebook marks
 the scope `rules_removed`, so materials can be reconfirmed directly for ordinary
 questions, while a changed-but-unlocked profile still requires locking.
-Regressions: `python -m unittest discover -s tests -p test_release_plain_mode_recovery.py -v`.
+Regressions: `python -m unittest discover -s tests -p test_plain_mode_recovery.py -v`.
 
 Post-review fixes F-07/F-11 (2026-10-25): nonpaged text/DOCX chunks are
 labelled `section i/n`, CSV chunks by row range (index `label_version` 2; older
@@ -163,7 +190,7 @@ records are re-extracted locally on reuse); evidence and pre-reading summaries
 use the path relative to the confirmed material folder. `.gitignore` covers
 runtime state, terminal chat folders, `*.env`/`.env.*` (templates excepted) and
 `*_ai_updated*` workbooks. Regressions:
-`python -m unittest discover -s tests -p test_release_traceable_labels.py -v`.
+`python -m unittest discover -s tests -p test_traceable_labels.py -v`.
 
 Post-review step 4 / F-10 (2026-10-25): `excel_chat_agent.py` prints a
 deterministic local plan summary (sheet, target column, header, cell count,
@@ -171,7 +198,7 @@ first ten edits, plan path, SHA-256) after the model's reply; `确认执行` app
 a private copy of exactly the shown bytes and refuses a changed plan or a plan
 without a stored summary hash. excel_agent safety refusals (`die()`) are
 reported instead of exiting the agent. Regressions:
-`python -m unittest discover -s tests -p test_release_excel_plan.py -v`.
+`python -m unittest discover -s tests -p test_legacy_excel_plan.py -v`.
 
 Post-review step 5 / F-13 (2026-10-25): the 16 UI functions that were
 redefined at runtime are now declared once and delegate to their
@@ -184,11 +211,11 @@ them. The browser method
 `test_full_workflow_and_diagnostics_have_no_chinese_ui_in_english_or_german`
 scans the visible EN/DE UI after rules, materials, classification, rules and
 materials drawers, diagnostics and the scan/cache report. Source checks:
-`python -m unittest discover -s tests -p test_release_frontend_cleanup.py -v`.
+`python -m unittest discover -s tests -p test_frontend_cleanup.py -v`.
 Static baseline after this step: Ruff 256, mypy 44 (step 7 clears both).
 
 Reproduce the final additional regression with:
-`python -m unittest discover -s tests -p test_release_step_nine.py -v`.
+`python -m unittest discover -s tests -p test_native_picker.py -v`.
 All current static findings and exact tested source hashes are in the JSON;
 the step-8 static snapshot remains a historical explanation of the prior baseline.
 
@@ -200,8 +227,8 @@ methods and all 15 promoted audit methods pass. The browser suite has 17 passing
 methods, including visible localized startup recovery and retry at 390px.
 
 ```bash
-python -m unittest discover -s tests -p test_release_step_eight.py -v
-python -m unittest discover -s tests -p test_release_audit_gaps.py -v
+python -m unittest discover -s tests -p test_startup_configuration.py -v
+python -m unittest discover -s tests -p "test_*.py" -v
 python tests/browser_release.py
 ```
 
@@ -226,7 +253,7 @@ After step 7 (R13–R15), discovery runs 169 tests: 165 pass, 3 fail and the nat
 Windows test remains skipped on Linux. Seven new draft/message/image-group
 methods pass, as does the promoted English progress/notices audit assertion.
 Run the new methods with:
-`python -m unittest discover -s tests -p test_release_step_seven.py -v`.
+`python -m unittest discover -s tests -p test_rule_drafts_and_messages.py -v`.
 The browser suite has 16 methods, all passing. Four new methods cover editor
 text/dirty/caret/scroll/error preservation across six language changes, rejected
 context discards, cancel/save/stale-version behavior, structured dynamic message
@@ -243,7 +270,7 @@ See docs/release-reports/Workbench_Repair_Step_07_2026-10-25.md at repository ro
 After step 6 (R12), discovery runs 162 tests: 157 pass, 4 fail and the native
 Windows test remains skipped on Linux. The 18 new runtime/lifecycle tests and
 the R12 dropped-content audit regression pass. Run the new tests with:
-`python -m unittest discover -s tests -p test_release_step_six.py -v`.
+`python -m unittest discover -s tests -p test_answer_stream.py -v`.
 The browser suite has 12 methods: 9 pass; 3 retain 8 known R13/R14/R15 failures.
 The two new methods exercise visible answer previews, Stop, worker completion,
 retry, navigation disconnect and truncated-response cleanup using real controls.
@@ -273,7 +300,7 @@ See docs/release-reports/Workbench_Repair_Step_06_2026-10-25.md at repository ro
 After step 5 (R11), discovery runs 144 tests: 138 pass, 5 fail and the native
 Windows test remains skipped on Linux. The 20 new accounting tests and both
 R11 audit regressions pass. Run the accounting tests with:
-`python -m unittest discover -s tests -p test_release_step_five.py -v`.
+`python -m unittest discover -s tests -p test_usage_and_pricing.py -v`.
 The browser suite has 10 methods: 7 pass; 3 retain 8 known R13/R14/R15 failures.
 Its new test checks real unknown-usage responses in chat, cumulative status,
 Codebook preparation and comparison cards.
@@ -300,7 +327,7 @@ See docs/release-reports/Workbench_Repair_Step_05_2026-10-25.md at repository ro
 After step 4, discovery runs 124 tests: 116 pass, 7 fail and the native Windows
 test is skipped on Linux. R09/R10 audit regressions now pass.
 Run the new response-round/reference tests with:
-`python -m unittest discover -s tests -p test_release_step_four.py -v`.
+`python -m unittest discover -s tests -p test_answer_validation.py -v`.
 BG chat defaults to required classification. Use require_classification=false
 for an explanation-only API request, or select Explanation follow-up in the UI.
 Any returned classification is still fully validated. Nonpaged Codebooks use
@@ -311,7 +338,7 @@ See docs/release-reports/Workbench_Repair_Step_04_2026-10-24.md at repository ro
 After step 3, discovery runs 106 tests: 96 pass, 9 fail and the native Windows
 test remains skipped on Linux. R05/R06/R07/R08 audit regressions now pass.
 Run the new scope/recovery/rollback matrix with:
-`python -m unittest discover -s tests -p test_release_step_three.py -v`.
+`python -m unittest discover -s tests -p test_context_integrity.py -v`.
 Browser coverage now also verifies editing/relocking rules and re-confirming
 the same BG without losing the material selection. The pending rule path is
 tested separately from the effective prepared path.
@@ -320,7 +347,7 @@ See docs/release-reports/Workbench_Repair_Step_03_2026-10-24.md at repository ro
 After step 2, discovery runs 97 tests: 83 pass, 13 fail and one native Windows
 junction/case test is skipped on Linux. R02/R03/R04 regressions now pass.
 Run the targeted backend suite with:
-`python -m unittest discover -s tests -p test_release_step_two.py -v`.
+`python -m unittest discover -s tests -p "test_legacy_apply_plan.py" -v`.
 Browser coverage includes attribute-safe paths/custom models and real two-page
 review/confirmation clicks. The remaining browser failures still track
 R13/R14/R15. Detailed results are recorded in
