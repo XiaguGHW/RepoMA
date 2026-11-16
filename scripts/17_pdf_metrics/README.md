@@ -1,0 +1,36 @@
+# 17 — Metriktabellen und Konfusionsmatrizen der PDF-Ergebnisse (115 BG, P3)
+
+`evaluate_pdf_results.py` liest je Modell eine Ergebnisdatei (Blatt `Sheet1`) und erzeugt:
+
+- **Metriken_2x2**: vier Tabellen im 2×2-Raster (oben Haiku | Gemini Pro, unten Opus | Gemini Flash),
+  Spalten E1, E2, M, E (E1+E2), Total mit n; Zeilen Allowed Acc., Strict Macro-F1, Allowed Macro-Prec., Allowed Macro-Rec.
+- **Konfusion_2x2**: Konfusionsmatrizen wie in der Arbeit (Diagonale blau, links rot = nicht zulässig,
+  rechts grün = weiteres zulässiges Label), dazu `konfusion_2x2.png` (300 dpi).
+- **Werte** (Zahlen), **Detail** (jede Zeile mit neu berechnetem Status), **Pruefungen_Zusammenfassung**, **Pruefungen**.
+
+Regeln:
+- GT, Register und weitere zulässige Labels aus `Sheet1` der Datei; FINAL_GT (Skript 12) nur als Info-Abgleich.
+- `Allowed_Set_Status` wird nicht übernommen, sondern neu berechnet und abgeglichen (Abweichungen in `Pruefungen`).
+- Register M ohne weiteres zulässiges Label (z. B. 0804EN7325) zählt als E2.
+- Klassenmittel wie Skript 09: Precision über vorhergesagte Klassen, Recall über Klassen der GT,
+  Strict-F1 über Klassen in GT oder Vorhersage.
+- Schreibweisen wie `Gantry`, `Umsetzeinheit`, Kodierungsfehler werden über `canon` (Skript 13/12) vereinheitlicht.
+- Modellname aus dem Dateinamen (`haiku`, `opus`, `gemini-2.5-pro`, `gemini-2.5-flash`, `gpt`, `deepseek`).
+
+## Aufruf (PowerShell)
+
+```
+conda activate thesis
+cd <Repo>\scripts\17_pdf_metrics
+python evaluate_pdf_results.py "...\haiku.xlsx" "...\gemini-2.5-pro.xlsx" "...\opus.xlsx" "...\gemini-2.5-flash.xlsx" --out PDF_Metriken
+# oder
+python evaluate_pdf_results.py --dir "...\PDF_Ordner" --out PDF_Metriken
+```
+
+Optionen: `--subtitle "115BG, P3, PDF"`, `--input-label PDF`, `--lang de`, `--height 0.7`, `--no-png`, `--sheet Sheet1`.
+
+## Selbsttest
+
+```
+python selftest_evaluate_pdf_results.py
+```
