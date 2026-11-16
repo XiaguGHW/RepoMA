@@ -67,3 +67,7 @@ python evaluate_prompt_results.py --dir "C:\pdf\prompt" --out "C:\pdf\Ergebnis_P
 ```
 python evaluate_70bg_results.py --dir "C:\...\pdf" --out "C:\...\Ergebnis_70BG" [--nur-sheet1]
 ```
+
+## Stabilitätsexperiment (4 Konfigurationen × 10 Läufe)
+
+`evaluate_stability_results.py --dir <Ordner mit *_P3_10_runs> --out <Ziel>`: Blatt `Metriken_2x2` in `Stabilitaet_Metriken.xlsx`; Mittel über die Läufe für Allowed Acc., Strict Macro-F1, Allowed Macro-Prec./-Rec., Strict Acc., dazu SD der Allowed Acc. (pp) und Anzahl BG mit wechselnder Vorhersage, je E1/E2/M/E/Total. Modell und Eingabeform aus dem Ordnernamen; `Backup_Original` und `__pycache__` werden übersprungen. Braucht zusätzlich `evaluate_70bg_results.py` und `evaluate_prompt_results.py` im selben Ordner.
