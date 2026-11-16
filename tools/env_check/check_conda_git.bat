@@ -20,6 +20,8 @@ dir "C:\Program Files\Git\cmd\git.exe"
 dir "%LOCALAPPDATA%\Programs\Git\cmd\git.exe"
 echo.
 echo --- conda: moegliche Installationsorte ---
+dir "C:\Program Files\Anaconda3\Scripts\conda.exe"
+dir "C:\Program Files\Anaconda3\condabin"
 dir "%USERPROFILE%\anaconda3\Scripts\conda.exe"
 dir "%USERPROFILE%\miniconda3\Scripts\conda.exe"
 dir "C:\ProgramData\anaconda3\Scripts\conda.exe"
