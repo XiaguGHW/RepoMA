@@ -59,3 +59,11 @@ python evaluate_text_results.py --dir "C:\pdf\text" --out "C:\pdf\Ergebnis_Text"
 ```
 python evaluate_prompt_results.py --dir "C:\pdf\prompt" --out "C:\pdf\Ergebnis_Prompt" [--nur-sheet1]
 ```
+
+## Ergänzungsdatensatz (70 BG)
+
+`evaluate_70bg_results.py`: vier finale Konfigurationen (z. B. Haiku PDF, Gemini Pro PDF, GPT-5.5 Image, DeepSeek Text); Eingabeform aus dem Dateinamen (`pdf_only_…`, `image_only_…`, `text_only_…`), mit `--dir` nur Dateien mit `70BG` im Namen. `Allowed_Set_Status` wird nicht benötigt. Braucht zusätzlich `evaluate_prompt_results.py` im selben Ordner. Ausgabe `70BG_Metriken_Konfusion.xlsx` (Metriken_2x2, Konfusion_2x2) und `konfusion_70bg_2x2.png`; erwartete Regime 59 / 10 / 1.
+
+```
+python evaluate_70bg_results.py --dir "C:\...\pdf" --out "C:\...\Ergebnis_70BG" [--nur-sheet1]
+```
