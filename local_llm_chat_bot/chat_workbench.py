@@ -43,6 +43,7 @@ try:
     from dotenv import load_dotenv
     from workbench_i18n import catalog_script_json, UIMessage, localize_message
     from workbench_frontend import load_frontend_html
+    import workbench_state_files as state_files
     from workbench_messages import (UIRequestError, UIValidationError, error_copy, message_payload, redact_value,
                                     ui_message)
     from workbench_models import (ApplyRequest, BGRequest, CacheConfirmRequest, CacheFileRequest, ChatCancelRequest,
@@ -186,15 +187,15 @@ def write_json_atomically(path: Path, payload: Any) -> None:
 
 def load_codebook_profile() -> dict:
     try:
-        data = json.loads(codebook_profile_path().read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
+        return state_files.decode(state_files.CODEBOOK_PROFILE,
+                                  json.loads(codebook_profile_path().read_text(encoding="utf-8")))
     except (OSError, ValueError):
         return {}
 
 
 def save_codebook_profile(profile: dict) -> None:
     profile["version"] = uuid.uuid4().hex
-    write_json_atomically(codebook_profile_path(), profile)
+    write_json_atomically(codebook_profile_path(), state_files.encode(state_files.CODEBOOK_PROFILE, profile))
 
 
 def file_digest(path: Path) -> str:
@@ -208,8 +209,9 @@ def file_digest(path: Path) -> str:
 def load_material_selection(folder: Path) -> tuple[set[str], int, int]:
     """Restore only still-existing files; never touch the original BG folder."""
     try:
-        all_records = json.loads(material_selections_path().read_text(encoding="utf-8"))
-        record = all_records.get(str(folder), {}) if isinstance(all_records, dict) else {}
+        all_records = state_files.decode(state_files.MATERIAL_SELECTIONS,
+                                         json.loads(material_selections_path().read_text(encoding="utf-8")))
+        record = all_records.get(str(folder), {})
         items = record.get("files", []) if isinstance(record, dict) else []
     except (OSError, ValueError):
         items = []
@@ -240,8 +242,8 @@ def save_material_selection(folder: Path, files: list[Path]) -> None:
     """Persist a compact, path-relative manual selection under AI_Bot_State."""
     app_state_home().mkdir(parents=True, exist_ok=True)
     try:
-        records = json.loads(material_selections_path().read_text(encoding="utf-8"))
-        records = records if isinstance(records, dict) else {}
+        records = state_files.decode(state_files.MATERIAL_SELECTIONS,
+                                     json.loads(material_selections_path().read_text(encoding="utf-8")))
     except (OSError, ValueError):
         records = {}
     entries = []
@@ -257,13 +259,12 @@ def save_material_selection(folder: Path, files: list[Path]) -> None:
     if len(records) > 100:
         keep = sorted(records, key=lambda key: str((records[key] if isinstance(records[key], dict) else {}).get("updated_at", "")), reverse=True)[:100]
         records = {key: records[key] for key in keep}
-    write_json_atomically(material_selections_path(), records)
+    write_json_atomically(material_selections_path(), state_files.encode(state_files.MATERIAL_SELECTIONS, records))
 
 
 def load_model_tests() -> dict[str, dict]:
     try:
-        data = json.loads(model_tests_path().read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
+        return state_files.decode(state_files.MODEL_TESTS, json.loads(model_tests_path().read_text(encoding="utf-8")))
     except (OSError, ValueError):
         return {}
 
@@ -271,7 +272,7 @@ def load_model_tests() -> dict[str, dict]:
 def save_model_test(result: dict) -> None:
     records = load_model_tests()
     records[str(result["requested_model"])] = result
-    write_json_atomically(model_tests_path(), records)
+    write_json_atomically(model_tests_path(), state_files.encode(state_files.MODEL_TESTS, records))
 
 
 def local_diagnostics() -> dict[str, Any]:
@@ -351,7 +352,7 @@ def local_diagnostics() -> dict[str, Any]:
 
 def load_workbench_settings() -> dict[str, str]:
     try:
-        data = json.loads(workbench_settings_path().read_text(encoding="utf-8"))
+        data = state_files.decode(state_files.SETTINGS, json.loads(workbench_settings_path().read_text(encoding="utf-8")))
         return {
             "workspace": str(data.get("workspace", "")),
             "session": str(data.get("session", "default")) or "default",
@@ -367,10 +368,10 @@ def normalize_language(value: Any) -> str:
 
 
 def save_workbench_settings(workspace: Path, session_name: str, model: str, language: str = "zh") -> None:
-    write_json_atomically(workbench_settings_path(), {
+    write_json_atomically(workbench_settings_path(), state_files.encode(state_files.SETTINGS, {
         "workspace": str(workspace), "session": session_name,
         "model": canonical_model_id(model), "language": normalize_language(language),
-    })
+    }))
 
 
 def session() -> dict[str, Any]:
@@ -699,7 +700,7 @@ class CodebookJob:
             CODEBOOK_JOB.clear()
             CODEBOOK_JOB.update(home=str(app_state_home()), record=snapshot)
         try:
-            write_json_atomically(codebook_job_path(), snapshot)
+            write_json_atomically(codebook_job_path(), state_files.encode(state_files.CODEBOOK_JOB, snapshot))
         except OSError:
             pass  # The in-memory record still serves the open page.
 
@@ -769,7 +770,7 @@ def load_codebook_job() -> dict | None:
     if live and live.get("state") == "running":
         return live
     try:
-        record = json.loads(codebook_job_path().read_text(encoding="utf-8"))
+        record = state_files.decode(state_files.CODEBOOK_JOB, json.loads(codebook_job_path().read_text(encoding="utf-8")))
     except (OSError, ValueError):
         return live
     if not isinstance(record, dict):
@@ -782,7 +783,7 @@ def load_codebook_job() -> dict | None:
             "reason": "interrupted", "stage": error.stage, "unit": None, "attempts": None,
             "message": full.payload(), "short": short.payload(), "technical": ""})
         try:
-            write_json_atomically(codebook_job_path(), record)
+            write_json_atomically(codebook_job_path(), state_files.encode(state_files.CODEBOOK_JOB, record))
         except OSError:
             pass
     return record
@@ -1403,13 +1404,12 @@ def invalidate_current_coverage(state: ProjectState, document_id: str | None = N
     if document_id:
         coverage["files"] = [item for item in coverage.get("files", []) if item.get("id") != document_id]
     coverage["complete"] = False
-    write_json_atomically(coverage_path(state), coverage)
+    write_json_atomically(coverage_path(state), state_files.encode(state_files.COVERAGE, coverage))
 
 
 def load_coverage(state: ProjectState) -> dict:
     try:
-        data = json.loads(coverage_path(state).read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
+        return state_files.decode(state_files.COVERAGE, json.loads(coverage_path(state).read_text(encoding="utf-8")))
     except (OSError, ValueError):
         return {}
 
@@ -1649,7 +1649,7 @@ def prepare_coverage(data: dict[str, Any], full: bool = False, progress=None, us
               "files": records, "complete": all(item["complete"] for item in records), "model_calls": total_calls,
               "retry_calls": retry_calls, "retry_limit": retry_limit,
               "reused_files": reused_files, "created_files": created_files}
-    write_json_atomically(coverage_path(state), report)
+    write_json_atomically(coverage_path(state), state_files.encode(state_files.COVERAGE, report))
     return report
 
 
@@ -2354,7 +2354,7 @@ def set_language(request: LanguageRequest):
             else:
                 settings = load_workbench_settings()
                 settings['language'] = language
-                write_json_atomically(workbench_settings_path(), settings)
+                write_json_atomically(workbench_settings_path(), state_files.encode(state_files.SETTINGS, settings))
     finally:
         if acquired:
             LOCK.release()
