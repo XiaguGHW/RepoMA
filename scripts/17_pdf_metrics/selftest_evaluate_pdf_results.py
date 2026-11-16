@@ -83,10 +83,21 @@ def main():
                 assert abs(got[k] - ref[k]) < 1e-12, (name, s, k, got[k], ref[k])
         m = E.matrix_for(recs)
         assert m["n"] == 115 and m["diag"].sum() + m["red"].sum() + m["green"].sum() == 115
-    pr = pd.read_excel(tmp / "out" / "PDF_Metriken_Konfusion.xlsx", sheet_name="Pruefungen")
+    pr = pd.DataFrame(E.LAST_ISSUES).reindex(columns=["Typ", "SAP"])
+    import openpyxl
+    assert openpyxl.load_workbook(tmp / "out" / "PDF_Metriken_Konfusion.xlsx").sheetnames == ["Metriken_2x2", "Konfusion_2x2"]
     assert (pr.Typ == "Allowed_Set_Status weicht ab").sum() == 1
     assert ((pr.Typ.str.startswith("Register M ohne")) & (pr.SAP == "0804EN7325")).sum() == 4
     assert (tmp / "out" / "konfusion_2x2.png").is_file()
+    f0 = tmp / names[0]
+    wb = openpyxl.load_workbook(f0)
+    for n in ["Uebersicht", "Pivot", "Fehler", "Meta"]:
+        wb.create_sheet(n)
+    wb.save(f0)
+    E.main([str(tmp / n) for n in names] + ["--out", str(tmp / "out2"), "--no-png", "--nur-sheet1"])
+    assert openpyxl.load_workbook(f0).sheetnames == ["Sheet1"]
+    assert len(openpyxl.load_workbook(tmp / "out2" / "Backup_Original" / names[0]).sheetnames) == 5
+    assert len(pd.read_excel(f0, sheet_name="Sheet1")) == 115
     print("Selbsttest OK:", tmp / "out")
 
 

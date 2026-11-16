@@ -11,7 +11,9 @@ Blatt 1 "Metriken_2x2"  : je Modell eine Tabelle (Zeilen = Metriken, Spalten = E
                           (dieselbe Klassenauswahl wie Skript 09, damit die Zahlen zu Tabelle 5.5 passen)
 Blatt 2 "Konfusion_2x2" : Konfusionsmatrizen im Stil von Abbildung 5.x (Diagonale blau, links rot =
                           nicht zulässig, rechts grün = weiteres zulässiges Label), zusätzlich als PNG.
-Weitere Blätter          : Detail (alle Zeilen), Pruefungen (Status-Abgleich, Label, Register, FINAL_GT).
+Hinweise (Status-Abgleich, Label, Register) erscheinen in der Konsole.
+Mit --nur-sheet1 werden in den Ergebnisdateien danach alle Blätter außer Sheet1 gelöscht
+(Sicherungskopie in <out>/Backup_Original).
 
 Regime: M mit nur einem zulässigen Label (z. B. 0804EN7325) zählt als E2, wie in der Arbeit.
 
@@ -408,6 +410,9 @@ def main(argv=None):
     ap.add_argument("--lang", choices=["en", "de"], default="en", help="Sprache der Legende")
     ap.add_argument("--height", type=float, default=0.7, help="Höhenfaktor der PNG-Matrizen")
     ap.add_argument("--no-png", action="store_true")
+    ap.add_argument("--nur-sheet1", action="store_true",
+                    help="nach der Auswertung in den Ergebnisdateien alle Blätter außer --sheet löschen "
+                         "(Sicherung in <out>/Backup_Original)")
     a = ap.parse_args(argv)
 
     files = [Path(f) for f in a.files]
@@ -440,32 +445,6 @@ def main(argv=None):
         mats.append((f"{name} ({a.input_label}), n = {m['n']}", m))
     write_confusion_sheet(wb, mats, a.lang)
 
-    # Zahlen als Tabelle (für Prüfung / Weiterverwendung)
-    rows = []
-    for name, recs in results:
-        for s in SUBSETS:
-            mm = metrics(subset(recs, s))
-            rows.append({"Modell": name, "Teilmenge": SUBSET_HEAD[s], "n": mm["n"],
-                         **{lab: (None if np.isnan(mm[k]) else round(mm[k] * 100, 2)) for k, lab in METRIC_ROWS}})
-    det = [{"Modell": r["Modell"], "Excel-Zeile": r["Zeile"], "SAP": r["SAP"], "Ground Truth": r["gt"],
-            "Weitere zulässige": ", ".join(r["alts"]), "Register (Datei)": r["register_datei"],
-            "Regime (gewertet)": r["regime"], "Predicted (Datei)": r["pred_raw"], "Predicted (normalisiert)": r["pred"],
-            "Allowed korrekt": "CORRECT" if r["hit"] else "INCORRECT", "Strict korrekt": r["strict"],
-            "Allowed_Set_Status (Datei)": r["status_datei"]} for _, recs in results for r in recs]
-    cols = ["Modell", "Typ", "Zeile", "SAP", "Detail"]
-    pr = pd.DataFrame(issues).reindex(columns=cols)
-    counts = pr.groupby(["Modell", "Typ"], dropna=False).size().reset_index(name="Anzahl")
-
-    from openpyxl.utils.dataframe import dataframe_to_rows
-    for title, df in [("Werte", pd.DataFrame(rows)), ("Detail", pd.DataFrame(det)),
-                      ("Pruefungen_Zusammenfassung", counts), ("Pruefungen", pr)]:
-        ws = wb.create_sheet(title)
-        for r in dataframe_to_rows(df, index=False, header=True):
-            ws.append(r)
-        for c in ws[1]:
-            c.font = styles()["Font"](bold=True)
-        ws.freeze_panes = "A2"
-        autosize(ws)
     xlsx = out / "PDF_Metriken_Konfusion.xlsx"
     wb.save(xlsx)
     if not a.no_png:
@@ -478,9 +457,55 @@ def main(argv=None):
         ns = " / ".join(str(len(subset(recs, s))) for s in ["E1", "E2", "M"])
         print(f"  {name:<20} n={tot['n']:>3} (E1/E2/M {ns})  Allowed Acc {tot['acc']*100:5.1f}%  "
               f"Strict Macro-F1 {tot['f1']*100:5.1f}%")
-    dev = [i for i in issues if i["Typ"] == "Allowed_Set_Status weicht ab"]
-    print(f"  Abweichungen Allowed_Set_Status: {len(dev)} (Details im Blatt Pruefungen)")
+    shown = [i for i in issues if i["Typ"] != "Datei" and not i["Typ"].startswith("Info:")]
+    dev = [i for i in shown if i["Typ"] == "Allowed_Set_Status weicht ab"]
+    print(f"  Abweichungen Allowed_Set_Status: {len(dev)}")
+    if shown:
+        print("  Hinweise:")
+        for i in shown:
+            parts = [i.get("Modell"), i["Typ"]]
+            parts += [f"Zeile {i['Zeile']}" if i.get("Zeile") else None, i.get("SAP"), i.get("Detail")]
+            print("   - " + " | ".join(str(x) for x in parts if x))
+    global LAST_ISSUES
+    LAST_ISSUES = issues
+
+    if a.nur_sheet1:
+        keep_only_sheet(files, a.sheet, out)
     return results
+
+
+def keep_only_sheet(files, sheet, out):
+    """Löscht in den Ergebnisdateien alle Blätter außer `sheet`. Vorher Sicherungskopie in <out>/Backup_Original."""
+    import shutil
+    from openpyxl import load_workbook
+    backup = out / "Backup_Original"
+    backup.mkdir(parents=True, exist_ok=True)
+    print(f"Nur '{sheet}' behalten (Sicherung in {backup}):")
+    for f in files:
+        try:
+            wb = load_workbook(f)
+        except PermissionError:
+            print(f"  ! {f.name}: Datei ist geöffnet oder gesperrt, übersprungen")
+            continue
+        if sheet not in wb.sheetnames:
+            print(f"  ! {f.name}: Blatt '{sheet}' fehlt, nichts gelöscht")
+            continue
+        others = [n for n in wb.sheetnames if n != sheet]
+        if not others:
+            print(f"  {f.name}: nur '{sheet}' vorhanden")
+            continue
+        shutil.copy2(f, backup / f.name)
+        for n in others:
+            del wb[n]
+        wb.active = 0
+        try:
+            wb.save(f)
+            print(f"  {f.name}: gelöscht {', '.join(others)}")
+        except PermissionError:
+            print(f"  ! {f.name}: Speichern nicht möglich (Datei in Excel geöffnet?)")
+
+
+LAST_ISSUES = []
 
 
 if __name__ == "__main__":

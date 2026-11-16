@@ -6,11 +6,12 @@
   Spalten E1, E2, M, E (E1+E2), Total mit n; Zeilen Allowed Acc., Strict Macro-F1, Allowed Macro-Prec., Allowed Macro-Rec.
 - **Konfusion_2x2**: Konfusionsmatrizen wie in der Arbeit (Diagonale blau, links rot = nicht zulässig,
   rechts grün = weiteres zulässiges Label), dazu `konfusion_2x2.png` (300 dpi).
-- **Werte** (Zahlen), **Detail** (jede Zeile mit neu berechnetem Status), **Pruefungen_Zusammenfassung**, **Pruefungen**.
+- Nur diese zwei Blätter; Hinweise (Abweichungen von `Allowed_Set_Status`, Register, unbekannte Labels) erscheinen in der Konsole.
+- Option `--nur-sheet1`: löscht danach in den Ergebnisdateien alle Blätter außer `Sheet1` (Sicherungskopie in `<out>/Backup_Original`). Gilt auch für die Image-/Text-Varianten.
 
 Regeln:
 - GT, Register und weitere zulässige Labels aus `Sheet1` der Datei; FINAL_GT (Skript 12) nur als Info-Abgleich.
-- `Allowed_Set_Status` wird nicht übernommen, sondern neu berechnet und abgeglichen (Abweichungen in `Pruefungen`).
+- `Allowed_Set_Status` wird nicht übernommen, sondern neu berechnet und abgeglichen (Abweichungen in der Konsole).
 - Register M ohne weiteres zulässiges Label (z. B. 0804EN7325) zählt als E2.
 - Klassenmittel wie Skript 09: Precision über vorhergesagte Klassen, Recall über Klassen der GT,
   Strict-F1 über Klassen in GT oder Vorhersage.
