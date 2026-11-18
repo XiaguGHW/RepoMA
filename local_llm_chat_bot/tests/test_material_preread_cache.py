@@ -104,6 +104,50 @@ class MaterialPrereadCache(unittest.TestCase):
         self.post("/api/cache/file/rebuild", {"document_id": self.document["id"], "confirmed": True})
         self.assertFalse((w.app_state_home() / "material_cache" / self.document["sha256"]).exists())
 
+    def test_failed_whole_group_names_the_file_in_its_failure(self):
+        self.fail_group(2)
+        record = self.file_record(self.post("/api/coverage", {}))
+        self.assertFalse(record["complete"])
+        failure = record["failure_messages"][0]
+        self.assertEqual((failure["message_key"], failure["params"]["index"]), ("reading.group_failed", 2))
+        detail = failure["params"]["detail"]
+        self.assertEqual(detail["message_key"], "model.request_failed")
+        self.assertEqual((detail["params"]["context"]["message_key"], detail["params"]["context"]["params"]["name"]),
+                         ("model.context_group", "manual.txt"))
+        self.assertIn("SAFETY", json.dumps(detail["params"]["detail"]))
+
+    def test_failed_merge_keeps_the_group_notes_and_reports_the_merge(self):
+        def transform(response, prompt, system):
+            if "片段笔记合成" in prompt:
+                response["candidates"][0]["finishReason"] = "SAFETY"
+            return response
+        self.f.response_transform = transform
+        record = self.file_record(self.post("/api/coverage", {}))
+        self.assertFalse(record["complete"])
+        self.assertEqual(len(self.merge_calls()), 1)
+        failure = record["failure_messages"][0]
+        self.assertEqual(failure["message_key"], "reading.merge_failed")
+        detail = failure["params"]["detail"]
+        self.assertEqual((detail["message_key"], detail["params"]["context"]["message_key"]),
+                         ("model.request_failed", "model.context_merge"))
+        self.assertEqual(record["summary"].count("Fixture evidence"), self.groups())  # the notes, joined
+
+    def test_failed_dossier_request_is_a_named_model_error(self):
+        report = self.post("/api/coverage", {})
+
+        def transform(response, prompt, system):
+            if "evidence consolidator" in system:
+                response["candidates"][0]["finishReason"] = "SAFETY"
+            return response
+        self.f.response_transform = transform
+        before = len(self.f.calls)
+        with self.assertRaises(w.UIRequestError) as caught:
+            w.prepare_bg_dossier(w.ACTIVE, report, force=True)
+        self.assertEqual(len(self.f.calls) - before, 1)
+        message = caught.exception.ui_message
+        self.assertEqual((message.message_key, message.params["context"].message_key),
+                         ("model.request_failed", "model.context_dossier"))
+
     def test_cut_group_is_split_once_and_completes_in_the_same_scan(self):
         groups = self.groups()
         self.fail_group(2, "MAX_TOKENS")
