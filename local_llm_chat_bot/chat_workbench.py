@@ -52,8 +52,10 @@ try:
                                   CoverageRequest, LanguageRequest, ModelSwitchRequest, ModelTestRequest,
                                   OperationCancelRequest, PathRequest, SessionDeleteRequest, SessionOpenRequest,
                                   SessionPinRequest, SessionRenameRequest, Setup, TargetRequest)
-    from workbench_model_calls import (accounted_model_call, check_answer_size, check_request, commit_answer,
-                                       connector_failure, model_request_failed, require_model_success)
+    from workbench_model_calls import (check_answer_size, check_request, commit_answer, model_request_failed,
+                                       require_model_success)
+    # Re-exported for tests and diagnostics scripts.
+    from workbench_model_calls import accounted_model_call, connector_failure  # noqa: F401
     from workbench_structured import Attempt, CallTask, StructuredCallError, call_model_text, structured_call
     from workbench_rules import (CODEBOOK_FILE_TYPES, CODEBOOK_JOB_LOG_LIMIT, CODEBOOK_JSON_REPAIR_SYSTEM,
                                  CODEBOOK_MERGE_SYSTEM, CODEBOOK_PAGE_SYSTEM, CODEBOOK_RECOMMENDED_MODEL,
@@ -1812,40 +1814,46 @@ def call_model(data: Session, question: str, progress=None, *, require_classific
             model_started = True
             report("model", ui_message(data, 'progress.generating'), 92)
 
-    def answer_call(prompt, tokens, shortened=False):
-        nonlocal preview
-        check_request(data)
-        limit = data["request_control"].policy.max_answer_chars if data.get("request_control") else 131072
-        preview = AnswerPreview(limit)
-        if data.get("answer_events"):
-            data["answer_events"]({"type": "answer_reset"})
-        raw_response = accounted_model_call(data, llm, visuals, prompt, SYSTEM,
-                                            {"maxOutputTokens": tokens, "temperature": 0}, stream=True,
-                                            event_handler=model_events, usage_records=usage_records)
-        failure = connector_failure(raw_response)
-        if failure and classify_model_failure(failure)[0] == "output_limit":
-            if shortened:
-                raise UIRequestError(ui_message(data, 'model.answer_too_long', tokens=tokens))
-            report("model", ui_message(data, 'progress.answer_shorten'), 92)
-            notices.append(ui_message(data, 'notice.answer_shortened'))
-            return answer_call(prompt + ANSWER_SHORTEN_INSTRUCTION, ANSWER_RETRY_OUTPUT_TOKENS, shortened=True)
-        # Non-streaming providers cannot emit early chunks; still use the same
-        # safe answer decoder, without replaying chunks from streaming providers.
-        if not preview.started and not preview.disabled:
-            model_events("content", raw_response)
-        return raw_response
+    def answer_call(prompt: str, context: UIMessage) -> str:
+        """One answer request: full ceiling, then once shorter after an output-limit stop."""
+        def before_attempt(attempt: Attempt, number: int) -> None:
+            nonlocal preview
+            if number > 1:
+                report("model", ui_message(data, 'progress.answer_shorten'), 92)
+                notices.append(ui_message(data, 'notice.answer_shortened'))
+            check_request(data)
+            limit = data["request_control"].policy.max_answer_chars if data.get("request_control") else 131072
+            preview = AnswerPreview(limit)
+            if data.get("answer_events"):
+                data["answer_events"]({"type": "answer_reset"})
+
+        def flush_preview(text: str) -> None:
+            # Non-streaming providers cannot emit early chunks; still use the same
+            # safe answer decoder, without replaying chunks from streaming providers.
+            if not preview.started and not preview.disabled:
+                model_events("content", text)
+
+        task = CallTask(SYSTEM, prompt, (Attempt(ANSWER_OUTPUT_TOKENS),
+                                         Attempt(ANSWER_RETRY_OUTPUT_TOKENS, ANSWER_SHORTEN_INSTRUCTION)),
+                        files=visuals, event_handler=model_events)
+        try:
+            raw_response = call_model_text(data, llm, task, usage_records=usage_records, before_attempt=before_attempt)
+        except StructuredCallError as failed:
+            if failed.reason == "output_limit":
+                raise UIRequestError(ui_message(data, 'model.answer_too_long', tokens=task.attempts[-1].output_tokens))
+            flush_preview(failed.raw)
+            raise model_request_failed(failed.failure, context) from None
+        flush_preview(raw_response)
+        return raw_response.strip()
 
     report("model", ui_message(data, 'progress.waiting'), 90)
-    raw = answer_call(model_prompt, ANSWER_OUTPUT_TOKENS)
-    raw = require_model_success(raw, ui_message(data, 'model.context_main'))
+    raw = answer_call(model_prompt, ui_message(data, 'model.context_main'))
     validation = {"required": classification_required, "repairs": 0}
     scope = classification_scope(documents, bg_context)
 
     def repair_classification(repair_prompt):
         report("validation", ui_message(data, 'progress.repair'), 96)
-        repaired = answer_call(repair_prompt, ANSWER_OUTPUT_TOKENS)
-        repaired = require_model_success(repaired, ui_message(data, 'model.context_repair'))
-        return repaired
+        return answer_call(repair_prompt, ui_message(data, 'model.context_repair'))
 
     def validated_action(raw_response: str, request_prompt: str) -> dict:
         result = validated_model_action(raw_response, request_prompt, evidence=evidence, scope=scope,
@@ -1896,8 +1904,7 @@ def call_model(data: Session, question: str, progress=None, *, require_classific
                                   [] if dossier and not focus else coverage_summaries, dossier, data.get("language", "zh"),
                                   require_classification=classification_request, focus_name=focus["name"] if focus else "")
         report("model", ui_message(data, 'progress.supplementary'), 93)
-        raw = answer_call(model_prompt, ANSWER_OUTPUT_TOKENS)
-        raw = require_model_success(raw, ui_message(data, 'model.context_supplementary'))
+        raw = answer_call(model_prompt, ui_message(data, 'model.context_supplementary'))
         try:
             action = validated_action(raw, model_prompt)
         except RequestStopped:
@@ -1995,20 +2002,18 @@ def call_comparison(data: Session, question: str, models: list[str]) -> dict[str
         try:
             connector = LLMConnector(model, data["llm"].api_key,
                                      session_id=f"{state.data['session_id']}-comparison-{index}")
-            raw = accounted_model_call(data, connector,
-                visuals, prompt, SYSTEM, {"maxOutputTokens": ANSWER_OUTPUT_TOKENS, "temperature": 0},
-                stream=True, event_handler=events, usage_records=usage_records,
-            )
-            raw = require_model_success(raw, ui_message(data, 'model.context_compare', model=model))
+            # One attempt at the normal answer ceiling (no shortened retry in a comparison).
+            task = CallTask(SYSTEM, prompt, (Attempt(ANSWER_OUTPUT_TOKENS),), files=visuals, event_handler=events)
+            raw = model_text(data, connector, task, ui_message(data, 'model.context_compare', model=model),
+                             usage_records=usage_records)
             actual_model = connector.last_response_model or model
             validation = {"required": True, "repairs": 0}
 
             def repair_comparison(repair_prompt):
-                repaired = accounted_model_call(data, connector, visuals, repair_prompt, SYSTEM,
-                                                      {"maxOutputTokens": ANSWER_OUTPUT_TOKENS, "temperature": 0},
-                                                      stream=True, event_handler=events, usage_records=usage_records)
-                repaired = require_model_success(repaired, ui_message(data, 'model.context_compare_repair', model=model))
-                return repaired
+                repair_task = CallTask(SYSTEM, repair_prompt, (Attempt(ANSWER_OUTPUT_TOKENS),), files=visuals,
+                                       event_handler=events)
+                return model_text(data, connector, repair_task,
+                                  ui_message(data, 'model.context_compare_repair', model=model), usage_records=usage_records)
 
             action = validated_model_action(raw, prompt, evidence=evidence,
                                             scope=classification_scope(documents, bg_context),
