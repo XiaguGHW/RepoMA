@@ -53,7 +53,8 @@ try:
                                   OperationCancelRequest, PathRequest, SessionDeleteRequest, SessionOpenRequest,
                                   SessionPinRequest, SessionRenameRequest, Setup, TargetRequest)
     from workbench_model_calls import (accounted_model_call, check_answer_size, check_request, commit_answer,
-                                       connector_failure, require_model_success)
+                                       connector_failure, model_request_failed, require_model_success)
+    from workbench_structured import Attempt, CallTask, StructuredCallError, call_model_text, structured_call
     from workbench_rules import (CODEBOOK_FILE_TYPES, CODEBOOK_JOB_LOG_LIMIT, CODEBOOK_JSON_REPAIR_SYSTEM,
                                  CODEBOOK_MERGE_SYSTEM, CODEBOOK_PAGE_SYSTEM, CODEBOOK_RECOMMENDED_MODEL,
                                  CODEBOOK_SECTION_SYSTEM, CodebookParseBudget, CodebookPrepareError,
@@ -633,13 +634,14 @@ def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data:
             "do not summarize, add, omit, translate, or change any factual content.\n"
             f"Parser error: {initial_error}\n\n--- CANDIDATE JSON ---\n{raw}"
         )
-        if on_call:
-            on_call()
         tokens = output_tokens or CODEBOOK_BUDGET.repair_output_tokens
-        repaired = accounted_model_call(data, connector, [], repair_prompt, CODEBOOK_JSON_REPAIR_SYSTEM,
-                                        {"maxOutputTokens": tokens, "temperature": 0}, stream=True,
-                                        usage_records=usage_records)
-        repaired = require_model_success(repaired, ui_message(data, 'model.context_codebook_repair'))
+        task = CallTask(CODEBOOK_JSON_REPAIR_SYSTEM, repair_prompt, (Attempt(tokens),))
+        try:
+            repaired = call_model_text(data, connector, task, usage_records=usage_records,
+                                       before_attempt=(lambda _attempt, _number: on_call()) if on_call else None)
+        except StructuredCallError as failed:
+            raise model_request_failed(failed.failure, ui_message(data, 'model.context_codebook_repair'))
+        repaired = repaired.strip()
         repair_usage = connector.get_last_token_usage() or {}
         try:
             return parse_codebook_draft(repaired), repair_usage
@@ -803,14 +805,13 @@ def parse_codebook_unit(job: CodebookJob, data: Session, connector: LLMConnector
 
     def request(piece: dict, tokens: int) -> tuple[dict | None, tuple[str, dict, str] | None]:
         files, prompt, source = codebook_piece_request(unit, piece, total, file_type)
-        job.count_call()
-        raw = accounted_model_call(data, connector, files, prompt, CODEBOOK_PAGE_SYSTEM,
-                                   {"maxOutputTokens": tokens, "temperature": 0}, stream=True,
-                                   usage_records=job.usages)
-        failure = connector_failure(raw)
-        if failure:
-            reason, params = classify_model_failure(failure)
-            return None, (reason, params, str(failure))
+        # One attempt per piece: after an output-limit stop, run() splits the piece instead.
+        task = CallTask(CODEBOOK_PAGE_SYSTEM, prompt, (Attempt(tokens),), files=files)
+        try:
+            raw = call_model_text(data, connector, task, usage_records=job.usages,
+                                  before_attempt=lambda _attempt, _number: job.count_call())
+        except StructuredCallError as failed:
+            return None, (failed.reason, failed.params, failed.technical)
         note = parse_codebook_note(raw)
         if note is None:
             if not str(raw).strip():
@@ -867,18 +868,44 @@ def merge_codebook_notes(job: CodebookJob, data: Session, connector: LLMConnecto
         prompt += (" This Codebook has no physical pages: cite the supplied block numbers in \"blocks\" and "
                    "\"evidence_blocks\" and leave \"pages\" and \"evidence_pages\" empty.")
     prompt += "\n\n" + notes_text
-    for tokens in budget.merge_output_tokens:
-        job.count_call()
-        raw = accounted_model_call(data, connector, [], prompt, CODEBOOK_MERGE_SYSTEM,
-                                   {"maxOutputTokens": tokens, "temperature": 0}, stream=True, usage_records=job.usages)
-        failure = connector_failure(raw)
-        if not failure:
-            return raw
-        reason, params = classify_model_failure(failure)
-        if reason != "output_limit":
-            raise CodebookPrepareError(reason, "merging", technical=str(failure), params=params)
+    task = CallTask(CODEBOOK_MERGE_SYSTEM, prompt, CallTask.ladder(*budget.merge_output_tokens))
+    try:
+        return call_model_text(data, connector, task, usage_records=job.usages,
+                               before_attempt=lambda _attempt, _number: job.count_call())
+    except StructuredCallError as failed:
+        if failed.reason != "output_limit":
+            raise CodebookPrepareError(failed.reason, "merging", technical=failed.technical, params=failed.params)
     job.event("merging", "rulejob.log.merge_sectioned", tokens=budget.section_output_tokens[0])
     return json.dumps(merge_codebook_sections(job, data, connector, notes_text, cache), ensure_ascii=False)
+
+
+def parse_section(raw: str) -> dict:
+    result = parse_codebook_note(raw)
+    if result is None:
+        raise ValueError("section response is not a JSON object")
+    return result
+
+
+class SectionCache:
+    """Merge sections that succeeded before (same notes, request and model) are
+    reused, so a retry after a dropped connection pays only for the rest."""
+
+    def __init__(self, cache: tuple[dict, Path], job: "CodebookJob", label: UIMessage):
+        self.entries, self.path, self.job, self.label = cache[0], cache[1], job, label
+
+    def get(self, key: str) -> dict | None:
+        stored = self.entries.get(key)
+        if isinstance(stored, list) and stored:
+            self.job.event("merging", "rulejob.log.section_reused", section=self.label)
+            return dict(stored[0])
+        return None
+
+    def put(self, key: str, value: dict) -> None:
+        self.entries[key] = [value]
+        try:
+            write_json_atomically(self.path, self.entries)
+        except OSError:
+            pass
 
 
 def merge_codebook_sections(job: CodebookJob, data: Session, connector: LLMConnector, notes_text: str,
@@ -895,40 +922,28 @@ def merge_codebook_sections(job: CodebookJob, data: Session, connector: LLMConne
         # A section that succeeded before (same notes, request and model) is
         # reused, so a retry after a dropped connection pays only for the rest.
         key = "section:" + hashlib.sha256(f"{system}\0{request}".encode("utf-8")).hexdigest()[:24]
-        if cache and isinstance(cache[0].get(key), list) and cache[0][key]:
-            job.event("merging", "rulejob.log.section_reused", section=label)
-            return dict(cache[0][key][0])
-        if total is None:
-            job.event("merging", "rulejob.log.merge_outline", progress={}, section=label)
-        else:
-            job.event("merging", "rulejob.log.merge_section", progress={"current": current, "total": total},
-                      current=current, total=total, section=label)
-        technical = ""
-        for attempt, tokens in enumerate(budget.section_output_tokens, start=1):
-            text = request
+
+        def before_attempt(_attempt: Attempt, number: int) -> None:
+            if number == 1:
+                if total is None:
+                    job.event("merging", "rulejob.log.merge_outline", progress={}, section=label)
+                else:
+                    job.event("merging", "rulejob.log.merge_section", progress={"current": current, "total": total},
+                              current=current, total=total, section=label)
             job.count_call()
-            raw = accounted_model_call(data, connector, [], text, system,
-                                       {"maxOutputTokens": tokens, "temperature": 0}, stream=True,
-                                       usage_records=job.usages)
-            failure = connector_failure(raw)
-            if failure:
-                reason, params = classify_model_failure(failure)
-                technical = str(failure)
-                if reason != "output_limit":
-                    raise CodebookPrepareError(reason, "merging", technical=technical, params=params)
-                continue
-            result = parse_codebook_note(raw)
-            if result is None:
-                raise CodebookPrepareError("invalid_json", "merging", technical=str(raw)[:800])
-            if cache:
-                cache[0][key] = [result]
-                try:
-                    write_json_atomically(cache[1], cache[0])
-                except OSError:
-                    pass
-            return result
-        raise CodebookPrepareError("section_output_limit", "merging", attempts=len(budget.section_output_tokens),
-                                   technical=technical, params={"section": label})
+
+        task = CallTask(system, request, CallTask.ladder(*budget.section_output_tokens))
+        try:
+            return structured_call(data, connector, task, parse_section, usage_records=job.usages,
+                                   before_attempt=before_attempt,
+                                   cache=SectionCache(cache, job, label) if cache else None, cache_key=key)
+        except StructuredCallError as failed:
+            if failed.reason == "invalid":
+                raise CodebookPrepareError("invalid_json", "merging", technical=failed.raw[:800])
+            if failed.reason == "output_limit":
+                raise CodebookPrepareError("section_output_limit", "merging", attempts=failed.attempts,
+                                           technical=failed.technical, params={"section": label})
+            raise CodebookPrepareError(failed.reason, "merging", technical=failed.technical, params=failed.params)
 
     outline = section(UIMessage("rulejob.section.outline", "zh"),
                       'SECTION outline. Return {"classes":[{"name":"exact official class name"}]} listing every '
