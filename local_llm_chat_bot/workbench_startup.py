@@ -112,10 +112,43 @@ def bootstrap() -> StartupConfig:
     return config
 
 
+@dataclass(frozen=True)
+class FarmSettings:
+    """Bosch Farm settings read without changing the process environment."""
+    key: str
+    # Process variables plus .env values the process does not set itself
+    # (process variables keep precedence, as with load_dotenv(override=False)).
+    values: dict[str, str]
+
+
 class FarmEnvironment:
     """Track only dotenv-added values; external process variables keep precedence."""
     def __init__(self) -> None:
         self._loaded: dict[str, str] = {}
+
+    def peek(self, path: Path, reader: Callable[..., dict[str, str | None]], *,
+             explicit: bool = False) -> FarmSettings:
+        """What a fresh use() of this .env would see, without touching os.environ.
+
+        Safe while a model call runs: that call reads the Farm URL and proxy
+        settings from os.environ, which use() rewrites temporarily.  Same checks
+        and errors as use().
+        """
+        external = {name: value for name, value in os.environ.items() if self._loaded.get(name) != value}
+        if explicit and not path.is_file():
+            raise StartupError('startup.env_missing', path=path)
+        if path.exists() and not path.is_file():
+            raise StartupError('startup.env_unreadable', path=path)
+        try:
+            from_file = reader(path, encoding='utf-8-sig') if path.is_file() else {}
+        except (OSError, UnicodeError):
+            raise StartupError('startup.env_unreadable', path=path) from None
+        values = {name: value for name, value in from_file.items() if value is not None and name not in external}
+        values.update(external)
+        key = values.get('BOSCH_FARM_SUBSCRIPTION_KEY') or values.get('BOSCH_FARM_API_KEY')
+        if not key or not key.strip():
+            raise StartupError('startup.key_missing', path=path)
+        return FarmSettings(key, values)
 
     @contextmanager
     def use(self, path: Path, loader: Callable[..., object], *, explicit: bool = False,
