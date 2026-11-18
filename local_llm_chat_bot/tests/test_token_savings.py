@@ -12,7 +12,7 @@ from code_chat_agent import PricingCatalog, ProjectState  # noqa: E402
 from release_safety import summarize_usage  # noqa: E402
 from fixture_support import FixtureEnvironment  # noqa: E402
 
-ANSWER_SYSTEM = "careful local workspace"
+ANSWER_SYSTEM = "You are the Bosch Assembly Assistant"
 
 
 class TokenSavings(unittest.TestCase):

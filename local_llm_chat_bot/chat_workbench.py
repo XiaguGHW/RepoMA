@@ -78,7 +78,7 @@ try:
                                           ANSWER_SHORTEN_INSTRUCTION, ClassificationValidationError,
                                           classification_scope, image_group_notices, relevant_codebook_page_evidence,
                                           validated_model_action)
-    from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative, excerpt, prompt_for, safe_name)
+    from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, prompt_for, safe_name)
     from local_document_library import (LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS, TextDecodingError,
                                         decode_text_bytes, material_role_label, MAX_CHUNKS_PER_DOCUMENT)
     from llm_connector_with_prompt_caching import LLMConnector, farm_base_url
@@ -1692,8 +1692,6 @@ def call_model(data: Session, question: str, progress=None, *, require_classific
         if not focus:
             raise HTTPException(409, ui_message(data, 'scope.focus_invalid'))
         material_ids = [focus_source_id]
-    matches = state.search(question)
-    snippets = {item: excerpt(state, item, question) for item in matches}
     preferred = ([bg_context.get("codebook_id")] + material_ids) if bg_context else material_ids
     allowed = material_ids + [bg_context.get("codebook_id")] if bg_context else material_ids
     report("search", ui_message(data, 'progress.search'), 10)
@@ -1795,7 +1793,7 @@ def call_model(data: Session, question: str, progress=None, *, require_classific
         # Keep the cached prompt start identical to whole-range turns: reuse an
         # existing dossier as background, never build one for a focused turn.
         dossier = load_bg_dossier_cache(coverage, data["model"])
-    model_prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
+    model_prompt = prompt_for(state, question, document_snippets=evidence, bg_context=bg_context,
                               coverage_summaries=[] if dossier and not focus else coverage_summaries, bg_dossier=dossier,
                               response_language=data.get("language", "zh"), require_classification=classification_request,
                               focus_name=focus["name"] if focus else "")
@@ -1891,34 +1889,8 @@ def call_model(data: Session, question: str, progress=None, *, require_classific
                 "turn_usage": summarize_usage(usage_records), "model_response": llm.last_response_model or data["model"],
                 "turn_cost": summarize_usage(usage_records)["cost_usd"],
                 "usage": status_data(data)}
-    requested = [ensure_relative(item) for item in action.get("read_files", [])[:4] if isinstance(item, str)]
-    complete = {}
-    for relative in requested:
-        check_request(data)
-        path = state.resolve_relative(relative)
-        if path.is_file() and path.stat().st_size <= 1_000_000:
-            complete[relative] = path.read_text(encoding="utf-8", errors="replace")
-            state.refresh_file(relative)
-    if complete:
-        model_prompt = prompt_for(state, question, snippets, complete, evidence, bg_context,
-                                  [] if dossier and not focus else coverage_summaries, dossier, data.get("language", "zh"),
-                                  require_classification=classification_request, focus_name=focus["name"] if focus else "")
-        report("model", ui_message(data, 'progress.supplementary'), 93)
-        raw = answer_call(model_prompt, ui_message(data, 'model.context_supplementary'))
-        try:
-            action = validated_action(raw, model_prompt)
-        except RequestStopped:
-            raise
-        except Exception as exc:
-            if bg_context or isinstance(exc, ClassificationValidationError):
-                raise
-            if looks_like_action(raw):
-                raise ValueError("Incomplete or invalid action JSON; no answer committed") from exc
-            check_answer_size(data, raw)
-            notices.append(ui_message(data, 'notice.supplementary_failed', detail=error_copy(exc, data)))
-            action = {"answer": raw.strip() or str(ui_message(data, "model.empty")), "changes": [], "classification": None}
-    # File changes proposed by the model (the "changes" field of the shared
-    # action schema) are ignored: the assistant no longer edits files.
+    # The answer schema is {answer, classification}; any other field a model
+    # adds (e.g. file requests or changes) is ignored.
     with commit_answer(data):
         ensure_current_sources(data)
         title_session_from_question(state, question)
@@ -1965,8 +1937,6 @@ def call_comparison(data: Session, question: str, models: list[str]) -> dict[str
     bg_context = state.data.get("bg_context")
     if not bg_context:
         raise HTTPException(400, ui_message(ACTIVE, 'error.bg_required'))
-    matches = state.search(question)
-    snippets = {item: excerpt(state, item, question) for item in matches}
     preferred = [bg_context.get("codebook_id")] + list(bg_context.get("source_ids", []))
     evidence = traceable_evidence(data, documents.search(question, preferred_ids=preferred, classification=True,
                                                          allowed_ids=preferred))
@@ -1977,7 +1947,7 @@ def call_comparison(data: Session, question: str, models: list[str]) -> dict[str
     visual_report: dict[str, Any] = documents.last_visual_report
     coverage = load_coverage(state)
     dossier = load_bg_dossier_cache(coverage, data["model"]) if coverage_matches_current_selection(data, coverage) else None
-    prompt = prompt_for(state, question, snippets, document_snippets=evidence, bg_context=bg_context,
+    prompt = prompt_for(state, question, document_snippets=evidence, bg_context=bg_context,
                         coverage_summaries=[] if dossier else (coverage.get("files", []) if coverage_matches_current_selection(data, coverage) else []),
                         bg_dossier=dossier, response_language=data.get("language", "zh"))
     results = []

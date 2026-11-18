@@ -144,27 +144,6 @@ class ResponseRounds(unittest.TestCase):
         self.assertEqual(model.call_count, 2)
         self.assertEqual(result["classification"]["label"], "Rotationseinheit")
 
-    def test_supplementary_round_cannot_fallback_to_invalid_raw_answer(self):
-        (self.f.workspace / "notes.txt").write_text("Read-only supplemental fixture")
-        first = copy.deepcopy(self.good)
-        first["classification"] = None
-        first["read_files"] = ["notes.txt"]
-        self.failed([first, self.invalid(), self.invalid()])
-
-    def test_one_repair_budget_is_shared_with_supplementary_round(self):
-        (self.f.workspace / "notes.txt").write_text("Read-only supplemental fixture")
-        repaired = copy.deepcopy(self.good)
-        repaired["read_files"] = ["notes.txt"]
-        self.failed([self.invalid(), repaired, self.invalid()])
-
-    def test_supplementary_round_cannot_omit_previously_required_classification(self):
-        (self.f.workspace / "notes.txt").write_text("Supplement")
-        first = copy.deepcopy(self.good)
-        first["read_files"] = ["notes.txt"]
-        missing = copy.deepcopy(self.good)
-        missing["classification"] = None
-        self.failed([first, missing, missing])
-
     def test_truncated_and_malformed_actions_cannot_commit(self):
         self.failed(['{"answer":', '{"answer":'], required=True)
         broken = copy.deepcopy(self.good)

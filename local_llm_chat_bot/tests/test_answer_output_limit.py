@@ -12,7 +12,7 @@ import chat_workbench as w  # noqa: E402
 from code_chat_agent import SYSTEM  # noqa: E402
 from fixture_support import FixtureEnvironment  # noqa: E402
 
-ANSWER_SYSTEM = "careful local workspace"
+ANSWER_SYSTEM = "You are the Bosch Assembly Assistant"
 
 
 class AnswerOutputLimit(unittest.TestCase):

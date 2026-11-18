@@ -92,26 +92,23 @@ class UsageLedger(unittest.TestCase):
         self.assertEqual(profile['usage']['requests'], 3)
         self.reconcile()
 
-    def test_classification_repair_and_supplementary_reads_are_counted_once(self):
+    def test_classification_repair_is_counted_once(self):
         self.bg()
         self.post('/api/chat', {'question': 'classify'})
-        (self.f.workspace / 'extra.txt').write_text('Full extra evidence', encoding='utf-8')
         counter = 0
         def transform(response, _prompt, system):
             nonlocal counter
-            if 'careful local workspace' in system:
+            if 'You are the Bosch Assembly Assistant' in system:
                 counter += 1
                 action = json.loads(response['candidates'][0]['content']['parts'][0]['text'])
                 if counter == 1:
                     action['classification']['label'] = 'invalid'
-                if counter == 2:
-                    action['read_files'] = ['extra.txt']
                 response['candidates'][0]['content']['parts'][0]['text'] = json.dumps(action)
             return response
         self.f.response_transform = transform
         result = self.post('/api/chat', {'question': 'classify again'})
-        self.assertEqual(counter, 3)
-        self.assertEqual(result['turn_usage']['requests'], 3)
+        self.assertEqual(counter, 2)
+        self.assertEqual(result['turn_usage']['requests'], 2)
         self.reconcile()
 
     def test_failed_comparison_keeps_consumed_usage(self):
@@ -132,7 +129,7 @@ class UsageLedger(unittest.TestCase):
                         w.bg_dossier_cache_path(coverage, w.ACTIVE['model']).unlink(missing_ok=True)
                 before = len(self.f.calls)
                 def transform(response, _prompt, system):
-                    match = {'codebook': 'transcribe exactly one', 'main': 'careful local workspace',
+                    match = {'codebook': 'transcribe exactly one', 'main': 'You are the Bosch Assembly Assistant',
                              'dossier': 'careful technical evidence consolidator'}[location]
                     if match in system:
                         response['candidates'][0]['finishReason'] = 'MAX_TOKENS'

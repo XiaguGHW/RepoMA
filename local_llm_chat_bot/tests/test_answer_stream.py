@@ -292,7 +292,7 @@ class StreamLifecycle(unittest.TestCase):
         self.assertEqual(self.wait_done(request_id)['state'], 'timed_out')
         self.assert_uncommitted()
 
-    def test_cancellation_prevents_supplementary_and_classification_repair(self):
+    def test_cancellation_prevents_classification_repair(self):
         self.post('/api/codebook/prepare', {'path': str(self.f.rules)})
         self.post('/api/codebook/lock', {})
         self.post('/api/target', {'target': str(self.f.bg_a), 'selected_paths': ['facts.txt']})
