@@ -209,7 +209,6 @@ class StreamLifecycle(unittest.TestCase):
 
     def assert_uncommitted(self):
         self.assertEqual(w.ACTIVE['state'].data['history'], self.old_history)
-        self.assertEqual(w.ACTIVE['pending'], [])
         self.assertFalse((self.f.workspace / 'must-not-write.txt').exists())
 
     def wait_done(self, request_id):

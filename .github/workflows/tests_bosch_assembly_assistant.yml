@@ -22,7 +22,7 @@ concurrency:
 
 env:
   # mypy may not get worse than this. Lower it when errors are fixed.
-  MYPY_BASELINE: "10"
+  MYPY_BASELINE: "1"
 
 jobs:
   tests:

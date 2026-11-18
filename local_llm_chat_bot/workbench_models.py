@@ -115,8 +115,3 @@ class CodebookEditRequest(BaseModel):
 
 class ChatCancelRequest(BaseModel):
     request_id: str
-
-
-class ApplyRequest(BaseModel):
-    confirmed: bool = False
-    plan_id: str = ""

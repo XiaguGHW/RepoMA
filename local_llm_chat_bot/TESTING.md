@@ -34,9 +34,9 @@ because 2.4.0 crashed in this container's process discovery before checking code
 
 Tests are grouped by feature. Classes that mixed several features were split;
 their setUp/tearDown and helpers live unchanged in `tests/api_cases.py`
-(`ApiCase`, `EnglishApiCase`, `DirectSessionCase`). Files named `test_legacy_*`
-cover code-change plans (`/api/apply`) and the Excel agent and go away with
-those features in refactor step 2. The history below keeps its original
+(`ApiCase`, `EnglishApiCase`, `DirectSessionCase`). The `test_legacy_*` files
+(code-change plans, `/api/apply`, Excel agent) were removed with those
+features in refactor step 2a; commands below that name them no longer apply. The history below keeps its original
 wording; old file names map as follows:
 
 | Old file | Now |
@@ -137,8 +137,6 @@ runs.
   `python -m unittest discover -s tests -p test_local_access.py -v`
 - F-08 three-language residual scan:
   `python -m unittest discover -s tests -p test_i18n_residuals.py -v`
-- F-10 deterministic Excel plans:
-  `python -m unittest discover -s tests -p test_legacy_excel_plan.py -v`
 - F-13 dead-code and frontend-cleanup checks:
   `python -m unittest discover -s tests -p test_frontend_cleanup.py -v`
 - F-11 packaging gate (read-only; does not create a ZIP):

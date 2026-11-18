@@ -29,8 +29,6 @@ class Session(TypedDict, total=False):
     env_file: str                  # .env file the credentials came from
     env_explicit: bool             # True when that .env was given explicitly
     pricing: PricingCatalog        # model prices for usage estimates
-    pending: list[dict[str, Any]]  # code-change plan waiting for confirmation (legacy)
-    pending_plan: dict[str, Any]   # identity of that plan (legacy)
 
     # Only on the copy made for one model call (begin_model_work):
     request_control: RequestControl     # timeout, cancel and size limits of the call
@@ -40,5 +38,5 @@ class Session(TypedDict, total=False):
 
 
 SETUP_KEYS = frozenset({"state", "documents", "model", "language", "llm", "env_file", "env_explicit",
-                        "pricing", "pending"})
+                        "pricing"})
 MODEL_WORK_KEYS = frozenset({"request_control", "cancel_event", "operation_id", "answer_events"})

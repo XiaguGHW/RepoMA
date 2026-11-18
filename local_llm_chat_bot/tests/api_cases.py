@@ -9,7 +9,6 @@ import sys
 APP = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(APP), str(APP / "tests")]
 
-import json  # noqa: E402
 import unittest  # noqa: E402
 from unittest.mock import patch  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -98,28 +97,3 @@ class DirectSessionCase(unittest.TestCase):
         for p in reversed(self.patches):
             p.stop()
         self.tmp.cleanup()
-
-
-class LegacyApplyPlanHelpers:
-    """Legacy code-change plan helpers (/api/chat proposal, rejected /api/apply).
-    Removed together with /api/apply in refactor step 2."""
-
-    def propose(self, name):
-        action = {
-            "answer": name,
-            "changes": [{"path": name + ".txt", "content": name}],
-            "read_files": [],
-        }
-        with patch.object(
-            w.ACTIVE["llm"], "ask_about_files", return_value=json.dumps(action)
-        ):
-            result = self.post("/api/chat", {"question": "Prepare " + name})
-        self.assertTrue(result["plan_id"])
-        self.assertNotIn("content", result["changes"][0])
-        return result["plan_id"]
-
-    def rejected(self, plan_id):
-        response = self.client.post(
-            "/api/apply", json={"confirmed": True, "plan_id": plan_id}
-        )
-        self.assertEqual(response.status_code, 409, response.text)

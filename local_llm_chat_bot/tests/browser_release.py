@@ -428,7 +428,6 @@ class BrowserRelease(unittest.TestCase):
         self.assertEqual(w.ACTIVE['state'].data['history'], original_history)
         self.assertIn('Stopped', self.page.locator('[data-process-text]').inner_text())
         self.assertFalse(w.MODEL_WORK_IN_PROGRESS.is_set())
-        self.assertEqual(w.ACTIVE['pending'], [])
         self.ask('Retry after stop')
         self.completed('safe preview, explicit stop and retry')
 
@@ -465,7 +464,6 @@ class BrowserRelease(unittest.TestCase):
         self.assertEqual(w.ACTIVE['state'].data['history'], old_history)
         self.assertEqual(self.page.locator('.answer-preview').count(), 0)
         self.assertEqual(self.page.locator('.change-plan').count(), 0)
-        self.assertEqual(w.ACTIVE['pending'], [])
         self.assertGreater(self.page.locator('#chat .message.error').count(), 0)
         self.completed('navigation disconnect and truncated preview cleanup')
 
@@ -910,60 +908,6 @@ class BrowserRelease(unittest.TestCase):
         control.dispatch_event("pointerover")
         self.assertFalse(self.page.evaluate("window.__attributeProbe===1"))
 
-    @unittest.skip("Code change plans need a code workspace; the Bosch Assembly Assistant has none "
-                   "(its automatic session folder is private state, so writes there are refused).")
-    def test_two_pages_confirm_only_their_displayed_plan(self):
-        other = self.browser.new_page(viewport={"width": 1440, "height": 1000})
-        self.addCleanup(other.close)
-        other.on("dialog", lambda dialog: dialog.accept())
-        auto_app_dialogs(other)
-        other.on("pageerror", lambda error: self.errors.append(str(error)))
-        other.goto(self.page.url)
-        other.wait_for_function(
-            "lastStatusSnapshot?.workspace && document.getElementById('setupmsg').textContent === t('workspace.opened')"
-        )
-
-        def action(name):
-            return json.dumps(
-                {
-                    "answer": name,
-                    "changes": [{"path": name + ".txt", "content": name}],
-                    "read_files": [],
-                }
-            )
-
-        first_page = self.page
-        with patch.object(
-            w.ACTIVE["llm"],
-            "ask_about_files",
-            side_effect=[action("page_A"), action("page_B")],
-        ):
-            self.ask("Prepare plan A")
-            first_id = first_page.locator(
-                ".change-plan button[data-plan-id]"
-            ).get_attribute("data-plan-id")
-            self.page = other
-            try:
-                self.ask("Prepare plan B")
-            finally:
-                self.page = first_page
-        second_id = other.locator(".change-plan button[data-plan-id]").get_attribute(
-            "data-plan-id"
-        )
-        self.assertNotEqual(first_id, second_id)
-        with first_page.expect_response(
-            lambda r: r.url.endswith("/api/apply")
-        ) as response:
-            first_page.locator(".change-plan button[data-plan-id]").click()
-        self.assertEqual(response.value.request.post_data_json["plan_id"], first_id)
-        self.assertEqual(response.value.status, 409)
-        self.assertFalse((self.auto_workspace / "page_A.txt").exists())
-        self.assertFalse((self.auto_workspace / "page_B.txt").exists())
-        with other.expect_response(lambda r: r.url.endswith("/api/apply")) as response:
-            other.locator(".change-plan button[data-plan-id]").click()
-        self.assertEqual(response.value.request.post_data_json["plan_id"], second_id)
-        self.assertEqual(response.value.status, 200)
-        self.assertEqual((self.auto_workspace / "page_B.txt").read_text(), "page_B")
 
     def test_stale_tab_cannot_classify_another_tabs_session_or_bg(self):
         self.language("en")

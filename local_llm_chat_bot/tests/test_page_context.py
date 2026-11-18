@@ -75,8 +75,6 @@ class PageContext(unittest.TestCase):
                                    ("DELETE", "/api/codebook", None),
                                    ("POST", "/api/session/delete", {"confirmed": True}),
                                    ("POST", "/api/session/rename", {"name": "renamed"}),
-                                   ("POST", "/api/apply", {"confirmed": True, "plan_id": "x"}),
-                                   ("DELETE", "/api/pending", None),
                                    ("POST", "/api/cache/clear", {"confirmed": True}),
                                    ("POST", "/api/export/session", {})]:
             with self.subTest(path=path, method=method):

@@ -59,12 +59,10 @@ class SecretBoundary(unittest.TestCase):
                 self.assert_secret_nowhere(prompts)
                 self.assertNotIn(SECRET, response.text)
 
-    def test_diff_apply_and_index_exclude_the_configured_file(self):
+    def test_index_and_paths_exclude_the_configured_file(self):
         env_file = self.setup_with("farm_settings.json")  # .json would otherwise be indexed as code
         state = w.ACTIVE["state"]
         self.assertNotIn("farm_settings.json", state.data["files"])
-        with self.assertRaises(ValueError):
-            w.build_diff(state, [{"path": "farm_settings.json", "content": "overwritten"}])
         with self.assertRaises(ValueError):
             state.resolve_relative("farm_settings.json")
         prompts = []
@@ -113,8 +111,6 @@ class SecretBoundary(unittest.TestCase):
         self.assertIn("[redacted]", response.text)
         self.assert_secret_nowhere(prompts)
         self.assertTrue(all("[redacted]" in prompt for prompt in prompts[1:]))
-        for item in w.ACTIVE.get("pending", []):
-            self.assertNotIn(SECRET, item["content"])
 
 
 class TerminalBoundary(unittest.TestCase):

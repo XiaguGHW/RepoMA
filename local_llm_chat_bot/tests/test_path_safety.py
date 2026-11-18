@@ -15,10 +15,10 @@ import unittest  # noqa: E402
 from unittest.mock import patch  # noqa: E402
 import chat_workbench as w  # noqa: E402
 from code_chat_agent import safe_name  # noqa: E402
-from api_cases import ApiCase, DirectSessionCase, EnglishApiCase, LegacyApplyPlanHelpers  # noqa: E402
+from api_cases import ApiCase, DirectSessionCase, EnglishApiCase  # noqa: E402
 
 
-class PathSafety(LegacyApplyPlanHelpers, ApiCase):
+class PathSafety(ApiCase):
     def test_regular_unicode_paths_work_and_unsafe_paths_are_rejected(self):
         state = w.ACTIVE["state"]
         good = self.f.workspace / "中文 ü folder" / "normal.txt"
@@ -42,7 +42,7 @@ class PathSafety(LegacyApplyPlanHelpers, ApiCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 state.resolve_relative(value)
 
-    def test_file_and_directory_links_are_blocked_for_reads_and_diffs(self):
+    def test_file_and_directory_links_are_blocked_for_reads(self):
         state = w.ACTIVE["state"]
         private = self.f.workspace / "AI_Bot_State" / "private.txt"
         private.write_text("PRIVATE_MARKER")
@@ -61,8 +61,6 @@ class PathSafety(LegacyApplyPlanHelpers, ApiCase):
             with self.subTest(name=name):
                 with self.assertRaises(ValueError):
                     state.resolve_relative(name)
-                with self.assertRaises(ValueError):
-                    w.build_diff(state, [{"path": name, "content": "blocked"}])
         state.scan()
         self.assertFalse(
             any("linked_" in name or "alias" in name for name in state.data["files"])

@@ -10,7 +10,6 @@ from workbench_startup import (StartupConfig, StartupError, FarmEnvironment, HOS
                                running_workbench, workbench_url)
 
 
-import difflib
 import webbrowser
 import asyncio
 import copy
@@ -48,7 +47,7 @@ try:
     import workbench_state_files as state_files
     from workbench_messages import (UIRequestError, UIValidationError, error_copy, message_payload, redact_value,
                                     ui_message)
-    from workbench_models import (ApplyRequest, BGRequest, CacheConfirmRequest, CacheFileRequest, ChatCancelRequest,
+    from workbench_models import (BGRequest, CacheConfirmRequest, CacheFileRequest, ChatCancelRequest,
                                   ChatRequest, CodebookEditRequest, CodebookPrepareRequest, CompareRequest,
                                   CoverageRequest, LanguageRequest, ModelSwitchRequest, ModelTestRequest,
                                   OperationCancelRequest, PathRequest, SessionDeleteRequest, SessionOpenRequest,
@@ -76,8 +75,7 @@ try:
                                           ANSWER_SHORTEN_INSTRUCTION, ClassificationValidationError,
                                           classification_scope, image_group_notices, relevant_codebook_page_evidence,
                                           validated_model_action)
-    from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative,
-                                 excerpt, prompt_for, safe_name, sha256)
+    from code_chat_agent import (PricingCatalog, ProjectState, SYSTEM, ensure_relative, excerpt, prompt_for, safe_name)
     from local_document_library import (LocalDocumentLibrary, SUPPORTED_DOCUMENT_EXTENSIONS, TextDecodingError,
                                         decode_text_bytes, material_role_label, MAX_CHUNKS_PER_DOCUMENT)
     from llm_connector_with_prompt_caching import LLMConnector, farm_base_url
@@ -1222,22 +1220,6 @@ def write_bg_analysis_export(state: ProjectState, language: str = "zh") -> Path:
     return target
 
 
-def build_diff(state: ProjectState, changes: list[dict]) -> list[dict]:
-    prepared = []
-    for change in changes:
-        if not isinstance(change, dict) or not isinstance(change.get("path"), str) or not isinstance(change.get("content"), str):
-            continue
-        relative = ensure_relative(change["path"])
-        path = state.resolve_relative(relative)
-        old = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
-        before = sha256(path.read_bytes()) if path.exists() else None
-        diff = "\n".join(difflib.unified_diff(old.splitlines(), change["content"].splitlines(),
-                                                 fromfile=f"a/{relative}", tofile=f"b/{relative}", lineterm=""))
-        prepared.append({"path": relative, "content": change["content"], "before": before,
-                         "reason": str(change.get("reason", "")), "diff": diff})
-    return prepared
-
-
 def coverage_path(state: ProjectState) -> Path:
     return state.root / "analysis_coverage.json"
 
@@ -1663,7 +1645,6 @@ def call_model(data: Session, question: str, progress=None, *, require_classific
                focus_source_id: str = "") -> dict[str, Any]:
     state, documents, llm = data["state"], data["documents"], data["llm"]
     ensure_current_sources(data)
-    invalidate_pending(data)
     def report(phase: str, text: str, percent: int | None = None) -> None:
         check_request(data)
         if progress:
@@ -1868,7 +1849,7 @@ def call_model(data: Session, question: str, progress=None, *, require_classific
             notices.insert(0, ui_message(data, 'notice.auto_prepared', files=len(coverage.get("files", [])), calls=coverage.get("model_calls", 0)))
         report("complete", ui_message(data, 'model.complete'), 100)
         return {"answer": answer, "reasoning": "".join(reasoning), "notices": notices, "notice_messages": [message_payload(item) for item in notices],
-                "sources": redact_value(evidence, llm.api_key), "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [], "can_export_bg": False,
+                "sources": redact_value(evidence, llm.api_key), "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "can_export_bg": False,
                 "classification": None, "coverage_summary": coverage_summary_for_answer(coverage) if classification_required and not focus else None,
                 "scope": turn_scope,
                 "turn_usage": summarize_usage(usage_records), "model_response": llm.last_response_model or data["model"],
@@ -1901,13 +1882,10 @@ def call_model(data: Session, question: str, progress=None, *, require_classific
             check_answer_size(data, raw)
             notices.append(ui_message(data, 'notice.supplementary_failed', detail=error_copy(exc, data)))
             action = {"answer": raw.strip() or str(ui_message(data, "model.empty")), "changes": [], "classification": None}
-    for change in action.get("changes", []):
-        if isinstance(change, dict) and state.resolve_relative(change.get("path", "")).exists() and change.get("path") not in complete:
-            raise ValueError("A complete current file must be read before proposing its replacement")
+    # File changes proposed by the model (the "changes" field of the shared
+    # action schema) are ignored: the assistant no longer edits files.
     with commit_answer(data):
         ensure_current_sources(data)
-        changes = build_diff(state, action.get("changes", []))
-        plan_id = publish_pending(data, changes)
         title_session_from_question(state, question)
         state.add_turn("user", question)
         state.add_turn("assistant", action.get("answer", ""))
@@ -1934,8 +1912,8 @@ def call_model(data: Session, question: str, progress=None, *, require_classific
         notices.insert(0, ui_message(data, 'notice.auto_prepared', files=len(coverage.get("files", [])), calls=coverage.get("model_calls", 0)))
     report("complete", ui_message(data, 'model.complete'), 100)
     return {"answer": action.get("answer", ""), "reasoning": "".join(reasoning), "notices": notices, "notice_messages": [message_payload(item) for item in notices],
-            "sources": redact_value(evidence, llm.api_key), "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals, "changes": [{k: v for k, v in item.items() if k != "content"} for item in changes],
-            "plan_id": plan_id, "can_export_bg": bool(bg_context),
+            "sources": redact_value(evidence, llm.api_key), "dfc_evidence": visual_report.get("dfc", []), "visuals": visuals,
+            "can_export_bg": bool(bg_context),
             "turn_usage": turn_token_usage,
             "model_response": llm.last_response_model or data["model"],
             "turn_cost": turn_token_usage["cost_usd"],
@@ -2074,7 +2052,6 @@ def reset_context(data: Session):
     state.data['summary'] = ''
     state.data.pop('last_bg_analysis', None)
     coverage_path(state).unlink(missing_ok=True)
-    invalidate_pending(data)
     state.data["context_revision"] = uuid.uuid4().hex
     state.save()
 
@@ -2264,7 +2241,7 @@ def setup(request: Setup):
             connector = LLMConnector(model, key, session_id=state.data["session_id"])
             candidate: Session = {"state": state, "documents": documents, "model": model, "language": language,
                          "llm": connector, "env_file": str(env_file), "env_explicit": explicit,
-                         "pricing": PricingCatalog(price_file), "pending": []}
+                         "pricing": PricingCatalog(price_file)}
             restore_context_binding(candidate)
             state.scan()
             state.data["selected_model"] = model
@@ -2314,7 +2291,6 @@ def activate_local_session(data: Session, session_name: str) -> dict:
         restore_context_binding(data)
         data["model"] = canonical_model_id(state.data.get("selected_model") or data["model"])
         data["llm"] = LLMConnector(data["model"], data["llm"].api_key, session_id=state.data["session_id"])
-        invalidate_pending(data)
         save_workbench_settings(state.workspace, state.root.name, data["model"], data.get("language", "zh"))
         return status_data(data)
 
@@ -2567,7 +2543,6 @@ def add_document(request: PathRequest):
     state.data["active_source_ids"] = list(dict.fromkeys(state.data["active_source_ids"]))
     state.data["source_binding"] = source_binding(session()["documents"], state.data["active_source_ids"])
     state.data["context_revision"] = uuid.uuid4().hex
-    invalidate_pending(session())
     state.save()
     return {"id": item["id"], "name": item["name"], "chunks": len(item["chunks"]),
             "material_role": item.get("material_role", "other"),
@@ -2700,7 +2675,6 @@ def analyze_target(request: TargetRequest):
         archive.unlink(missing_ok=True)
         raise
     state.data, documents.data = candidate, staged.data
-    invalidate_pending(data)
     return {"sources": len(sources), "skipped": skipped[:10], "skipped_count": len(skipped), "target_kind": target_kind,
             "files": [scan_report_file(item, reading_hints(data, sources)) for item in sources],
             "classification": bool(codebook_path), "status": status_data(data)}
@@ -3197,117 +3171,6 @@ def compare(request: CompareRequest):
         return call_comparison(data, question, models)
     finally:
         end_model_work(data)
-
-
-def invalidate_pending(data: Session):
-    data["pending"] = []
-    data.pop("pending_plan", None)
-    if ACTIVE.get("state") is data.get("state") and ACTIVE is not data:
-        ACTIVE["pending"] = []
-        ACTIVE.pop("pending_plan", None)
-
-
-def plan_digest(changes):
-    return sha256(json.dumps(changes, ensure_ascii=False, sort_keys=True,
-                             separators=(",", ":")).encode("utf-8"))
-
-
-def plan_context(data: Session):
-    state = data["state"]
-    rules = load_codebook_profile()
-    rule_path = Path(str(rules.get("source_path", "")))
-    return plan_digest({
-        "workspace": str(state.workspace), "session": str(state.root),
-        "session_id": state.data["session_id"], "model": data["model"],
-        "revision": state.data.get("context_revision"),
-        "context_schema_version": state.data.get("context_schema_version", 1),
-        "target": state.data.get("selected_target"),
-        "bg": state.data.get("bg_context"),
-        "sources": state.data.get("active_source_ids"),
-        "documents": [{key: item.get(key) for key in ("id", "path", "sha256")}
-                      for item in data["documents"].list()],
-        "rules": rules,
-        "rule_source_sha256": file_digest(rule_path) if rule_path.is_file() else None,
-    })
-
-
-def publish_pending(data: Session, changes):
-    """Bind the exact displayed ordered plan to this session and context."""
-    with LOCK:
-        invalidate_pending(data)
-        if not changes:
-            return None
-        plan = {"id": uuid.uuid4().hex, "context": plan_context(data),
-                "changes": plan_digest(changes)}
-        data["pending"], data["pending_plan"] = changes, plan
-        if ACTIVE.get("state") is data["state"]:
-            ACTIVE["pending"], ACTIVE["pending_plan"] = changes, plan
-        return plan["id"]
-
-
-@app.post("/api/apply")
-@context_mutation
-def apply(request: ApplyRequest):
-    if not request.confirmed:
-        raise HTTPException(400, ui_message(ACTIVE, 'error.confirmation'))
-    data = session()
-    pending = data.get("pending", [])
-    plan = data.get("pending_plan") or {}
-    if not request.plan_id or request.plan_id != plan.get("id") or not pending:
-        raise HTTPException(409, ui_message(ACTIVE, 'error.plan_expired'))
-    if plan.get("context") != plan_context(data) or plan.get("changes") != plan_digest(pending):
-        raise HTTPException(409, ui_message(ACTIVE, 'error.plan_changed'))
-    ensure_current_sources(data)
-    state = data["state"]
-    backup_dir = state.root / "backups" / uuid.uuid4().hex
-    staged, applied, originals = [], [], {}
-    try:
-        for item in pending:
-            path = state.resolve_relative(item["path"])
-            if path.suffix.lower() not in {".py", ".txt", ".md", ".json", ".csv", ".html", ".css", ".js"}:
-                raise ValueError("Binary documents and Excel must use the dedicated copy-based editor")
-            old = path.read_bytes() if path.exists() else None
-            if (sha256(old) if old is not None else None) != item["before"]:
-                raise HTTPException(409, ui_message(ACTIVE, 'error.source_changed', path=item['path']))
-            originals[path] = old
-            if old is not None:
-                backup = backup_dir / item["path"]
-                backup.parent.mkdir(parents=True, exist_ok=True)
-                backup.write_bytes(old)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temp = path.with_name('.' + path.name + '.' + uuid.uuid4().hex + '.tmp')
-            staged.append((path, temp))
-            with temp.open('w', encoding='utf-8', newline='') as handle:
-                handle.write(item['content'])
-                handle.flush()
-                os.fsync(handle.fileno())
-        for path, temp in staged:
-            os.replace(temp, path)
-            applied.append(path)
-        invalidate_pending(data)
-        for path, _ in staged:
-            state.refresh_file(state.relative(path))
-    except Exception:
-        for path in reversed(applied):
-            old = originals[path]
-            if old is None:
-                path.unlink(missing_ok=True)
-            else:
-                rollback = path.with_name('.' + path.name + '.rollback')
-                rollback.write_bytes(old)
-                os.replace(rollback, path)
-        raise
-    finally:
-        for _, temp in staged:
-            temp.unlink(missing_ok=True)
-    return {"applied": len(pending), "backup": str(backup_dir)}
-
-
-@app.delete("/api/pending")
-@context_mutation
-def cancel_pending():
-    invalidate_pending(session())
-    return {"cancelled": True}
 
 
 HTML = load_frontend_html()

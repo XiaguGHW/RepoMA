@@ -1,13 +1,8 @@
 """Offline regressions: real SDK decoding against a local mock HTTP transport."""
-import contextlib
-import io
 import json
 import sys
-import tempfile
-import threading
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from openai import OpenAI
@@ -15,7 +10,6 @@ from openai import OpenAI
 from openai import _base_client
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import excel_chat_agent as agent
 import llm_connector_with_prompt_caching as connector
 
 httpx = getattr(_base_client, "httpx2", None) or _base_client.httpx
@@ -90,17 +84,6 @@ class StreamingTests(unittest.TestCase):
         self.assertEqual("".join(t for k, t in events if k == "content"), planner)
         self.assertEqual(self.llm.last_usage["total_tokens"], 30)
 
-    def test_missing_reasoning_is_reported_not_invented(self):
-        self.responses = [stream_response([{"content": "你好。"}])]
-        output = io.StringIO()
-        args = SimpleNamespace(stream=False, no_stream=False, show_reasoning=True, thinking="auto")
-        with contextlib.redirect_stdout(output):
-            text, shown = agent.ask_with_progress(self.llm, "你好", "模型请求", 100, args, agent.TerminalProgress(), show_answer=True)
-        self.assertEqual(text, "你好。")
-        self.assertTrue(shown)
-        self.assertIn("没有返回 reasoning_content", output.getvalue())
-        self.assertNotIn("接口思考>", output.getvalue())
-
     def test_stream_rejection_falls_back_once_and_is_remembered(self):
         self.responses = [httpx.Response(400, json={"error": {"message": "stream is not supported"}}),
                           httpx.Response(200, json=complete()), httpx.Response(200, json=complete())]
@@ -118,59 +101,6 @@ class StreamingTests(unittest.TestCase):
         self.assertEqual(len(self.requests), 1)
         self.assertEqual(self.requests[0]["thinking"], {"type": "enabled"})
         self.assertFalse(self.llm._stream_rejected)
-
-    def test_partial_stream_never_becomes_an_executable_plan(self):
-        self.responses = [stream_response([{"content": '{"tool_calls":[],"reply":"看似完成"}'}], finished=False)]
-        args = SimpleNamespace(stream=True, no_stream=False, show_reasoning=False, thinking="auto")
-        with contextlib.redirect_stdout(io.StringIO()):
-            with self.assertRaisesRegex(RuntimeError, "完成标记"):
-                agent.ask_with_progress(self.llm, "检查文件", "模型请求", 100, args, agent.TerminalProgress())
-        self.assertEqual(len(self.requests), 1)
-
-    def test_full_response_reasoning_and_hidden_planner_body(self):
-        self.responses = [httpx.Response(200, json=complete('{"tool_calls":[]}'))]
-        args = SimpleNamespace(stream=False, no_stream=True, show_reasoning=True, thinking="auto")
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            _, shown = agent.ask_with_progress(self.llm, "检查文件", "模型请求", 100, args, agent.TerminalProgress())
-        self.assertIn("接口思考> 先检查工作簿结构。", output.getvalue())
-        self.assertNotIn('"tool_calls"', output.getvalue())
-        self.assertFalse(shown)
-        self.assertNotIn("stream", self.requests[0])
-
-    def test_progress_survives_excel_tool_stdout_redirection(self):
-        output, tool_output = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(output):
-            progress = agent.TerminalProgress(interval=0.01)
-            with progress.phase("读取工作簿"):
-                with contextlib.redirect_stdout(tool_output):
-                    threading.Event().wait(0.06)
-        self.assertIn("仍在等待完成", output.getvalue())
-        self.assertEqual(tool_output.getvalue(), "")
-
-    def test_main_runs_discovery_open_and_reply_without_extra_final_request(self):
-        with tempfile.TemporaryDirectory() as folder:
-            file_path = str(Path(folder) / "129BG.xlsx")
-            plans = [
-                {"tool_calls": [{"name": "discover_workbooks", "arguments": {"root": folder, "name_hint": "129BG"}}]},
-                {"tool_calls": [{"name": "open_workbook", "arguments": {"path": file_path}}]},
-                {"tool_calls": [], "reply": "已打开 129BG.xlsx，共 15 张工作表。"},
-            ]
-            self.responses = [httpx.Response(200, json=complete(json.dumps(p, ensure_ascii=False), reasoning=None)) for p in plans]
-            with patch.object(agent, "APP_DIR", Path(folder) / "sessions"), \
-                 patch.object(agent, "load_dotenv"), \
-                 patch.object(agent.WorkbookTools, "discover_workbooks", return_value={"candidates": [{"path": file_path}]}) as discover, \
-                 patch.object(agent.WorkbookTools, "open_workbook", return_value={"opened_workbook": "129BG.xlsx", "path": file_path, "overview": {"sheet_count": 15}}) as opened, \
-                 patch.dict("os.environ", {"BOSCH_FARM_SUBSCRIPTION_KEY": "offline-test-only"}, clear=True), \
-                 patch.object(sys, "argv", ["excel_chat_agent.py", "--model", "deepseek-v4-flash-2026-04-23"]), \
-                 patch("builtins.input", side_effect=[f'请看一下 "{folder}" 里叫129BG的表', "/quit"]), \
-                 contextlib.redirect_stdout(io.StringIO()) as output:
-                agent.main()
-            discover.assert_called_once()
-            opened.assert_called_once()
-            self.assertEqual(len(self.requests), 3)
-            self.assertIn("模型请求 3 次", output.getvalue())
-            self.assertIn("共 15 张工作表", output.getvalue())
 
     def test_gemini_does_not_receive_openai_streaming_options(self):
         llm = connector.LLMConnector("gemini-2.5-pro", "offline-test-only")
