@@ -28,7 +28,7 @@ from functools import wraps
 from queue import Empty, Full, Queue
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 STARTUP_CONFIG = bootstrap() if __name__ == '__main__' else StartupConfig()
 FARM_ENVIRONMENT = FarmEnvironment()
@@ -52,8 +52,11 @@ try:
                                   CoverageRequest, LanguageRequest, ModelSwitchRequest, ModelTestRequest,
                                   OperationCancelRequest, PathRequest, SessionDeleteRequest, SessionOpenRequest,
                                   SessionPinRequest, SessionRenameRequest, Setup, TargetRequest)
-    from workbench_model_calls import (accounted_model_call, check_answer_size, check_request, commit_answer,
-                                       connector_failure, require_model_success)
+    from workbench_model_calls import (check_answer_size, check_request, commit_answer, model_request_failed,
+                                       require_model_success)
+    # Re-exported for tests and diagnostics scripts.
+    from workbench_model_calls import accounted_model_call, connector_failure  # noqa: F401
+    from workbench_structured import Attempt, CallTask, StructuredCallError, call_model_text, structured_call
     from workbench_rules import (CODEBOOK_FILE_TYPES, CODEBOOK_JOB_LOG_LIMIT, CODEBOOK_JSON_REPAIR_SYSTEM,
                                  CODEBOOK_MERGE_SYSTEM, CODEBOOK_PAGE_SYSTEM, CODEBOOK_RECOMMENDED_MODEL,
                                  CODEBOOK_SECTION_SYSTEM, CodebookParseBudget, CodebookPrepareError,
@@ -620,6 +623,18 @@ def require_unique_rule_ids(draft: dict | None, status: int = 400) -> None:
 CODEBOOK_BUDGET = CodebookParseBudget()
 
 
+def model_text(data: Session, connector: Any, task: CallTask, context: UIMessage, *,
+               usage_records: list | None = None,
+               before_attempt: Callable[[Attempt, int], None] | None = None) -> str:
+    """call_model_text for free-text results: the stripped text, or the
+    user-visible "model request failed" error naming ``context``."""
+    try:
+        return call_model_text(data, connector, task, usage_records=usage_records,
+                               before_attempt=before_attempt).strip()
+    except StructuredCallError as failed:
+        raise model_request_failed(failed.failure, context) from None
+
+
 def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data: Session, usage_records=None,
                                      on_call=None, output_tokens: int | None = None) -> tuple[dict, dict | None]:
     """Parse the final Codebook JSON, making one syntax-only repair attempt if needed."""
@@ -633,13 +648,11 @@ def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data:
             "do not summarize, add, omit, translate, or change any factual content.\n"
             f"Parser error: {initial_error}\n\n--- CANDIDATE JSON ---\n{raw}"
         )
-        if on_call:
-            on_call()
         tokens = output_tokens or CODEBOOK_BUDGET.repair_output_tokens
-        repaired = accounted_model_call(data, connector, [], repair_prompt, CODEBOOK_JSON_REPAIR_SYSTEM,
-                                        {"maxOutputTokens": tokens, "temperature": 0}, stream=True,
-                                        usage_records=usage_records)
-        repaired = require_model_success(repaired, ui_message(data, 'model.context_codebook_repair'))
+        task = CallTask(CODEBOOK_JSON_REPAIR_SYSTEM, repair_prompt, (Attempt(tokens),))
+        repaired = model_text(data, connector, task, ui_message(data, 'model.context_codebook_repair'),
+                              usage_records=usage_records,
+                              before_attempt=(lambda _attempt, _number: on_call()) if on_call else None)
         repair_usage = connector.get_last_token_usage() or {}
         try:
             return parse_codebook_draft(repaired), repair_usage
@@ -803,14 +816,13 @@ def parse_codebook_unit(job: CodebookJob, data: Session, connector: LLMConnector
 
     def request(piece: dict, tokens: int) -> tuple[dict | None, tuple[str, dict, str] | None]:
         files, prompt, source = codebook_piece_request(unit, piece, total, file_type)
-        job.count_call()
-        raw = accounted_model_call(data, connector, files, prompt, CODEBOOK_PAGE_SYSTEM,
-                                   {"maxOutputTokens": tokens, "temperature": 0}, stream=True,
-                                   usage_records=job.usages)
-        failure = connector_failure(raw)
-        if failure:
-            reason, params = classify_model_failure(failure)
-            return None, (reason, params, str(failure))
+        # One attempt per piece: after an output-limit stop, run() splits the piece instead.
+        task = CallTask(CODEBOOK_PAGE_SYSTEM, prompt, (Attempt(tokens),), files=files)
+        try:
+            raw = call_model_text(data, connector, task, usage_records=job.usages,
+                                  before_attempt=lambda _attempt, _number: job.count_call())
+        except StructuredCallError as failed:
+            return None, (failed.reason, failed.params, failed.technical)
         note = parse_codebook_note(raw)
         if note is None:
             if not str(raw).strip():
@@ -867,18 +879,44 @@ def merge_codebook_notes(job: CodebookJob, data: Session, connector: LLMConnecto
         prompt += (" This Codebook has no physical pages: cite the supplied block numbers in \"blocks\" and "
                    "\"evidence_blocks\" and leave \"pages\" and \"evidence_pages\" empty.")
     prompt += "\n\n" + notes_text
-    for tokens in budget.merge_output_tokens:
-        job.count_call()
-        raw = accounted_model_call(data, connector, [], prompt, CODEBOOK_MERGE_SYSTEM,
-                                   {"maxOutputTokens": tokens, "temperature": 0}, stream=True, usage_records=job.usages)
-        failure = connector_failure(raw)
-        if not failure:
-            return raw
-        reason, params = classify_model_failure(failure)
-        if reason != "output_limit":
-            raise CodebookPrepareError(reason, "merging", technical=str(failure), params=params)
+    task = CallTask(CODEBOOK_MERGE_SYSTEM, prompt, CallTask.ladder(*budget.merge_output_tokens))
+    try:
+        return call_model_text(data, connector, task, usage_records=job.usages,
+                               before_attempt=lambda _attempt, _number: job.count_call())
+    except StructuredCallError as failed:
+        if failed.reason != "output_limit":
+            raise CodebookPrepareError(failed.reason, "merging", technical=failed.technical, params=failed.params)
     job.event("merging", "rulejob.log.merge_sectioned", tokens=budget.section_output_tokens[0])
     return json.dumps(merge_codebook_sections(job, data, connector, notes_text, cache), ensure_ascii=False)
+
+
+def parse_section(raw: str) -> dict:
+    result = parse_codebook_note(raw)
+    if result is None:
+        raise ValueError("section response is not a JSON object")
+    return result
+
+
+class SectionCache:
+    """Merge sections that succeeded before (same notes, request and model) are
+    reused, so a retry after a dropped connection pays only for the rest."""
+
+    def __init__(self, cache: tuple[dict, Path], job: "CodebookJob", label: UIMessage):
+        self.entries, self.path, self.job, self.label = cache[0], cache[1], job, label
+
+    def get(self, key: str) -> dict | None:
+        stored = self.entries.get(key)
+        if isinstance(stored, list) and stored:
+            self.job.event("merging", "rulejob.log.section_reused", section=self.label)
+            return dict(stored[0])
+        return None
+
+    def put(self, key: str, value: dict) -> None:
+        self.entries[key] = [value]
+        try:
+            write_json_atomically(self.path, self.entries)
+        except OSError:
+            pass
 
 
 def merge_codebook_sections(job: CodebookJob, data: Session, connector: LLMConnector, notes_text: str,
@@ -895,40 +933,28 @@ def merge_codebook_sections(job: CodebookJob, data: Session, connector: LLMConne
         # A section that succeeded before (same notes, request and model) is
         # reused, so a retry after a dropped connection pays only for the rest.
         key = "section:" + hashlib.sha256(f"{system}\0{request}".encode("utf-8")).hexdigest()[:24]
-        if cache and isinstance(cache[0].get(key), list) and cache[0][key]:
-            job.event("merging", "rulejob.log.section_reused", section=label)
-            return dict(cache[0][key][0])
-        if total is None:
-            job.event("merging", "rulejob.log.merge_outline", progress={}, section=label)
-        else:
-            job.event("merging", "rulejob.log.merge_section", progress={"current": current, "total": total},
-                      current=current, total=total, section=label)
-        technical = ""
-        for attempt, tokens in enumerate(budget.section_output_tokens, start=1):
-            text = request
+
+        def before_attempt(_attempt: Attempt, number: int) -> None:
+            if number == 1:
+                if total is None:
+                    job.event("merging", "rulejob.log.merge_outline", progress={}, section=label)
+                else:
+                    job.event("merging", "rulejob.log.merge_section", progress={"current": current, "total": total},
+                              current=current, total=total, section=label)
             job.count_call()
-            raw = accounted_model_call(data, connector, [], text, system,
-                                       {"maxOutputTokens": tokens, "temperature": 0}, stream=True,
-                                       usage_records=job.usages)
-            failure = connector_failure(raw)
-            if failure:
-                reason, params = classify_model_failure(failure)
-                technical = str(failure)
-                if reason != "output_limit":
-                    raise CodebookPrepareError(reason, "merging", technical=technical, params=params)
-                continue
-            result = parse_codebook_note(raw)
-            if result is None:
-                raise CodebookPrepareError("invalid_json", "merging", technical=str(raw)[:800])
-            if cache:
-                cache[0][key] = [result]
-                try:
-                    write_json_atomically(cache[1], cache[0])
-                except OSError:
-                    pass
-            return result
-        raise CodebookPrepareError("section_output_limit", "merging", attempts=len(budget.section_output_tokens),
-                                   technical=technical, params={"section": label})
+
+        task = CallTask(system, request, CallTask.ladder(*budget.section_output_tokens))
+        try:
+            return structured_call(data, connector, task, parse_section, usage_records=job.usages,
+                                   before_attempt=before_attempt,
+                                   cache=SectionCache(cache, job, label) if cache else None, cache_key=key)
+        except StructuredCallError as failed:
+            if failed.reason == "invalid":
+                raise CodebookPrepareError("invalid_json", "merging", technical=failed.raw[:800])
+            if failed.reason == "output_limit":
+                raise CodebookPrepareError("section_output_limit", "merging", attempts=failed.attempts,
+                                           technical=failed.technical, params={"section": label})
+            raise CodebookPrepareError(failed.reason, "merging", technical=failed.technical, params=failed.params)
 
     outline = section(UIMessage("rulejob.section.outline", "zh"),
                       'SECTION outline. Return {"classes":[{"name":"exact official class name"}]} listing every '
@@ -1328,7 +1354,8 @@ def prepare_bg_dossier(data: Session, coverage: dict, *, force: bool = False, us
     request = "Create one reusable BG comprehensive evidence dossier with sections: composition/BOM; motion and main functional chain; actuators/transmission; relevant geometry/interfaces; DFC hierarchy; conflicts or limitations; source evidence. Every factual bullet must retain its source file and page/section label.\n\n" + sources
     records_used: list[dict] = []
     try:
-        raw = require_model_success(accounted_model_call(data, data["llm"], [], request, system_prompt, {"maxOutputTokens": BG_DOSSIER_TOKENS, "temperature": 0}, stream=True, usage_records=records_used), ui_message(data, 'model.context_dossier'))
+        raw = model_text(data, data["llm"], CallTask(system_prompt, request, (Attempt(BG_DOSSIER_TOKENS),)),
+                         ui_message(data, 'model.context_dossier'), usage_records=records_used)
     finally:
         if usage_records is not None:
             usage_records.extend(records_used)
@@ -1508,21 +1535,24 @@ def prepare_coverage(data: Session, full: bool = False, progress=None, usage_rec
                 nonlocal total_calls
                 attempts: list[dict] = []
                 hint = PREREAD_VISUAL_INSTRUCTION.format(count=len(attached)) if attached else ""
+                prompt = (f"文件：{document['name']}。{label}提取结构、部件、驱动、运动、接口、尺寸和不确定处，"
+                          f"并保留页面/表格标签。{hint}{MATERIAL_GROUP_FORMAT}\n\n{text}")
                 try:
-                    return accounted_model_call(data, llm, attached, f"文件：{document['name']}。{label}提取结构、部件、驱动、运动、接口、尺寸和不确定处，并保留页面/表格标签。{hint}{MATERIAL_GROUP_FORMAT}\n\n{text}",
-                                                summary_system, {"maxOutputTokens": MATERIAL_GROUP_TOKENS, "temperature": 0}, stream=True, usage_records=attempts)
+                    return call_model_text(data, llm, CallTask(summary_system, prompt, (Attempt(MATERIAL_GROUP_TOKENS),),
+                                                               files=attached), usage_records=attempts)
                 finally:
                     total_calls += len(attempts)
                     if usage_records is not None:
                         usage_records.extend(attempts)
 
-            raw = call(images)
-            failure = connector_failure(raw) if images else None
-            if failure and classify_model_failure(failure)[0] not in {"output_limit", "timeout"}:
-                # A model or endpoint that refuses pictures still gets the text.
-                visual_fallback = True
-                raw = call([])
-            return raw
+            try:
+                return call(images)
+            except StructuredCallError as failed:
+                if not images or failed.reason in {"output_limit", "timeout"}:
+                    raise
+            # A model or endpoint that refuses pictures still gets the text.
+            visual_fallback = True
+            return call([])
 
         for number, group in enumerate(groups, start=1):
             # A group that succeeded before (e.g. in a scan where another group
@@ -1547,12 +1577,13 @@ def prepare_coverage(data: Session, full: bool = False, progress=None, usage_rec
                     if progress:
                         progress("reading", ui_message(data, "reading.group", name=document["name"], index=number, total=len(groups)),
                                  12 + int((file_index - 1 + number / max(len(groups), 1)) / max(total_documents, 1) * 48))
-                    raw = group_call(group, label, images_for.get(group))
-                    failure = connector_failure(raw)
-                    if failure and classify_model_failure(failure)[0] == "output_limit" and halves:
+                    try:
+                        raw = group_call(group, label, images_for.get(group))
+                    except StructuredCallError as failed:
+                        if failed.reason != "output_limit" or not halves:
+                            raise model_request_failed(failed.failure, ui_message(data, 'model.context_group', name=document["name"])) from None
                         split = True
                     else:
-                        raw = require_model_success(raw, ui_message(data, 'model.context_group', name=document["name"]))
                         notes.append(raw.strip())
                         save_material_group_note(document, data["model"], group, raw.strip())
                         continue
@@ -1571,15 +1602,14 @@ def prepare_coverage(data: Session, full: bool = False, progress=None, usage_rec
                     retry_calls += 1
                     file_retry_calls += 1
                     # Pictures ride with the first half of a split group.
-                    raw = group_call(half, label + f"本次只处理该组的第 {part}/2 部分。",
-                                     images_for.get(group) if part == 1 else None)
                     try:
-                        note = require_model_success(raw, ui_message(data, 'model.context_group', name=document["name"])).strip()
-                    except RequestStopped:
-                        raise
-                    except Exception as exc:
-                        failures.append(ui_message(data, "reading.part_failed", index=number, part=part, detail=error_copy(exc, data)))
+                        raw = group_call(half, label + f"本次只处理该组的第 {part}/2 部分。",
+                                         images_for.get(group) if part == 1 else None)
+                    except StructuredCallError as failed:
+                        error = model_request_failed(failed.failure, ui_message(data, 'model.context_group', name=document["name"]))
+                        failures.append(ui_message(data, "reading.part_failed", index=number, part=part, detail=error_copy(error, data)))
                         continue
+                    note = raw.strip()
                     collected[part - 1] = note
                     save_material_group_note(document, data["model"], half, note)
                 notes.extend(note for note in collected if note)
@@ -1593,15 +1623,15 @@ def prepare_coverage(data: Session, full: bool = False, progress=None, usage_rec
             try:
                 merged = "\n\n".join(f"[片段组 {i}]\n{note}" for i, note in enumerate(notes, start=1))
                 attempts: list[dict] = []
+                prompt = (f"请将下列同一文件的全部片段笔记合成为一份不遗漏冲突或不确定处的技术摘要。必须保留证据标签。"
+                          f"{MATERIAL_MERGE_FORMAT}\n\n文件：{document['name']}\n\n{merged}")
                 try:
-                    raw = accounted_model_call(data, llm, [], f"请将下列同一文件的全部片段笔记合成为一份不遗漏冲突或不确定处的技术摘要。必须保留证据标签。{MATERIAL_MERGE_FORMAT}\n\n文件：{document['name']}\n\n{merged}",
-                                               summary_system, {"maxOutputTokens": MATERIAL_MERGE_TOKENS, "temperature": 0}, stream=True, usage_records=attempts)
+                    summary = model_text(data, llm, CallTask(summary_system, prompt, (Attempt(MATERIAL_MERGE_TOKENS),)),
+                                         ui_message(data, 'model.context_merge', name=document["name"]), usage_records=attempts)
                 finally:
                     total_calls += len(attempts)
                     if usage_records is not None:
                         usage_records.extend(attempts)
-                raw = require_model_success(raw, ui_message(data, 'model.context_merge', name=document["name"]))
-                summary = raw.strip()
             except RequestStopped:
                 raise
             except Exception as exc:
@@ -1782,40 +1812,46 @@ def call_model(data: Session, question: str, progress=None, *, require_classific
             model_started = True
             report("model", ui_message(data, 'progress.generating'), 92)
 
-    def answer_call(prompt, tokens, shortened=False):
-        nonlocal preview
-        check_request(data)
-        limit = data["request_control"].policy.max_answer_chars if data.get("request_control") else 131072
-        preview = AnswerPreview(limit)
-        if data.get("answer_events"):
-            data["answer_events"]({"type": "answer_reset"})
-        raw_response = accounted_model_call(data, llm, visuals, prompt, SYSTEM,
-                                            {"maxOutputTokens": tokens, "temperature": 0}, stream=True,
-                                            event_handler=model_events, usage_records=usage_records)
-        failure = connector_failure(raw_response)
-        if failure and classify_model_failure(failure)[0] == "output_limit":
-            if shortened:
-                raise UIRequestError(ui_message(data, 'model.answer_too_long', tokens=tokens))
-            report("model", ui_message(data, 'progress.answer_shorten'), 92)
-            notices.append(ui_message(data, 'notice.answer_shortened'))
-            return answer_call(prompt + ANSWER_SHORTEN_INSTRUCTION, ANSWER_RETRY_OUTPUT_TOKENS, shortened=True)
-        # Non-streaming providers cannot emit early chunks; still use the same
-        # safe answer decoder, without replaying chunks from streaming providers.
-        if not preview.started and not preview.disabled:
-            model_events("content", raw_response)
-        return raw_response
+    def answer_call(prompt: str, context: UIMessage) -> str:
+        """One answer request: full ceiling, then once shorter after an output-limit stop."""
+        def before_attempt(attempt: Attempt, number: int) -> None:
+            nonlocal preview
+            if number > 1:
+                report("model", ui_message(data, 'progress.answer_shorten'), 92)
+                notices.append(ui_message(data, 'notice.answer_shortened'))
+            check_request(data)
+            limit = data["request_control"].policy.max_answer_chars if data.get("request_control") else 131072
+            preview = AnswerPreview(limit)
+            if data.get("answer_events"):
+                data["answer_events"]({"type": "answer_reset"})
+
+        def flush_preview(text: str) -> None:
+            # Non-streaming providers cannot emit early chunks; still use the same
+            # safe answer decoder, without replaying chunks from streaming providers.
+            if not preview.started and not preview.disabled:
+                model_events("content", text)
+
+        task = CallTask(SYSTEM, prompt, (Attempt(ANSWER_OUTPUT_TOKENS),
+                                         Attempt(ANSWER_RETRY_OUTPUT_TOKENS, ANSWER_SHORTEN_INSTRUCTION)),
+                        files=visuals, event_handler=model_events)
+        try:
+            raw_response = call_model_text(data, llm, task, usage_records=usage_records, before_attempt=before_attempt)
+        except StructuredCallError as failed:
+            if failed.reason == "output_limit":
+                raise UIRequestError(ui_message(data, 'model.answer_too_long', tokens=task.attempts[-1].output_tokens))
+            flush_preview(failed.raw)
+            raise model_request_failed(failed.failure, context) from None
+        flush_preview(raw_response)
+        return raw_response.strip()
 
     report("model", ui_message(data, 'progress.waiting'), 90)
-    raw = answer_call(model_prompt, ANSWER_OUTPUT_TOKENS)
-    raw = require_model_success(raw, ui_message(data, 'model.context_main'))
+    raw = answer_call(model_prompt, ui_message(data, 'model.context_main'))
     validation = {"required": classification_required, "repairs": 0}
     scope = classification_scope(documents, bg_context)
 
     def repair_classification(repair_prompt):
         report("validation", ui_message(data, 'progress.repair'), 96)
-        repaired = answer_call(repair_prompt, ANSWER_OUTPUT_TOKENS)
-        repaired = require_model_success(repaired, ui_message(data, 'model.context_repair'))
-        return repaired
+        return answer_call(repair_prompt, ui_message(data, 'model.context_repair'))
 
     def validated_action(raw_response: str, request_prompt: str) -> dict:
         result = validated_model_action(raw_response, request_prompt, evidence=evidence, scope=scope,
@@ -1936,20 +1972,18 @@ def call_comparison(data: Session, question: str, models: list[str]) -> dict[str
         try:
             connector = LLMConnector(model, data["llm"].api_key,
                                      session_id=f"{state.data['session_id']}-comparison-{index}")
-            raw = accounted_model_call(data, connector,
-                visuals, prompt, SYSTEM, {"maxOutputTokens": ANSWER_OUTPUT_TOKENS, "temperature": 0},
-                stream=True, event_handler=events, usage_records=usage_records,
-            )
-            raw = require_model_success(raw, ui_message(data, 'model.context_compare', model=model))
+            # One attempt at the normal answer ceiling (no shortened retry in a comparison).
+            task = CallTask(SYSTEM, prompt, (Attempt(ANSWER_OUTPUT_TOKENS),), files=visuals, event_handler=events)
+            raw = model_text(data, connector, task, ui_message(data, 'model.context_compare', model=model),
+                             usage_records=usage_records)
             actual_model = connector.last_response_model or model
             validation = {"required": True, "repairs": 0}
 
             def repair_comparison(repair_prompt):
-                repaired = accounted_model_call(data, connector, visuals, repair_prompt, SYSTEM,
-                                                      {"maxOutputTokens": ANSWER_OUTPUT_TOKENS, "temperature": 0},
-                                                      stream=True, event_handler=events, usage_records=usage_records)
-                repaired = require_model_success(repaired, ui_message(data, 'model.context_compare_repair', model=model))
-                return repaired
+                repair_task = CallTask(SYSTEM, repair_prompt, (Attempt(ANSWER_OUTPUT_TOKENS),), files=visuals,
+                                       event_handler=events)
+                return model_text(data, connector, repair_task,
+                                  ui_message(data, 'model.context_compare_repair', model=model), usage_records=usage_records)
 
             action = validated_model_action(raw, prompt, evidence=evidence,
                                             scope=classification_scope(documents, bg_context),

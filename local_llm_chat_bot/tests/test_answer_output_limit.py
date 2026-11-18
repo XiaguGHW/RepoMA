@@ -68,6 +68,51 @@ class AnswerOutputLimit(unittest.TestCase):
         self.assertEqual(w.ACTIVE["state"].data["history"], [])
         self.assertFalse(w.MODEL_WORK_IN_PROGRESS.is_set())
 
+    def fail_answers(self, *, skip=0, reason="SAFETY"):
+        state = {"seen": 0}
+
+        def transform(response, prompt, system):
+            if ANSWER_SYSTEM in system:
+                state["seen"] += 1
+                if state["seen"] > skip:
+                    response["candidates"][0]["finishReason"] = reason
+            return response
+        self.f.response_transform = transform
+
+    def assert_model_failure(self, payload, context):
+        self.assertEqual(payload["message_key"], "model.request_failed")
+        self.assertEqual(payload["params"]["context"]["message_key"], context)
+        self.assertIn("(safety)", json.dumps(payload["params"]["detail"]).lower())
+
+    def test_refused_answer_is_a_named_model_failure_and_not_retried(self):
+        self.fail_answers()
+        before = len(self.f.calls)
+        response = self.client.post("/api/chat", json={"question": "根据分类规则判断当前Baugruppe类别"})
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assert_model_failure(response.json(), "model.context_main")
+        self.assertEqual(len(self.answer_calls(before)), 1)
+        self.assertEqual(w.ACTIVE["state"].data["history"], [])
+
+    def test_refused_repair_names_the_repair(self):
+        self.fail_answers(skip=1)
+        before = len(self.f.calls)
+        response = self.client.post("/api/chat", json={"question": "TEST_UNKNOWN 根据分类规则判断当前Baugruppe类别"})
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertEqual(len(self.answer_calls(before)), 2)
+        detail = response.json()["detail"]
+        self.assertTrue(detail.startswith("分类输出修复请求失败"), detail)  # model.context_repair
+        self.assertIn("(safety)", detail)
+        self.assertEqual(w.ACTIVE["state"].data["history"], [])
+
+    def test_refused_comparison_model_is_reported_per_model(self):
+        self.fail_answers()
+        models = ["gemini-2.5-pro", "gemini-2.5-flash"]
+        result = self.post("/api/compare", {"question": "classify", "models": models})
+        for model, entry in zip(models, result["results"]):
+            self.assertFalse(entry["ok"])
+            self.assert_model_failure(entry["error_message"], "model.context_compare")
+            self.assertEqual(entry["error_message"]["params"]["context"]["params"]["model"], model)
+
     def test_classification_answer_length_is_bounded_in_the_prompt(self):
         self.assertNotIn("may exceed the normal length limit", SYSTEM)
         self.assertIn("at most about 1500 Chinese characters", SYSTEM)
