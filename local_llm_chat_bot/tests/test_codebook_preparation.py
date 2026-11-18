@@ -518,6 +518,41 @@ class CodebookPreparation(unittest.TestCase):
         self.assertEqual(w.load_codebook_profile(), {})
         self.assert_closed()
 
+    def test_merge_json_syntax_error_gets_one_repair_request(self):
+        def broken_merge(response, prompt, system):
+            if "consolidate page-by-page" in system:
+                text = response["candidates"][0]["content"]["parts"][0]["text"]
+                response["candidates"][0]["content"]["parts"][0]["text"] = text[:-1] + ",,}"
+            if "Repair its JSON syntax only" in prompt:
+                from fixture_support import PROFILE
+                response["candidates"][0]["content"]["parts"][0]["text"] = json.dumps(PROFILE)
+            return response
+        self.f.response_transform = broken_merge
+        self.post("/api/codebook/prepare", {"path": str(self.f.rules)})
+        self.assertEqual(self.task()["state"], "succeeded")
+        repairs = [call for call in self.f.calls if "Repair its JSON syntax only" in json.dumps(call["body"])]
+        self.assertEqual(len(repairs), 1)
+        body = repairs[0]["body"]
+        self.assertEqual(body.get("generationConfig", {}).get("maxOutputTokens"), w.CODEBOOK_BUDGET.repair_output_tokens)
+        self.assertTrue(w.load_codebook_profile())
+
+    def test_repair_request_stopped_at_its_ceiling_fails_and_saves_nothing(self):
+        def broken(response, prompt, system):
+            if "consolidate page-by-page" in system:
+                response["candidates"][0]["content"]["parts"][0]["text"] = '{"classes": [{"name": '
+            if "Repair its JSON syntax only" in prompt:
+                response["candidates"][0]["finishReason"] = "MAX_TOKENS"
+            return response
+        self.f.response_transform = broken
+        response = self.client.post("/api/codebook/prepare", json={"path": str(self.f.rules)})
+        self.assertEqual(response.status_code, 400)
+        failure = self.task()["failure"]
+        self.assertEqual((failure["reason"], failure["stage"]), ("invalid_json", "merging"))
+        self.assertIn("Rule JSON repair failed", failure["technical"])
+        self.assertIn("MAX_TOKENS", failure["technical"])
+        self.assertEqual(w.load_codebook_profile(), {})
+        self.assert_closed()
+
     def test_user_cancel_of_background_job_is_recorded_and_saves_nothing(self):
         from docx import Document
         document = Document()
