@@ -65,7 +65,7 @@ class FixtureEnvironment:
                     text=json.dumps(PROFILE)
                 elif 'transcribe exactly one' in system:
                     text=json.dumps({'page':1,'definitions':['Rotationseinheit: rotates objects']})
-                elif 'careful local workspace' in system:
+                elif 'You are the Bosch Assembly Assistant' in system:
                     if 'TEST_EMPTY' in prompt:
                         text=''
                     elif 'TEST_BAD_JSON' in prompt:

@@ -33,48 +33,26 @@ MAX_SNIPPETS = 6
 MAX_SNIPPET_CHARS = 4_000
 HISTORY_MESSAGES_PER_REQUEST = 4
 
-SYSTEM = """You are a careful local workspace and document assistant. You never have direct filesystem access.
-The local program gives you code excerpts, locally extracted document excerpts, and, when necessary, current full files.
-Return ONLY a JSON object with these fields:
-{
-  "answer": "concise explanation in the response language requested in the user prompt (normally <= 1200 Chinese characters or equivalent; complete the JSON even if you must shorten)",
-  "read_files": ["relative/path"],
-  "changes": [{"path": "relative/path", "content": "complete new UTF-8 file content", "reason": "brief reason"}],
-  "memory_action": {"operation": "none|add|edit|delete", "id": "memory id or empty", "content": "new memory text or empty"},
-  "classification": null
-}
+SYSTEM = """You are the Bosch Assembly Assistant. You classify a Baugruppe (assembly) by a locked Codebook
+and answer questions about its documents. You have no direct file access: the local program supplies the
+locked Codebook profile, an evidence dossier, per-file summaries and locally extracted document excerpts.
+Return ONLY one JSON object, without Markdown fences:
+{"answer": "plain-text answer in the response language requested in the user prompt", "classification": null}
+The user prompt says when and in which form a classification object is required.
 Rules:
-- Paths must be relative to the supplied workspace. Never use .. or an absolute path.
-- For a modification, first request the complete current target file in read_files unless it was supplied in this message.
-- Do not put a change in changes until you have the complete current content for that file.
-- A new file may be created directly if its parent path is clear.
-- Keep read_files focused (at most 4). Do not request an entire repository.
-- Use supplied document excerpts as evidence when answering document questions. Cite their filename/page or sheet in the answer when useful.
-- Do not propose a code change merely because the user asks a document question.
-- If evidence is insufficient, explain what is needed and leave changes empty.
-- Set memory_action only when the user explicitly asks you to remember, update, or delete a long-term memory. Never infer a memory action from ordinary discussion.
-- For add use the concise fact/preference in content. For edit/delete, use an exact memory id shown in the supplied long-term memory when available; otherwise use operation none and ask the user to use /memory.
-- Never claim a memory action was completed: the local program requires explicit confirmation.
-- Do not use Markdown fences around the JSON.
-- For ordinary explanations, be structured but concise. Never let a long explanation prevent a complete valid JSON object.
-- Write the natural-language answer in the response language requested in the user prompt.
-  Keep official Codebook category names, filenames, part numbers, source quotations,
-  supplied table labels, and supplied technical evidence exactly as provided.
-- Exception — when the supplied prompt contains BG CLASSIFICATION MODE and you return a
-  non-null classification object, give an evidence-led assessment of at most about 1500 Chinese characters (or equivalent).
-  Use concise equivalent sections in the requested response language: recommendation;
-  Codebook decision path; evidence (file/page/sheet/row); alternatives; uncertainty.
-  At most 4 short points per section; cite evidence labels instead of quoting long
-  passages. The classification object must always be complete: shorten the answer
-  rather than leave the JSON unfinished.
-  Do not invent evidence. Separate an observed fact from an inference.
-- Write for a narrow plain terminal, not for Markdown rendering. Use this default shape in the requested language:
-  Short conclusion: one sentence
-  1) Short heading — one or two short lines
-  2) Short heading — one or two short lines
-  下一步：only when the user needs an action
-- Prefer 3–5 numbered sections. Avoid Markdown tables, long paragraphs, deep nested lists, and more than about 10 visible lines unless the user explicitly asks for a detailed answer.
-- For a script-structure explanation, first give only the top-level modules and their roles. Offer to expand a specific numbered module instead of explaining every function at once.
+- Use only the supplied material as evidence. Cite file names with page, sheet, row or chunk exactly as labelled.
+  Do not invent evidence. Separate an observed fact from an inference. If the evidence is insufficient, say what is missing.
+- Write `answer` in the requested response language. Keep official Codebook category names, file names, part numbers,
+  source quotations, supplied table labels and technical evidence exactly as provided.
+- `answer` is shown as plain text: no Markdown tables, headings or nested lists.
+- Explanation (classification null): normally at most about 1200 Chinese characters (or equivalent): a one-sentence
+  conclusion, then 3-5 short numbered points; add a next step only when the user needs an action. Longer only when the
+  user explicitly asks for detail.
+- Classification (non-null classification object): an evidence-led assessment of at most about 1500 Chinese characters
+  (or equivalent), in short sections: recommendation; Codebook decision path; evidence (file/page/sheet/row);
+  alternatives; uncertainty. At most 4 short points per section; cite evidence labels instead of quoting long passages.
+- The classification object must always be complete, and the JSON object must always be valid: shorten the answer rather
+  than leave either unfinished.
 """
 
 
@@ -691,17 +669,12 @@ def classification_manifest(evidence, context):
     }
 
 
-def prompt_for(state: ProjectState, question: str, snippets: dict[str, str], full_files: dict[str, str] | None = None,
+def prompt_for(state: ProjectState, question: str,
                document_snippets: list[dict] | None = None, bg_context: dict | None = None,
                coverage_summaries: list[dict] | None = None, bg_dossier: dict | None = None,
                response_language: str = "zh", require_classification: bool | None = True,
                focus_name: str = ""):
     recent = "\n".join(f"{turn['role']}: {turn['content']}" for turn in state.data["history"][-HISTORY_MESSAGES_PER_REQUEST:]) or "(new conversation)"
-    memories = state.search_memory(question)
-    memory_text = "\n".join(f"- [{item['id']}] {item['content']}" for item in memories) or "(No relevant confirmed long-term memory.)"
-    indexed = "\n".join(f"- {p}: {', '.join(m.get('symbols', [])[:12])}" for p, m in list(state.data["files"].items())[:250])
-    shown = "\n\n".join(f"--- EXCERPT {path} ---\n{text}" for path, text in snippets.items()) or "(No relevant excerpt found.)"
-    complete = "\n\n".join(f"--- COMPLETE FILE {path} ---\n{text}" for path, text in (full_files or {}).items()) or "(No complete file was requested yet.)"
     document_text = "\n\n".join(
         f"--- DOCUMENT [{item['id']}] {item['label']} ---\n{item['text']}"
         for item in (document_snippets or [])
@@ -759,23 +732,13 @@ BG CLASSIFICATION MODE (active):
     dossier_block = "" if stable else f"""BG comprehensive evidence dossier (compiled from the selected files' local summaries; citations and limitations must be retained):\n{dossier_text}
 
 """
-    # Code context only when a code workspace is actually indexed; the
-    # Bosch Assembly Assistant uses an empty session folder, so nothing is sent.
-    has_code = bool(state.data["files"] or snippets or full_files)
-    workspace_line = f"Workspace: {state.workspace}\n" if has_code else ""
-    code_block = (f"Indexed files and symbols (local metadata only):\n{indexed}\n\n"
-                  f"Relevant code excerpts:\n{shown}\n\n") if has_code else ""
-    complete_block = f"Complete current files supplied in this turn:\n{complete}\n\n" if has_code else ""
-    return f"""{stable}{workspace_line}Project summary: {state.data['summary'] or '(none)'}
-Recent conversation:\n{recent}
+    return f"""{stable}Recent conversation:\n{recent}
 
-Relevant confirmed long-term memory (local, user-confirmed):\n{memory_text}
-
-{code_block}Relevant locally extracted document excerpts:\n{document_text}
+Relevant locally extracted document excerpts:\n{document_text}
 
 {dossier_block}Prepared per-file evidence summaries (fallback only when no dossier is available; do not claim unread pages were inspected):\n{coverage_text}
 
-{complete_block}Response language: Write the natural-language `answer` primarily in {language_name}.
+Response language: Write the natural-language `answer` primarily in {language_name}.
 Do not translate official Codebook category names, filenames, part numbers, source quotations,
 table labels, or the supplied material evidence; preserve their original spelling verbatim.
 
