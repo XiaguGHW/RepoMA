@@ -768,7 +768,10 @@ def load_codebook_job() -> dict | None:
     home = str(app_state_home())
     with CODEBOOK_JOB_GUARD:
         live = copy.deepcopy(CODEBOOK_JOB.get("record")) if CODEBOOK_JOB.get("home") == home else None
-    if live and live.get("state") == "running":
+    if live:
+        # A job of this process: its record is current.  The file can lag
+        # behind it for a moment (publish() updates memory first), and must not
+        # then be read as a run interrupted by a restart.
         return live
     try:
         record = state_files.decode(state_files.CODEBOOK_JOB, json.loads(codebook_job_path().read_text(encoding="utf-8")))

@@ -13,6 +13,7 @@ from pathlib import Path
 import sys
 import threading
 import time
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -599,6 +600,32 @@ class CodebookPreparation(unittest.TestCase):
         self.assertIn("bar.id='scopebar'", source)
         self.assertNotRegex(source, r"rulews\.model_prompt")
 
+
+
+class FinishedJobWhileFileLags(unittest.TestCase):
+    """publish() updates the in-memory record before it writes the file."""
+
+    def test_a_finished_job_is_not_read_as_interrupted_in_that_moment(self):
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(w, "app_state_home", return_value=Path(folder)):
+            running = {"task_id": "t1", "state": "running", "stage": "saving", "updated_at": "x", "log": []}
+            w.write_json_atomically(w.codebook_job_path(), w.state_files.encode(w.state_files.CODEBOOK_JOB, running))
+            before = w.codebook_job_path().read_bytes()
+            finished = dict(running, state="succeeded", finished_at="y")
+            self.assertFalse(w.MODEL_WORK_IN_PROGRESS.is_set())
+            with w.CODEBOOK_JOB_GUARD:
+                saved = dict(w.CODEBOOK_JOB)
+                w.CODEBOOK_JOB.clear()
+                w.CODEBOOK_JOB.update(home=str(Path(folder)), record=finished)
+            try:
+                self.assertEqual(w.load_codebook_job()["state"], "succeeded")
+                self.assertEqual(w.codebook_job_path().read_bytes(), before)  # not rewritten as interrupted
+            finally:
+                with w.CODEBOOK_JOB_GUARD:
+                    w.CODEBOOK_JOB.clear()
+                    w.CODEBOOK_JOB.update(saved)
+            # After a restart (no record in memory) a running file still means interrupted.
+            self.assertEqual(w.load_codebook_job()["failure"]["reason"], "interrupted")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
