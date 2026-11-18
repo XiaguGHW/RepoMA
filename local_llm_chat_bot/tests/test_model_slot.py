@@ -1,5 +1,6 @@
 """The model slot: one model task at a time, no global lock during model calls,
-and only requests that cannot affect the running task are let through."""
+and only requests that cannot affect the running task are let through
+(other saved sessions, diagnostics, model test, reading, UI language)."""
 
 from pathlib import Path
 import sys
@@ -146,7 +147,7 @@ class RequestsWhileModelWorkRuns(EnglishApiCase):
         self.assertTrue(w.ACTIVE["state"].root.is_dir())
         self.assertEqual(w.ACTIVE["state"].root.name, self.active)
 
-    def test_context_changes_and_environment_checks_are_refused(self):
+    def test_context_changes_are_refused(self):
         refused = [
             ("POST", "/api/setup", {"workspace": str(self.f.workspace), "model": "gemini-2.5-pro"}),
             ("POST", "/api/session/open", {"name": "other_a"}),
@@ -156,15 +157,29 @@ class RequestsWhileModelWorkRuns(EnglishApiCase):
             ("POST", "/api/codebook/lock", {}),
             ("DELETE", "/api/codebook", None),
             ("POST", "/api/cache/clear", {"confirmed": True}),
-            # These two still rewrite the process environment the running call reads.
-            ("GET", "/api/diagnostics", None),
-            ("POST", "/api/model-test", {"model": "claude-haiku-5-5"}),
             # A second model task.
             ("POST", "/api/coverage", {}),
         ]
         for method, path, body in refused:
             with self.subTest(path=path):
                 self.assertEqual(self.status(method, path, body), 409)
+
+    def test_diagnostics_and_model_test_run_without_touching_the_environment(self):
+        environ = dict(w.os.environ)
+        seen = []
+        original = w.run_model_test
+
+        def run(request, key, base_url):
+            seen.append((dict(w.os.environ) == environ, base_url))
+            return original(request, key, base_url)
+        with patch.object(w, "run_model_test", run):
+            response = self.client.post("/api/model-test", json={"model": "claude-haiku-5-5"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["ok"], response.text)
+        self.assertEqual(seen, [(True, w.farm_base_url())])
+        self.assertEqual(self.status("GET", "/api/diagnostics"), 200)
+        self.assertEqual(dict(w.os.environ), environ)
+        self.assertTrue(w.MODEL_WORK_IN_PROGRESS.is_set())
 
     def test_reading_and_language_keep_working(self):
         for path in ("/api/status", "/api/sessions", "/api/codebook", "/api/settings"):

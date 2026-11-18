@@ -33,7 +33,7 @@ except ImportError:
 DEFAULT_FARM_BASE = "https://aoai-farm.bosch-temp.com/api"
 
 
-def farm_base_url() -> str:
+def farm_base_url(env: "dict[str, str] | None" = None) -> str:
     """Read the endpoint lazily so a local .env loaded by the GUI takes effect.
 
     The workbench imports this module before its setup endpoint calls
@@ -41,7 +41,8 @@ def farm_base_url() -> str:
     endpoints functional without requiring users to export an environment
     variable before launching Python.
     """
-    value = os.getenv("BOSCH_FARM_BASE_URL", DEFAULT_FARM_BASE).strip().rstrip("/")
+    source = os.environ if env is None else env
+    value = source.get("BOSCH_FARM_BASE_URL", DEFAULT_FARM_BASE).strip().rstrip("/")
     from urllib.parse import urlsplit
     parsed = urlsplit(value)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
@@ -76,13 +77,16 @@ def connection_setup_timeout(error: BaseException, elapsed: float, connect_timeo
 class LLMConnector:
     """One small interface for Bosch Farm Gemini, Claude and OpenAI-style models."""
 
-    def __init__(self, model_name: str, api_key: str, session_id: str | None = None):
+    def __init__(self, model_name: str, api_key: str, session_id: str | None = None,
+                 base_url: str | None = None):
         model_name = str(model_name).strip()
         if not model_name or any(c.isspace() for c in model_name) or any(c in model_name for c in "?#\\"):
             raise ValueError("Enter one exact Bosch Farm model ID without spaces")
         self.model_name = model_name
         self.api_key = api_key
         self.session_id = session_id
+        # A fixed endpoint (model test with a re-read .env); None: read it per request.
+        self.base_url = base_url
         self.last_usage = None
         self.last_reasoning = ""
         self.last_response_model = None
@@ -175,11 +179,14 @@ class LLMConnector:
         if isinstance(body, dict) and isinstance(body.get("usage"), dict):
             self._record_usage(body["usage"])
 
+    def _farm_base(self) -> str:
+        return self.base_url or farm_base_url()
+
     def _get_common_headers(self) -> dict:
         return {"X-Session-ID": str(self.session_id)} if self.session_id else {}
 
     def _call_gemini(self, file_paths, user_prompt, system_prompt, generation_config):
-        url = f"{farm_base_url()}/google/v1/publishers/google/models/{self.model_name}:generateContent"
+        url = f"{self._farm_base()}/google/v1/publishers/google/models/{self.model_name}:generateContent"
         headers = self._get_common_headers()
         headers.update({"genaiplatform-farm-subscription-key": self.api_key, "Content-Type": "application/json"})
         parts = [p for fp in file_paths for p in [self._file_to_gemini_part(fp)] if p]
@@ -202,7 +209,7 @@ class LLMConnector:
         return "".join(texts) or f"(no text content, finishReason={reason})"
 
     def _call_claude(self, file_paths, user_prompt, system_prompt, generation_config):
-        url = f"{farm_base_url()}/google/v1/publishers/anthropic/models/{self.model_name}:rawPredict"
+        url = f"{self._farm_base()}/google/v1/publishers/anthropic/models/{self.model_name}:rawPredict"
         session = self.session_id or f"caching_session_{uuid.uuid4().hex[:12]}"
         self.session_id = session
         headers = self._get_common_headers()
@@ -251,7 +258,7 @@ class LLMConnector:
         if not _OPENAI_AVAILABLE:
             return "Error: openai package must be installed — run: pip install openai"
         name = self.model_name.lower()
-        base = farm_base_url()
+        base = self._farm_base()
         base_url = (f"{base}/google/v1/endpoints/{self.model_name}/openai" if ("glm" in name or "-oss" in name)
                     else f"{base}/openai/deployments/{self.model_name}")
         headers = self._get_common_headers()

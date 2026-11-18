@@ -40,7 +40,7 @@ try:
     import uvicorn
 
     from release_safety import (safe_error, summarize_usage, context_state_error, valid_rule_profile)
-    from dotenv import load_dotenv
+    from dotenv import dotenv_values, load_dotenv
     from workbench_i18n import catalog_script_json, UIMessage, localize_message
     from workbench_frontend import load_frontend_html
     from workbench_session import Session
@@ -287,8 +287,9 @@ def local_diagnostics() -> dict[str, Any]:
     configuration_error = None
     endpoint = ''
     try:
-        with FARM_ENVIRONMENT.use(env_file, load_dotenv, explicit=explicit, commit=False):
-            endpoint = validate_farm_endpoint(env_file)
+        # Read-only: a model call may be running and reads os.environ.
+        farm = FARM_ENVIRONMENT.peek(env_file, dotenv_values, explicit=explicit)
+        endpoint = validate_farm_endpoint(env_file, farm.values)
         key_present = True
     except StartupError as exc:
         configuration_error = exc
@@ -2018,12 +2019,15 @@ def call_comparison(data: Session, question: str, models: list[str]) -> dict[str
             "sources": [str(item.get("label", item.get("name", "未知来源"))) for item in evidence]}
 
 
-def saved_session_change(function):
-    """Pin, rename or delete a saved session folder.
+def alongside_model_work(function):
+    """A request that may run while a model task holds the slot.
 
-    Unlike context_mutation this may run while a model task holds the slot,
-    as long as it does not touch the active session: the task writes only the
-    active session's folder.  The endpoint calls reject_active_session_while_busy().
+    Unlike context_mutation it does not refuse a running task; the endpoint
+    itself must leave that task's context alone.  Used for: pin, rename and
+    delete of saved sessions (each calls reject_active_session_while_busy(),
+    as the task writes the active session's folder), diagnostics and the model
+    test (both read the .env with FarmEnvironment.peek(), never rewriting the
+    process environment the task reads).
     """
     @wraps(function)
     def guarded(*args, **kwargs):
@@ -2184,9 +2188,9 @@ def effective_env_file(override: str = '') -> tuple[Path, bool]:
     return (Path(active_path), bool(ACTIVE.get('env_explicit'))) if active_path else (STARTUP_CONFIG.env_file, STARTUP_CONFIG.env_explicit)
 
 
-def validate_farm_endpoint(path: Path) -> str:
+def validate_farm_endpoint(path: Path, env: dict[str, str] | None = None) -> str:
     try:
-        return farm_base_url()
+        return farm_base_url(env)
     except ValueError:
         raise StartupError('startup.endpoint_invalid', path=path) from None
 
@@ -2313,7 +2317,7 @@ def activate_local_session(data: Session, session_name: str) -> dict:
 
 
 @app.post("/api/session/rename")
-@saved_session_change
+@alongside_model_work
 def rename_session(request: SessionRenameRequest):
     with LOCK:
         data = session()
@@ -2335,7 +2339,7 @@ def rename_session(request: SessionRenameRequest):
 
 
 @app.post("/api/session/delete")
-@saved_session_change
+@alongside_model_work
 def delete_session(request: SessionDeleteRequest):
     with LOCK:
         if not request.confirmed:
@@ -2417,7 +2421,7 @@ def create_session():
 
 
 @app.post("/api/session/pin")
-@saved_session_change
+@alongside_model_work
 def pin_session(request: SessionPinRequest):
     data = session()
     name = safe_name(request.name.strip())
@@ -2455,23 +2459,31 @@ def model_tests():
 
 
 @app.get("/api/diagnostics")
-@context_mutation
+@alongside_model_work
 def diagnostics():
     """Local-only readiness checks; this endpoint never contacts Bosch Farm."""
     return local_diagnostics()
 
 
 @app.post("/api/model-test")
-@context_mutation
+@alongside_model_work
 def model_test(request: ModelTestRequest):
     env_file, explicit = effective_env_file()
-    with FARM_ENVIRONMENT.use(env_file, load_dotenv, explicit=explicit, commit=not bool(ACTIVE)) as key:
-        validate_farm_endpoint(env_file)
+    if ACTIVE:
+        # A session is open and a model task may be running: test with the
+        # current .env without rewriting the environment that task reads.
+        settings = FARM_ENVIRONMENT.peek(env_file, dotenv_values, explicit=explicit)
+        base_url = validate_farm_endpoint(env_file, settings.values)
         check_state_directory(app_state_home())
-        return run_model_test(request, key)
+        return run_model_test(request, settings.key, base_url)
+    # No session yet (so no model task): a working .env is adopted, as before.
+    with FARM_ENVIRONMENT.use(env_file, load_dotenv, explicit=explicit) as key:
+        base_url = validate_farm_endpoint(env_file)
+        check_state_directory(app_state_home())
+        return run_model_test(request, key, base_url)
 
 
-def run_model_test(request: ModelTestRequest, key: str):
+def run_model_test(request: ModelTestRequest, key: str, base_url: str):
     model = request.model.strip()
     if not model:
         raise HTTPException(400, ui_message(ACTIVE, 'model.id_required'))
@@ -2483,7 +2495,7 @@ def run_model_test(request: ModelTestRequest, key: str):
         save_model_test(result)
         return result
     try:
-        probe = LLMConnector(model, key, session_id=f"model_check_{os.urandom(6).hex()}")
+        probe = LLMConnector(model, key, session_id=f"model_check_{os.urandom(6).hex()}", base_url=base_url)
         notices = []
         answer = probe.ask_about_files(
             [], "Reply with exactly OK.", "You are a connection test. Follow the user instruction exactly.",
