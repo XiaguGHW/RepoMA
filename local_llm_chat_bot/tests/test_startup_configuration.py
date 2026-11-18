@@ -91,10 +91,9 @@ class Configuration(unittest.TestCase):
         self.configured()
         self.assertEqual(w.ACTIVE['llm'].api_key, 'external-process-key')
 
-    def test_failed_config_switch_preserves_active_environment_and_pending_plan(self):
+    def test_failed_config_switch_preserves_active_environment_and_session(self):
         self.configured()
         active = dict(w.ACTIVE)
-        w.ACTIVE['pending'].append({'path': 'reviewed-fixture.txt'})
         snapshot = dict(os.environ)
         invalid = self.f.root / 'invalid.env'
         invalid.write_bytes(b'\xff\xfesecret data not UTF-8')
@@ -104,7 +103,7 @@ class Configuration(unittest.TestCase):
             self.assertEqual(response.status_code, 400, response.text)
             self.assertEqual(response.json()['message_key'], key)
             self.assertIs(w.ACTIVE['state'], active['state'])
-            self.assertEqual(w.ACTIVE['pending'], [{'path': 'reviewed-fixture.txt'}])
+            self.assertIs(w.ACTIVE['llm'], active['llm'])
             self.assertEqual(dict(os.environ), snapshot)
             self.assertNotIn(SECRET, response.text)
         second = self.f.root / 'valid-new.env'

@@ -82,8 +82,6 @@ class ContextIntegrity(unittest.TestCase):
         return {
             "state": copy.deepcopy(state.data),
             "documents": copy.deepcopy(documents.data),
-            "pending": copy.deepcopy(w.ACTIVE.get("pending")),
-            "plan": copy.deepcopy(w.ACTIVE.get("pending_plan")),
             "files": {
                 str(path): path.read_bytes() if path.exists() else None
                 for path in paths
@@ -201,12 +199,6 @@ class ContextIntegrity(unittest.TestCase):
     def test_failed_target_prepare_and_commit_preserve_every_active_record(self):
         self.bg()
         self.post("/api/chat", {"question": "classify"})
-        w.publish_pending(
-            w.ACTIVE,
-            w.build_diff(
-                w.ACTIVE["state"], [{"path": "pending.txt", "content": "reviewed"}]
-            ),
-        )
         body = {"target": str(self.f.bg_b), "selected_paths": ["facts.txt"]}
         for location in (
             "parse",
@@ -268,7 +260,6 @@ class ContextIntegrity(unittest.TestCase):
         result = self.post("/api/target", body)
         self.assertEqual(result["sources"], 1)
         self.assertEqual(w.ACTIVE["state"].data["history"], [])
-        self.assertEqual(w.ACTIVE["pending"], [])
 
     def test_changed_rule_rejected_before_any_target_mutation(self):
         self.bg()
@@ -407,7 +398,6 @@ class StaleResults(unittest.TestCase):
             response = self.client.post("/api/chat", json={"question": "Classify this Baugruppe"})
         self.assertEqual(response.status_code, 409, response.text)
         self.assertEqual(state.data["history"], history)
-        self.assertEqual(w.ACTIVE["pending"], [])
         self.assertIsNone(state.data.get("last_bg_analysis"))
 
     def test_base_exception_in_worker_always_releases_model_slot(self):

@@ -27,8 +27,7 @@ class SessionType(EnglishApiCase):
 
     def test_every_typed_key_is_documented_in_one_group(self):
         typed = workbench_session.Session.__optional_keys__ | workbench_session.Session.__required_keys__
-        legacy = {"pending_plan"}  # set only while a legacy code-change plan waits
-        self.assertEqual(workbench_session.SETUP_KEYS | workbench_session.MODEL_WORK_KEYS | legacy, typed)
+        self.assertEqual(workbench_session.SETUP_KEYS | workbench_session.MODEL_WORK_KEYS, typed)
 
 
 if __name__ == "__main__":

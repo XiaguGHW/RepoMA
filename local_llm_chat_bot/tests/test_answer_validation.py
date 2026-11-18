@@ -95,7 +95,6 @@ class ResponseRounds(unittest.TestCase):
         self.assertEqual(model.call_count, calls or len(actions))
         self.assertEqual(w.ACTIVE["state"].data.get("last_bg_analysis"), old_analysis)
         self.assertEqual(w.ACTIVE["state"].data["history"], history)
-        self.assertEqual(w.ACTIVE["pending"], [])
         self.assertFalse((self.f.workspace / "must-not-write.txt").exists())
         self.assertNotIn("通过校验", response.text)
         self.assertFalse(w.MODEL_WORK_IN_PROGRESS.is_set())
@@ -199,7 +198,6 @@ class ResponseRounds(unittest.TestCase):
             result["results"][1]["classification"]["label"], "Rotationseinheit"
         )
         self.assertEqual(w.ACTIVE["state"].data["history"], history)
-        self.assertEqual(w.ACTIVE["pending"], [])
 
     def test_normal_mode_cannot_accept_an_unlocked_classification(self):
         self.assertEqual(self.client.delete("/api/bg").status_code, 200)
@@ -209,7 +207,6 @@ class ResponseRounds(unittest.TestCase):
             response = self.client.post("/api/chat", json={"question": "Explain"})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(model.call_count, 1)
-        self.assertEqual(w.ACTIVE["pending"], [])
 
     def test_real_pdf_rule_pages_use_the_actual_page_inventory(self):
         import fitz

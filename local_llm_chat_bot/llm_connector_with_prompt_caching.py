@@ -595,15 +595,3 @@ class LLMConnector:
                 if response is not None and hasattr(response, 'close'):
                     response.close()
         return "Error: retries exhausted"
-
-
-# Run from the downloaded standalone folder; keep .env in the same folder.
-# 1) python -m pip install -r requirements.txt
-# 2) python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop
-# 3) Display reasoning_content when Farm returns it (also requests streaming):
-#    python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --show-reasoning
-# 4) If Farm does not support streaming, keep progress and use a full response:
-#    python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --show-reasoning --no-stream
-# 5) Optionally request DeepSeek thinking explicitly, only if Farm supports it:
-#    python excel_chat_agent.py --model deepseek-v4-flash-2026-04-23 --session workshop --show-reasoning --thinking enabled
-
