@@ -383,8 +383,10 @@ class BrowserRelease(unittest.TestCase):
         self.assertEqual(self.page.locator('.classification-card').filter(
             has=self.page.get_by_role('heading', name=self.page.evaluate("t('classification.title')"), exact=True)
         ).count(), 1)
-        self.assertIn(self.page.evaluate("t('scope.kind_answer')"),
-                      self.page.locator(".scope-tag").last.inner_text())
+        # An explanation shows only its range above the answer (no kind tag).
+        scope_line = self.page.locator(".scope-tag").last
+        self.assertEqual(scope_line.locator(".chip").count(), 1)
+        self.assertIn(self.page.evaluate("t('scope.tag_all',{count:1}).split(':')[0]"), scope_line.inner_text())
         self.assertNotIn(
             "classification",
             self.page.locator("#chat .message.error").all_text_contents(),
@@ -1204,6 +1206,19 @@ class BrowserRelease(unittest.TestCase):
         self.assertEqual(self.page.input_value("#question"), "draft stays")
         self.assertEqual(self.page.locator("#chat .classify-request").count(), 1)
         self.assertNotIn(payload["question"], self.page.locator("#chat .message.user").all_inner_texts())
+        # A classification shows its range next to the request tag, not in a line above the answer.
+        request = self.page.locator("#chat .classify-request").last
+        self.assertEqual(request.locator(".chip").count(), 1)
+        scope_lines = self.page.locator("#chat .scope-tag").count()
+        range_en = request.locator(".chip").inner_text()
+        self.language("de")
+        self.assertNotEqual(request.locator(".chip").inner_text(), range_en)  # follows the language
+        self.assertIn("Bereich", request.locator(".chip").inner_text())
+        self.language("en")
+        # The progress card has the same rounded frame as the answer.
+        radius = self.page.evaluate(
+            "[...document.querySelectorAll('#chat .message.assistant')].map(n=>getComputedStyle(n).borderTopLeftRadius)")
+        self.assertTrue(radius and set(radius) == {"14px"}, radius)
         self.assertIn("Rotationseinheit", self.page.locator(".classification-card").first.inner_text())
         # Classified: the result stays beside the button, which becomes secondary.
         self.page.wait_for_function("lastStatusSnapshot.last_classification?.label==='Rotationseinheit'")
@@ -1214,6 +1229,7 @@ class BrowserRelease(unittest.TestCase):
         self.page.locator("#question").fill("")
         self.ask("Explain the motor evidence again")
         self.assertEqual(self.page.locator(".classification-card").count(), cards)
+        self.assertEqual(self.page.locator("#chat .scope-tag").count(), scope_lines + 1)
         self.assertIn("Rotationseinheit", self.page.locator("#scopebar .classify-result").inner_text())
         # Reload and language switch keep the request as a tag, not a user message.
         self.page.reload()
