@@ -38,11 +38,16 @@ def require_model_success(raw: Any, context=None) -> str:
     text = str(raw or "").strip()
     failure = connector_failure(text)
     if failure:
-        context = context or UIMessage('model.context_main')
-        language = getattr(context, 'language', 'zh')
-        raise UIRequestError(UIMessage('model.request_failed', language, context=context,
-                                        detail=localize_message(failure, language)))
+        raise model_request_failed(failure, context)
     return text
+
+
+def model_request_failed(failure: Any, context=None) -> UIRequestError:
+    """The user-visible error for a connector failure (see connector_failure)."""
+    context = context or UIMessage('model.context_main')
+    language = getattr(context, 'language', 'zh')
+    return UIRequestError(UIMessage('model.request_failed', language, context=context,
+                                    detail=localize_message(failure, language)))
 
 
 def accounted_model_call(data: Session, connector, *args, usage_records=None, **kwargs):
