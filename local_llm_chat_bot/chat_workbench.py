@@ -28,7 +28,7 @@ from functools import wraps
 from queue import Empty, Full, Queue
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 STARTUP_CONFIG = bootstrap() if __name__ == '__main__' else StartupConfig()
 FARM_ENVIRONMENT = FarmEnvironment()
@@ -621,6 +621,18 @@ def require_unique_rule_ids(draft: dict | None, status: int = 400) -> None:
 CODEBOOK_BUDGET = CodebookParseBudget()
 
 
+def model_text(data: Session, connector: Any, task: CallTask, context: UIMessage, *,
+               usage_records: list | None = None,
+               before_attempt: Callable[[Attempt, int], None] | None = None) -> str:
+    """call_model_text for free-text results: the stripped text, or the
+    user-visible "model request failed" error naming ``context``."""
+    try:
+        return call_model_text(data, connector, task, usage_records=usage_records,
+                               before_attempt=before_attempt).strip()
+    except StructuredCallError as failed:
+        raise model_request_failed(failed.failure, context) from None
+
+
 def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data: Session, usage_records=None,
                                      on_call=None, output_tokens: int | None = None) -> tuple[dict, dict | None]:
     """Parse the final Codebook JSON, making one syntax-only repair attempt if needed."""
@@ -636,12 +648,9 @@ def parse_codebook_draft_with_repair(connector: LLMConnector, raw: str, *, data:
         )
         tokens = output_tokens or CODEBOOK_BUDGET.repair_output_tokens
         task = CallTask(CODEBOOK_JSON_REPAIR_SYSTEM, repair_prompt, (Attempt(tokens),))
-        try:
-            repaired = call_model_text(data, connector, task, usage_records=usage_records,
-                                       before_attempt=(lambda _attempt, _number: on_call()) if on_call else None)
-        except StructuredCallError as failed:
-            raise model_request_failed(failed.failure, ui_message(data, 'model.context_codebook_repair'))
-        repaired = repaired.strip()
+        repaired = model_text(data, connector, task, ui_message(data, 'model.context_codebook_repair'),
+                              usage_records=usage_records,
+                              before_attempt=(lambda _attempt, _number: on_call()) if on_call else None)
         repair_usage = connector.get_last_token_usage() or {}
         try:
             return parse_codebook_draft(repaired), repair_usage
@@ -1343,7 +1352,8 @@ def prepare_bg_dossier(data: Session, coverage: dict, *, force: bool = False, us
     request = "Create one reusable BG comprehensive evidence dossier with sections: composition/BOM; motion and main functional chain; actuators/transmission; relevant geometry/interfaces; DFC hierarchy; conflicts or limitations; source evidence. Every factual bullet must retain its source file and page/section label.\n\n" + sources
     records_used: list[dict] = []
     try:
-        raw = require_model_success(accounted_model_call(data, data["llm"], [], request, system_prompt, {"maxOutputTokens": BG_DOSSIER_TOKENS, "temperature": 0}, stream=True, usage_records=records_used), ui_message(data, 'model.context_dossier'))
+        raw = model_text(data, data["llm"], CallTask(system_prompt, request, (Attempt(BG_DOSSIER_TOKENS),)),
+                         ui_message(data, 'model.context_dossier'), usage_records=records_used)
     finally:
         if usage_records is not None:
             usage_records.extend(records_used)
@@ -1523,21 +1533,24 @@ def prepare_coverage(data: Session, full: bool = False, progress=None, usage_rec
                 nonlocal total_calls
                 attempts: list[dict] = []
                 hint = PREREAD_VISUAL_INSTRUCTION.format(count=len(attached)) if attached else ""
+                prompt = (f"文件：{document['name']}。{label}提取结构、部件、驱动、运动、接口、尺寸和不确定处，"
+                          f"并保留页面/表格标签。{hint}{MATERIAL_GROUP_FORMAT}\n\n{text}")
                 try:
-                    return accounted_model_call(data, llm, attached, f"文件：{document['name']}。{label}提取结构、部件、驱动、运动、接口、尺寸和不确定处，并保留页面/表格标签。{hint}{MATERIAL_GROUP_FORMAT}\n\n{text}",
-                                                summary_system, {"maxOutputTokens": MATERIAL_GROUP_TOKENS, "temperature": 0}, stream=True, usage_records=attempts)
+                    return call_model_text(data, llm, CallTask(summary_system, prompt, (Attempt(MATERIAL_GROUP_TOKENS),),
+                                                               files=attached), usage_records=attempts)
                 finally:
                     total_calls += len(attempts)
                     if usage_records is not None:
                         usage_records.extend(attempts)
 
-            raw = call(images)
-            failure = connector_failure(raw) if images else None
-            if failure and classify_model_failure(failure)[0] not in {"output_limit", "timeout"}:
-                # A model or endpoint that refuses pictures still gets the text.
-                visual_fallback = True
-                raw = call([])
-            return raw
+            try:
+                return call(images)
+            except StructuredCallError as failed:
+                if not images or failed.reason in {"output_limit", "timeout"}:
+                    raise
+            # A model or endpoint that refuses pictures still gets the text.
+            visual_fallback = True
+            return call([])
 
         for number, group in enumerate(groups, start=1):
             # A group that succeeded before (e.g. in a scan where another group
@@ -1562,12 +1575,13 @@ def prepare_coverage(data: Session, full: bool = False, progress=None, usage_rec
                     if progress:
                         progress("reading", ui_message(data, "reading.group", name=document["name"], index=number, total=len(groups)),
                                  12 + int((file_index - 1 + number / max(len(groups), 1)) / max(total_documents, 1) * 48))
-                    raw = group_call(group, label, images_for.get(group))
-                    failure = connector_failure(raw)
-                    if failure and classify_model_failure(failure)[0] == "output_limit" and halves:
+                    try:
+                        raw = group_call(group, label, images_for.get(group))
+                    except StructuredCallError as failed:
+                        if failed.reason != "output_limit" or not halves:
+                            raise model_request_failed(failed.failure, ui_message(data, 'model.context_group', name=document["name"])) from None
                         split = True
                     else:
-                        raw = require_model_success(raw, ui_message(data, 'model.context_group', name=document["name"]))
                         notes.append(raw.strip())
                         save_material_group_note(document, data["model"], group, raw.strip())
                         continue
@@ -1586,15 +1600,14 @@ def prepare_coverage(data: Session, full: bool = False, progress=None, usage_rec
                     retry_calls += 1
                     file_retry_calls += 1
                     # Pictures ride with the first half of a split group.
-                    raw = group_call(half, label + f"本次只处理该组的第 {part}/2 部分。",
-                                     images_for.get(group) if part == 1 else None)
                     try:
-                        note = require_model_success(raw, ui_message(data, 'model.context_group', name=document["name"])).strip()
-                    except RequestStopped:
-                        raise
-                    except Exception as exc:
-                        failures.append(ui_message(data, "reading.part_failed", index=number, part=part, detail=error_copy(exc, data)))
+                        raw = group_call(half, label + f"本次只处理该组的第 {part}/2 部分。",
+                                         images_for.get(group) if part == 1 else None)
+                    except StructuredCallError as failed:
+                        error = model_request_failed(failed.failure, ui_message(data, 'model.context_group', name=document["name"]))
+                        failures.append(ui_message(data, "reading.part_failed", index=number, part=part, detail=error_copy(error, data)))
                         continue
+                    note = raw.strip()
                     collected[part - 1] = note
                     save_material_group_note(document, data["model"], half, note)
                 notes.extend(note for note in collected if note)
@@ -1608,15 +1621,15 @@ def prepare_coverage(data: Session, full: bool = False, progress=None, usage_rec
             try:
                 merged = "\n\n".join(f"[片段组 {i}]\n{note}" for i, note in enumerate(notes, start=1))
                 attempts: list[dict] = []
+                prompt = (f"请将下列同一文件的全部片段笔记合成为一份不遗漏冲突或不确定处的技术摘要。必须保留证据标签。"
+                          f"{MATERIAL_MERGE_FORMAT}\n\n文件：{document['name']}\n\n{merged}")
                 try:
-                    raw = accounted_model_call(data, llm, [], f"请将下列同一文件的全部片段笔记合成为一份不遗漏冲突或不确定处的技术摘要。必须保留证据标签。{MATERIAL_MERGE_FORMAT}\n\n文件：{document['name']}\n\n{merged}",
-                                               summary_system, {"maxOutputTokens": MATERIAL_MERGE_TOKENS, "temperature": 0}, stream=True, usage_records=attempts)
+                    summary = model_text(data, llm, CallTask(summary_system, prompt, (Attempt(MATERIAL_MERGE_TOKENS),)),
+                                         ui_message(data, 'model.context_merge', name=document["name"]), usage_records=attempts)
                 finally:
                     total_calls += len(attempts)
                     if usage_records is not None:
                         usage_records.extend(attempts)
-                raw = require_model_success(raw, ui_message(data, 'model.context_merge', name=document["name"]))
-                summary = raw.strip()
             except RequestStopped:
                 raise
             except Exception as exc:
