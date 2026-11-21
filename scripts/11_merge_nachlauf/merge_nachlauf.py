@@ -237,15 +237,28 @@ def merge_pair(orig, nach, out, log, dry, overwrite=False, only=None, wo=None, s
     return changed
 
 
-def nach_saps(path):
+def nach_saps(path, with_empty=False):
     wb = load_workbook(path, read_only=True, data_only=True)
     ws = wb[SHEET_NAME]
     head = [str(c.value).strip() if c.value is not None else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
     hm = {h: i for i, h in enumerate(head) if h}
-    sh, th = find(hm, "sap"), find(hm, "teamcenter")
-    saps = {ident(r[hm[sh]], r[hm[th]] if th else None) for r in ws.iter_rows(min_row=2, values_only=True)}
+    sh, th, ph = find(hm, "sap"), find(hm, "teamcenter"), find(hm, "predicted")
+    saps, leer = set(), set()
+    for r in ws.iter_rows(min_row=2, values_only=True):
+        k = ident(r[hm[sh]], r[hm[th]] if th else None)
+        if not k:
+            continue
+        pred = r[hm[ph]] if ph else None
+        # nur gültige Nachlauf-Ergebnisse verwenden; leere/ungültige bleiben Lücken
+        if empty(pred) or str(pred).strip().upper() == "[EMPTY]" or str(canon(pred)).startswith("?"):
+            leer.add(k)
+        else:
+            saps.add(k)
     wb.close()
-    return {x for x in saps if x}
+    if leer:
+        print(f"  ! {path.name[-40:]}: {len(leer)} Baugruppe(n) wieder ohne gültiges Ergebnis "
+              f"(werden nicht eingesetzt): {', '.join(sorted(leer))}")
+    return (saps, leer) if with_empty else saps
 
 
 def original_ids(path):
@@ -288,8 +301,9 @@ def process(folder, dry, overwrite=False, reuse=False, ref_ids=None):
         # Jede Lücke (Lauf, Baugruppe) bekommt ein eigenes Nachlauf-Ergebnis: die k-te Lücke einer
         # Baugruppe wird aus der k-ten Nachlauf-Datei gefüllt, die diese Baugruppe enthält.
         # Fehlt eine Baugruppe nur in einem Lauf, genügt also ein einziger Nachlauf.
-        nsaps = {n: nach_saps(n) for n in nach}
-        saps = set().union(*nsaps.values())
+        both = {n: nach_saps(n, with_empty=True) for n in nach}
+        nsaps = {n: v for n, (v, _) in both.items()}          # gültige Ergebnisse je Nachlauf-Datei
+        saps = set().union(*(v | e for v, e in both.values()))  # alle nachgelaufenen BG (für die Lückensuche)
         # Schutz: nur Baugruppen ergänzen, die zu diesem Experiment gehören (in mindestens einem Original
         # vorhanden oder in der Referenzdatei); sonst würden fremde Zeilen angehängt.
         known = set().union(*(set(original_ids(o)) for o in orig))
