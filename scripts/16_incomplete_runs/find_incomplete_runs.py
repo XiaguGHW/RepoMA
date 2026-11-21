@@ -215,7 +215,7 @@ def main():
                 tcs[k[4:]] = v
     if a.reference:
         ref_rows = read(Path(a.reference))[0]
-        ref = {"Haupt": {k for k in ref_rows if not k.startswith("_sap_")}}
+        ref = {"Haupt": {k for k in ref_rows if not k.startswith("_")}}  # nur Baugruppen, keine _sap_/_tc_-Hilfseinträge
         ref["70"] = ref["Haupt"]
     else:
         ref = {}
