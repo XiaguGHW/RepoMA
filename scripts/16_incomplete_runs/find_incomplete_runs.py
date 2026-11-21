@@ -220,6 +220,7 @@ def main():
     skip_dirs = {"backup_original", "nachlauf", "__pycache__", "_backup_vor_merge"}
     files = [f for r in a.root for f in sorted(Path(r).rglob("*.xlsx"))
              if not f.name.startswith(SKIP)
+             and not f.name.lower().startswith("nachlauf_")  # noch nicht zusammengeführte Nachlauf-Ergebnisse
              and not f.name.endswith("_Metriken_Konfusion.xlsx")
              and f.name not in ("Stabilitaet_Metriken.xlsx", Path(a.out).name, "Nachlauf_Uebersicht.xlsx")
              and not any(p.lower() in skip_dirs or p.lower().startswith("_backup_vor_merge")
