@@ -6,12 +6,13 @@ merge_nachlauf.py
 Führt Nachlauf-Dateien (erneut ausgeführte, zuvor EXCLUDED Baugruppen) mit den
 ursprünglichen Lauf-Dateien zusammen, sodass wieder 10 vollständige Lauf-Dateien entstehen.
 
-Zuordnung (Standard): Nur unvollständige Originale werden ergänzt, d. h. Läufe, in denen eine
-Baugruppe der Nachlauf-Dateien fehlt oder keine gültige Vorhersage hat (EXCLUDED, leer, [EMPTY],
-nicht zuordenbar, Processing-Fehler). Je unvollständigem Lauf wird eine eigene Nachlauf-Datei
-verwendet (beide nach Zeitstempel sortiert). Gültige Zeilen bleiben unverändert, fehlende Zeilen
-werden angehängt. So kann eine gemeinsame Nachlauf-Eingabe je Modell (Skript 16, --pro-modell)
-so oft laufen, wie es unvollständige Läufe gibt.
+Zuordnung (Standard): Ergänzt werden nur Lücken, d. h. Baugruppen der Nachlauf-Dateien, die in einem
+Original fehlen oder keine gültige Vorhersage haben (EXCLUDED, leer, [EMPTY], nicht zuordenbar,
+Processing-Fehler). Jede Lücke erhält ein eigenes Nachlauf-Ergebnis: Die k-te Lücke einer Baugruppe
+(Originale nach Zeitstempel) wird aus der k-ten Nachlauf-Datei mit dieser Baugruppe gefüllt.
+Fehlt jede Baugruppe nur in einem Lauf, genügt ein einziger Nachlauf je Modell. Gültige Zeilen
+bleiben unverändert, fehlende Zeilen werden angehängt. Nicht füllbare Lücken werden gemeldet
+(--wiederverwenden setzt dann dasselbe Ergebnis mehrfach ein, nicht empfohlen).
 Mit --ueberschreiben: altes Verhalten (alle Originale ↔ alle Nachlauf-Dateien, gleiche Anzahl).
 
 Für jede Baugruppe (SAP-Nummer) aus der Nachlauf-Datei werden in der Originaldatei alle
@@ -140,8 +141,9 @@ def sap_rows(ws, ho):
     return rows
 
 
-def merge_pair(orig, nach, out, log, dry, overwrite=False):
-    wo = load_workbook(orig)
+def merge_pair(orig, nach, out, log, dry, overwrite=False, only=None, wo=None, save=True):
+    """Nachlauf-Zeilen in das Original übernehmen. only: nur diese SAP-Nummern; wo: bereits geöffnetes Original."""
+    wo = wo if wo is not None else load_workbook(orig)
     wn = load_workbook(nach, read_only=True, data_only=True)
     so, sn = wo[SHEET_NAME], wn[SHEET_NAME]
     ho, hn = header_map(so), {str(c.value).strip(): i for i, c in enumerate(next(sn.iter_rows(min_row=1, max_row=1)))
@@ -164,6 +166,8 @@ def merge_pair(orig, nach, out, log, dry, overwrite=False):
         if empty(sap):
             continue
         sap = str(sap).strip()
+        if only is not None and sap not in only:
+            continue
         base = dict(Original=orig.name, Nachlauf=nach.name, SAP=sap)
         note = []
         if sap not in rows_o:
@@ -209,7 +213,7 @@ def merge_pair(orig, nach, out, log, dry, overwrite=False):
         log.append({**base, "Excel-Zeile": r, "Vorher": old_status or "leer", "Aktion": "ersetzt",
                     "Predicted_Label neu": pred, "Status neu": status, "Hinweis": "; ".join(note)})
 
-    if not dry:
+    if save and not dry:
         wo.save(out)
     wn.close()
     return changed
@@ -237,7 +241,7 @@ def missing_in(orig, saps):
     return out
 
 
-def process(folder, dry, overwrite=False):
+def process(folder, dry, overwrite=False, reuse=False):
     files = [f for f in folder.glob("*.xlsx") if not f.name.startswith("~$")]
     nach = sorted([f for f in files if f.name.lower().startswith(NACHLAUF_PREFIX)], key=lambda f: stamp(f.name))
     orig = sorted([f for f in files if not f.name.lower().startswith(NACHLAUF_PREFIX)], key=lambda f: stamp(f.name))
@@ -250,44 +254,66 @@ def process(folder, dry, overwrite=False):
         if len(orig) != len(nach):
             print("  ABBRUCH: Anzahl Originale und Nachlauf-Dateien unterschiedlich.")
             return False
-        pairs = list(zip(orig, nach))
+        plan = {o: [(n, None)] for o, n in zip(orig, nach)}
     else:
-        # nur unvollständige Originale ergänzen; je unvollständigem Lauf eine eigene Nachlauf-Datei
-        saps = set().union(*(nach_saps(n) for n in nach))
-        need = [(o, missing_in(o, saps)) for o in orig]
-        incomplete = [(o, m) for o, m in need if m]
-        for o, m in incomplete:
-            print(f"  unvollständig: {o.name[-40:]}  ({len(m)}: {', '.join(m)})")
-        if len(nach) < len(incomplete):
-            print(f"  ABBRUCH: {len(incomplete)} unvollständige Läufe, aber nur {len(nach)} Nachlauf-Dateien. "
-                  f"Die Nachlauf-Eingabe bitte {len(incomplete)}-mal laufen lassen.")
-            return False
-        if len(nach) > len(incomplete):
-            print(f"  Hinweis: {len(nach) - len(incomplete)} Nachlauf-Datei(en) werden nicht benötigt.")
-        pairs = [(o, n) for (o, _), n in zip(incomplete, nach)]
-        if not pairs:
-            print("  Alle Originale vollständig – nichts zu tun.")
+        # Jede Lücke (Lauf, Baugruppe) bekommt ein eigenes Nachlauf-Ergebnis: die k-te Lücke einer
+        # Baugruppe wird aus der k-ten Nachlauf-Datei gefüllt, die diese Baugruppe enthält.
+        # Fehlt eine Baugruppe nur in einem Lauf, genügt also ein einziger Nachlauf.
+        nsaps = {n: nach_saps(n) for n in nach}
+        saps = set().union(*nsaps.values())
+        used, plan, unfilled = {}, {}, []
+        for o in orig:
+            for sp in missing_in(o, saps):
+                srcs = [n for n in nach if sp in nsaps[n]]
+                k = used.get(sp, 0)
+                if k < len(srcs):
+                    plan.setdefault(o, []).append((srcs[k], sp))
+                    used[sp] = k + 1
+                elif reuse and srcs:
+                    plan.setdefault(o, []).append((srcs[k % len(srcs)], sp))
+                    used[sp] = k + 1
+                    print(f"  ! {sp} in {o.name[-30:]}: Nachlauf-Ergebnis wiederverwendet (--wiederverwenden)")
+                else:
+                    unfilled.append((o.name, sp))
+        # je Original und Nachlauf-Datei die SAP-Mengen bündeln
+        plan = {o: [(n, {sp for m, sp in items if m == n}) for n in dict.fromkeys(m for m, _ in items)]
+                for o, items in plan.items()}
+        for o, items in plan.items():
+            print(f"  ergänzt: {o.name[-40:]}  ← " + "; ".join(f"{n.name[-26:]}: {', '.join(sorted(x))}" for n, x in items))
+        if unfilled:
+            need = {}
+            for _, sp in unfilled:
+                need[sp] = need.get(sp, 0) + 1
+            print(f"  NICHT gefüllt ({len(unfilled)} Lücken, zu wenige Nachlauf-Ergebnisse):")
+            for sp, c in sorted(need.items()):
+                print(f"    {sp}: noch {c} Nachlauf(e) nötig")
+        if not plan:
+            print("  Nichts zu ergänzen.")
             return True
 
     backup = folder / BACKUP_DIR
+    i = 2
+    while backup.exists():  # weiterer Merge (z. B. zweite Nachlauf-Runde): neuer Sicherungsordner
+        backup = folder / f"{BACKUP_DIR}_{i}"
+        i += 1
     if not dry:
-        if backup.exists():
-            print(f"  ABBRUCH: {backup} existiert bereits (Merge schon ausgeführt?).")
-            return False
         backup.mkdir()
         for f in orig + nach:
             shutil.move(str(f), backup / f.name)
-        paired = {o for o, _ in pairs}
         for o in orig:  # nicht betroffene Originale unverändert zurückkopieren
-            if o not in paired:
+            if o not in plan:
                 shutil.copy2(backup / o.name, folder / o.name)
 
     log = []
-    for i, (o, n) in enumerate(pairs, 1):
+    for o, items in plan.items():
         src_o = o if dry else backup / o.name
-        src_n = n if dry else backup / n.name
-        k = merge_pair(src_o, src_n, folder / o.name, log, dry, overwrite)
-        print(f"  {o.name[-30:]} ← {n.name[-30:]}  ({k} Zeilen ersetzt/ergänzt)")
+        wo = load_workbook(src_o)
+        k = 0
+        for i, (n, only) in enumerate(items):
+            src_n = n if dry else backup / n.name
+            k += merge_pair(src_o, src_n, folder / o.name, log, dry, overwrite, only=only, wo=wo,
+                            save=(i == len(items) - 1))
+        print(f"  {o.name[-40:]}: {k} Zeilen ersetzt/ergänzt")
 
     df = pd.DataFrame(log)
     flagged = df[df["Hinweis"].fillna("") != ""] if "Hinweis" in df else df.iloc[0:0]
@@ -305,6 +331,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("ordner", nargs="*")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--wiederverwenden", action="store_true",
+                    help="Notlösung: fehlt eine Baugruppe in mehreren Läufen, dasselbe Nachlauf-Ergebnis mehrfach einsetzen")
     ap.add_argument("--ueberschreiben", action="store_true",
                     help="altes Verhalten: alle Originale mit allen Nachlauf-Dateien paaren und auch gültige Zeilen ersetzen")
     a = ap.parse_args()
@@ -312,8 +340,8 @@ def main():
         folders = [Path(x) for x in a.ordner]
     else:
         base = Path(__file__).resolve().parent
-        folders = [d for d in sorted(base.iterdir()) if d.is_dir() and d.name != BACKUP_DIR]
-    results = [process(f, a.dry_run, a.ueberschreiben) for f in folders]
+        folders = [d for d in sorted(base.iterdir()) if d.is_dir() and not d.name.startswith(BACKUP_DIR)]
+    results = [process(f, a.dry_run, a.ueberschreiben, a.wiederverwenden) for f in folders]
     if not any(r is not None for r in results):
         sys.exit("Keine Ordner mit Nachlauf-Dateien gefunden.")
 

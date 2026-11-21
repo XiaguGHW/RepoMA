@@ -138,7 +138,8 @@ def main(argv=None):
 
     root = Path(a.dir)
     configs, issues = [], []
-    for d in sorted(p for p in root.iterdir() if p.is_dir() and p.name.lower() not in SKIP_DIRS):
+    for d in sorted(p for p in root.iterdir() if p.is_dir() and p.name.lower() not in SKIP_DIRS
+                    and not p.name.lower().startswith("_backup_vor_merge")):
         files = sorted(f for f in d.rglob("*") if f.suffix.lower() in (".xlsx", ".xlsm")
                        and not E.is_output_or_backup(f))
         if not files:

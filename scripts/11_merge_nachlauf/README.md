@@ -36,3 +36,11 @@ python merge_nachlauf.py                      # alle Unterordner des Skriptordne
 - Gültige Zeilen bleiben unverändert; fehlende Zeilen werden angehängt.
 - Nicht betroffene Originale werden unverändert zurückkopiert.
 - `--ueberschreiben`: altes Verhalten (alle Originale ↔ alle Nachlauf-Dateien, gleiche Anzahl).
+
+## Ein Nachlauf je Modell genügt meist
+
+Jede Lücke (Lauf × Baugruppe) bekommt ein eigenes Nachlauf-Ergebnis; ein Nachlauf kann Lücken in
+verschiedenen Läufen füllen, solange jede Baugruppe nur einmal fehlt. Fehlt eine Baugruppe in k Läufen,
+sind k Nachläufe nötig (Skript 16 zeigt das als „Wiederholungen nötig“). Nicht füllbare Lücken meldet das
+Skript; nach weiteren Nachläufen einfach erneut ausführen (neuer Sicherungsordner `_backup_vor_merge_2`, …).
+`--wiederverwenden` setzt notfalls dasselbe Ergebnis mehrfach ein (verfälscht die Streuung, nicht empfohlen).

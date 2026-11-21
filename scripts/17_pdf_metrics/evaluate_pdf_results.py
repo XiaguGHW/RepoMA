@@ -74,7 +74,7 @@ def is_output_or_backup(p):
     p = Path(p)
     return (p.name.startswith("~$") or p.name.endswith("_Metriken_Konfusion.xlsx")
             or p.name == "Stabilitaet_Metriken.xlsx" or p.name.lower().startswith("nachlauf_")
-            or any(x in ("Backup_Original", "_backup_vor_merge", "Nachlauf") for x in p.parts))
+            or any(x in ("Backup_Original", "Nachlauf") or x.startswith("_backup_vor_merge") for x in p.parts))
 
 
 def model_rank(name):

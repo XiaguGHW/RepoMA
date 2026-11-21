@@ -144,8 +144,10 @@ def make_reruns(a, bad_by_file, names, tcs):
                 g["files"].append(f)
                 for k, st in bad:
                     g["bad"].setdefault(k, []).append(f"{label_of(f).split(' | ')[-1]}: {st}")
+        # nötige Nachläufe = wie oft die am häufigsten fehlende Baugruppe fehlt (Skript 11 füllt je Lücke
+        # ein eigenes Ergebnis ein; fehlt jede BG nur in einem Lauf, genügt ein Nachlauf)
         jobs = [(out_root / safe_name(folder.name), [(k, "; ".join(v)) for k, v in sorted(g["bad"].items())],
-                 f"{folder.name} ({len(g['files'])} unvollständige Läufe)", len(g["files"]))
+                 f"{folder.name} ({len(g['files'])} unvollständige Läufe)", max(len(v) for v in g["bad"].values()))
                 for folder, g in groups.items()]
     else:
         jobs = [(out_root / safe_name(f.stem), bad, f.name, 1) for f, bad in bad_by_file.items() if bad]
@@ -186,7 +188,8 @@ def make_reruns(a, bad_by_file, names, tcs):
     with pd.ExcelWriter(out_root / "Nachlauf_Uebersicht.xlsx", engine="openpyxl") as xw:
         lg.to_excel(xw, sheet_name="Nachlauf", index=False)
     if getattr(a, "pro_modell", False) and summary:
-        print("\nNachlauf je Modell (Eingabe so oft laufen lassen, wie Wiederholungen nötig sind):")
+        print("\nNachlauf je Modell (Eingabe so oft laufen lassen, wie 'Wiederholungen nötig' angibt;"
+              " 1 = einmal genügt):")
         print(pd.DataFrame(summary).to_string(index=False))
     nf = lg[~lg["Gefunden"]] if len(lg) else lg
     print(f"\nNachlauf: {lg['Ergebnisdatei'].nunique() if len(lg) else 0} Ordner unter {out_root.resolve()}, "
@@ -212,7 +215,8 @@ def main():
              if not f.name.startswith(SKIP)
              and not f.name.endswith("_Metriken_Konfusion.xlsx")
              and f.name not in ("Stabilitaet_Metriken.xlsx", Path(a.out).name, "Nachlauf_Uebersicht.xlsx")
-             and not any(p.lower() in skip_dirs for p in f.relative_to(r).parts[:-1])]
+             and not any(p.lower() in skip_dirs or p.lower().startswith("_backup_vor_merge")
+                         for p in f.relative_to(r).parts[:-1])]
     data = {}
     for f in files:
         res = read(f)
