@@ -6,9 +6,13 @@ merge_nachlauf.py
 Führt Nachlauf-Dateien (erneut ausgeführte, zuvor EXCLUDED Baugruppen) mit den
 ursprünglichen Lauf-Dateien zusammen, sodass wieder 10 vollständige Lauf-Dateien entstehen.
 
-Zuordnung: Die Originaldateien (ohne Präfix "nachlauf_") und die Nachlauf-Dateien werden
-jeweils nach dem Zeitstempel im Dateinamen sortiert und der Reihe nach gepaart
-(1. Original ↔ 1. Nachlauf, …, 10. Original ↔ 10. Nachlauf).
+Zuordnung (Standard): Nur unvollständige Originale werden ergänzt, d. h. Läufe, in denen eine
+Baugruppe der Nachlauf-Dateien fehlt oder keine gültige Vorhersage hat (EXCLUDED, leer, [EMPTY],
+nicht zuordenbar, Processing-Fehler). Je unvollständigem Lauf wird eine eigene Nachlauf-Datei
+verwendet (beide nach Zeitstempel sortiert). Gültige Zeilen bleiben unverändert, fehlende Zeilen
+werden angehängt. So kann eine gemeinsame Nachlauf-Eingabe je Modell (Skript 16, --pro-modell)
+so oft laufen, wie es unvollständige Läufe gibt.
+Mit --ueberschreiben: altes Verhalten (alle Originale ↔ alle Nachlauf-Dateien, gleiche Anzahl).
 
 Für jede Baugruppe (SAP-Nummer) aus der Nachlauf-Datei werden in der Originaldatei alle
 gemeinsamen Spalten (z. B. Ground Truth, Register, Weitere zulässige Ground Truth,
@@ -115,7 +119,28 @@ def style_for_status(ws, col, status):
     return None
 
 
-def merge_pair(orig, nach, out, log, dry):
+def needs_fill(ws, r, ho):
+    """Zeile ohne gültige Vorhersage: EXCLUDED, leer, [EMPTY], nicht zuordenbar oder Processing-Fehler."""
+    stat_h, pred_h, proc_h = find(ho, "allowed"), find(ho, "predicted"), find(ho, "processing")
+    st = str(ws.cell(row=r, column=ho[stat_h]).value or "").strip().upper() if stat_h else ""
+    pred = ws.cell(row=r, column=ho[pred_h]).value if pred_h else None
+    proc = str(ws.cell(row=r, column=ho[proc_h]).value or "").lower() if proc_h else ""
+    if st == "EXCLUDED" or "error" in proc or empty(pred) or str(pred).strip().upper() == "[EMPTY]":
+        return True
+    return str(canon(pred)).startswith("?")
+
+
+def sap_rows(ws, ho):
+    sap_h = find(ho, "sap")
+    rows = {}
+    for r in range(2, ws.max_row + 1):
+        v = ws.cell(row=r, column=ho[sap_h]).value
+        if not empty(v):
+            rows.setdefault(str(v).strip(), r)
+    return rows
+
+
+def merge_pair(orig, nach, out, log, dry, overwrite=False):
     wo = load_workbook(orig)
     wn = load_workbook(nach, read_only=True, data_only=True)
     so, sn = wo[SHEET_NAME], wn[SHEET_NAME]
@@ -129,11 +154,7 @@ def merge_pair(orig, nach, out, log, dry):
     if not (sap_o and sap_n and gt_h and pred_h and stat_h):
         raise ValueError(f"Spalten fehlen in {orig.name} oder {nach.name}")
 
-    rows_o = {}
-    for r in range(2, so.max_row + 1):
-        v = so.cell(row=r, column=ho[sap_o]).value
-        if not empty(v):
-            rows_o.setdefault(str(v).strip(), r)
+    rows_o = sap_rows(so, ho)
 
     common = [h for h in hn if h in ho and h not in (sap_o, stat_h)]
     stat_n = find(hn, "allowed")
@@ -144,19 +165,26 @@ def merge_pair(orig, nach, out, log, dry):
             continue
         sap = str(sap).strip()
         base = dict(Original=orig.name, Nachlauf=nach.name, SAP=sap)
-        if sap not in rows_o:
-            log.append({**base, "Hinweis": "SAP nicht in Originaldatei – übersprungen"})
-            continue
-        r = rows_o[sap]
-        old_status = str(so.cell(row=r, column=ho[stat_h]).value or "").strip().upper()
-        old_pred = so.cell(row=r, column=ho[pred_h]).value
         note = []
-        if old_status != "EXCLUDED" and not empty(old_pred):
-            note.append(f"Original war nicht EXCLUDED ({old_status}) – überschrieben")
+        if sap not in rows_o:
+            # Zeile fehlte im Original: am Ende anhängen (SAP und alle gemeinsamen Spalten)
+            r = so.max_row + 1
+            so.cell(row=r, column=ho[sap_o]).value = row[hn[sap_n]]
+            rows_o[sap] = r
+            old_status = "fehlte"
+            note.append("Zeile fehlte im Original – ergänzt")
+        else:
+            r = rows_o[sap]
+            old_status = str(so.cell(row=r, column=ho[stat_h]).value or "").strip().upper()
+            if not overwrite and not needs_fill(so, r, ho):
+                log.append({**base, "Excel-Zeile": r, "Vorher": old_status, "Aktion": "nicht ersetzt (Original gültig)"})
+                continue
+            if overwrite and not needs_fill(so, r, ho):
+                note.append(f"Original war gültig ({old_status}) – überschrieben (--ueberschreiben)")
 
         new = {h: row[hn[h]] for h in common}
         for h in (gt_h, alt_h):
-            if h and h in new and _norm(so.cell(row=r, column=ho[h]).value or "") != _norm(new[h] or ""):
+            if old_status != "fehlte" and h and h in new and _norm(so.cell(row=r, column=ho[h]).value or "") != _norm(new[h] or ""):
                 note.append(f"{h} geändert: '{so.cell(row=r, column=ho[h]).value or ''}' → '{new[h] or ''}'")
 
         gt = new.get(gt_h, so.cell(row=r, column=ho[gt_h]).value)
@@ -178,7 +206,7 @@ def merge_pair(orig, nach, out, log, dry):
         if ref is not None and ref.row != r:
             sc._style = copy.copy(ref._style)
         changed += 1
-        log.append({**base, "Excel-Zeile": r, "Vorher": old_status or "leer",
+        log.append({**base, "Excel-Zeile": r, "Vorher": old_status or "leer", "Aktion": "ersetzt",
                     "Predicted_Label neu": pred, "Status neu": status, "Hinweis": "; ".join(note)})
 
     if not dry:
@@ -187,16 +215,59 @@ def merge_pair(orig, nach, out, log, dry):
     return changed
 
 
-def process(folder, dry):
+def nach_saps(path):
+    wb = load_workbook(path, read_only=True, data_only=True)
+    ws = wb[SHEET_NAME]
+    head = [str(c.value).strip() if c.value is not None else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    hm = {h: i for i, h in enumerate(head) if h}
+    sh = find(hm, "sap")
+    saps = {str(r[hm[sh]]).strip() for r in ws.iter_rows(min_row=2, values_only=True) if not empty(r[hm[sh]])}
+    wb.close()
+    return saps
+
+
+def missing_in(orig, saps):
+    """Baugruppen aus `saps`, die im Original fehlen oder keine gültige Vorhersage haben."""
+    wb = load_workbook(orig, read_only=False, data_only=True)
+    ws = wb[SHEET_NAME]
+    ho = header_map(ws)
+    rows = sap_rows(ws, ho)
+    out = sorted(s for s in saps if s not in rows or needs_fill(ws, rows[s], ho))
+    wb.close()
+    return out
+
+
+def process(folder, dry, overwrite=False):
     files = [f for f in folder.glob("*.xlsx") if not f.name.startswith("~$")]
     nach = sorted([f for f in files if f.name.lower().startswith(NACHLAUF_PREFIX)], key=lambda f: stamp(f.name))
     orig = sorted([f for f in files if not f.name.lower().startswith(NACHLAUF_PREFIX)], key=lambda f: stamp(f.name))
     if not nach:
         return None
     print(f"\n{folder.name}: {len(orig)} Originale, {len(nach)} Nachlauf-Dateien")
-    if len(orig) != len(nach):
-        print("  ABBRUCH: Anzahl Originale und Nachlauf-Dateien unterschiedlich.")
-        return False
+
+    if overwrite:
+        # altes Verhalten: alle Originale der Reihe nach mit allen Nachlauf-Dateien paaren
+        if len(orig) != len(nach):
+            print("  ABBRUCH: Anzahl Originale und Nachlauf-Dateien unterschiedlich.")
+            return False
+        pairs = list(zip(orig, nach))
+    else:
+        # nur unvollständige Originale ergänzen; je unvollständigem Lauf eine eigene Nachlauf-Datei
+        saps = set().union(*(nach_saps(n) for n in nach))
+        need = [(o, missing_in(o, saps)) for o in orig]
+        incomplete = [(o, m) for o, m in need if m]
+        for o, m in incomplete:
+            print(f"  unvollständig: {o.name[-40:]}  ({len(m)}: {', '.join(m)})")
+        if len(nach) < len(incomplete):
+            print(f"  ABBRUCH: {len(incomplete)} unvollständige Läufe, aber nur {len(nach)} Nachlauf-Dateien. "
+                  f"Die Nachlauf-Eingabe bitte {len(incomplete)}-mal laufen lassen.")
+            return False
+        if len(nach) > len(incomplete):
+            print(f"  Hinweis: {len(nach) - len(incomplete)} Nachlauf-Datei(en) werden nicht benötigt.")
+        pairs = [(o, n) for (o, _), n in zip(incomplete, nach)]
+        if not pairs:
+            print("  Alle Originale vollständig – nichts zu tun.")
+            return True
 
     backup = folder / BACKUP_DIR
     if not dry:
@@ -206,16 +277,20 @@ def process(folder, dry):
         backup.mkdir()
         for f in orig + nach:
             shutil.move(str(f), backup / f.name)
+        paired = {o for o, _ in pairs}
+        for o in orig:  # nicht betroffene Originale unverändert zurückkopieren
+            if o not in paired:
+                shutil.copy2(backup / o.name, folder / o.name)
 
     log = []
-    for i, (o, n) in enumerate(zip(orig, nach), 1):
+    for i, (o, n) in enumerate(pairs, 1):
         src_o = o if dry else backup / o.name
         src_n = n if dry else backup / n.name
-        k = merge_pair(src_o, src_n, folder / o.name, log, dry)
-        print(f"  Lauf {i:2d}: {o.name[-24:]} ← {n.name[-24:]}  ({k} Zeilen ersetzt)")
+        k = merge_pair(src_o, src_n, folder / o.name, log, dry, overwrite)
+        print(f"  {o.name[-30:]} ← {n.name[-30:]}  ({k} Zeilen ersetzt/ergänzt)")
 
     df = pd.DataFrame(log)
-    flagged = df[df["Hinweis"].fillna("") != ""] if len(df) else df
+    flagged = df[df["Hinweis"].fillna("") != ""] if "Hinweis" in df else df.iloc[0:0]
     for _, r in flagged.iterrows():
         print(f"  Hinweis {r['SAP']}: {r['Hinweis']}")
     if not dry:
@@ -230,13 +305,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("ordner", nargs="*")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--ueberschreiben", action="store_true",
+                    help="altes Verhalten: alle Originale mit allen Nachlauf-Dateien paaren und auch gültige Zeilen ersetzen")
     a = ap.parse_args()
     if a.ordner:
         folders = [Path(x) for x in a.ordner]
     else:
         base = Path(__file__).resolve().parent
         folders = [d for d in sorted(base.iterdir()) if d.is_dir() and d.name != BACKUP_DIR]
-    results = [process(f, a.dry_run) for f in folders]
+    results = [process(f, a.dry_run, a.ueberschreiben) for f in folders]
     if not any(r is not None for r in results):
         sys.exit("Keine Ordner mit Nachlauf-Dateien gefunden.")
 

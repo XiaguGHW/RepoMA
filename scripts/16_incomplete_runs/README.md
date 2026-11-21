@@ -33,3 +33,16 @@ Spalte `Gefunden` (False = nicht zugeordnet, bitte prüfen).
 python find_incomplete_runs.py --root <Prompt-Ordner> --input-dataset <...\classification_experiment_dataset.xlsx> --input-dir <BG-Eingabeordner>
 python run_prompt_development.py --prompt-config P2 --model gemini-2.5-flash --input-excel Nachlauf\<Ordner>\nachlauf_dataset.xlsx
 ```
+
+## Eine Nachlauf-Eingabe je Modell (`--pro-modell`)
+
+Für Wiederholungsläufe (Ordner `*_10_runs`): statt je Ergebnisdatei ein Ordner je Modellordner mit
+**einer** `nachlauf_dataset.xlsx` (alle fehlenden BG aller Läufe, Spalten wie die Eingabeliste,
+`prompt_engineering = yes`). Die Konsole zeigt „Wiederholungen nötig“ = Anzahl unvollständiger Läufe:
+so oft wird die Eingabe ausgeführt. Die Ergebnisse mit Präfix `nachlauf_` in den Modellordner legen und
+mit Skript 11 zusammenführen; es ergänzt je unvollständigem Lauf nur die fehlenden/ungültigen Zeilen.
+
+```powershell
+python find_incomplete_runs.py --root <Ordner mit *_10_runs> --reference <vollständige Datei> `
+  --input-dataset <classification_experiment_dataset_v2.xlsx> --pro-modell
+```

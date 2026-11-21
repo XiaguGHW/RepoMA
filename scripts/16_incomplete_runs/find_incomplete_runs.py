@@ -135,10 +135,22 @@ def make_reruns(a, bad_by_file, names, tcs):
     if a.input_dir:
         folders = [d for d in Path(a.input_dir).rglob("*") if d.is_dir()]
     log = []
-    for f, bad in bad_by_file.items():
-        if not bad:
-            continue
-        target = out_root / safe_name(f.stem)
+    if getattr(a, "pro_modell", False):
+        # je Modellordner eine gemeinsame Eingabe: Vereinigung der fehlenden BG aller Läufe
+        groups = {}
+        for f, bad in bad_by_file.items():
+            if bad:
+                g = groups.setdefault(f.parent, {"files": [], "bad": {}})
+                g["files"].append(f)
+                for k, st in bad:
+                    g["bad"].setdefault(k, []).append(f"{label_of(f).split(' | ')[-1]}: {st}")
+        jobs = [(out_root / safe_name(folder.name), [(k, "; ".join(v)) for k, v in sorted(g["bad"].items())],
+                 f"{folder.name} ({len(g['files'])} unvollständige Läufe)", len(g["files"]))
+                for folder, g in groups.items()]
+    else:
+        jobs = [(out_root / safe_name(f.stem), bad, f.name, 1) for f, bad in bad_by_file.items() if bad]
+    summary = []
+    for target, bad, label, n_runs in jobs:
         target.mkdir(parents=True, exist_ok=True)
         idx = []
         for k, st in bad:
@@ -159,7 +171,7 @@ def make_reruns(a, bad_by_file, names, tcs):
                 if hits:
                     folder_hit = hits[0]
                     shutil.copytree(folder_hit, target / folder_hit.name, dirs_exist_ok=True)
-            log.append({"Ergebnisdatei": f.name, "Nachlauf-Ordner": str(target), "SAP": sap, "Teamcenter": tc,
+            log.append({"Ergebnisdatei": label, "Nachlauf-Ordner": str(target), "SAP": sap, "Teamcenter": tc,
                         "Status": st, "Zeile in Eingabeliste": None if row_hit is None else int(row_hit) + 2,
                         "Ordner kopiert": None if folder_hit is None else str(folder_hit),
                         "Gefunden": (row_hit is not None or ds is None) and (folder_hit is not None or not folders)})
@@ -169,9 +181,13 @@ def make_reruns(a, bad_by_file, names, tcs):
                 sub[c_sel] = "yes"
             with pd.ExcelWriter(target / "nachlauf_dataset.xlsx", engine="openpyxl") as xw:
                 sub.to_excel(xw, sheet_name=sheet, index=False)
+        summary.append({"Nachlauf-Ordner": target.name, "Baugruppen": len(bad), "Wiederholungen nötig": n_runs})
     lg = pd.DataFrame(log)
     with pd.ExcelWriter(out_root / "Nachlauf_Uebersicht.xlsx", engine="openpyxl") as xw:
         lg.to_excel(xw, sheet_name="Nachlauf", index=False)
+    if getattr(a, "pro_modell", False) and summary:
+        print("\nNachlauf je Modell (Eingabe so oft laufen lassen, wie Wiederholungen nötig sind):")
+        print(pd.DataFrame(summary).to_string(index=False))
     nf = lg[~lg["Gefunden"]] if len(lg) else lg
     print(f"\nNachlauf: {lg['Ergebnisdatei'].nunique() if len(lg) else 0} Ordner unter {out_root.resolve()}, "
           f"{len(lg)} Baugruppen" + (f"; NICHT gefunden: {len(nf)} (siehe Nachlauf_Uebersicht.xlsx)" if len(nf) else "."))
@@ -186,10 +202,12 @@ def main():
     ap.add_argument("--sheet-name", default=None, help="Blatt der Eingabeliste (Standard: Experiment_Dataset oder erstes Blatt)")
     ap.add_argument("--input-dir", help="vollständiger Eingabeordner mit einem Unterordner je Baugruppe")
     ap.add_argument("--rerun-out", default="Nachlauf", help="Zielordner für die Nachlauf-Experimente")
+    ap.add_argument("--pro-modell", action="store_true",
+                    help="eine Nachlauf-Eingabe je Modellordner (z. B. *_10_runs) statt je Ergebnisdatei")
     ap.add_argument("--nur-leer", action="store_true", help="nur leere Ausgaben und ERROR nachlaufen lassen (nicht fehlend/ungültig)")
     a = ap.parse_args()
 
-    skip_dirs = {"backup_original", "nachlauf", "__pycache__"}
+    skip_dirs = {"backup_original", "nachlauf", "__pycache__", "_backup_vor_merge"}
     files = [f for r in a.root for f in sorted(Path(r).rglob("*.xlsx"))
              if not f.name.startswith(SKIP)
              and not f.name.endswith("_Metriken_Konfusion.xlsx")

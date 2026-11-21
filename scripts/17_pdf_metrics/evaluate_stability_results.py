@@ -35,7 +35,7 @@ import evaluate_pdf_results as E  # noqa: E402
 import evaluate_70bg_results as S  # noqa: E402  (input_label)
 
 cm = E.cm
-SKIP_DIRS = {"backup_original", "__pycache__"}
+SKIP_DIRS = {"backup_original", "__pycache__", "_backup_vor_merge", "nachlauf"}
 
 
 def strict_acc(recs):

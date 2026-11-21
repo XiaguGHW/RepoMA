@@ -73,7 +73,8 @@ def is_output_or_backup(p):
     """Excel-Sperrdateien, eigene Ausgaben (*_Metriken_Konfusion.xlsx) und Sicherungskopien überspringen."""
     p = Path(p)
     return (p.name.startswith("~$") or p.name.endswith("_Metriken_Konfusion.xlsx")
-            or "Backup_Original" in p.parts)
+            or p.name == "Stabilitaet_Metriken.xlsx" or p.name.lower().startswith("nachlauf_")
+            or any(x in ("Backup_Original", "_backup_vor_merge", "Nachlauf") for x in p.parts))
 
 
 def model_rank(name):

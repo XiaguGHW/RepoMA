@@ -27,3 +27,12 @@ python merge_nachlauf.py                      # alle Unterordner des Skriptordne
   Die übrigen Blätter (Prompt_Evaluation, Confusion_Matrix, …) werden nicht neu berechnet.
 - Originale und Nachlauf-Dateien werden nach `_backup_vor_merge/` verschoben,
   `merge_protokoll.xlsx` dort listet jede ersetzte Zeile und alle Hinweise.
+
+## Seit 2026-11: nur unvollständige Läufe ergänzen (Standard)
+
+- Gepaart werden nur Originale, in denen eine Baugruppe der Nachlauf-Dateien fehlt oder keine gültige
+  Vorhersage hat (EXCLUDED, leer, `[EMPTY]`, nicht zuordenbar, Processing-Fehler); je solchem Lauf eine
+  eigene Nachlauf-Datei. Zu wenige Nachlauf-Dateien → Abbruch mit Hinweis, wie oft laufen lassen.
+- Gültige Zeilen bleiben unverändert; fehlende Zeilen werden angehängt.
+- Nicht betroffene Originale werden unverändert zurückkopiert.
+- `--ueberschreiben`: altes Verhalten (alle Originale ↔ alle Nachlauf-Dateien, gleiche Anzahl).
