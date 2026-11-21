@@ -44,3 +44,12 @@ verschiedenen Läufen füllen, solange jede Baugruppe nur einmal fehlt. Fehlt ei
 sind k Nachläufe nötig (Skript 16 zeigt das als „Wiederholungen nötig“). Nicht füllbare Lücken meldet das
 Skript; nach weiteren Nachläufen einfach erneut ausführen (neuer Sicherungsordner `_backup_vor_merge_2`, …).
 `--wiederverwenden` setzt notfalls dasselbe Ergebnis mehrfach ein (verfälscht die Streuung, nicht empfohlen).
+
+## Weitere Regeln (2026-11-21)
+
+- Baugruppen werden über SAP-Nummer erkannt, ersatzweise über Teamcenter (3 BG ohne SAP im Ergänzungsdatensatz).
+- `prompt_engineering` wird nicht übernommen (im Nachlauf „yes“, in den Ergebnissen kennzeichnet „yes“ Vorversuchs-BG).
+- `Allowed_Set_Status` ist optional (fehlt z. B. in den 70BG-Dateien).
+- Nur Baugruppen, die in mindestens einem Original oder in `--referenz` vorkommen, werden ergänzt.
+  Fehlt eine Baugruppe in allen Läufen, `--referenz <vollständige Ergebnisdatei>` angeben.
+- Test des ganzen Ablaufs: `python test_nachlauf_ablauf.py`.

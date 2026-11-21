@@ -87,7 +87,9 @@ def read(path):
     c_tc = find_col(df.columns, "teamcenter")
     rows = {}
     for _, r in df.iterrows():
-        if pd.isna(r[c_sap]) or not str(r[c_sap]).strip():
+        sap_ok = not (pd.isna(r[c_sap]) or not str(r[c_sap]).strip())
+        tc_ok = c_tc is not None and not (pd.isna(r[c_tc]) or not str(r[c_tc]).strip())
+        if not sap_ok and not tc_ok:
             continue
         raw = r[c_pred]
         stat = "" if c_stat is None or pd.isna(r[c_stat]) else str(r[c_stat])
@@ -99,11 +101,13 @@ def read(path):
             status = "ungültig"
         else:
             status = "ok"
-        k = key(r[c_sap])
+        # Kennung: SAP-Nummer, ersatzweise Teamcenter (3 BG des Ergänzungsdatensatzes ohne SAP)
+        k = key(r[c_sap]) if sap_ok else "TC:" + norm_id(r[c_tc])
         if rows.get(k) != "ok":  # doppelte Zeilen: ok gewinnt
             rows[k] = status
-        rows.setdefault("_sap_" + k, str(r[c_sap]).strip())
-        if c_tc is not None and not pd.isna(r[c_tc]) and str(r[c_tc]).strip():
+        if sap_ok:
+            rows.setdefault("_sap_" + k, str(r[c_sap]).strip())
+        if tc_ok:
             rows.setdefault("_tc_" + k, str(r[c_tc]).strip())
     return rows, (stat if c_stat else "")
 
@@ -143,7 +147,7 @@ def make_reruns(a, bad_by_file, names, tcs):
                 g = groups.setdefault(f.parent, {"files": [], "bad": {}})
                 g["files"].append(f)
                 for k, st in bad:
-                    g["bad"].setdefault(k, []).append(f"{label_of(f).split(' | ')[-1]}: {st}")
+                    g["bad"].setdefault(k, []).append(f"{f.name}: {st}")
         # nötige Nachläufe = wie oft die am häufigsten fehlende Baugruppe fehlt (Skript 11 füllt je Lücke
         # ein eigenes Ergebnis ein; fehlt jede BG nur in einem Lauf, genügt ein Nachlauf)
         jobs = [(out_root / safe_name(folder.name), [(k, "; ".join(v)) for k, v in sorted(g["bad"].items())],
@@ -156,14 +160,17 @@ def make_reruns(a, bad_by_file, names, tcs):
         target.mkdir(parents=True, exist_ok=True)
         idx = []
         for k, st in bad:
-            sap, tc = names.get(k, k), tcs.get(k)
-            ids = {norm_id(sap)} | ({norm_id(tc)} if tc else set())
+            sap, tc = names.get(k), tcs.get(k)
+            ids = ({norm_id(sap)} if sap else set()) | ({norm_id(tc)} if tc else set())
             row_hit = folder_hit = None
             if ds is not None:
-                for i, r in ds.iterrows():
-                    cand = {norm_id(r[c]) for c in (c_sap, c_tc) if c is not None and not pd.isna(r[c])}
-                    if ids & cand:
-                        row_hit = i
+                # zuerst über die SAP-Nummer suchen, nur ohne Treffer über Teamcenter
+                for col, val in ((c_sap, sap), (c_tc, tc)):
+                    if col is None or not val:
+                        continue
+                    hit = ds.index[ds[col].fillna("").map(norm_id) == norm_id(val)]
+                    if len(hit):
+                        row_hit = hit[0]
                         break
                 if row_hit is not None and row_hit not in idx:
                     idx.append(row_hit)
@@ -237,6 +244,11 @@ def main():
                 tcs[k[4:]] = v
     if a.reference:
         ref_rows = read(Path(a.reference))[0]
+        for k, v in ref_rows.items():  # Nummern auch für BG, die in keinem Lauf vorkommen
+            if k.startswith("_sap_"):
+                names.setdefault(k[5:], v)
+            elif k.startswith("_tc_"):
+                tcs.setdefault(k[4:], v)
         ref = {"Haupt": {k for k in ref_rows if not k.startswith("_")}}  # nur Baugruppen, keine _sap_/_tc_-Hilfseinträge
         ref["70"] = ref["Haupt"]
     else:
@@ -256,13 +268,13 @@ def main():
         bad_by_file[f] = bad
         over.append({"Experiment": label_of(f), "Datei": str(f), "Datensatz": dataset(f), "Erwartet": len(exp),
                      "Gültig": len(exp) - len(bad), "Unvollständig": len(bad),
-                     "Baugruppen": ", ".join(f"{names.get(k, k)} ({st})" for k, st in bad)})
+                     "Baugruppen": ", ".join(f"{names.get(k) or tcs.get(k) or k} ({st})" for k, st in bad)})
         for k, st in bad:
             gt = None
             if s12 is not None:
                 g = {key(x): v for x, v in s12.FINAL_GT.items()}.get(k)
                 gt = g[0] if g else None
-            miss.append({"Experiment": label_of(f), "Datei": f.name, "SAP": names.get(k, k),
+            miss.append({"Experiment": label_of(f), "Datei": f.name, "SAP": names.get(k),
                          "Teamcenter": tcs.get(k), "Status": st, "GT": gt})
 
     over = pd.DataFrame(over).sort_values(["Unvollständig", "Experiment"], ascending=[False, True])

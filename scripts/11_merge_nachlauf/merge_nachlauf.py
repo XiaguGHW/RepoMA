@@ -131,13 +131,25 @@ def needs_fill(ws, r, ho):
     return str(canon(pred)).startswith("?")
 
 
+def ident(sap, tc):
+    """Baugruppen-Kennung: SAP-Nummer, ersatzweise Teamcenter (3 BG des Ergänzungsdatensatzes ohne SAP)."""
+    def n(x):
+        return re.sub(r"[^0-9A-Z]", "", str(x).upper()).lstrip("0")
+    if not empty(sap) and n(sap):
+        return "SAP:" + n(sap)
+    if not empty(tc) and n(tc):
+        return "TC:" + n(tc)
+    return None
+
+
 def sap_rows(ws, ho):
-    sap_h = find(ho, "sap")
+    sap_h, tc_h = find(ho, "sap"), find(ho, "teamcenter")
     rows = {}
     for r in range(2, ws.max_row + 1):
-        v = ws.cell(row=r, column=ho[sap_h]).value
-        if not empty(v):
-            rows.setdefault(str(v).strip(), r)
+        k = ident(ws.cell(row=r, column=ho[sap_h]).value,
+                  ws.cell(row=r, column=ho[tc_h]).value if tc_h else None)
+        if k:
+            rows.setdefault(k, r)
     return rows
 
 
@@ -150,36 +162,41 @@ def merge_pair(orig, nach, out, log, dry, overwrite=False, only=None, wo=None, s
                               if c.value is not None}
 
     sap_o, sap_n = find(ho, "sap"), find(hn, "sap")
+    tc_o, tc_n = find(ho, "teamcenter"), find(hn, "teamcenter")
     gt_h = find(ho, exact="Ground Truth")
     alt_h, pred_h = find(ho, "weitere"), find(ho, "predicted")
-    stat_h = find(ho, "allowed")
-    if not (sap_o and sap_n and gt_h and pred_h and stat_h):
+    stat_h = find(ho, "allowed")  # optional (z. B. fehlt in den 70BG-Dateien)
+    if not (sap_o and sap_n and gt_h and pred_h):
         raise ValueError(f"Spalten fehlen in {orig.name} oder {nach.name}")
 
     rows_o = sap_rows(so, ho)
 
-    common = [h for h in hn if h in ho and h not in (sap_o, stat_h)]
+    # prompt_engineering NICHT übernehmen: im Nachlauf steht dort "yes" (Auswahl der Zeilen),
+    # in den Ergebnisdateien kennzeichnet "yes" aber Vorversuchs-Baugruppen, die ausgeschlossen werden.
+    skip = {sap_o, stat_h} | {h for h in ho if "prompt" in h.lower() and "engineer" in h.lower()}
+    common = [h for h in hn if h in ho and h not in skip]
     stat_n = find(hn, "allowed")
     changed = 0
     for row in sn.iter_rows(min_row=2, values_only=True):
-        sap = row[hn[sap_n]]
-        if empty(sap):
+        sap_v = row[hn[sap_n]]
+        tc_v = row[hn[tc_n]] if tc_n else None
+        sap = ident(sap_v, tc_v)
+        if sap is None:
             continue
-        sap = str(sap).strip()
         if only is not None and sap not in only:
             continue
-        base = dict(Original=orig.name, Nachlauf=nach.name, SAP=sap)
+        base = dict(Original=orig.name, Nachlauf=nach.name, SAP=str(sap_v or tc_v).strip())
         note = []
         if sap not in rows_o:
             # Zeile fehlte im Original: am Ende anhängen (SAP und alle gemeinsamen Spalten)
             r = so.max_row + 1
-            so.cell(row=r, column=ho[sap_o]).value = row[hn[sap_n]]
+            so.cell(row=r, column=ho[sap_o]).value = sap_v
             rows_o[sap] = r
             old_status = "fehlte"
             note.append("Zeile fehlte im Original – ergänzt")
         else:
             r = rows_o[sap]
-            old_status = str(so.cell(row=r, column=ho[stat_h]).value or "").strip().upper()
+            old_status = str(so.cell(row=r, column=ho[stat_h]).value or "").strip().upper() if stat_h else ""
             if not overwrite and not needs_fill(so, r, ho):
                 log.append({**base, "Excel-Zeile": r, "Vorher": old_status, "Aktion": "nicht ersetzt (Original gültig)"})
                 continue
@@ -204,11 +221,12 @@ def merge_pair(orig, nach, out, log, dry, overwrite=False, only=None, wo=None, s
 
         for h, v in new.items():
             so.cell(row=r, column=ho[h]).value = v
-        sc = so.cell(row=r, column=ho[stat_h])
-        sc.value = status
-        ref = style_for_status(so, ho[stat_h], status)
-        if ref is not None and ref.row != r:
-            sc._style = copy.copy(ref._style)
+        if stat_h:
+            sc = so.cell(row=r, column=ho[stat_h])
+            sc.value = status
+            ref = style_for_status(so, ho[stat_h], status)
+            if ref is not None and ref.row != r:
+                sc._style = copy.copy(ref._style)
         changed += 1
         log.append({**base, "Excel-Zeile": r, "Vorher": old_status or "leer", "Aktion": "ersetzt",
                     "Predicted_Label neu": pred, "Status neu": status, "Hinweis": "; ".join(note)})
@@ -224,10 +242,21 @@ def nach_saps(path):
     ws = wb[SHEET_NAME]
     head = [str(c.value).strip() if c.value is not None else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
     hm = {h: i for i, h in enumerate(head) if h}
-    sh = find(hm, "sap")
-    saps = {str(r[hm[sh]]).strip() for r in ws.iter_rows(min_row=2, values_only=True) if not empty(r[hm[sh]])}
+    sh, th = find(hm, "sap"), find(hm, "teamcenter")
+    saps = {ident(r[hm[sh]], r[hm[th]] if th else None) for r in ws.iter_rows(min_row=2, values_only=True)}
     wb.close()
-    return saps
+    return {x for x in saps if x}
+
+
+def original_ids(path):
+    wb = load_workbook(path, read_only=True, data_only=True)
+    ws = wb[SHEET_NAME]
+    head = [str(c.value).strip() if c.value is not None else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    hm = {h: i for i, h in enumerate(head) if h}
+    sh, th = find(hm, "sap"), find(hm, "teamcenter")
+    ids = {ident(r[hm[sh]], r[hm[th]] if th else None) for r in ws.iter_rows(min_row=2, values_only=True)}
+    wb.close()
+    return {x for x in ids if x}
 
 
 def missing_in(orig, saps):
@@ -241,7 +270,7 @@ def missing_in(orig, saps):
     return out
 
 
-def process(folder, dry, overwrite=False, reuse=False):
+def process(folder, dry, overwrite=False, reuse=False, ref_ids=None):
     files = [f for f in folder.glob("*.xlsx") if not f.name.startswith("~$")]
     nach = sorted([f for f in files if f.name.lower().startswith(NACHLAUF_PREFIX)], key=lambda f: stamp(f.name))
     orig = sorted([f for f in files if not f.name.lower().startswith(NACHLAUF_PREFIX)], key=lambda f: stamp(f.name))
@@ -261,6 +290,17 @@ def process(folder, dry, overwrite=False, reuse=False):
         # Fehlt eine Baugruppe nur in einem Lauf, genügt also ein einziger Nachlauf.
         nsaps = {n: nach_saps(n) for n in nach}
         saps = set().union(*nsaps.values())
+        # Schutz: nur Baugruppen ergänzen, die zu diesem Experiment gehören (in mindestens einem Original
+        # vorhanden oder in der Referenzdatei); sonst würden fremde Zeilen angehängt.
+        known = set().union(*(set(original_ids(o)) for o in orig))
+        if ref_ids:
+            known |= ref_ids
+        foreign = sorted(saps - known)
+        if foreign:
+            print(f"  ! {len(foreign)} Baugruppe(n) der Nachlauf-Dateien kommen in keinem Original vor und werden "
+                  f"nicht ergänzt: {', '.join(foreign)}" + ("" if ref_ids else
+                  " (fehlt eine BG in allen Läufen, --referenz <vollständige Datei> angeben)"))
+        saps -= set(foreign)
         used, plan, unfilled = {}, {}, []
         for o in orig:
             for sp in missing_in(o, saps):
@@ -331,6 +371,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("ordner", nargs="*")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--referenz", help="vollständige Ergebnisdatei (Sheet1): legt fest, welche Baugruppen zum Experiment gehören")
     ap.add_argument("--wiederverwenden", action="store_true",
                     help="Notlösung: fehlt eine Baugruppe in mehreren Läufen, dasselbe Nachlauf-Ergebnis mehrfach einsetzen")
     ap.add_argument("--ueberschreiben", action="store_true",
@@ -341,7 +382,8 @@ def main():
     else:
         base = Path(__file__).resolve().parent
         folders = [d for d in sorted(base.iterdir()) if d.is_dir() and not d.name.startswith(BACKUP_DIR)]
-    results = [process(f, a.dry_run, a.ueberschreiben, a.wiederverwenden) for f in folders]
+    ref_ids = original_ids(Path(a.referenz)) if a.referenz else None
+    results = [process(f, a.dry_run, a.ueberschreiben, a.wiederverwenden, ref_ids) for f in folders]
     if not any(r is not None for r in results):
         sys.exit("Keine Ordner mit Nachlauf-Dateien gefunden.")
 
