@@ -189,7 +189,12 @@ def main():
     ap.add_argument("--nur-leer", action="store_true", help="nur leere Ausgaben und ERROR nachlaufen lassen (nicht fehlend/ungültig)")
     a = ap.parse_args()
 
-    files = [f for r in a.root for f in sorted(Path(r).rglob("*.xlsx")) if not f.name.startswith(SKIP)]
+    skip_dirs = {"backup_original", "nachlauf", "__pycache__"}
+    files = [f for r in a.root for f in sorted(Path(r).rglob("*.xlsx"))
+             if not f.name.startswith(SKIP)
+             and not f.name.endswith("_Metriken_Konfusion.xlsx")
+             and f.name not in ("Stabilitaet_Metriken.xlsx", Path(a.out).name, "Nachlauf_Uebersicht.xlsx")
+             and not any(p.lower() in skip_dirs for p in f.relative_to(r).parts[:-1])]
     data = {}
     for f in files:
         res = read(f)
