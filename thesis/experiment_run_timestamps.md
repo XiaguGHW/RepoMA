@@ -60,3 +60,20 @@
 | 8 | DeepSeek Flash | P3 | Text | 70 BG | 19:56:48 | 19:57:33 |
 | 9 | DeepSeek Flash | P3 | Text | 70 BG | 19:58:06 | 19:59:01,869 |
 | 10 | DeepSeek Flash | P3 | Text | 70 BG | 19:59:21 | 20:00:21 |
+
+## 第五组：Gemini 2.5 Flash · P3 · PDF · 70 BG
+
+手写标题注明「10组」，照片中共 10 条记录。原始记录未注明实验日期或时区；小数位数及逗号按手写记录保留。
+
+| 顺序 | 模型 | Prompt | 输入形式 | 数据量 | 开始时间 | 结束时间 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | Gemini 2.5 Flash | P3 | PDF | 70 BG | 18:57:24 | 19:01:55,771 |
+| 2 | Gemini 2.5 Flash | P3 | PDF | 70 BG | 19:24:38 | 19:29:10,851 |
+| 3 | Gemini 2.5 Flash | P3 | PDF | 70 BG | 19:30:27 | 19:35:23 |
+| 4 | Gemini 2.5 Flash | P3 | PDF | 70 BG | 19:38:29 | 19:42:30 |
+| 5 | Gemini 2.5 Flash | P3 | PDF | 70 BG | 19:44:03 | 19:48:13 |
+| 6 | Gemini 2.5 Flash | P3 | PDF | 70 BG | 19:48:54 | 19:52:49 |
+| 7 | Gemini 2.5 Flash | P3 | PDF | 70 BG | 19:53:28 | 19:57:51 |
+| 8 | Gemini 2.5 Flash | P3 | PDF | 70 BG | 19:59:47 | 20:04:09 |
+| 9 | Gemini 2.5 Flash | P3 | PDF | 70 BG | 20:05:56 | 20:09:56,742 |
+| 10 | Gemini 2.5 Flash | P3 | PDF | 70 BG | 20:10:18 | 20:14:28,867 |
