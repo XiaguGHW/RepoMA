@@ -113,8 +113,14 @@ def load_runs(files, gt, pe, issues, kind):
         run = R.read_predictions(f, "Sheet1", f"{model} | {f.name}", gt, pe, issues)
         if not run:
             continue
-        ds = "main" if len(set(run) & main_keys) >= len(run) / 2 else "supp"
-        groups.setdefault((model, prompt, inp, ds), []).append((f, run))
+        # Datei kann beide Datensätze enthalten (z. B. pdf_only_185BG_…): nach Baugruppen aufteilen
+        parts = {"main": {k: v for k, v in run.items() if k in main_keys},
+                 "supp": {k: v for k, v in run.items() if k not in main_keys}}
+        for ds, part in parts.items():
+            if part:
+                groups.setdefault((model, prompt, inp, ds), []).append((f, part))
+        if parts["main"] and parts["supp"]:
+            print(f"  Hinweis: {f.name} enthält beide Datensätze ({len(parts['main'])} + {len(parts['supp'])} BG) – aufgeteilt")
     return groups, unknown
 
 

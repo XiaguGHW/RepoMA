@@ -119,9 +119,14 @@ def collect(root, sheet, gt, pe, issues):
             if not run:
                 print(f"  ! {d.name}/{f.name}: keine auswertbaren Zeilen – übersprungen")
                 continue
-            ds = "main" if len(set(run) & main_keys) >= len(run) / 2 else "supp"
-            out.setdefault(model, {"main": [], "supp": []})[ds].append((f, run))
-            info.append((model, ds, d.name))
+            parts = {"main": {k: v for k, v in run.items() if k in main_keys},
+                     "supp": {k: v for k, v in run.items() if k not in main_keys}}
+            if parts["main"] and parts["supp"]:
+                print(f"  Hinweis: {f.name} enthält beide Datensätze – aufgeteilt")
+            for ds, part in parts.items():
+                if part:
+                    out.setdefault(model, {"main": [], "supp": []})[ds].append((f, part))
+                    info.append((model, ds, d.name))
     # Warnung: Läufe eines Modells/Datensatzes aus mehreren Ordnern (z. B. Vergleichsläufe mit eingelesen)
     for model in out:
         for ds in ("main", "supp"):
