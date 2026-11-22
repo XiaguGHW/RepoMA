@@ -92,6 +92,9 @@ def label_of(path):
     return " | ".join(p for p in parts if p)
 
 
+WARN_OK = []  # (Datei, BG, Processing_Status) – Fehlerstatus, aber gültige Vorhersage
+
+
 def read(path):
     try:
         xl = pd.ExcelFile(path)
@@ -105,6 +108,7 @@ def read(path):
         return None
     c_stat = find_col(df.columns, "processing_status")
     c_tc = find_col(df.columns, "teamcenter")
+    c_rea = find_col(df.columns, "reasoning")
     rows = {}
     for _, r in df.iterrows():
         sap_ok = not (pd.isna(r[c_sap]) or not str(r[c_sap]).strip())
@@ -113,8 +117,15 @@ def read(path):
             continue
         raw = r[c_pred]
         stat = "" if c_stat is None or pd.isna(r[c_stat]) else str(r[c_stat])
-        if "error" in stat.lower():
+        rea = "" if c_rea is None or pd.isna(r[c_rea]) else str(r[c_rea]).strip()
+        pred_ok = not (pd.isna(raw) or str(raw).strip() in ("", "[EMPTY]", "nan")) and canon(raw) is not None
+        if "error" in stat.lower() and not (pred_ok and len(rea) > 20 and "error" not in rea.lower()[:40]):
             status = "Fehler"
+        elif "error" in stat.lower():
+            # Fehlermeldung (z. B. HTTP 413 beim ersten Versuch), aber gültige Vorhersage mit Begründung:
+            # Ergebnis des erfolgreichen Wiederholungsversuchs -> zählt als vorhanden
+            status = "ok"
+            WARN_OK.append((path.name, str(r[c_sap]) if sap_ok else str(r[c_tc]), stat[:60]))
         elif pd.isna(raw) or str(raw).strip() in ("", "[EMPTY]", "nan"):
             status = "leer"
         elif canon(raw) is None:
@@ -233,6 +244,14 @@ def make_reruns(a, bad_by_file, names, tcs):
           f"{len(lg)} Baugruppen" + (f"; NICHT gefunden: {len(nf)} (siehe Nachlauf_Uebersicht.xlsx)" if len(nf) else "."))
 
 
+def print_warn_ok():
+    if WARN_OK:
+        print(f"\nHinweis: {len(WARN_OK)} Zeile(n) mit Fehlermeldung, aber gültiger Vorhersage und Begründung "
+              "(als vorhanden gezählt):")
+        for f, bg, st in WARN_OK[:30]:
+            print(f"  {bg} in {f[-50:]}: {st}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", action="append", required=True)
@@ -327,3 +346,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    print_warn_ok()

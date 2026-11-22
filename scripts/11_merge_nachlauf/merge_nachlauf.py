@@ -123,12 +123,19 @@ def style_for_status(ws, col, status):
 def needs_fill(ws, r, ho):
     """Zeile ohne gültige Vorhersage: EXCLUDED, leer, [EMPTY], nicht zuordenbar oder Processing-Fehler."""
     stat_h, pred_h, proc_h = find(ho, "allowed"), find(ho, "predicted"), find(ho, "processing")
+    rea_h = find(ho, "reasoning")
     st = str(ws.cell(row=r, column=ho[stat_h]).value or "").strip().upper() if stat_h else ""
     pred = ws.cell(row=r, column=ho[pred_h]).value if pred_h else None
     proc = str(ws.cell(row=r, column=ho[proc_h]).value or "").lower() if proc_h else ""
-    if st == "EXCLUDED" or "error" in proc or empty(pred) or str(pred).strip().upper() == "[EMPTY]":
+    rea = str(ws.cell(row=r, column=ho[rea_h]).value or "").strip() if rea_h else ""
+    if st == "EXCLUDED" or empty(pred) or str(pred).strip().upper() == "[EMPTY]":
         return True
-    return str(canon(pred)).startswith("?")
+    if str(canon(pred)).startswith("?"):
+        return True
+    # Fehlermeldung, aber gültige Vorhersage mit Begründung (erfolgreicher Wiederholungsversuch): gilt als vorhanden
+    if "error" in proc and not (len(rea) > 20 and "error" not in rea.lower()[:40]):
+        return True
+    return False
 
 
 def ident(sap, tc):
