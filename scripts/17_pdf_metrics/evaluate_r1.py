@@ -95,13 +95,25 @@ def collect(root, sheet, gt, pe, issues):
     """{Modell: {"main": [Lauf...], "supp": [Lauf...]}}; Lauf = {BG: (pred oder None)}."""
     main_keys = set(cm.MAIN_115)
     out, info = {}, []
-    for d in sorted(p for p in Path(root).iterdir() if p.is_dir() and p.name.lower() not in SKIP_DIRS
-                    and not p.name.lower().startswith("_backup_vor_merge")):
-        files = sorted(f for f in d.rglob("*") if f.suffix.lower() in (".xlsx", ".xlsm")
+    roots = [Path(x) for x in (root if isinstance(root, (list, tuple)) else [root])]
+    # Konfigurationsordner = Ordner, die selbst Ergebnisdateien enthalten (auch eine Ebene tiefer,
+    # z. B. 03_Wiederholung\115BG\<Konfiguration>)
+    cands = []
+    for rt in roots:
+        for p in [rt] + sorted(rt.rglob("*")):
+            if p.is_dir() and not any(x.lower() in SKIP_DIRS or x.lower().startswith("_backup_vor_merge")
+                                      for x in p.relative_to(rt).parts) \
+                    and any(f.suffix.lower() in (".xlsx", ".xlsm") and not E.is_output_or_backup(f) for f in p.glob("*")):
+                cands.append(p)
+    for d in cands:
+        files = sorted(f for f in d.glob("*") if f.suffix.lower() in (".xlsx", ".xlsm")
                        and not E.is_output_or_backup(f))
         if not files:
             continue
         model = E.model_name(d)
+        if model not in MODEL_ORDER and model not in ("Claude Opus 4.8",):
+            print(f"  ! Ordner {d.name}: Modell nicht erkannt – übersprungen")
+            continue
         for f in files:
             run = read_predictions(f, sheet, f"{model} | {d.name}", gt, pe, issues)
             if not run:
@@ -541,7 +553,8 @@ def write_excel(path, results, gt_name):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--dir", required=True, help="Ordner mit den Konfigurationsordnern (115 und 70BG)")
+    ap.add_argument("--dir", required=True, action="append",
+                    help="Ordner mit den Konfigurationsordnern (115 und 70BG); mehrfach angebbar")
     ap.add_argument("--gt", required=True, help="R1.md oder Excel mit der Ground Truth")
     ap.add_argument("--gt-name", default="R1")
     ap.add_argument("--sheet", default="Sheet1")
