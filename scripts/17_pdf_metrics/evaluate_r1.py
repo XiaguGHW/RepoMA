@@ -175,15 +175,17 @@ def subset_keys(gt, keys, which):
     return [k for k in keys if (len(gt[k][1]) > 1) == amb]
 
 
+def build_runs(runs_main, runs_supp, scope):
+    if scope == "115":
+        return [r for _, r in runs_main]
+    n = min(len(runs_main), len(runs_supp))
+    return [{**runs_main[i][1], **runs_supp[i][1]} for i in range(n)]
+
+
 def evaluate(gt, runs_main, runs_supp, scope, rng):
     """scope: '115' oder '185'. Rückgabe: dict je Teilmenge."""
-    if scope == "115":
-        runs = [r for _, r in runs_main]
-        strata = [set(cm.MAIN_115) - set()]
-    else:
-        n = min(len(runs_main), len(runs_supp))
-        runs = [{**runs_main[i][1], **runs_supp[i][1]} for i in range(n)]
-        strata = [set(cm.MAIN_115), None]  # None = Ergänzung (alle übrigen)
+    runs = build_runs(runs_main, runs_supp, scope)
+    strata = [set(cm.MAIN_115)]
     if not runs:
         return None
     allkeys = sorted(set().union(*runs))
@@ -221,6 +223,193 @@ def evaluate(gt, runs_main, runs_supp, scope, rng):
             row["prec"], row["rec"], row["f1"] = (float(np.mean([x[i] for x in prf])) for i in range(3))
         res[which] = row
     return res
+
+
+# ---------------------------------------------------------------- Konfusionsmatrix (Stil Betreuer-Beispiel)
+ABBR = {"Lineareinheit": "LE", "Rotationseinheit": "RE", "Greifer": "GR", "Multi-Achs-System (Gantry)": "MA",
+        "Roboter": "RO", "Kombinierte Einheit": "KE", "Keine der verfügbaren Klassen": "SO"}
+COL_ORDER = ["Lineareinheit", "Rotationseinheit", "Greifer", "Multi-Achs-System (Gantry)", "Roboter",
+             "Kombinierte Einheit", "Keine der verfügbaren Klassen"]
+LEGEND = ("LE = Lineareinheit, RE = Rotationseinheit, GR = Greifer, MA = Multi-Achs-System (Gantry), "
+          "RO = Roboter, KE = Kombinierte Einheit, SO = Keine der verfügbaren Klassen")
+
+
+def set_label(allowed):
+    return "{" + ", ".join(ABBR[c] for c in COL_ORDER if c in allowed) + "}"
+
+
+def confusion_data(gt, runs):
+    """Mittlere Konfusionsmatrix über die Läufe (Zelle = mittlere Anzahl je Lauf).
+    Zeilen: eindeutige Klassen (Primärlabel) und mehrdeutige Labelmengen; Spalten: Vorhersage."""
+    R = len(runs)
+    keys = sorted(set().union(*runs))
+    rows = {}  # Zeilenschlüssel -> dict
+    for k in keys:
+        allowed = gt[k][1]
+        rk = ("E", gt[k][0]) if len(allowed) == 1 else ("M", allowed)
+        row = rows.setdefault(rk, {"cnt": {c: 0.0 for c in COL_ORDER}, "inv": 0.0, "n": 0, "korrekt": 0.0,
+                                   "allowed": allowed})
+        row["n"] += 1
+        for run in runs:
+            if k not in run:
+                continue
+            p = run[k]
+            if p in row["cnt"]:
+                row["cnt"][p] += 1 / R
+            else:
+                row["inv"] += 1 / R
+            if correct(gt, k, p):
+                row["korrekt"] += 1 / R
+    eind = [(c, rows[("E", c)]) for c in COL_ORDER if ("E", c) in rows]
+    mehr = sorted([(rk[1], v) for rk, v in rows.items() if rk[0] == "M"], key=lambda x: (-x[1]["n"], set_label(x[0])))
+    return eind, mehr
+
+
+def write_confusion_sheet(wb, title, sheet_name, gt, runs):
+    from openpyxl.utils import get_column_letter
+    St = E.styles()
+    Font = St["Font"]
+    ws = wb.create_sheet(sheet_name[:31])
+    ws.sheet_view.showGridLines = False
+    eind, mehr = confusion_data(gt, runs)
+    R = len(runs)
+    fmt = "0" if R == 1 else "0.0"
+    has_inv = any(v["inv"] > 0 for _, v in eind + mehr)
+    pred_cols = [ABBR[c] for c in COL_ORDER] + (["ungültig"] if has_inv else [])
+    head = ["Referenz ↓ / Vorhersage →"] + pred_cols + ["n", "korrekt", "Accuracy"]
+    from openpyxl.styles import Alignment
+    wrap = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.column_dimensions["A"].width = 2
+    ws.column_dimensions["B"].width = 36
+    for j in range(1, len(head)):
+        ws.column_dimensions[get_column_letter(2 + j)].width = 9 if head[j] != "ungültig" else 10
+    gap = 2 + len(head)
+    ws.column_dimensions[get_column_letter(gap)].width = 3
+    for j in range(len(COL_ORDER)):
+        ws.column_dimensions[get_column_letter(gap + 1 + j)].width = 6
+
+    def hdr(r, c, v, width=1):
+        if width > 1:
+            ws.merge_cells(start_row=r, start_column=c, end_row=r, end_column=c + width - 1)
+        cell = ws.cell(r, c, v)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.alignment = wrap
+        for j in range(width):
+            ws.cell(r, c + j).fill = St["fill"](cm.HEAD)
+            ws.cell(r, c + j).border = St["border"]
+
+    ws.merge_cells(start_row=2, start_column=2, end_row=2, end_column=1 + len(head))
+    t = ws.cell(2, 2, title)
+    t.font = Font(bold=True, color="FFFFFF", size=12)
+    for j in range(len(head)):
+        ws.cell(2, 2 + j).fill = St["fill"](cm.NAVY)
+    hdr(3, gap + 1, "Zulässige Klassen je Zeile (1 = zulässig)", len(COL_ORDER))
+    for j, h in enumerate(head):
+        hdr(4, 2 + j, h)
+    for j, c in enumerate(COL_ORDER):
+        hdr(4, gap + 1 + j, ABBR[c])
+
+    r = 5
+    tot = {"E": [0.0, 0], "M": [0.0, 0]}
+    for section, items in (("Eindeutig", [(ABBR[c], v) for c, v in eind]),
+                           ("Mehrdeutig", [(set_label(a), v) for a, v in mehr])):
+        ws.cell(r, 2, section).font = Font(bold=True, italic=True)
+        r += 1
+        for lab, v in items:
+            ws.cell(r, 2, lab).border = St["border"]
+            vals = [v["cnt"][c] for c in COL_ORDER] + ([v["inv"]] if has_inv else [])
+            for j, x in enumerate(vals):
+                cell = ws.cell(r, 3 + j, x)
+                cell.number_format = fmt
+                cell.alignment = St["center"]
+                cell.border = St["border"]
+                if j < len(COL_ORDER) and COL_ORDER[j] in v["allowed"]:
+                    cell.font = Font(bold=True, color="1F4E9E")
+            base = 3 + len(vals)
+            for j, (x, f) in enumerate(((v["n"], "0"), (v["korrekt"], fmt), (v["korrekt"] / v["n"], "0.0%"))):
+                cell = ws.cell(r, base + j, x)
+                cell.number_format = f
+                cell.alignment = St["right"]
+                cell.border = St["border"]
+            for j, c in enumerate(COL_ORDER):
+                cell = ws.cell(r, gap + 1 + j, 1 if c in v["allowed"] else 0)
+                cell.alignment = St["center"]
+                cell.border = St["border"]
+            key = "E" if section == "Eindeutig" else "M"
+            tot[key][0] += v["korrekt"]
+            tot[key][1] += v["n"]
+            r += 1
+
+    # Accuracy nach Teilmenge
+    r += 2
+    ws.cell(r, 2, "Accuracy nach Teilmenge").font = Font(bold=True)
+    r += 1
+    for j, h in enumerate(["Teilmenge", "korrekt", "n", "Accuracy"]):
+        hdr(r, 2 + j, h)
+    r += 1
+    for lab, (k_, n_) in (("eindeutig", tot["E"]), ("mehrdeutig", tot["M"]),
+                          ("alle (Allowed-Label-Set Accuracy)", [tot["E"][0] + tot["M"][0], tot["E"][1] + tot["M"][1]])):
+        bold = lab.startswith("alle")
+        for j, (x, f) in enumerate(((lab, None), (k_, fmt), (n_, "0"), (k_ / n_ if n_ else None, "0.0%"))):
+            cell = ws.cell(r, 2 + j, x)
+            cell.border = St["border"]
+            cell.font = Font(bold=bold)
+            if f:
+                cell.number_format = f
+        r += 1
+
+    # Precision, Recall, F1 je Klasse (nur eindeutige)
+    r += 2
+    ws.cell(r, 2, "Precision, Recall und F1 je Klasse (nur eindeutige Baugruppen)").font = Font(bold=True)
+    r += 1
+    for j, h in enumerate(["Klasse", "TP", "vorhergesagt (Spaltensumme)", "Referenz (Zeilensumme)",
+                           "Precision", "Recall", "F1"]):
+        hdr(r, 2 + j, h)
+    ws.row_dimensions[r].height = 45
+    r += 1
+    E_rows = dict(eind)
+    P_, R_, F_ = [], [], []
+    sums = [0.0, 0.0, 0.0]
+    for c in COL_ORDER:
+        tp = E_rows[c]["cnt"][c] if c in E_rows else 0.0
+        pred = sum(v["cnt"][c] for _, v in eind)
+        ref = (sum(E_rows[c]["cnt"].values()) + E_rows[c]["inv"]) if c in E_rows else 0.0
+        P = tp / pred if pred else None
+        Rr = tp / ref if ref else None
+        F = 2 * tp / (pred + ref) if (pred + ref) else None
+        if P is not None:
+            P_.append(P)
+        if Rr is not None:
+            R_.append(Rr)
+        if F is not None:
+            F_.append(F)
+        sums = [sums[0] + tp, sums[1] + pred, sums[2] + ref]
+        for j, (x, f) in enumerate(((f"{ABBR[c]} – {c}", None), (tp, fmt), (pred, fmt), (ref, fmt),
+                                    (P, "0.0%"), (Rr, "0.0%"), (F, "0.0%"))):
+            cell = ws.cell(r, 2 + j, x if x is not None else "–")
+            cell.border = St["border"]
+            if f:
+                cell.number_format = f
+                cell.alignment = St["right"]
+        r += 1
+    macro = (float(np.mean(P_)) if P_ else None, float(np.mean(R_)) if R_ else None, float(np.mean(F_)) if F_ else None)
+    for j, (x, f) in enumerate((("Macro (ungewichteter Mittelwert)", None), (sums[0], fmt), (sums[1], fmt),
+                                (sums[2], fmt), (macro[0], "0.0%"), (macro[1], "0.0%"), (macro[2], "0.0%"))):
+        cell = ws.cell(r, 2 + j, x)
+        cell.border = St["border"]
+        cell.font = Font(bold=True)
+        if f:
+            cell.number_format = f
+    r += 2
+    notes = [LEGEND,
+             ("Zellen: mittlere Anzahl je Lauf über " + str(R) + " Läufe; " if R > 1 else "Zellen: Anzahl (1 Lauf); ")
+             + "fett/blau = Vorhersage liegt in der zulässigen Labelmenge der Zeile.",
+             "Mehrdeutige Zeilen: zulässige Labelmenge (ungeordnet, Primärlabel nicht unterschieden).",
+             "Precision/Recall/F1 aus der mittleren Matrix der eindeutigen Baugruppen; Precision nur für vorhergesagte Klassen, "
+             "Recall nur für Klassen mit Referenz; Macro = ungewichteter Mittelwert. Die Macro-Werte im Blatt "
+             "'Wiederholläufe' sind dagegen je Lauf berechnet und gemittelt (kleine Abweichungen möglich)."]
+    for i, txt in enumerate(notes):
+        ws.cell(r + i, 2, txt).font = Font(italic=True, size=9, color="595959")
 
 
 # ---------------------------------------------------------------- Excel
@@ -371,6 +560,18 @@ def main(argv=None):
     out.mkdir(parents=True, exist_ok=True)
     xlsx = out / f"Wiederhollaeufe_{a.gt_name}.xlsx"
     write_excel(xlsx, results, a.gt_name)
+    from openpyxl import load_workbook
+    wb = load_workbook(xlsx)
+    short = {"Gemini 2.5 Pro": "Pro", "Gemini 2.5 Flash": "Flash", "Claude Haiku 4.5": "Haiku",
+             "GPT-5.5": "GPT", "DeepSeek-V4-Flash": "DeepSeek"}
+    for m in results:
+        for scope in ("185", "115"):
+            runs = build_runs(data[m]["main"], data[m]["supp"], scope)
+            if not runs or (scope == "185" and not data[m]["supp"]):
+                continue
+            write_confusion_sheet(wb, f"{m} – {scope} Baugruppen, {len(runs)} Läufe, GT {a.gt_name}",
+                                  f"KM_{short.get(m, m)}_{scope}", gt, runs)
+    wb.save(xlsx)
     print(f"\nAusgabe: {xlsx}")
     shown = [i for i in issues if not i["Typ"].startswith("Info:") and "Register" not in i["Typ"]
              and "Allowed_Set_Status" not in i["Typ"]]

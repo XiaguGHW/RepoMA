@@ -79,3 +79,5 @@ Wiederholungsläufe (10 runs) auf 115 und 185 BG, GT aus `thesis/R1.md` (oder Ex
 ```
 python evaluate_r1.py --dir "C:\...\stability" --gt "C:\...\R1.md" --out "C:\...\Ergebnis_R1"
 ```
+
+Zusätzlich je Modell und Datensatz ein Blatt `KM_<Modell>_<185|115>` im Stil des Betreuer-Beispiels (mittlere Konfusionsmatrix über die Läufe, eindeutige Klassen und mehrdeutige Labelmengen, Matrix der zulässigen Klassen, Accuracy nach Teilmenge, P/R/F1 je Klasse nur eindeutig).
