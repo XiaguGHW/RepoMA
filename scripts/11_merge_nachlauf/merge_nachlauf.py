@@ -204,9 +204,17 @@ def merge_pair(orig, nach, out, log, dry, overwrite=False, only=None, wo=None, s
                 note.append(f"Original war gültig ({old_status}) – überschrieben (--ueberschreiben)")
 
         new = {h: row[hn[h]] for h in common}
-        for h in (gt_h, alt_h):
-            if old_status != "fehlte" and h and h in new and _norm(so.cell(row=r, column=ho[h]).value or "") != _norm(new[h] or ""):
-                note.append(f"{h} geändert: '{so.cell(row=r, column=ho[h]).value or ''}' → '{new[h] or ''}'")
+        # GT-Spalten (Ground Truth, Register, weitere zulässige) des Originals behalten: Die Nachlauf-Eingabe
+        # kann einen anderen GT-Stand haben; eine Datei soll nicht zeilenweise gemischte GT-Stände enthalten.
+        # Nur bei angehängten (vorher fehlenden) Zeilen werden sie aus dem Nachlauf übernommen.
+        reg_h = find(ho, exact="Register") or find(ho, "regist")
+        if old_status != "fehlte":
+            for h in (gt_h, alt_h, reg_h):
+                if h and h in new:
+                    if _norm(so.cell(row=r, column=ho[h]).value or "") != _norm(new[h] or ""):
+                        note.append(f"{h}: Nachlauf-Eingabe hat anderen GT-Stand "
+                                    f"('{new[h] or ''}' statt '{so.cell(row=r, column=ho[h]).value or ''}') – Original beibehalten")
+                    del new[h]
 
         gt = new.get(gt_h, so.cell(row=r, column=ho[gt_h]).value)
         alt = new.get(alt_h, so.cell(row=r, column=ho[alt_h]).value if alt_h else "")
