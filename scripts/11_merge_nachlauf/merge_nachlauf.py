@@ -191,10 +191,18 @@ def merge_pair(orig, nach, out, log, dry, overwrite=False, only=None, wo=None, s
             # Zeile fehlte im Original: am Ende anhängen (SAP und alle gemeinsamen Spalten)
             r = so.max_row + 1
             so.cell(row=r, column=ho[sap_o]).value = sap_v
+            if sap in GT_LOOKUP:  # GT-Stand der übrigen Läufe bzw. der Referenz, nicht der Nachlauf-Eingabe
+                for h, v in GT_LOOKUP[sap].items():
+                    if h in ho:
+                        so.cell(row=r, column=ho[h]).value = v
+                gt_from_lookup = True
+            else:
+                gt_from_lookup = False
             rows_o[sap] = r
             old_status = "fehlte"
             note.append("Zeile fehlte im Original – ergänzt")
         else:
+            gt_from_lookup = False
             r = rows_o[sap]
             old_status = str(so.cell(row=r, column=ho[stat_h]).value or "").strip().upper() if stat_h else ""
             if not overwrite and not needs_fill(so, r, ho):
@@ -208,10 +216,12 @@ def merge_pair(orig, nach, out, log, dry, overwrite=False, only=None, wo=None, s
         # kann einen anderen GT-Stand haben; eine Datei soll nicht zeilenweise gemischte GT-Stände enthalten.
         # Nur bei angehängten (vorher fehlenden) Zeilen werden sie aus dem Nachlauf übernommen.
         reg_h = find(ho, exact="Register") or find(ho, "regist")
-        if old_status != "fehlte":
+        if old_status == "fehlte" and not gt_from_lookup:
+            note.append("GT-Spalten aus der Nachlauf-Eingabe übernommen (BG in keinem Lauf/keiner Referenz) – bitte prüfen")
+        if old_status != "fehlte" or gt_from_lookup:
             for h in (gt_h, alt_h, reg_h):
                 if h and h in new:
-                    if _norm(so.cell(row=r, column=ho[h]).value or "") != _norm(new[h] or ""):
+                    if old_status != "fehlte" and _norm(so.cell(row=r, column=ho[h]).value or "") != _norm(new[h] or ""):
                         note.append(f"{h}: Nachlauf-Eingabe hat anderen GT-Stand "
                                     f"('{new[h] or ''}' statt '{so.cell(row=r, column=ho[h]).value or ''}') – Original beibehalten")
                     del new[h]
@@ -267,6 +277,26 @@ def nach_saps(path, with_empty=False):
         print(f"  ! {path.name[-40:]}: {len(leer)} Baugruppe(n) wieder ohne gültiges Ergebnis "
               f"(werden nicht eingesetzt): {', '.join(sorted(leer))}")
     return (saps, leer) if with_empty else saps
+
+
+REF_PATH = None
+GT_LOOKUP = {}  # Baugruppe -> {"Ground Truth": ..., "Register": ..., "Weitere ...": ...} aus Originalen/Referenz
+
+
+def add_gt_lookup(path):
+    """GT-Spalten einer vollständigen Datei (Original oder Referenz) für angehängte Zeilen merken."""
+    wb = load_workbook(path, read_only=True, data_only=True)
+    ws = wb[SHEET_NAME]
+    head = [str(c.value).strip() if c.value is not None else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    hm = {h: i for i, h in enumerate(head) if h}
+    sh, th = find(hm, "sap"), find(hm, "teamcenter")
+    cols = [h for h in (find(hm, exact="Ground Truth"), find(hm, exact="Register") or find(hm, "regist"),
+                        find(hm, "weitere")) if h]
+    for r in ws.iter_rows(min_row=2, values_only=True):
+        k = ident(r[hm[sh]], r[hm[th]] if th else None)
+        if k and k not in GT_LOOKUP:
+            GT_LOOKUP[k] = {h: r[hm[h]] for h in cols}
+    wb.close()
 
 
 def original_ids(path):
@@ -428,6 +458,11 @@ def process(folder, dry, overwrite=False, reuse=False, ref_ids=None):
             if o not in plan:
                 shutil.copy2(backup / o.name, folder / o.name)
 
+    GT_LOOKUP.clear()
+    for o in orig:  # GT-Stand der Originale dieses Ordners (vor Änderungen)
+        add_gt_lookup(o if dry else backup / o.name)
+    if REF_PATH:
+        add_gt_lookup(REF_PATH)
     log = []
     for o, items in plan.items():
         src_o = o if dry else backup / o.name
@@ -466,7 +501,9 @@ def main():
     else:
         base = Path(__file__).resolve().parent
         folders = [d for d in sorted(base.iterdir()) if d.is_dir() and not d.name.startswith(BACKUP_DIR)]
-    ref_ids = original_ids(Path(a.referenz)) if a.referenz else None
+    global REF_PATH
+    REF_PATH = Path(a.referenz) if a.referenz else None
+    ref_ids = original_ids(REF_PATH) if a.referenz else None
     results = [process(f, a.dry_run, a.ueberschreiben, a.wiederverwenden, ref_ids) for f in folders]
     if not any(r is not None for r in results):
         sys.exit("Keine Ordner mit Nachlauf-Dateien gefunden.")
