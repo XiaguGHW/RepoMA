@@ -74,6 +74,7 @@ def is_output_or_backup(p):
     p = Path(p)
     return (p.name.startswith("~$") or p.name.endswith("_Metriken_Konfusion.xlsx")
             or p.name == "Stabilitaet_Metriken.xlsx" or p.name.lower().startswith("nachlauf_")
+            or p.name.startswith("Wiederhollaeufe_") or p.name in ("Unvollstaendige_Laeufe.xlsx", "Nachlauf_Uebersicht.xlsx")
             or any(x in ("Backup_Original", "Nachlauf") or x.startswith("_backup_vor_merge") for x in p.parts))
 
 

@@ -71,3 +71,11 @@ python evaluate_70bg_results.py --dir "C:\...\pdf" --out "C:\...\Ergebnis_70BG" 
 ## Stabilitätsexperiment (4 Konfigurationen × 10 Läufe)
 
 `evaluate_stability_results.py --dir <Ordner mit *_P3_10_runs> --out <Ziel>`: Blatt `Metriken_2x2` in `Stabilitaet_Metriken.xlsx`; Mittel über die Läufe für Allowed Acc., Strict Macro-F1, Allowed Macro-Prec./-Rec., Strict Acc., dazu SD der Allowed Acc. (pp) und Anzahl BG mit wechselnder Vorhersage, je E1/E2/M/E/Total. Modell und Eingabeform aus dem Ordnernamen; `Backup_Original` und `__pycache__` werden übersprungen. Braucht zusätzlich `evaluate_70bg_results.py` und `evaluate_prompt_results.py` im selben Ordner.
+
+## Hauptauswertung mit R1 (`evaluate_r1.py`)
+
+Wiederholungsläufe (10 runs) auf 115 und 185 BG, GT aus `thesis/R1.md` (oder Excel). Allowed-Label-Set Accuracy (Mittel über Läufe, SD in pp, 95%-Bootstrap-KI) für alle / eindeutige / mehrdeutige BG; Macro-P/R/F1 nur auf eindeutigen BG. Keine E1/E2-Trennung. Ordner für 115 und 70BG im selben `--dir`; der Datensatz wird aus den BG erkannt, Lauf i (115) und Lauf i (70) werden für 185 zusammengelegt.
+
+```
+python evaluate_r1.py --dir "C:\...\stability" --gt "C:\...\R1.md" --out "C:\...\Ergebnis_R1"
+```
