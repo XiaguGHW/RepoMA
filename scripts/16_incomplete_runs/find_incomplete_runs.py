@@ -184,12 +184,19 @@ def make_reruns(a, bad_by_file, names, tcs):
                     g["bad"].setdefault(k, []).append(f"{f.name}: {st}")
         # nötige Nachläufe = wie oft die am häufigsten fehlende Baugruppe fehlt (Skript 11 füllt je Lücke
         # ein eigenes Ergebnis ein; fehlt jede BG nur in einem Lauf, genügt ein Nachlauf)
+        # alle Konfigurationen je Ordner (auch vollständige), damit der Nachlauf-Ordnername eindeutig sagt,
+        # welche Konfiguration nachlaufen muss
         same_folder = {}
-        for folder, tok in groups:
-            same_folder.setdefault(folder, []).append(tok)
+        for f in bad_by_file:
+            same_folder.setdefault(f.parent, set()).add(config_tokens(f))
         jobs = []
         for (folder, tok), g in groups.items():
-            name = folder.name if len(same_folder[folder]) == 1 else folder.name + "__" + "_".join(x or "x" for x in tok)
+            # Ordnername eindeutig machen: übergeordneter Ordner (z. B. 02_Input_P3) + Modellordner,
+            # bei mehreren Konfigurationen im Ordner zusätzlich Modell_Prompt_Eingabe
+            top = folder.parent.parent.name if folder.parent.parent != folder.parent else ""
+            name = (f"{top}__" if top else "") + folder.name
+            if len(same_folder[folder]) > 1:
+                name += "__" + "_".join(x or "x" for x in tok)
             jobs.append((out_root / safe_name(name), [(k, "; ".join(v)) for k, v in sorted(g["bad"].items())],
                          f"{name} ({len(g['files'])} unvollständige Läufe)", max(len(v) for v in g["bad"].values())))
             if len(same_folder[folder]) > 1:
@@ -328,6 +335,7 @@ def main():
                          "Teamcenter": tcs.get(k), "Status": st, "GT": gt})
 
     over = pd.DataFrame(over).sort_values(["Unvollständig", "Experiment"], ascending=[False, True])
+    Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(a.out, engine="openpyxl") as xw:
         over.to_excel(xw, sheet_name="Uebersicht", index=False)
         pd.DataFrame(miss).to_excel(xw, sheet_name="Fehlende_BG", index=False)

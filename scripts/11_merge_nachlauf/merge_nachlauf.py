@@ -408,7 +408,9 @@ def process(folder, dry, overwrite=False, reuse=False, ref_ids=None):
     print(f"\n{folder.name}: {len(orig)} Originale, {len(nach)} Nachlauf-Dateien")
     # Konfigurationen im Ordner (Modell/Prompt/Eingabe aus den Dateinamen); ein Ordner mit mehreren
     # Konfigurationen (z. B. Prompt-Vergleich) wird je Konfiguration getrennt zusammengeführt.
-    gtok = {o: config_tokens(o.name) for o in orig}
+    ftok = config_tokens(folder.name)
+    fill = lambda t: tuple(a or b for a, b in zip(t, ftok))  # noqa: E731  fehlende Angaben aus dem Ordnernamen
+    gtok = {o: fill(config_tokens(o.name)) for o in orig}
     groups = sorted(set(gtok.values()), key=str)
     if len(groups) <= 1:
         wrong = check_config(folder, orig, nach)
@@ -424,7 +426,7 @@ def process(folder, dry, overwrite=False, reuse=False, ref_ids=None):
             return False
         assign = {g: [] for g in groups}
         for n in nach:
-            tn = config_tokens(n.name)
+            tn = fill(config_tokens(n.name))
             cand = [g for g in groups if all(not (tn[i] and g[i] and tn[i] != g[i]) for i in range(3))]
             if len(cand) != 1:
                 print(f"  ABBRUCH: {n.name} lässt sich keiner Konfiguration eindeutig zuordnen "

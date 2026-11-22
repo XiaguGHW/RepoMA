@@ -33,7 +33,7 @@ print(subprocess.run([sys.executable,S11,str(h)],capture_output=True,text=True).
 for sub in (tmp/"NL").iterdir():
     if not sub.is_dir(): continue
     x=pd.read_excel(sub/"nachlauf_dataset.xlsx",dtype=str); x["Predicted_Label"]="Roboter"; x["Allowed_Set_Status"]=""
-    tok=sub.name.split("__")[1].split("_")   # haiku_P1_pdf
+    tok=sub.name.split("__")[-1].split("_")   # haiku_P1_pdf
     m={"haiku":"claude-haiku-4-5","gemini-flash":"gemini-2.5-flash"}[tok[0]]
     x.to_excel(d/f"nachlauf_pdf_only_115BG_{tok[1]}_{m}_caching_2026-11-22_1{len(list(d.glob('nachlauf_*')))}-00-00.xlsx",sheet_name="Sheet1",index=False)
 print(subprocess.run([sys.executable,S11,str(d),"--referenz",str(tmp/"ref.xlsx")],capture_output=True,text=True).stdout)
