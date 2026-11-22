@@ -62,6 +62,26 @@ def find_col(cols, *names):
     return None
 
 
+MODEL_KEYS = [("deepseek", "deepseek"), ("haiku", "haiku"), ("opus", "opus"), ("gemini-2.5-pro", "gemini-pro"),
+              ("gemini-2.5-flash", "gemini-flash"), ("gpt", "gpt")]
+
+
+def config_tokens(path):
+    """Modell, Prompt und Eingabeform aus Datei- bzw. Ordnernamen (Datei hat Vorrang)."""
+    def find(text):
+        t = re.sub(r"[\s_]+", "-", text.lower())
+        model = next((v for k, v in MODEL_KEYS if k in t), None)
+        if model is None and "gemini" in t:
+            model = "gemini-flash" if "flash" in t else ("gemini-pro" if "pro" in t else None)
+        pr = re.findall(r"(?<![a-z0-9])p([1-4])(?![0-9])", t)
+        prompt = f"P{pr[0]}" if len(set(pr)) == 1 else None
+        inp = next((lab for key, lab in (("pdf", "pdf"), ("image", "image"), ("bild", "image"), ("img", "image"),
+                                          ("text", "text"), ("txt", "text")) if re.search(rf"(?<![a-z]){key}(?![a-z])", t)), None)
+        return model, prompt, inp
+    f, d = find(Path(path).name), find(Path(path).parent.name)
+    return tuple(a or b for a, b in zip(f, d))
+
+
 def label_of(path):
     name = path.stem
     m_prompt = re.search(r"P[1-4]", name)
@@ -141,18 +161,28 @@ def make_reruns(a, bad_by_file, names, tcs):
     log = []
     if getattr(a, "pro_modell", False):
         # je Modellordner eine gemeinsame Eingabe: Vereinigung der fehlenden BG aller Läufe
+        # Gruppe = Ordner + Modell + Prompt + Eingabeform, damit ein Ordner mit verschiedenen
+        # Konfigurationen (z. B. Prompt-Vergleich) nicht zu einer gemeinsamen Nachlauf-Eingabe vermischt wird
         groups = {}
         for f, bad in bad_by_file.items():
             if bad:
-                g = groups.setdefault(f.parent, {"files": [], "bad": {}})
+                tok = config_tokens(f)
+                g = groups.setdefault((f.parent, tok), {"files": [], "bad": {}})
                 g["files"].append(f)
                 for k, st in bad:
                     g["bad"].setdefault(k, []).append(f"{f.name}: {st}")
         # nötige Nachläufe = wie oft die am häufigsten fehlende Baugruppe fehlt (Skript 11 füllt je Lücke
         # ein eigenes Ergebnis ein; fehlt jede BG nur in einem Lauf, genügt ein Nachlauf)
-        jobs = [(out_root / safe_name(folder.name), [(k, "; ".join(v)) for k, v in sorted(g["bad"].items())],
-                 f"{folder.name} ({len(g['files'])} unvollständige Läufe)", max(len(v) for v in g["bad"].values()))
-                for folder, g in groups.items()]
+        same_folder = {}
+        for folder, tok in groups:
+            same_folder.setdefault(folder, []).append(tok)
+        jobs = []
+        for (folder, tok), g in groups.items():
+            name = folder.name if len(same_folder[folder]) == 1 else folder.name + "__" + "_".join(x or "x" for x in tok)
+            jobs.append((out_root / safe_name(name), [(k, "; ".join(v)) for k, v in sorted(g["bad"].items())],
+                         f"{name} ({len(g['files'])} unvollständige Läufe)", max(len(v) for v in g["bad"].values())))
+            if len(same_folder[folder]) > 1:
+                print(f"  Hinweis: {folder.name} enthält mehrere Konfigurationen – eigene Nachlauf-Eingabe je Konfiguration ({name})")
     else:
         jobs = [(out_root / safe_name(f.stem), bad, f.name, 1) for f, bad in bad_by_file.items() if bad]
     summary = []

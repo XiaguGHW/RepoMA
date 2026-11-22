@@ -79,6 +79,9 @@ def load_gt(path):
             issues.append(f"GT-Zeile ohne Zuordnung: {sap} / {tc}")
             continue
         g = cm.canon(str(r[c["gt"]]).strip())
+        if g is None or g.startswith("UNGÜLTIG"):
+            issues.append(f"GT-Label nicht erkannt: {sap} / {tc}: {r[c['gt']]}")
+            continue
         alts = {cm.canon(a.strip()) for a in re.split(r"[,;\n|]", str(r[c["alt"]] or "")) if a.strip()} - {g}
         alts = {a for a in alts if a and not a.startswith("UNGÜLTIG")}
         gt[k] = (g, frozenset({g} | alts))
@@ -101,9 +104,22 @@ def collect(root, sheet, gt, pe, issues):
         model = E.model_name(d)
         for f in files:
             run = read_predictions(f, sheet, f"{model} | {d.name}", gt, pe, issues)
+            if not run:
+                print(f"  ! {d.name}/{f.name}: keine auswertbaren Zeilen – übersprungen")
+                continue
             ds = "main" if len(set(run) & main_keys) >= len(run) / 2 else "supp"
             out.setdefault(model, {"main": [], "supp": []})[ds].append((f, run))
-        info.append((model, d.name))
+            info.append((model, ds, d.name))
+    # Warnung: Läufe eines Modells/Datensatzes aus mehreren Ordnern (z. B. Vergleichsläufe mit eingelesen)
+    for model in out:
+        for ds in ("main", "supp"):
+            dirs = sorted({d for m, x, d in info if m == model and x == ds})
+            if len(dirs) > 1:
+                print(f"  ! {model} ({'115' if ds == 'main' else '70'} BG): Läufe aus mehreren Ordnern {dirs} – "
+                      f"nur Ordner der Wiederholungsläufe in --dir legen!")
+            n = len(out[model][ds])
+            if n and n != 10:
+                print(f"  ! {model} ({'115' if ds == 'main' else '70'} BG): {n} Läufe (erwartet 10)")
     return out, info
 
 
@@ -116,7 +132,8 @@ def read_predictions(path, sheet, who, gt, pe, issues):
     c_sap, c_tc = E.find_col(cols, contains=["sap"]), E.find_col(cols, contains=["teamcenter"])
     c_pred, c_pe = E.find_col(cols, contains=["predicted"]), E.find_col(cols, contains=["prompt", "engineer"])
     if not c_pred or not (c_sap or c_tc):
-        sys.exit(f"Spalten SAP/Teamcenter oder Predicted_Label fehlen in {path}")
+        print(f"  ! {path.name}: keine Spalten SAP/Teamcenter + Predicted_Label – keine Ergebnisdatei, übersprungen")
+        return {}
     run = {}
     for i, r in df.iterrows():
         if c_pe and str(r[c_pe]).strip().lower() == "yes":
@@ -247,11 +264,12 @@ def confusion_data(gt, runs):
     for k in keys:
         allowed = gt[k][1]
         rk = ("E", gt[k][0]) if len(allowed) == 1 else ("M", allowed)
-        row = rows.setdefault(rk, {"cnt": {c: 0.0 for c in COL_ORDER}, "inv": 0.0, "n": 0, "korrekt": 0.0,
-                                   "allowed": allowed})
+        row = rows.setdefault(rk, {"cnt": {c: 0.0 for c in COL_ORDER}, "inv": 0.0, "miss": 0.0, "n": 0,
+                                   "korrekt": 0.0, "allowed": allowed})
         row["n"] += 1
         for run in runs:
             if k not in run:
+                row["miss"] += 1 / R
                 continue
             p = run[k]
             if p in row["cnt"]:
@@ -275,14 +293,15 @@ def write_confusion_sheet(wb, title, sheet_name, gt, runs):
     R = len(runs)
     fmt = "0" if R == 1 else "0.0"
     has_inv = any(v["inv"] > 0 for _, v in eind + mehr)
-    pred_cols = [ABBR[c] for c in COL_ORDER] + (["ungültig"] if has_inv else [])
+    has_miss = any(v["miss"] > 0 for _, v in eind + mehr)
+    pred_cols = [ABBR[c] for c in COL_ORDER] + (["ungültig"] if has_inv else []) + (["fehlt"] if has_miss else [])
     head = ["Referenz ↓ / Vorhersage →"] + pred_cols + ["n", "korrekt", "Accuracy"]
     from openpyxl.styles import Alignment
     wrap = Alignment(horizontal="center", vertical="center", wrap_text=True)
     ws.column_dimensions["A"].width = 2
     ws.column_dimensions["B"].width = 36
     for j in range(1, len(head)):
-        ws.column_dimensions[get_column_letter(2 + j)].width = 9 if head[j] != "ungültig" else 10
+        ws.column_dimensions[get_column_letter(2 + j)].width = 9 if head[j] not in ("ungültig", "fehlt") else 10
     gap = 2 + len(head)
     ws.column_dimensions[get_column_letter(gap)].width = 3
     for j in range(len(COL_ORDER)):
@@ -317,7 +336,7 @@ def write_confusion_sheet(wb, title, sheet_name, gt, runs):
         r += 1
         for lab, v in items:
             ws.cell(r, 2, lab).border = St["border"]
-            vals = [v["cnt"][c] for c in COL_ORDER] + ([v["inv"]] if has_inv else [])
+            vals = [v["cnt"][c] for c in COL_ORDER] + ([v["inv"]] if has_inv else []) + ([v["miss"]] if has_miss else [])
             for j, x in enumerate(vals):
                 cell = ws.cell(r, 3 + j, x)
                 cell.number_format = fmt
@@ -547,8 +566,8 @@ def main(argv=None):
                     print(f"  ! {name}: {f.name[-45:]} hat {len(run)} gewertete BG (erwartet {exp})")
         if rs and len(rs) != len(rm):
             print(f"  ! unterschiedliche Laufzahl (115: {len(rm)}, 70: {len(rs)}) – für 185 werden {min(len(rm), len(rs))} Paare genutzt")
-        results[m] = {"115": evaluate(gt, rm, rs, "115", rng) if rm else None,
-                      "185": evaluate(gt, rm, rs, "185", rng) if rm and rs else None}
+        results[m] = {"115": evaluate(gt, rm, rs, "115", np.random.default_rng(SEED)) if rm else None,
+                      "185": evaluate(gt, rm, rs, "185", np.random.default_rng(SEED)) if rm and rs else None}
         for scope in ("185", "115"):
             res = results[m][scope]
             if res:

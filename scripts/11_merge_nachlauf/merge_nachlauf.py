@@ -283,6 +283,77 @@ def missing_in(orig, saps):
     return out
 
 
+MODEL_KEYS = [("deepseek", "deepseek"), ("haiku", "haiku"), ("opus", "opus"), ("gemini-2.5-pro", "gemini-pro"),
+              ("gemini-2.5-flash", "gemini-flash"), ("gpt", "gpt")]
+
+
+def config_tokens(name):
+    t = re.sub(r"[\s_]+", "-", name.lower())
+    model = next((v for k, v in MODEL_KEYS if k in t), None)
+    pr = re.findall(r"(?<![a-z0-9])p([1-4])(?![0-9])", t)
+    prompt = f"P{pr[0]}" if len(set(pr)) == 1 else None
+    inp = next((lab for key, lab in (("pdf", "pdf"), ("image", "image"), ("bild", "image"), ("text", "text"))
+                if re.search(rf"(?<![a-z]){key}(?![a-z])", t)), None)
+    return model, prompt, inp
+
+
+def check_config(folder, orig, nach):
+    """Abbruch, wenn eine Nachlauf-Datei erkennbar zu einem anderen Modell/Prompt/Eingabe gehört."""
+    ref = [config_tokens(folder.name)] + [config_tokens(o.name) for o in orig]
+    want = tuple(next((t[i] for t in ref if t[i]), None) for i in range(3))
+    bad = []
+    for n in nach:
+        got = config_tokens(n.name)
+        for i, what in enumerate(("Modell", "Prompt", "Eingabe")):
+            if want[i] and got[i] and want[i] != got[i]:
+                bad.append(f"{n.name}: {what} {got[i]} ≠ {want[i]}")
+    return bad
+
+
+def plan_group(orig, nach, reuse, ref_ids):
+    """Jede Lücke (Lauf, Baugruppe) bekommt ein eigenes Nachlauf-Ergebnis: die k-te Lücke einer
+    Baugruppe wird aus der k-ten Nachlauf-Datei gefüllt, die diese Baugruppe enthält."""
+    both = {n: nach_saps(n, with_empty=True) for n in nach}
+    nsaps = {n: v for n, (v, _) in both.items()}          # gültige Ergebnisse je Nachlauf-Datei
+    saps = set().union(*(v | e for v, e in both.values()))  # alle nachgelaufenen BG (für die Lückensuche)
+    # Schutz: nur Baugruppen dieses Experiments (in einem Original oder in der Referenzdatei)
+    known = set().union(*(set(original_ids(o)) for o in orig))
+    if ref_ids:
+        known |= ref_ids
+    foreign = sorted(saps - known)
+    if foreign:
+        print(f"  ! {len(foreign)} Baugruppe(n) der Nachlauf-Dateien kommen in keinem Original vor und werden "
+              f"nicht ergänzt: {', '.join(foreign)}" + ("" if ref_ids else
+              " (fehlt eine BG in allen Läufen, --referenz <vollständige Datei> angeben)"))
+    saps -= set(foreign)
+    used, plan, unfilled = {}, {}, []
+    for o in orig:
+        for sp in missing_in(o, saps):
+            srcs = [n for n in nach if sp in nsaps[n]]
+            k = used.get(sp, 0)
+            if k < len(srcs):
+                plan.setdefault(o, []).append((srcs[k], sp))
+                used[sp] = k + 1
+            elif reuse and srcs:
+                plan.setdefault(o, []).append((srcs[k % len(srcs)], sp))
+                used[sp] = k + 1
+                print(f"  ! {sp} in {o.name[-30:]}: Nachlauf-Ergebnis wiederverwendet (--wiederverwenden)")
+            else:
+                unfilled.append((o.name, sp))
+    plan = {o: [(n, {sp for m, sp in items if m == n}) for n in dict.fromkeys(m for m, _ in items)]
+            for o, items in plan.items()}
+    for o, items in plan.items():
+        print(f"  ergänzt: {o.name[-40:]}  ← " + "; ".join(f"{n.name[-26:]}: {', '.join(sorted(x))}" for n, x in items))
+    if unfilled:
+        need = {}
+        for _, sp in unfilled:
+            need[sp] = need.get(sp, 0) + 1
+        print(f"  NICHT gefüllt ({len(unfilled)} Lücken, zu wenige Nachlauf-Ergebnisse):")
+        for sp, c in sorted(need.items()):
+            print(f"    {sp}: noch {c} Nachlauf(e) nötig")
+    return plan
+
+
 def process(folder, dry, overwrite=False, reuse=False, ref_ids=None):
     files = [f for f in folder.glob("*.xlsx") if not f.name.startswith("~$")]
     nach = sorted([f for f in files if f.name.lower().startswith(NACHLAUF_PREFIX)], key=lambda f: stamp(f.name))
@@ -290,6 +361,34 @@ def process(folder, dry, overwrite=False, reuse=False, ref_ids=None):
     if not nach:
         return None
     print(f"\n{folder.name}: {len(orig)} Originale, {len(nach)} Nachlauf-Dateien")
+    # Konfigurationen im Ordner (Modell/Prompt/Eingabe aus den Dateinamen); ein Ordner mit mehreren
+    # Konfigurationen (z. B. Prompt-Vergleich) wird je Konfiguration getrennt zusammengeführt.
+    gtok = {o: config_tokens(o.name) for o in orig}
+    groups = sorted(set(gtok.values()), key=str)
+    if len(groups) <= 1:
+        wrong = check_config(folder, orig, nach)
+        if wrong:
+            print("  ABBRUCH: Nachlauf-Datei passt nicht zu diesem Ordner:")
+            for w in wrong:
+                print("    " + w)
+            return False
+        assign = {groups[0] if groups else None: nach}
+    else:
+        if overwrite:
+            print("  ABBRUCH: --ueberschreiben ist für Ordner mit mehreren Konfigurationen nicht möglich.")
+            return False
+        assign = {g: [] for g in groups}
+        for n in nach:
+            tn = config_tokens(n.name)
+            cand = [g for g in groups if all(not (tn[i] and g[i] and tn[i] != g[i]) for i in range(3))]
+            if len(cand) != 1:
+                print(f"  ABBRUCH: {n.name} lässt sich keiner Konfiguration eindeutig zuordnen "
+                      f"(erkannt: {tn}; im Ordner: {groups}).")
+                return False
+            assign[cand[0]].append(n)
+        print("  Konfigurationen: " + "; ".join(f"{'/'.join(x or '?' for x in g)}: "
+                                               f"{sum(1 for o in orig if gtok[o] == g)} Original(e), "
+                                               f"{len(assign[g])} Nachlauf" for g in groups))
 
     if overwrite:
         # altes Verhalten: alle Originale der Reihe nach mit allen Nachlauf-Dateien paaren
@@ -298,49 +397,12 @@ def process(folder, dry, overwrite=False, reuse=False, ref_ids=None):
             return False
         plan = {o: [(n, None)] for o, n in zip(orig, nach)}
     else:
-        # Jede Lücke (Lauf, Baugruppe) bekommt ein eigenes Nachlauf-Ergebnis: die k-te Lücke einer
-        # Baugruppe wird aus der k-ten Nachlauf-Datei gefüllt, die diese Baugruppe enthält.
-        # Fehlt eine Baugruppe nur in einem Lauf, genügt also ein einziger Nachlauf.
-        both = {n: nach_saps(n, with_empty=True) for n in nach}
-        nsaps = {n: v for n, (v, _) in both.items()}          # gültige Ergebnisse je Nachlauf-Datei
-        saps = set().union(*(v | e for v, e in both.values()))  # alle nachgelaufenen BG (für die Lückensuche)
-        # Schutz: nur Baugruppen ergänzen, die zu diesem Experiment gehören (in mindestens einem Original
-        # vorhanden oder in der Referenzdatei); sonst würden fremde Zeilen angehängt.
-        known = set().union(*(set(original_ids(o)) for o in orig))
-        if ref_ids:
-            known |= ref_ids
-        foreign = sorted(saps - known)
-        if foreign:
-            print(f"  ! {len(foreign)} Baugruppe(n) der Nachlauf-Dateien kommen in keinem Original vor und werden "
-                  f"nicht ergänzt: {', '.join(foreign)}" + ("" if ref_ids else
-                  " (fehlt eine BG in allen Läufen, --referenz <vollständige Datei> angeben)"))
-        saps -= set(foreign)
-        used, plan, unfilled = {}, {}, []
-        for o in orig:
-            for sp in missing_in(o, saps):
-                srcs = [n for n in nach if sp in nsaps[n]]
-                k = used.get(sp, 0)
-                if k < len(srcs):
-                    plan.setdefault(o, []).append((srcs[k], sp))
-                    used[sp] = k + 1
-                elif reuse and srcs:
-                    plan.setdefault(o, []).append((srcs[k % len(srcs)], sp))
-                    used[sp] = k + 1
-                    print(f"  ! {sp} in {o.name[-30:]}: Nachlauf-Ergebnis wiederverwendet (--wiederverwenden)")
-                else:
-                    unfilled.append((o.name, sp))
-        # je Original und Nachlauf-Datei die SAP-Mengen bündeln
-        plan = {o: [(n, {sp for m, sp in items if m == n}) for n in dict.fromkeys(m for m, _ in items)]
-                for o, items in plan.items()}
-        for o, items in plan.items():
-            print(f"  ergänzt: {o.name[-40:]}  ← " + "; ".join(f"{n.name[-26:]}: {', '.join(sorted(x))}" for n, x in items))
-        if unfilled:
-            need = {}
-            for _, sp in unfilled:
-                need[sp] = need.get(sp, 0) + 1
-            print(f"  NICHT gefüllt ({len(unfilled)} Lücken, zu wenige Nachlauf-Ergebnisse):")
-            for sp, c in sorted(need.items()):
-                print(f"    {sp}: noch {c} Nachlauf(e) nötig")
+        plan = {}
+        for g, nach_g in assign.items():
+            if not nach_g:
+                continue
+            orig_g = [o for o in orig if gtok[o] == g] if g is not None else orig
+            plan.update(plan_group(orig_g, nach_g, reuse, ref_ids))
         if not plan:
             print("  Nichts zu ergänzen.")
             return True
