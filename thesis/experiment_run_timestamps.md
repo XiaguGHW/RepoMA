@@ -43,3 +43,20 @@
 | 7 | Claude Haiku 4.5 | P3 | PDF | 70 BG | 18:59:30 | 19:02:31 |
 | 8 | Claude Haiku 4.5 | P3 | PDF | 70 BG | 19:24:22 | 19:28:09 |
 | 9 | Claude Haiku 4.5 | P3 | PDF | 70 BG | 19:31:02 | 19:34:52 |
+
+## 第四组：DeepSeek Flash · P3 · Text · 70 BG
+
+手写标题注明「9组」，但照片中有 10 条时间记录，以下全部保留。原始记录未注明实验日期或时区。第 3 条结束时间的小时数看起来写为 `15`，早于开始时间；按原样暂录并标记待核对。小数位数及逗号按手写记录保留。
+
+| 顺序 | 模型 | Prompt | 输入形式 | 数据量 | 开始时间 | 结束时间 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | DeepSeek Flash | P3 | Text | 70 BG | 19:46:47 | 19:47:42 |
+| 2 | DeepSeek Flash | P3 | Text | 70 BG | 19:48:30 | 19:49:28 |
+| 3 | DeepSeek Flash | P3 | Text | 70 BG | 19:49:41 | 15:50:42（小时数待核对） |
+| 4 | DeepSeek Flash | P3 | Text | 70 BG | 19:51:27 | 19:52:25 |
+| 5 | DeepSeek Flash | P3 | Text | 70 BG | 19:52:41 | 19:53:36,952 |
+| 6 | DeepSeek Flash | P3 | Text | 70 BG | 19:54:25 | 19:55:21,881 |
+| 7 | DeepSeek Flash | P3 | Text | 70 BG | 19:55:35 | 19:56:34,71 |
+| 8 | DeepSeek Flash | P3 | Text | 70 BG | 19:56:48 | 19:57:33 |
+| 9 | DeepSeek Flash | P3 | Text | 70 BG | 19:58:06 | 19:59:01,869 |
+| 10 | DeepSeek Flash | P3 | Text | 70 BG | 19:59:21 | 20:00:21 |
