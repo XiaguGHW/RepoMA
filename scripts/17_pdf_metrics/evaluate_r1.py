@@ -100,19 +100,50 @@ def collect(root, sheet, gt, pe, issues):
             continue
         model = E.model_name(d)
         for f in files:
-            recs = E.read_file(f, sheet, f"{model} | {d.name}", issues)
-            run = {}
-            for r in recs:
-                k = r["SAP"]
-                if k in pe or k not in gt:
-                    if k not in gt and k not in pe:
-                        issues.append(dict(Modell=model, Typ="BG nicht in R1", SAP=k))
-                    continue
-                run[k] = r["pred"] if r["pred"] is not None else ("UNGÜLTIG:" + r["pred_raw"])
+            run = read_predictions(f, sheet, f"{model} | {d.name}", gt, pe, issues)
             ds = "main" if len(set(run) & main_keys) >= len(run) / 2 else "supp"
             out.setdefault(model, {"main": [], "supp": []})[ds].append((f, run))
         info.append((model, d.name))
     return out, info
+
+
+def read_predictions(path, sheet, who, gt, pe, issues):
+    """Nur Kennung und Vorhersage lesen – GT/Register/zulässige Labels der Datei werden nicht benutzt."""
+    xl = pd.ExcelFile(path)
+    sh = sheet if sheet in xl.sheet_names else xl.sheet_names[0]
+    df = pd.read_excel(path, sheet_name=sh, dtype=str)
+    cols = list(df.columns)
+    c_sap, c_tc = E.find_col(cols, contains=["sap"]), E.find_col(cols, contains=["teamcenter"])
+    c_pred, c_pe = E.find_col(cols, contains=["predicted"]), E.find_col(cols, contains=["prompt", "engineer"])
+    if not c_pred or not (c_sap or c_tc):
+        sys.exit(f"Spalten SAP/Teamcenter oder Predicted_Label fehlen in {path}")
+    run = {}
+    for i, r in df.iterrows():
+        if c_pe and str(r[c_pe]).strip().lower() == "yes":
+            continue
+        k = cm.match_key(r[c_sap] if c_sap else None, r[c_tc] if c_tc else None)
+        if k is None:
+            if not all(E.is_empty(r[c]) for c in (c_sap, c_tc) if c):
+                issues.append(dict(Modell=who, Typ="BG nicht zuordenbar", SAP=str(r[c_sap] if c_sap else r[c_tc])))
+            continue
+        if k in pe:
+            continue
+        if k not in gt:
+            issues.append(dict(Modell=who, Typ="BG nicht in R1", SAP=k))
+            continue
+        raw = "" if E.is_empty(r[c_pred]) else str(r[c_pred]).strip()
+        if not raw or raw.upper() == "[EMPTY]":
+            issues.append(dict(Modell=who, Typ="Leere Vorhersage (im Lauf nicht gewertet)", SAP=k, Detail=path.name))
+            continue
+        p = cm.canon(raw)
+        if p is None or p.startswith("UNGÜLTIG"):
+            issues.append(dict(Modell=who, Typ="Vorhersage nicht erkannt (als falsch gewertet)", SAP=k, Detail=raw))
+            p = "UNGÜLTIG:" + raw
+        if k in run:
+            issues.append(dict(Modell=who, Typ="Doppelte Baugruppe (erste Zeile verwendet)", SAP=k, Detail=path.name))
+            continue
+        run[k] = p
+    return run
 
 
 def correct(gt, k, pred):
@@ -248,6 +279,8 @@ def write_excel(path, results, gt_name):
             for j, v in enumerate(vals):
                 if widths[j] <= 3:
                     continue
+                if isinstance(v, float) and np.isnan(v):
+                    v = None
                 c = ws.cell(rr, 2 + j, v)
                 c.fill, c.border = St["fill"](bg), St["border"]
                 c.alignment = St["left"] if j == 0 else St["right"]
