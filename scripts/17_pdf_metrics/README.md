@@ -81,3 +81,11 @@ python evaluate_r1.py --dir "C:\...\stability" --gt "C:\...\R1.md" --out "C:\...
 ```
 
 Zusätzlich je Modell und Datensatz ein Blatt `KM_<Modell>_<185|115>` im Stil des Betreuer-Beispiels (mittlere Konfusionsmatrix über die Läufe, eindeutige Klassen und mehrdeutige Labelmengen, Matrix der zulässigen Klassen, Accuracy nach Teilmenge, P/R/F1 je Klasse nur eindeutig).
+
+## Blatt „Ergebnisse unter R1“ (`evaluate_r1_ergebnisse.py`)
+
+6 Modelle × P1–P4 / pdf, Bild, text / eindeutig, mehrdeutig, Gesamt für 185 und 115 BG, GT R1. Je Zelle Allowed-Label-Set Accuracy mit 95%-Bootstrap-KI; Macro-P/R/F1 nur eindeutige BG. P1–P4 und pdf/Bild/text aus Einzelläufen (`--prompt`, `--input`), eindeutig/mehrdeutig/Gesamt aus den Wiederholungsläufen (`--zehn`, Mittel). Ersatzquellen gelb, Quellen je Zelle im Blatt `Quellen`. Stil wie die Vorlage des Betreuers (Kopf grau, Rahmen dunkelrot); `evaluate_r1.py` nutzt jetzt denselben Stil.
+
+```
+python evaluate_r1_ergebnisse.py --gt R1.md --prompt <P1–P4> --input <pdf/Bild/text> --prompt <70BG einzel> --input <70BG einzel> --zehn <stability> --out Ergebnis_R1
+```

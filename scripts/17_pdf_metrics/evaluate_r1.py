@@ -311,17 +311,17 @@ def write_confusion_sheet(wb, title, sheet_name, gt, runs):
         if width > 1:
             ws.merge_cells(start_row=r, start_column=c, end_row=r, end_column=c + width - 1)
         cell = ws.cell(r, c, v)
-        cell.font = Font(bold=True, color="FFFFFF")
+        cell.font = Font(bold=True, color="000000")
         cell.alignment = wrap
         for j in range(width):
-            ws.cell(r, c + j).fill = St["fill"](cm.HEAD)
+            ws.cell(r, c + j).fill = St["fill"]("#D9D9D9")
             ws.cell(r, c + j).border = St["border"]
 
     ws.merge_cells(start_row=2, start_column=2, end_row=2, end_column=1 + len(head))
     t = ws.cell(2, 2, title)
-    t.font = Font(bold=True, color="FFFFFF", size=12)
+    t.font = Font(bold=True, color="000000", size=13)
     for j in range(len(head)):
-        ws.cell(2, 2 + j).fill = St["fill"](cm.NAVY)
+        ws.cell(2, 2 + j).fill = St["fill"]("#FFFFFF")
     hdr(3, gap + 1, "Zulässige Klassen je Zeile (1 = zulässig)", len(COL_ORDER))
     for j, h in enumerate(head):
         hdr(4, 2 + j, h)
@@ -449,10 +449,10 @@ def write_excel(path, results, gt_name):
     for scope, label in [("185", "185 Baugruppen"), ("115", "115 Baugruppen")]:
         ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=2 + len(widths) - 1)
         t = ws.cell(r, 2, f"Wiederholläufe (10 runs) mit {label} – Ground Truth {gt_name}, Allowed-Label-Set Accuracy")
-        t.font = Font(bold=True, color="FFFFFF", size=12)
+        t.font = Font(bold=True, color="000000", size=13)
         t.alignment = St["left"]
         for j in range(len(widths)):
-            ws.cell(r, 2 + j).fill = St["fill"](cm.NAVY)
+            ws.cell(r, 2 + j).fill = St["fill"]("#FFFFFF")
         # Kopf zweizeilig
         groups = [("Alle Baugruppen", 4), ("Eindeutige Baugruppen", 8), ("Mehrdeutige Baugruppen", 12),
                   ("Eindeutige: Macro (Mittel der Läufe)", 16)]
@@ -468,15 +468,15 @@ def write_excel(path, results, gt_name):
             for rr, h in ((r + 1, h1), (r + 2, h2)):
                 c = ws.cell(rr, 2 + j, h if h else None)
                 if widths[j] > 3:
-                    c.font = Font(bold=True, color="FFFFFF")
-                    c.fill = St["fill"](cm.HEAD)
+                    c.font = Font(bold=True, color="000000")
+                    c.fill = St["fill"]("#D9D9D9")
                     c.alignment = St["center"] if j else St["left"]
                     c.border = St["border"]
         # n-Zeile im Kopf
         rr = r + 3
         for i, m in enumerate([m for m in MODEL_ORDER if m in results] + [m for m in results if m not in MODEL_ORDER]):
             res = results[m].get(scope)
-            bg = E.ODD_ROW_BG if i % 2 else "#FFFFFF"
+            bg = "#FFFFFF"
             vals = [m, res["alle"]["runs"] if res else "fehlt", None]
             for which in ("alle", "eindeutig", "mehrdeutig"):
                 x = res[which] if res else None
