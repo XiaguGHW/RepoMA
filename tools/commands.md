@@ -107,3 +107,46 @@ python find_incomplete_runs.py `
 70BG 同理（把 115BG 换成 70BG，参考文件换成完整的 70 文件）。目标：`Alle Dateien vollständig.`
 
 注意：合并前在 Excel 里关闭这些文件。
+
+## 2026-11-23 · R1-Auswertung: alle Merges 115BG (6 Zielordner)
+
+在 `R1_Auswertung\00_Skripte` 里运行。一个文件夹一条命令，文件夹里的多个配置（P1–P4、pdf/image/text）会自动分开配对。
+
+先设参考文件：
+
+```
+$ref = "..\02_Input_P3\115BG\Gemini_Pro\prompt_development_P3_gemini-2.5-pro_text_only_2026-09-23_12-31-24.xlsx"
+```
+
+**预演：**
+
+```
+python merge_nachlauf.py --dry-run "..\01_Prompt_P1-P4\115BG\Claude_Opus"  --referenz $ref
+python merge_nachlauf.py --dry-run "..\01_Prompt_P1-P4\115BG\Claude_Haiku" --referenz $ref
+python merge_nachlauf.py --dry-run "..\01_Prompt_P1-P4\115BG\Gemini_Flash" --referenz $ref
+python merge_nachlauf.py --dry-run "..\01_Prompt_P1-P4\115BG\Gemini_Pro"   --referenz $ref
+python merge_nachlauf.py --dry-run "..\02_Input_P3\115BG\Gemini_Flash"     --referenz $ref
+python merge_nachlauf.py --dry-run "..\02_Input_P3\115BG\Gemini_Pro"       --referenz $ref
+```
+
+**正式合并：**
+
+```
+python merge_nachlauf.py "..\01_Prompt_P1-P4\115BG\Claude_Opus"  --referenz $ref
+python merge_nachlauf.py "..\01_Prompt_P1-P4\115BG\Claude_Haiku" --referenz $ref
+python merge_nachlauf.py "..\01_Prompt_P1-P4\115BG\Gemini_Flash" --referenz $ref
+python merge_nachlauf.py "..\01_Prompt_P1-P4\115BG\Gemini_Pro"   --referenz $ref
+python merge_nachlauf.py "..\02_Input_P3\115BG\Gemini_Flash"     --referenz $ref
+python merge_nachlauf.py "..\02_Input_P3\115BG\Gemini_Pro"       --referenz $ref
+```
+
+**复查：**
+
+```
+python find_incomplete_runs.py --root "..\01_Prompt_P1-P4\115BG" --root "..\02_Input_P3\115BG" --root "..\03_Wiederholung_10runs\115BG" --reference $ref
+```
+
+注意（P3 = pdf 是同一次运行）：
+- Gemini Pro DN9616：补跑一次，结果复制到 `01\115BG\Gemini_Pro\` 和 `02\115BG\Gemini_Pro\` 各一份。
+- Flash P3 / Haiku P3：不补跑，用 `02\115BG\<模型>\` 里已完整的 `…_pdf_only_…` 文件替换 `01\115BG\<模型>\` 里的 P3 文件（旧文件移走，不要两个 P3 同时在文件夹里）。
+- `$ref` 只在当前 PowerShell 窗口有效，新开窗口要重新设置。
