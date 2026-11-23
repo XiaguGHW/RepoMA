@@ -216,3 +216,11 @@ python find_incomplete_runs.py --root "..\01_Prompt_P1-P4\70BG" --root "..\02_In
 ```
 
 目标：`Alle Dateien vollständig.`（Pro 第 2 个补跑结果里的 MB8153 用不上，会被忽略，正常。）
+
+## 2026-11-23 · R1-Auswertung: Diagramme Wiederholungsläufe
+
+```
+python plot_wiederholung_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse\Diagramme"
+```
+
+Ausgabe: je Modell `Wiederholung_185BG_<Modell>.png` / `Wiederholung_115BG_<Modell>.png`, Sammelbild `…_alle.png`, Werte je Lauf `Accuracy_je_Lauf_R1.xlsx`.
