@@ -223,4 +223,4 @@ python find_incomplete_runs.py --root "..\01_Prompt_P1-P4\70BG" --root "..\02_In
 python plot_wiederholung_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse\Diagramme"
 ```
 
-Ausgabe: je Modell `Wiederholung_185BG_<Modell>.png` / `Wiederholung_115BG_<Modell>.png`, Sammelbild `…_alle.png`, Werte je Lauf `Accuracy_je_Lauf_R1.xlsx`.
+Ausgabe: `Diagramme_Wiederholung_R1.xlsx` (alle Diagramme, Blätter 185 BG / 115 BG / Werte je Lauf) – zum Versenden; dazu die einzelnen PNGs und `Accuracy_je_Lauf_R1.xlsx`.

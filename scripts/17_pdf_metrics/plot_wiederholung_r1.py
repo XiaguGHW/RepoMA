@@ -131,7 +131,50 @@ def main():
                 y += im.height
             canvas.save(out / f"Wiederholung_{scope}BG_alle.png", dpi=(300, 300))
     pd.DataFrame(rows).to_excel(out / "Accuracy_je_Lauf_R1.xlsx", index=False)
+    write_excel(out, models, rows)
     print(f"Ausgabe: {out}")
+
+
+def write_excel(out, models, rows):
+    """Alle Diagramme in eine Excel-Datei: je Datensatz ein Blatt (Diagramme untereinander), dazu die Werte je Lauf."""
+    from openpyxl import Workbook
+    from openpyxl.drawing.image import Image as XLImage
+    from openpyxl.styles import Font
+    wb = Workbook()
+    wb.remove(wb.active)
+    for scope in ("185", "115"):
+        files = [(m, out / f"Wiederholung_{scope}BG_{TITLE_NAME.get(m, m)}.png") for m in models]
+        files = [(m, f) for m, f in files if f.is_file()]
+        if not files:
+            continue
+        ws = wb.create_sheet(f"Diagramme {scope} BG")
+        ws.sheet_view.showGridLines = False
+        ws["B2"] = f"Mittelwert und Stabilität der Accuracy – 10 Läufe mit {scope} Baugruppen (Ground Truth R1)"
+        ws["B2"].font = Font(bold=True, size=14)
+        row = 4
+        for m, f in files:
+            img = XLImage(str(f))
+            w = 900                      # Anzeigebreite in Pixel (Bild bleibt in voller Auflösung eingebettet)
+            img.height = int(img.height * w / img.width)
+            img.width = w
+            ws.add_image(img, f"B{row}")
+            row += int(img.height / 20) + 2   # Standardzeilenhöhe ≈ 20 px
+    ws = wb.create_sheet("Werte je Lauf")
+    df = pd.DataFrame(rows)
+    if len(df):
+        piv = df.pivot_table(index=["Datensatz", "Modell"], columns="Lauf", values="Accuracy (%)").reset_index()
+        runs = [c for c in piv.columns if isinstance(c, (int, np.integer))]
+        piv["Mittelwert"] = piv[runs].mean(axis=1)
+        piv["SD (pp)"] = piv[runs].std(axis=1, ddof=1)
+        ws.append([str(c) if not isinstance(c, str) else c for c in piv.columns])
+        for r in piv.itertuples(index=False):
+            ws.append([round(v, 2) if isinstance(v, float) else v for v in r])
+        for c in ws[1]:
+            c.font = Font(bold=True)
+        ws.column_dimensions["A"].width = 12
+        ws.column_dimensions["B"].width = 22
+    wb.save(out / "Diagramme_Wiederholung_R1.xlsx")
+    print(f"Excel mit allen Diagrammen: {out / 'Diagramme_Wiederholung_R1.xlsx'}")
 
 
 if __name__ == "__main__":
