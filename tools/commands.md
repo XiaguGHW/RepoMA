@@ -43,3 +43,29 @@ dir "C:\Program Files\Anaconda3"
 ```
 
 （诊断脚本见 `tools/env_check/`）
+
+## 2026-11-23 · R1-Auswertung: Vollständigkeit prüfen und Nachlauf-Tabellen erzeugen
+
+在 `R1_Auswertung\00_Skripte` 里运行。`<…>` 换成真实路径。
+
+**115BG：**
+
+```
+python find_incomplete_runs.py `
+  --root "..\01_Prompt_P1-P4\115BG" --root "..\02_Input_P3\115BG" --root "..\03_Wiederholung_10runs\115BG" `
+  --reference "<完整的 115 文件>" `
+  --input-dataset "<classification_experiment_dataset_v2.xlsx>" --pro-modell `
+  --rerun-out "..\04_Nachlauf\115BG"
+```
+
+**70BG：**
+
+```
+python find_incomplete_runs.py `
+  --root "..\01_Prompt_P1-P4\70BG" --root "..\02_Input_P3\70BG" --root "..\03_Wiederholung_10runs\70BG" `
+  --reference "<完整的 70 文件>" `
+  --input-dataset "<classification_experiment_dataset_v2.xlsx>" --pro-modell `
+  --rerun-out "..\04_Nachlauf\70BG"
+```
+
+只检查、不生成补跑表：去掉 `--input-dataset …`、`--pro-modell` 和 `--rerun-out …` 这几行。
