@@ -51,6 +51,7 @@ def main(argv=None, kind="input", default_out="Input_P3_Teilmengen_R1.xlsx", onl
                     help="z. B. ..\\02_Input_P3 bzw. ..\\01_Prompt_P1-P4")
     ap.add_argument("--gt", required=True)
     ap.add_argument("--nur", choices=["pdf", "image", "text"], help="nur diese Eingabeform")
+    ap.add_argument("--p", default="P3", choices=["P1", "P2", "P3", "P4"], help="Prompt (Standard P3)")
     ap.add_argument("--out", default=default_out)
     a = ap.parse_args(argv)
     gt, pe, _ = R.load_gt(a.gt)
@@ -74,8 +75,8 @@ def main(argv=None, kind="input", default_out="Input_P3_Teilmengen_R1.xlsx", onl
                 continue
             if only_pref and inp != X.pref(m):
                 continue
-            main = groups.get((m, "P3", inp, "main"), [])
-            supp = groups.get((m, "P3", inp, "supp"), [])
+            main = groups.get((m, a.p, inp, "main"), [])
+            supp = groups.get((m, a.p, inp, "supp"), [])
             if len(main) > 1 or len(supp) > 1:
                 print(f"! {m} {inp}: mehrere Dateien – letzte verwendet: {[f.name for f, _ in main + supp]}")
             for scope in ("115", "185"):
@@ -85,7 +86,7 @@ def main(argv=None, kind="input", default_out="Input_P3_Teilmengen_R1.xlsx", onl
                 if scope == "185":
                     run.update(supp[-1][1])
                 src = main[-1][0].name + ("" if scope == "115" else " + " + supp[-1][0].name)
-                row = {"Modell": m, "Eingabe": inp, "Datensatz": f"{scope} BG", "Quelle": src}
+                row = {"Modell": m, "Prompt": a.p, "Eingabe": inp, "Datensatz": f"{scope} BG", "Quelle": src}
                 for name, f in subsets.items():
                     ks = [k for k in run if f(k)]
                     if not ks:

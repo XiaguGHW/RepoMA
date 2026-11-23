@@ -245,3 +245,8 @@ Allowed und Strict Accuracy für alle / eindeutig / mehrdeutig / E1 / E2 / M (R1
 ```
 python eval_prompt_p3_regime_r1.py --prompt "..\01_Prompt_P1-P4" --gt R1.md --out "..\05_Ergebnisse\Prompt_P3_Teilmengen_R1.xlsx"
 ```
+
+Andere Prompts: `--p P1` (bzw. P2, P4), z. B.
+```
+python eval_prompt_p3_regime_r1.py --prompt "..\01_Prompt_P1-P4" --gt R1.md --p P1 --out "..\05_Ergebnisse\Prompt_P1_Teilmengen_R1.xlsx"
+```
