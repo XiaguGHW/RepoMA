@@ -22,7 +22,6 @@ Kurz zum Vorgehen:
 - Bootstrap: 2000 Wiederholungen, Ziehen der Baugruppen mit Zurücklegen (jeweils mit allen Läufen); bei 185 BG werden die 115 und 70 BG getrennt gezogen.
 - Precision, Recall und F1 (Makro) wie von dir vorgeschlagen nur auf den eindeutigen Baugruppen, vorerst ohne Bootstrap. Makro-Mittelung: Precision über die vorhergesagten Klassen, Recall über die in der GT vorkommenden Klassen, F1 über beide zusammen.
 - Die 14 Baugruppen aus der Label-Konfiguration sind ausgeschlossen.
-- P1–P4 und der Vergleich pdf/Bild/text beruhen jeweils auf einem Einzellauf. Für Claude Opus gibt es keine Wiederholungsläufe, dort sind auch eindeutig/mehrdeutig/gesamt Einzelläufe (gelb markiert). Für GPT-5.5 und DeepSeek fehlen P1, P2 und P4 noch.
 
 Nachläufe:
 Ich habe alle Ergebnisdateien mit einem Skript auf fehlende Vorhersagen geprüft und die fehlenden Baugruppen nachlaufen lassen und ergänzt. Damit sind alle Läufe vollständig.
