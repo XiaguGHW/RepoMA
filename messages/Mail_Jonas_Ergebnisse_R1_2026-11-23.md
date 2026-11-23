@@ -34,3 +34,9 @@ Die Konfusionsmatrizen in deiner Darstellungsform habe ich ebenfalls vorbereitet
 
 Viele Grüße
 Duanni
+
+---
+
+Hinweis in Ergebnisse_unter_R1.xlsx (Zelle mit Erläuterung):
+> Die Werte für eindeutig/mehrdeutig/gesamt sind Mittelwerte über 10 Läufe (P3). Sie weichen teils deutlich vom Zwischenbericht ab, insbesondere bei Haiku. Die Berechnung habe ich geprüft. Die damalige Regime-Auswertung beruhte vermutlich noch nicht auf R1, sondern auf einem früheren GT-Stand. Dadurch waren die Werte für mehrdeutig dort niedriger.
+
