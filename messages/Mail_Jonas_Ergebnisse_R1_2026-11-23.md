@@ -20,7 +20,7 @@ Deine Rückfragen habe ich direkt in deinem Word-Dokument beantwortet (ebenfalls
 Kurz zum Vorgehen:
 - Die Allowed-Label-Set Accuracy (gesamt, eindeutig, mehrdeutig) sowie Precision, Recall und F1 (eindeutig) werden je Lauf berechnet und anschließend über die 10 Läufe gemittelt. Du hattest gefragt, ob wir den Mittelwert verwenden sollen – ich habe das so umgesetzt. Passt das für dich?
 - Bootstrap: 2000 Wiederholungen, Ziehen der Baugruppen mit Zurücklegen (jeweils mit allen Läufen); bei 185 BG werden die 115 und 70 BG getrennt gezogen.
-- Makro-Mittelung: Precision über die vorhergesagten Klassen, Recall über die in der GT vorkommenden Klassen, F1 über beide zusammen.
+- Precision, Recall und F1 (Makro) wie von dir vorgeschlagen nur auf den eindeutigen Baugruppen, vorerst ohne Bootstrap. Makro-Mittelung: Precision über die vorhergesagten Klassen, Recall über die in der GT vorkommenden Klassen, F1 über beide zusammen.
 - Die 14 Baugruppen aus dem Prompt Engineering sind ausgeschlossen.
 - P1–P4 und der Vergleich pdf/Bild/text beruhen jeweils auf einem Einzellauf. Für Claude Opus gibt es keine Wiederholungsläufe, dort sind auch eindeutig/mehrdeutig/gesamt Einzelläufe (gelb markiert). Für GPT-5.5 und DeepSeek fehlen P1, P2 und P4 noch.
 
