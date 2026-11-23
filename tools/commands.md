@@ -69,3 +69,41 @@ python find_incomplete_runs.py `
 ```
 
 只检查、不生成补跑表：去掉 `--input-dataset …`、`--pro-modell` 和 `--rerun-out …` 这几行。
+
+## 2026-11-23 · R1-Auswertung: Nachlauf zusammenführen (Merge)
+
+在 `R1_Auswertung\00_Skripte` 里运行。补跑结果先改名为 `nachlauf_<原文件名>`，放进缺失文件所在的模型文件夹（不要放子文件夹）。
+
+**1. 预演（不写入，只显示分配）：**
+
+```
+python merge_nachlauf.py --dry-run "<模型文件夹>" --referenz "<完整的 115 或 70 文件>"
+```
+
+例：
+
+```
+python merge_nachlauf.py --dry-run "..\01_Prompt_P1-P4\115BG\Gemini_Flash" --referenz "<完整的 115 文件>"
+```
+
+检查：每行 “ergänzt: … ← nachlauf_…” 的 P 编号/输入形式对得上；没有 “ABBRUCH”、“NICHT gefüllt”、“bitte prüfen”。
+
+**2. 正式合并（去掉 --dry-run）：**
+
+```
+python merge_nachlauf.py "<模型文件夹>" --referenz "<完整的 115 或 70 文件>"
+```
+
+原文件和 nachlauf_ 文件会移到 `_backup_vor_merge`（第二次合并：`_backup_vor_merge_2` …），里面有 `merge_protokoll.xlsx`。
+
+**3. 合并后复查（只检查，不生成补跑表）：**
+
+```
+python find_incomplete_runs.py `
+  --root "..\01_Prompt_P1-P4\115BG" --root "..\02_Input_P3\115BG" --root "..\03_Wiederholung_10runs\115BG" `
+  --reference "<完整的 115 文件>"
+```
+
+70BG 同理（把 115BG 换成 70BG，参考文件换成完整的 70 文件）。目标：`Alle Dateien vollständig.`
+
+注意：合并前在 Excel 里关闭这些文件。
