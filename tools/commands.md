@@ -230,3 +230,12 @@ Ausgabe: `Diagramme_Wiederholung_R1.xlsx` (alle Diagramme, Blätter 185 BG / 115
 ```
 python detail_bg_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse\Detail_BG_R1.xlsx"
 ```
+
+## 2026-11-23 · R1: Input-Vergleich (02_Input_P3) nach Teilmengen
+
+```
+python eval_input_regime_r1.py --input "..\02_Input_P3" --gt R1.md --nur pdf --out "..\05_Ergebnisse\Input_P3_pdf_Teilmengen_R1.xlsx"
+python eval_input_regime_r1.py --input "..\02_Input_P3" --gt R1.md --out "..\05_Ergebnisse\Input_P3_Teilmengen_R1.xlsx"
+```
+
+Allowed und Strict Accuracy für alle / eindeutig / mehrdeutig / E1 / E2 / M (R1-Register), 115 und 185 BG, Einzelläufe.
