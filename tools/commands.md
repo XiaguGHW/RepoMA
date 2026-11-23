@@ -250,3 +250,8 @@ Andere Prompts: `--p P1` (bzw. P2, P4), z. B.
 ```
 python eval_prompt_p3_regime_r1.py --prompt "..\01_Prompt_P1-P4" --gt R1.md --p P1 --out "..\05_Ergebnisse\Prompt_P1_Teilmengen_R1.xlsx"
 ```
+
+Einzelnachweis für einen Prompt/ein Modell aus 01 (z. B. Haiku, P1):
+```
+python detail_bg_r1.py --dir "..\01_Prompt_P1-P4" --gt R1.md --p P1 --modell Haiku --out "..\05_Ergebnisse\Detail_Haiku_P1.xlsx"
+```

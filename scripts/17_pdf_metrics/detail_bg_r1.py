@@ -25,12 +25,20 @@ def main():
     ap.add_argument("--dir", required=True, action="append")
     ap.add_argument("--gt", required=True)
     ap.add_argument("--out", default="Detail_BG_R1.xlsx")
+    ap.add_argument("--p", choices=["P1", "P2", "P3", "P4"],
+                    help="nur Dateien dieses Prompts (für 01_Prompt_P1-P4)")
+    ap.add_argument("--modell", help="nur dieses Modell, z. B. Haiku")
     a = ap.parse_args()
+    if a.p:
+        import re
+        orig = R.E.is_output_or_backup
+        pat = re.compile(rf"(^|[^A-Za-z0-9]){a.p}([^0-9]|$)")
+        R.E.is_output_or_backup = lambda f: orig(f) or not pat.search(f.name)
     gt, pe, _ = R.load_gt(a.gt)
     data, _ = R.collect(a.dir, "Sheet1", gt, pe, [])
     main_keys = set(cm.MAIN_115)
     rows = []
-    for m in [x for x in R.MODEL_ORDER if x in data]:
+    for m in [x for x in R.MODEL_ORDER if x in data and (not a.modell or a.modell.lower() in x.lower())]:
         for ds, runs in (("115", data[m]["main"]), ("70", data[m]["supp"])):
             runs = [r for _, r in runs]
             if not runs:
