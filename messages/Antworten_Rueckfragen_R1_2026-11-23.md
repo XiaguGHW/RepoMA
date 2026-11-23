@@ -58,7 +58,7 @@ b) Kombinationen der mehrdeutigen Labels (zulässige Labelmenge)
 
 ### 3. Allowed-Label-Set Metriken: Literatur oder selbst definiert?
 
-Die Allowed-Label-Set Accuracy ist in der Literatur belegt (unter anderem Namen). Die Allowed-Varianten von Precision, Recall und F1 waren dagegen eine eigene Festlegung, die eine Konvention für das Hauptlabel braucht. Die Makro-Mittelung auf den eindeutigen Baugruppen folgt den Standardformeln (Precision über die vorhergesagten Klassen, Recall über die in der Referenz vorkommenden Klassen, F1 über beide).
+Die Allowed-Label-Set Accuracy ist in der Literatur belegt, und zwar als „ReaL Accuracy“ bei Beyer et al. (2020): Eine Vorhersage gilt dort als korrekt, wenn sie in der Menge der als zulässig annotierten Labels enthalten ist. Die Allowed-Varianten von Precision, Recall und F1 waren dagegen eine eigene Festlegung, die eine Konvention für das Hauptlabel braucht. Die Makro-Mittelung auf den eindeutigen Baugruppen folgt den Standardformeln (Precision über die vorhergesagten Klassen, Recall über die in der Referenz vorkommenden Klassen, F1 über beide).
 
 ### 4. Aussagekraft von Precision, Recall und F1
 
