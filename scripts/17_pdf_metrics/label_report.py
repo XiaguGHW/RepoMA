@@ -37,8 +37,10 @@ def main():
             if any("SAP" in c for c in cells):
                 head = cells
             continue
+        if len(cells) != len(head):
+            continue  # andere Tabelle in R1.md (z. B. Statistik)
         r = dict(zip(head, cells))
-        g = next(v for k, v in r.items() if k.strip() == "Ground Truth")
+        g = r["Ground Truth"]
         cnt[("R1 Ground Truth", g)] += 1
         alt = next((v for k, v in r.items() if "weitere" in k.lower()), "")
         for x in re.split(r"[,;]", alt):
