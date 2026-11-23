@@ -60,7 +60,7 @@ def read_r1(path):
         rows.append(dict(zip(head, cells + [""] * (len(head) - len(cells)))))
     col = lambda *ks: next(c for c in head if all(k.lower() in c.lower() for k in ks))  # noqa: E731
     c_sap, c_tc, c_gt, c_alt = col("SAP"), col("Teamcenter"), col("Ground Truth"), col("weitere")
-    c_pe = next((c for c in head if "prompt" in c.lower()), None)
+    c_pe = next((c for c in head if "prompt" in c.lower() or "konfig" in c.lower()), None)
     gt = {}
     for r in rows:
         k = bg_key(r[c_sap], r[c_tc])

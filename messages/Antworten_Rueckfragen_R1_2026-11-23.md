@@ -14,7 +14,7 @@ Dass es in den bisherigen Ergebnissen nicht stimmig war, lag daran, dass z. B. d
 
 ### 2. Mehrdeutige Baugruppen bei R1 und R2
 
-Ausgewertet werden 185 Baugruppen (199 abzüglich der 14 aus dem Prompt Engineering). Baugruppen mit Register M, aber ohne weitere zulässige Labels (bei R1: 0804GE7738, 0804EN7325), werden als eindeutig gezählt.
+Ausgewertet werden 185 Baugruppen (199 abzüglich der 14 aus der Label-Konfiguration). Baugruppen mit Register M, aber ohne weitere zulässige Labels (bei R1: 0804GE7738, 0804EN7325), werden als eindeutig gezählt.
 
 | Datensatz | R1 eindeutig | R1 mehrdeutig | R2 eindeutig | R2 mehrdeutig |
 |---|---|---|---|---|

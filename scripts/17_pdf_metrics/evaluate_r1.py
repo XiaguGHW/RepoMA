@@ -69,7 +69,7 @@ def load_gt(path):
     c = dict(sap=E.find_col(cols, contains=["sap"]), tc=E.find_col(cols, contains=["teamcenter"]),
              gt=E.find_col(cols, exact="Ground Truth"), reg=E.find_col(cols, contains=["regist"]),
              alt=E.find_col(cols, contains=["weitere"]),
-             pe=E.find_col(cols, contains=["prompt"]) or next((x for x in cols if "Prompt Engineering" in x), None))
+             pe=E.find_col(cols, contains=["prompt"]) or E.find_col(cols, contains=["konfig"]))
     gt, pe, issues = {}, set(), []
     for _, r in df.iterrows():
         sap = r[c["sap"]] if c["sap"] else None
