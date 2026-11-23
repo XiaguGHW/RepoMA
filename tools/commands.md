@@ -150,3 +150,34 @@ python find_incomplete_runs.py --root "..\01_Prompt_P1-P4\115BG" --root "..\02_I
 - Gemini Pro DN9616：补跑一次，结果复制到 `01\115BG\Gemini_Pro\` 和 `02\115BG\Gemini_Pro\` 各一份。
 - Flash P3 / Haiku P3：不补跑，用 `02\115BG\<模型>\` 里已完整的 `…_pdf_only_…` 文件替换 `01\115BG\<模型>\` 里的 P3 文件（旧文件移走，不要两个 P3 同时在文件夹里）。
 - `$ref` 只在当前 PowerShell 窗口有效，新开窗口要重新设置。
+
+## 2026-11-23 · R1-Auswertung: 70BG prüfen
+
+在 `R1_Auswertung\00_Skripte` 里运行。
+
+```
+$ref70 = "..\02_Input_P3\70BG\Gemini_Pro\pdf_only_70BG_P3_gemini-2.5-pro_caching_2026-10-19_20-24-45.xlsx"
+Test-Path $ref70
+python find_incomplete_runs.py --root "..\01_Prompt_P1-P4\70BG" --root "..\02_Input_P3\70BG" --root "..\03_Wiederholung_10runs\70BG" --reference $ref70
+```
+
+`Test-Path` 应为 True；输出里 “Referenz” 应为 70 BG；目标：`Alle Dateien vollständig.`
+
+有缺失时生成补跑表：
+
+```
+python find_incomplete_runs.py --root "..\01_Prompt_P1-P4\70BG" --root "..\02_Input_P3\70BG" --root "..\03_Wiederholung_10runs\70BG" --reference $ref70 `
+  --input-dataset "<classification_experiment_dataset_v2.xlsx>" --pro-modell --rerun-out "..\04_Nachlauf\70BG"
+```
+
+合并：同 115BG（`merge_nachlauf.py "<模型文件夹>" --referenz $ref70`，先 `--dry-run`）。
+
+## 2026-11-23 · R1-Auswertung: Kennzahlen berechnen
+
+```
+python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse"
+python validate_r1.py --zehn "..\03_Wiederholung_10runs" --gt R1.md --werte "..\05_Ergebnisse\Wiederhollaeufe_R1.xlsx"
+python evaluate_r1_ergebnisse.py --gt R1.md --prompt "..\01_Prompt_P1-P4" --input "..\02_Input_P3" --zehn "..\03_Wiederholung_10runs" --out "..\05_Ergebnisse"
+```
+
+检查：每个模型 “10 Läufe 115 BG, 10 Läufe 70 BG”；validate 最后一行 “OK – alle Werte unabhängig bestätigt.”；ergebnisse 没有 “Einzelläufe gefunden”。
