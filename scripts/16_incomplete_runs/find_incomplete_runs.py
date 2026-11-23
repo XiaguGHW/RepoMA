@@ -336,6 +336,13 @@ def main():
 
     over = pd.DataFrame(over).sort_values(["Unvollständig", "Experiment"], ascending=[False, True])
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+    try:
+        open(a.out, "ab").close()
+    except PermissionError:
+        import time
+        alt = Path(a.out).with_name(Path(a.out).stem + time.strftime("_%H-%M-%S") + Path(a.out).suffix)
+        print(f"! {a.out} ist geöffnet (Excel?) – schreibe stattdessen {alt.name}")
+        a.out = str(alt)
     with pd.ExcelWriter(a.out, engine="openpyxl") as xw:
         over.to_excel(xw, sheet_name="Uebersicht", index=False)
         pd.DataFrame(miss).to_excel(xw, sheet_name="Fehlende_BG", index=False)
