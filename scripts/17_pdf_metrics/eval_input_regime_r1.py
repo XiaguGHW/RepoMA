@@ -45,16 +45,17 @@ def registers(path):
     return reg
 
 
-def main():
+def main(argv=None, kind="input", default_out="Input_P3_Teilmengen_R1.xlsx", only_pref=False):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", required=True, action="append", help="z. B. ..\\02_Input_P3")
+    ap.add_argument("--input", "--prompt", dest="input", required=True, action="append",
+                    help="z. B. ..\\02_Input_P3 bzw. ..\\01_Prompt_P1-P4")
     ap.add_argument("--gt", required=True)
     ap.add_argument("--nur", choices=["pdf", "image", "text"], help="nur diese Eingabeform")
-    ap.add_argument("--out", default="Input_P3_Teilmengen_R1.xlsx")
-    a = ap.parse_args()
+    ap.add_argument("--out", default=default_out)
+    a = ap.parse_args(argv)
     gt, pe, _ = R.load_gt(a.gt)
     reg = registers(a.gt)
-    groups, unknown = X.load_runs(X.files_in(a.input), gt, pe, [], "input")
+    groups, unknown = X.load_runs(X.files_in(a.input), gt, pe, [], kind)
     for u in unknown:
         print("! nicht zugeordnet:", u)
     subsets = {
@@ -70,6 +71,8 @@ def main():
     for m in models:
         for inp in ("pdf", "image", "text"):
             if a.nur and inp != a.nur:
+                continue
+            if only_pref and inp != X.pref(m):
                 continue
             main = groups.get((m, "P3", inp, "main"), [])
             supp = groups.get((m, "P3", inp, "supp"), [])

@@ -239,3 +239,9 @@ python eval_input_regime_r1.py --input "..\02_Input_P3" --gt R1.md --out "..\05_
 ```
 
 Allowed und Strict Accuracy für alle / eindeutig / mehrdeutig / E1 / E2 / M (R1-Register), 115 und 185 BG, Einzelläufe.
+
+## 2026-11-23 · R1: Prompt-Vergleich P3 (01_Prompt_P1-P4) nach Teilmengen
+
+```
+python eval_prompt_p3_regime_r1.py --prompt "..\01_Prompt_P1-P4" --gt R1.md --out "..\05_Ergebnisse\Prompt_P3_Teilmengen_R1.xlsx"
+```
