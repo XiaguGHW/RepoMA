@@ -3,7 +3,8 @@
 Nutzt KEINEN Code aus evaluate_r1.py / evaluate_pdf_results.py / Skript 12/13: eigene Einlese-Logik für
 R1.md und die Ergebnisdateien, eigene Label-Erkennung, eigene Berechnung. Verglichen werden je Modell,
 Datensatz (115/185) und Teilmenge (alle/eindeutig/mehrdeutig): Anzahl BG, Läufe, Accuracy-Mittel, SD,
-Macro-P/R/F1 (eindeutig) – exakt (±0,01) – sowie das Bootstrap-KI näherungsweise (±0,8 pp, eigene Ziehung).
+Macro-P/R/F1 (eindeutig) – exakt (±0,01). Das Bootstrap-KI ist zufallsabhängig: Es wird 20-mal unabhängig
+(je 2000 Ziehungen) neu berechnet; die Grenze aus evaluate_r1 muss in der Spannweite dieser Wiederholungen liegen (±0,3 pp).
 
 Erwartete Ordnerstruktur wie besprochen: <zehn>\\115BG\\<Konfiguration>\\*.xlsx und <zehn>\\70BG\\<Konfiguration>\\*.xlsx
 (Datensatz aus dem Ordnernamen 115BG/70BG). Backups (_backup_vor_merge*), nachlauf_*-Dateien werden übersprungen.
@@ -159,8 +160,15 @@ def main():
                 groups = [np.array([v for k, v in share.items() if k in main_keys]),
                           np.array([v for k, v in share.items() if k not in main_keys])] if scope == "185" else [np.array(list(share.values()))]
                 groups = [g for g in groups if len(g)]
-                boots = [np.concatenate([g[rng.integers(0, len(g), len(g))] for g in groups]).mean() * 100 for _ in range(4000)]
-                mine["KI unten (%)"], mine["KI oben (%)"] = np.percentile(boots, 2.5), np.percentile(boots, 97.5)
+                # Bootstrap-Grenzen schwanken zufällig (Monte-Carlo-Fehler, bei kleinem n deutlich):
+                # 20 unabhängige Wiederholungen à 2000 Ziehungen -> Spannweite der Grenzen als Toleranzbereich
+                lo_hi = []
+                for _ in range(20):
+                    boots = [np.concatenate([g[rng.integers(0, len(g), len(g))] for g in groups]).mean() * 100
+                             for _ in range(2000)]
+                    lo_hi.append((np.percentile(boots, 2.5), np.percentile(boots, 97.5)))
+                ci_range = {"KI unten (%)": (min(x[0] for x in lo_hi), max(x[0] for x in lo_hi)),
+                            "KI oben (%)": (min(x[1] for x in lo_hi), max(x[1] for x in lo_hi))}
                 row = ref[(ref["Modell"] == m) & (ref["Datensatz"].astype(str) == scope) & (ref["Teilmenge"] == sub)]
                 if row.empty:
                     print(f"FEHLT in Werte: {m} {scope} {sub}")
@@ -170,13 +178,19 @@ def main():
                 for col, v in mine.items():
                     if col not in row or (isinstance(v, float) and np.isnan(v)):
                         continue
-                    tol = 0.8 if col.startswith("KI") else 0.011
-                    diff = abs(float(row[col]) - float(v))
-                    if diff <= tol:
+                    if abs(float(row[col]) - float(v)) <= 0.011:
                         ok += 1
                     else:
                         bad += 1
                         print(f"ABWEICHUNG {m} {scope} {sub} {col}: evaluate_r1 {row[col]} / Gegenrechnung {v:.3f}")
+                for col, (lo, hi) in ci_range.items():
+                    x = float(row[col])
+                    if lo - 0.3 <= x <= hi + 0.3:
+                        ok += 1
+                    else:
+                        bad += 1
+                        print(f"ABWEICHUNG {m} {scope} {sub} {col}: evaluate_r1 {x:.2f} außerhalb der Spannweite "
+                              f"unabhängiger Bootstraps [{lo:.2f}; {hi:.2f}]")
     print(f"\nGegenrechnung: {ok} Werte übereinstimmend, {bad} Abweichungen.")
     if bad == 0:
         print("OK – alle Werte unabhängig bestätigt.")
