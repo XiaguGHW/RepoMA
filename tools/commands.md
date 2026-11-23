@@ -224,3 +224,9 @@ python plot_wiederholung_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --ou
 ```
 
 Ausgabe: `Diagramme_Wiederholung_R1.xlsx` (alle Diagramme, Blätter 185 BG / 115 BG / Werte je Lauf) – zum Versenden; dazu die einzelnen PNGs und `Accuracy_je_Lauf_R1.xlsx`.
+
+## 2026-11-23 · R1: Einzelnachweis je Baugruppe
+
+```
+python detail_bg_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse\Detail_BG_R1.xlsx"
+```
