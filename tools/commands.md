@@ -181,3 +181,38 @@ python evaluate_r1_ergebnisse.py --gt R1.md --prompt "..\01_Prompt_P1-P4" --inpu
 ```
 
 检查：每个模型 “10 Läufe 115 BG, 10 Läufe 70 BG”；validate 最后一行 “OK – alle Werte unabhängig bestätigt.”；ergebnisse 没有 “Einzelläufe gefunden”。
+
+## 2026-11-23 · R1-Auswertung: alle Merges 70BG (4 Zielordner)
+
+在 `R1_Auswertung\00_Skripte` 里运行。补跑结果改名 `nachlauf_<原文件名>`，放进对应文件夹（Pro、GPT 各需 2 个补跑结果）。
+
+```
+$ref70 = "..\02_Input_P3\70BG\Gemini_Pro\pdf_only_70BG_P3_gemini-2.5-pro_caching_2026-10-19_20-24-45.xlsx"
+Test-Path $ref70
+```
+
+**预演：**
+
+```
+python merge_nachlauf.py --dry-run "..\01_Prompt_P1-P4\70BG\Claude_Haiku"                         --referenz $ref70
+python merge_nachlauf.py --dry-run "..\03_Wiederholung_10runs\70BG\claude_haiku_pdf_P3_10_runs"    --referenz $ref70
+python merge_nachlauf.py --dry-run "..\03_Wiederholung_10runs\70BG\gemini-2.5-pro_pdf_P3_10_runs"  --referenz $ref70
+python merge_nachlauf.py --dry-run "..\03_Wiederholung_10runs\70BG\gpt-5.5_image_P3_10_runs"       --referenz $ref70
+```
+
+**正式合并：**
+
+```
+python merge_nachlauf.py "..\01_Prompt_P1-P4\70BG\Claude_Haiku"                         --referenz $ref70
+python merge_nachlauf.py "..\03_Wiederholung_10runs\70BG\claude_haiku_pdf_P3_10_runs"    --referenz $ref70
+python merge_nachlauf.py "..\03_Wiederholung_10runs\70BG\gemini-2.5-pro_pdf_P3_10_runs"  --referenz $ref70
+python merge_nachlauf.py "..\03_Wiederholung_10runs\70BG\gpt-5.5_image_P3_10_runs"       --referenz $ref70
+```
+
+**复查：**
+
+```
+python find_incomplete_runs.py --root "..\01_Prompt_P1-P4\70BG" --root "..\02_Input_P3\70BG" --root "..\03_Wiederholung_10runs\70BG" --reference $ref70
+```
+
+目标：`Alle Dateien vollständig.`（Pro 第 2 个补跑结果里的 MB8153 用不上，会被忽略，正常。）
