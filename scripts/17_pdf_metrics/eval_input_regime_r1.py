@@ -52,7 +52,7 @@ def main(argv=None, kind="input", default_out="Input_P3_Teilmengen_R1.xlsx", onl
     ap.add_argument("--gt", required=True)
     ap.add_argument("--nur", choices=["pdf", "image", "text"], help="nur diese Eingabeform")
     ap.add_argument("--p", default="P3", choices=["P1", "P2", "P3", "P4"], help="Prompt (Standard P3)")
-    ap.add_argument("--out", default=default_out)
+    ap.add_argument("--out", default=None)
     a = ap.parse_args(argv)
     gt, pe, _ = R.load_gt(a.gt)
     reg = registers(a.gt)
@@ -102,8 +102,17 @@ def main(argv=None, kind="input", default_out="Input_P3_Teilmengen_R1.xlsx", onl
         cols = ["Modell", "Eingabe", "Datensatz"] + [f"{metric} {s}" for s in subsets if f"{metric} {s}" in df]
         print(f"\n{metric} Accuracy (%), R1:")
         print(df[cols].to_string(index=False))
-    df.to_excel(a.out, index=False)
-    print(f"\nAusgabe: {a.out}")
+    out = Path(a.out) if a.out else Path(default_out.replace("P3", a.p))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        df.to_excel(out, index=False)
+    except PermissionError:
+        import datetime
+        alt = out.with_name(f"{out.stem}_{datetime.datetime.now():%H-%M-%S}{out.suffix}")
+        print(f"\n! {out} ist geöffnet (Excel?) – schreibe stattdessen nach {alt.name}")
+        df.to_excel(alt, index=False)
+        out = alt
+    print(f"\nAusgabe: {out}")
 
 
 if __name__ == "__main__":
