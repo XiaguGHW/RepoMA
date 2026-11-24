@@ -269,3 +269,16 @@ python plot_wiederholung_r1.py --dir "..\03_Wiederholung_10runs" --gt R2.md --ou
 ```
 
 Ausgabe: `Wiederhollaeufe_R2.xlsx`, `Ergebnisse_unter_R2.xlsx`, `Diagramme\Diagramme_Wiederholung_R2.xlsx`.
+
+## 2026-11-24 · Konfusionsmatrizen: Mittel oder Summe über alle Läufe
+
+`evaluate_r1.py` hat die Option `--km`:
+- `--km mittel` (Standard): Blätter `KM_…`, Zelle = mittlere Anzahl je Lauf (Dezimalzahlen)
+- `--km summe`: Blätter `KMS_…`, Zelle = Gesamtanzahl über alle 10 Läufe (ganze Zahlen, n = BG × Läufe)
+- `--km beide`: beide Varianten
+
+```
+python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R2.md --out "..\05_Ergebnisse_R2" --km summe
+```
+
+Accuracy und Precision/Recall/F1 sind in beiden Varianten gleich; nur die Zellwerte sind ×10.

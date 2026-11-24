@@ -272,10 +272,12 @@ def set_label(allowed):
     return "{" + ", ".join(ABBR[c] for c in COL_ORDER if c in allowed) + "}"
 
 
-def confusion_data(gt, runs):
-    """Mittlere Konfusionsmatrix über die Läufe (Zelle = mittlere Anzahl je Lauf).
+def confusion_data(gt, runs, summe=False):
+    """Konfusionsmatrix über die Läufe. summe=False: Zelle = mittlere Anzahl je Lauf;
+    summe=True: Zelle = Gesamtanzahl über alle Läufe (n = Baugruppen × Läufe).
     Zeilen: eindeutige Klassen (Primärlabel) und mehrdeutige Labelmengen; Spalten: Vorhersage."""
     R = len(runs)
+    w = 1.0 if summe else 1 / R
     keys = sorted(set().union(*runs))
     rows = {}  # Zeilenschlüssel -> dict
     for k in keys:
@@ -283,36 +285,36 @@ def confusion_data(gt, runs):
         rk = ("E", gt[k][0]) if len(allowed) == 1 else ("M", allowed)
         row = rows.setdefault(rk, {"cnt": {c: 0.0 for c in COL_ORDER}, "inv": 0.0, "miss": 0.0, "n": 0,
                                    "korrekt": 0.0, "allowed": allowed})
-        row["n"] += 1
+        row["n"] += R if summe else 1
         for run in runs:
             if k not in run:
-                row["miss"] += 1 / R
+                row["miss"] += w
                 continue
             p = run[k]
             if p in row["cnt"]:
-                row["cnt"][p] += 1 / R
+                row["cnt"][p] += w
             else:
-                row["inv"] += 1 / R
+                row["inv"] += w
             if correct(gt, k, p):
-                row["korrekt"] += 1 / R
+                row["korrekt"] += w
     eind = [(c, rows[("E", c)]) for c in COL_ORDER if ("E", c) in rows]
     mehr = sorted([(rk[1], v) for rk, v in rows.items() if rk[0] == "M"], key=lambda x: (-x[1]["n"], set_label(x[0])))
     return eind, mehr
 
 
-def write_confusion_sheet(wb, title, sheet_name, gt, runs):
+def write_confusion_sheet(wb, title, sheet_name, gt, runs, summe=False):
     from openpyxl.utils import get_column_letter
     St = E.styles()
     Font = St["Font"]
     ws = wb.create_sheet(sheet_name[:31])
     ws.sheet_view.showGridLines = False
-    eind, mehr = confusion_data(gt, runs)
+    eind, mehr = confusion_data(gt, runs, summe)
     R = len(runs)
-    fmt = "0" if R == 1 else "0.0"
+    fmt = "0" if (R == 1 or summe) else "0.0"
     has_inv = any(v["inv"] > 0 for _, v in eind + mehr)
     has_miss = any(v["miss"] > 0 for _, v in eind + mehr)
     pred_cols = [ABBR[c] for c in COL_ORDER] + (["ungültig"] if has_inv else []) + (["fehlt"] if has_miss else [])
-    head = ["Referenz ↓ / Vorhersage →"] + pred_cols + ["n", "korrekt", "Accuracy"]
+    head = ["Referenz ↓ / Vorhersage →"] + pred_cols + ["n (BG × Läufe)" if summe and R > 1 else "n", "korrekt", "Accuracy"]
     from openpyxl.styles import Alignment
     wrap = Alignment(horizontal="center", vertical="center", wrap_text=True)
     ws.column_dimensions["A"].width = 2
@@ -438,10 +440,11 @@ def write_confusion_sheet(wb, title, sheet_name, gt, runs):
             cell.number_format = f
     r += 2
     notes = [LEGEND,
-             ("Zellen: mittlere Anzahl je Lauf über " + str(R) + " Läufe; " if R > 1 else "Zellen: Anzahl (1 Lauf); ")
+             (("Zellen: Gesamtanzahl über alle " + str(R) + " Läufe (jede Baugruppe zählt einmal je Lauf); n = Baugruppen × Läufe; "
+               if summe else "Zellen: mittlere Anzahl je Lauf über " + str(R) + " Läufe; ") if R > 1 else "Zellen: Anzahl (1 Lauf); ")
              + "fett/blau = Vorhersage liegt in der zulässigen Labelmenge der Zeile.",
              "Mehrdeutige Zeilen: zulässige Labelmenge (ungeordnet, Primärlabel nicht unterschieden).",
-             "Precision/Recall/F1 aus der mittleren Matrix der eindeutigen Baugruppen; Precision nur für vorhergesagte Klassen, "
+             "Precision/Recall/F1 aus der Matrix der eindeutigen Baugruppen (Summe und Mittel ergeben dieselben Werte); Precision nur für vorhergesagte Klassen, "
              "Recall nur für Klassen mit Referenz; Macro = ungewichteter Mittelwert. Die Macro-Werte im Blatt "
              "'Wiederholläufe' sind dagegen je Lauf berechnet und gemittelt (kleine Abweichungen möglich)."]
     for i, txt in enumerate(notes):
@@ -564,6 +567,8 @@ def main(argv=None):
     ap.add_argument("--gt-name", default=None, help="Standard: aus Dateiname, z. B. R2.md -> R2")
     ap.add_argument("--sheet", default="Sheet1")
     ap.add_argument("--out", default="Ergebnis_R1")
+    ap.add_argument("--km", choices=["mittel", "summe", "beide"], default="mittel",
+                    help="Konfusionsmatrizen: Mittel je Lauf (KM_…), Summe über alle Läufe (KMS_…) oder beide")
     a = ap.parse_args(argv)
     if not a.gt_name:
         import re as _re
@@ -609,8 +614,10 @@ def main(argv=None):
             runs = build_runs(data[m]["main"], data[m]["supp"], scope)
             if not runs or (scope == "185" and not data[m]["supp"]):
                 continue
-            write_confusion_sheet(wb, f"{m} – {scope} Baugruppen, {len(runs)} Läufe, GT {a.gt_name}",
-                                  f"KM_{short.get(m, m)}_{scope}", gt, runs)
+            for summe in ([False] if a.km == "mittel" else [True] if a.km == "summe" else [False, True]):
+                art = "Summe über alle Läufe" if summe else "Mittel je Lauf"
+                write_confusion_sheet(wb, f"{m} – {scope} Baugruppen, {len(runs)} Läufe ({art}), GT {a.gt_name}",
+                                      f"{'KMS' if summe else 'KM'}_{short.get(m, m)}_{scope}", gt, runs, summe)
     wb.save(xlsx)
     print(f"\nAusgabe: {xlsx}")
     shown = [i for i in issues if not i["Typ"].startswith("Info:") and "Register" not in i["Typ"]
