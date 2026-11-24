@@ -163,7 +163,7 @@ def read_predictions(path, sheet, who, gt, pe, issues):
         if k in pe:
             continue
         if k not in gt:
-            issues.append(dict(Modell=who, Typ="BG nicht in R1", SAP=k))
+            issues.append(dict(Modell=who, Typ="BG nicht in GT", SAP=k))
             continue
         raw = "" if E.is_empty(r[c_pred]) else str(r[c_pred]).strip()
         if not raw or raw.upper() == "[EMPTY]":
