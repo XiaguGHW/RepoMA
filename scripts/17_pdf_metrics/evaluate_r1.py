@@ -567,8 +567,12 @@ def main(argv=None):
     ap.add_argument("--gt-name", default=None, help="Standard: aus Dateiname, z. B. R2.md -> R2")
     ap.add_argument("--sheet", default="Sheet1")
     ap.add_argument("--out", default="Ergebnis_R1")
-    ap.add_argument("--km", choices=["mittel", "summe", "beide"], default="mittel",
-                    help="Konfusionsmatrizen: Mittel je Lauf (KM_…), Summe über alle Läufe (KMS_…) oder beide")
+    ap.add_argument("--km", choices=["mittel", "summe", "beide", "keine"], default="mittel",
+                    help="Konfusionsmatrizen: Mittel je Lauf (KM_…), Summe über alle Läufe (KMS_…), beide oder keine")
+    ap.add_argument("--km-bg", choices=["115", "185", "beide"], default="beide",
+                    help="Konfusionsmatrizen nur für 115 BG, nur für 185 BG oder beide")
+    ap.add_argument("--km-modell", action="append", default=[],
+                    help="Konfusionsmatrizen nur für diese Modelle (Teil des Namens, z. B. Haiku); mehrfach möglich")
     a = ap.parse_args(argv)
     if not a.gt_name:
         import re as _re
@@ -609,8 +613,12 @@ def main(argv=None):
     wb = load_workbook(xlsx)
     short = {"Gemini 2.5 Pro": "Pro", "Gemini 2.5 Flash": "Flash", "Claude Haiku 4.5": "Haiku",
              "GPT-5.5": "GPT", "DeepSeek-V4-Flash": "DeepSeek"}
-    for m in results:
-        for scope in ("185", "115"):
+    km_scopes = [] if a.km == "keine" else (["185", "115"] if a.km_bg == "beide" else [a.km_bg])
+    km_models = [m for m in results if not a.km_modell or any(x.lower() in m.lower() for x in a.km_modell)]
+    if a.km_modell and not km_models:
+        print(f"  ! --km-modell {a.km_modell}: kein Modell gefunden (vorhanden: {', '.join(results)})")
+    for m in km_models:
+        for scope in km_scopes:
             runs = build_runs(data[m]["main"], data[m]["supp"], scope)
             if not runs or (scope == "185" and not data[m]["supp"]):
                 continue

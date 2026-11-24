@@ -282,3 +282,19 @@ python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R2.md --out "..\05_
 ```
 
 Accuracy und Precision/Recall/F1 sind in beiden Varianten gleich; nur die Zellwerte sind ×10.
+
+### Konfusionsmatrizen auswählen (GT, 115/185 BG, Modell)
+
+| Option | Werte | Bedeutung |
+|---|---|---|
+| `--gt` | `R1.md` / `R2.md` | Ground Truth (Ausgabe heißt dann `…_R1` bzw. `…_R2`) |
+| `--km` | `mittel` (Standard) / `summe` / `beide` / `keine` | Mittel je Lauf (`KM_…`), Summe über 10 Läufe (`KMS_…`) |
+| `--km-bg` | `beide` (Standard) / `115` / `185` | nur für 115 BG, nur für 185 BG oder beide |
+| `--km-modell` | z. B. `Haiku` (mehrfach möglich) | nur diese Modelle; ohne Angabe alle |
+
+Beispiele:
+```
+python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R2.md --out "..\05_Ergebnisse_R2" --km summe --km-bg 185
+python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse" --km summe --km-bg 115 --km-modell Haiku --km-modell GPT
+python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R2.md --out "..\05_Ergebnisse_R2" --km keine
+```
