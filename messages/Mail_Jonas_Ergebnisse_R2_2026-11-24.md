@@ -17,9 +17,14 @@ anbei wie besprochen dieselben Ergebnisse auf Basis von R2:
 
 Das Vorgehen ist identisch zu R1, nur die Ground Truth ist ausgetauscht. Unter R2 sind von den 185 ausgewerteten Baugruppen 154 eindeutig und 31 mehrdeutig (115 BG: 85 / 30).
 
-Ein Hinweis zur Interpretation: Unter R2 liegt die Accuracy auf den mehrdeutigen Baugruppen bei den meisten Modellen höher als auf den eindeutigen (z. B. Gemini Pro 99,7 % ggü. 95,2 %). Das ist meiner Einschätzung nach zum Teil durch die Entstehung von R2 bedingt: R2 wurde nach dem LLM-Review überarbeitet, und plausible LLM-Vorhersagen wurden dabei als weitere zulässige Labels aufgenommen. Die Modelle werden auf den mehrdeutigen Baugruppen also teilweise an Labels gemessen, die aus ihren eigenen Vorhersagen stammen. Hinzu kommt, dass bei mehrdeutigen Baugruppen mehrere Labels als korrekt gelten und die Teilmenge mit 30–31 Baugruppen klein ist (eine Baugruppe entspricht ca. 3 Prozentpunkten, entsprechend breit sind die Konfidenzintervalle).
+Hinweis zur Interpretation:
+Unter R2 liegt die Accuracy auf den mehrdeutigen Baugruppen bei den meisten Modellen höher als auf den eindeutigen (z. B. Gemini Pro 99,7 % ggü. 95,2 %). Gründe aus meiner Sicht:
 
-Das ist quasi das Gegenstück zu deinem Punkt zu R1: R1 begünstigt eher die menschliche Annotation, R2 eher die LLMs. Für den Vergleich mit der Human Annotation ist R2 daher sinnvoll, die hohen Werte der LLMs auf den mehrdeutigen Baugruppen sollte man aber vorsichtig interpretieren.
+1. Entstehung von R2: R2 wurde nach dem LLM-Review überarbeitet. Plausible LLM-Vorhersagen wurden dabei als weitere zulässige Labels aufgenommen. Die Modelle werden auf den mehrdeutigen Baugruppen also teilweise an Labels gemessen, die aus ihren eigenen Vorhersagen stammen.
+2. Mehrere korrekte Labels: Bei mehrdeutigen Baugruppen gelten mehrere Labels als richtig, ein Treffer ist dadurch leichter.
+3. Kleine Teilmenge: Mit 30–31 Baugruppen entspricht eine Baugruppe ca. 3 Prozentpunkten; die Konfidenzintervalle sind entsprechend breit.
+
+Fazit: R1 begünstigt eher die menschliche Annotation, R2 eher die LLMs. Für den Vergleich mit der Human Annotation ist R2 sinnvoll, die hohen Werte der LLMs auf den mehrdeutigen Baugruppen sollte man aber vorsichtig interpretieren.
 
 Viele Grüße
 Duanni
