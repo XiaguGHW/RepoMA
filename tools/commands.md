@@ -323,3 +323,11 @@ python validate_r1.py --zehn "..\03_Wiederholung_10runs" --gt R2.md --werte "..\
 ```
 
 Erwartet am Ende: „OK – alle Werte unabhängig bestätigt“.
+
+Danach Ergebnistabelle und Diagramme:
+```
+python evaluate_r1_ergebnisse.py --gt R2.md --prompt "..\01_Prompt_P1-P4" --input "..\02_Input_P3" --zehn "..\03_Wiederholung_10runs" --out "..\05_Ergebnisse_R2"
+python plot_wiederholung_r1.py --dir "..\03_Wiederholung_10runs" --gt R2.md --out "..\05_Ergebnisse_R2\Diagramme"
+```
+
+Zum Versenden: `Wiederhollaeufe_R2.xlsx` (ohne KM_-Blätter), `Ergebnisse_unter_R2.xlsx`, `Diagramme\Diagramme_Wiederholung_R2.xlsx`.
