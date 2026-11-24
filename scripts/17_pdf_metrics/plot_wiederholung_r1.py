@@ -91,7 +91,11 @@ def main():
     ap.add_argument("--dir", required=True, action="append")
     ap.add_argument("--gt", required=True)
     ap.add_argument("--out", default="Diagramme")
+    ap.add_argument("--gt-name", default=None)
     a = ap.parse_args()
+    if not a.gt_name:
+        import re as _re
+        a.gt_name = (_re.match(r"(R\d+)", Path(a.gt).stem, _re.I) or [Path(a.gt).stem])[0].upper()
     gt, pe, _ = R.load_gt(a.gt)
     data, _ = R.collect(a.dir, "Sheet1", gt, pe, [])
     out = Path(a.out)
@@ -130,12 +134,12 @@ def main():
                 canvas.paste(im, (0, y))
                 y += im.height
             canvas.save(out / f"Wiederholung_{scope}BG_alle.png", dpi=(300, 300))
-    pd.DataFrame(rows).to_excel(out / "Accuracy_je_Lauf_R1.xlsx", index=False)
-    write_excel(out, models, rows)
+    pd.DataFrame(rows).to_excel(out / f"Accuracy_je_Lauf_{a.gt_name}.xlsx", index=False)
+    write_excel(out, models, rows, a.gt_name)
     print(f"Ausgabe: {out}")
 
 
-def write_excel(out, models, rows):
+def write_excel(out, models, rows, gt_name="R1"):
     """Alle Diagramme in eine Excel-Datei: je Datensatz ein Blatt (Diagramme untereinander), dazu die Werte je Lauf."""
     from openpyxl import Workbook
     from openpyxl.drawing.image import Image as XLImage
@@ -149,7 +153,7 @@ def write_excel(out, models, rows):
             continue
         ws = wb.create_sheet(f"Diagramme {scope} BG")
         ws.sheet_view.showGridLines = False
-        ws["B2"] = f"Mittelwert und Stabilität der Accuracy – 10 Läufe mit {scope} Baugruppen (Ground Truth R1)"
+        ws["B2"] = f"Mittelwert und Stabilität der Accuracy – 10 Läufe mit {scope} Baugruppen (Ground Truth {gt_name})"
         ws["B2"].font = Font(bold=True, size=14)
         row = 4
         for m, f in files:
@@ -173,8 +177,8 @@ def write_excel(out, models, rows):
             c.font = Font(bold=True)
         ws.column_dimensions["A"].width = 12
         ws.column_dimensions["B"].width = 22
-    wb.save(out / "Diagramme_Wiederholung_R1.xlsx")
-    print(f"Excel mit allen Diagrammen: {out / 'Diagramme_Wiederholung_R1.xlsx'}")
+    wb.save(out / f"Diagramme_Wiederholung_{gt_name}.xlsx")
+    print(f"Excel mit allen Diagrammen: {out / f'Diagramme_Wiederholung_{gt_name}.xlsx'}")
 
 
 if __name__ == "__main__":

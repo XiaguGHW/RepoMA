@@ -221,7 +221,7 @@ def write(path, tables, gt_name):
     fill = lambda c: PatternFill("solid", fgColor=c)  # noqa: E731
     wb = Workbook()
     ws = wb.active
-    ws.title = "Ergebnisse unter R1"
+    ws.title = f"Ergebnisse unter {gt_name}"
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 16
     for j in range(len(COLS)):
@@ -302,7 +302,7 @@ def write(path, tables, gt_name):
         ("Accuracy je Zelle mit 95%-Bootstrap-Intervall (2000 Wiederholungen, Baugruppen mit Zurücklegen, je BG alle "
          "Läufe; bei 185 BG getrennt nach Haupt- und Ergänzungsdatensatz). Macro-P/R/F1 nur auf eindeutigen "
          "Baugruppen (Standardformeln; bei Wiederholungsläufen je Lauf berechnet und gemittelt), ohne Bootstrap.", True),
-        ("Eindeutig: keine weiteren zulässigen Labels in R1; mehrdeutig: mindestens ein weiteres zulässiges Label. "
+        (f"Eindeutig: keine weiteren zulässigen Labels in {gt_name}; mehrdeutig: mindestens ein weiteres zulässiges Label. "
          "Prompt-Engineering-Baugruppen ausgeschlossen.", False),
         ("Gelb: Ersatzquelle (Lauf 1 der Wiederholungsläufe statt Einzellauf bzw. Einzellauf statt 10 runs). "
          "Grau: nicht vorgesehen. „?“: optional, noch nicht gelaufen. „fehlt“: Daten fehlen.", False),
@@ -326,12 +326,15 @@ def write(path, tables, gt_name):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--gt", required=True)
-    ap.add_argument("--gt-name", default="R1")
+    ap.add_argument("--gt-name", default=None, help="Standard: aus Dateiname, z. B. R2.md -> R2")
     ap.add_argument("--prompt", action="append", default=[], help="Ordner mit P1–P4-Ergebnissen")
     ap.add_argument("--input", action="append", default=[], help="Ordner mit pdf/Bild/text-Ergebnissen (P3)")
     ap.add_argument("--zehn", action="append", default=[], help="Ordner mit den Wiederholungsläufen")
     ap.add_argument("--out", default="Ergebnis_R1")
     a = ap.parse_args(argv)
+    if not a.gt_name:
+        import re as _re
+        a.gt_name = (_re.match(r"(R\d+)", Path(a.gt).stem, _re.I) or [Path(a.gt).stem])[0].upper()
 
     gt, pe, gi = R.load_gt(a.gt)
     for i in gi:

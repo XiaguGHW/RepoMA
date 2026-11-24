@@ -561,10 +561,13 @@ def main(argv=None):
     ap.add_argument("--dir", required=True, action="append",
                     help="Ordner mit den Konfigurationsordnern (115 und 70BG); mehrfach angebbar")
     ap.add_argument("--gt", required=True, help="R1.md oder Excel mit der Ground Truth")
-    ap.add_argument("--gt-name", default="R1")
+    ap.add_argument("--gt-name", default=None, help="Standard: aus Dateiname, z. B. R2.md -> R2")
     ap.add_argument("--sheet", default="Sheet1")
     ap.add_argument("--out", default="Ergebnis_R1")
     a = ap.parse_args(argv)
+    if not a.gt_name:
+        import re as _re
+        a.gt_name = (_re.match(r"(R\d+)", Path(a.gt).stem, _re.I) or [Path(a.gt).stem])[0].upper()
 
     gt, pe, gt_issues = load_gt(a.gt)
     for i in gt_issues:

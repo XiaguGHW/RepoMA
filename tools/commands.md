@@ -255,3 +255,17 @@ Einzelnachweis für einen Prompt/ein Modell aus 01 (z. B. Haiku, P1):
 ```
 python detail_bg_r1.py --dir "..\01_Prompt_P1-P4" --gt R1.md --p P1 --modell Haiku --out "..\05_Ergebnisse\Detail_Haiku_P1.xlsx"
 ```
+
+## 2026-11-24 · R2-Auswertung (gleiche Ergebnisse wie R1, nur mit R2 als Ground Truth)
+
+在 `R1_Auswertung\00_Skripte` 里运行。先把 `thesis/R2.md` 放进 00_Skripte，并新建文件夹 `05_Ergebnisse_R2`。
+GT 名称自动从文件名取（R2.md → R2），输出文件名和表头都会是 R2。
+
+```
+python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R2.md --out "..\05_Ergebnisse_R2"
+python validate_r1.py --zehn "..\03_Wiederholung_10runs" --gt R2.md --werte "..\05_Ergebnisse_R2\Wiederhollaeufe_R2.xlsx"
+python evaluate_r1_ergebnisse.py --gt R2.md --prompt "..\01_Prompt_P1-P4" --input "..\02_Input_P3" --zehn "..\03_Wiederholung_10runs" --out "..\05_Ergebnisse_R2"
+python plot_wiederholung_r1.py --dir "..\03_Wiederholung_10runs" --gt R2.md --out "..\05_Ergebnisse_R2\Diagramme"
+```
+
+Ausgabe: `Wiederhollaeufe_R2.xlsx`, `Ergebnisse_unter_R2.xlsx`, `Diagramme\Diagramme_Wiederholung_R2.xlsx`.
