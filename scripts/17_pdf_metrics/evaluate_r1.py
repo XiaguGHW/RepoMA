@@ -91,7 +91,7 @@ def load_gt(path):
 
 
 # ---------------------------------------------------------------- Läufe einlesen
-def collect(root, sheet, gt, pe, issues):
+def collect(root, sheet, gt, pe, issues, keep=None, single=False):
     """{Modell: {"main": [Lauf...], "supp": [Lauf...]}}; Lauf = {BG: (pred oder None)}."""
     main_keys = set(cm.MAIN_115)
     out, info = {}, []
@@ -114,6 +114,8 @@ def collect(root, sheet, gt, pe, issues):
         if model not in MODEL_ORDER and model not in ("Claude Opus 4.8",):
             print(f"  ! Ordner {d.name}: Modell nicht erkannt – übersprungen")
             continue
+        if keep:
+            files = [f for f in files if keep(f, model)]
         for f in files:
             run = read_predictions(f, sheet, f"{model} | {d.name}", gt, pe, issues)
             if not run:
@@ -127,6 +129,19 @@ def collect(root, sheet, gt, pe, issues):
                 if part:
                     out.setdefault(model, {"main": [], "supp": []})[ds].append((f, part))
                     info.append((model, ds, d.name))
+    if single:   # Einzellauf: je Modell und Datensatz genau eine Datei
+        for model in out:
+            for ds in ("main", "supp"):
+                lst = out[model][ds]
+                if len(lst) > 1:
+                    # gleiche Vorhersagen (dieselbe Datei in zwei Ordnern) -> stillschweigend eine nehmen
+                    uniq = {tuple(sorted(r.items(), key=lambda x: x[0])) for _, r in lst}
+                    if len(uniq) > 1:
+                        print(f"  ! {model} ({'115' if ds == 'main' else '70'} BG): {len(lst)} passende Dateien – "
+                              f"verwendet wird {sorted(lst, key=lambda x: x[0].name)[-1][0].name}; "
+                              f"übrige: {', '.join(x[0].name for x in sorted(lst, key=lambda x: x[0].name)[:-1])}")
+                    out[model][ds] = [sorted(lst, key=lambda x: x[0].name)[-1]]
+        return out, info
     # Warnung: Läufe eines Modells/Datensatzes aus mehreren Ordnern (z. B. Vergleichsläufe mit eingelesen)
     for model in out:
         for ds in ("main", "supp"):
@@ -452,14 +467,14 @@ def write_confusion_sheet(wb, title, sheet_name, gt, runs, summe=False):
 
 
 # ---------------------------------------------------------------- Excel
-def write_excel(path, results, gt_name):
+def write_excel(path, results, gt_name, art="Wiederholläufe (10 runs)"):
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
     St = E.styles()
     Font = St["Font"]
     wb = Workbook()
     ws = wb.active
-    ws.title = "Wiederholläufe"
+    ws.title = "Wiederholläufe" if art.startswith("Wiederhol") else "Einzellauf"
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 2
     widths = [22, 9, 7, 14, 14, 20, 3, 14, 14, 20, 3, 14, 14, 20, 3, 12, 12, 12]
@@ -468,7 +483,7 @@ def write_excel(path, results, gt_name):
     r = 2
     for scope, label in [("185", "185 Baugruppen"), ("115", "115 Baugruppen")]:
         ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=2 + len(widths) - 1)
-        t = ws.cell(r, 2, f"Wiederholläufe (10 runs) mit {label} – Ground Truth {gt_name}, Allowed-Label-Set Accuracy")
+        t = ws.cell(r, 2, f"{art} mit {label} – Ground Truth {gt_name}, Allowed-Label-Set Accuracy")
         t.font = Font(bold=True, color="000000", size=13)
         t.alignment = St["left"]
         for j in range(len(widths)):
@@ -573,6 +588,10 @@ def main(argv=None):
                     help="Konfusionsmatrizen nur für 115 BG, nur für 185 BG oder beide")
     ap.add_argument("--km-modell", action="append", default=[],
                     help="Konfusionsmatrizen nur für diese Modelle (Teil des Namens, z. B. Haiku); mehrfach möglich")
+    ap.add_argument("--p", choices=["P1", "P2", "P3", "P4"],
+                    help="Einzellauf: nur Dateien dieses Prompts (z. B. aus 01_Prompt_P1-P4)")
+    ap.add_argument("--input", choices=["pdf", "image", "text", "bevorzugt"],
+                    help="Einzellauf: nur diese Eingabeform; bevorzugt = pdf, GPT-5.5 Bild, DeepSeek text")
     a = ap.parse_args(argv)
     if not a.gt_name:
         import re as _re
@@ -584,7 +603,21 @@ def main(argv=None):
     print(f"GT {a.gt_name}: {len(gt)} BG, davon Prompt-Engineering {len(pe)}; "
           f"mehrdeutig (ohne PE): {sum(len(v[1]) > 1 for k, v in gt.items() if k not in pe)}")
     issues = []
-    data, info = collect(a.dir, a.sheet, gt, pe, issues)
+    keep, single, art, stem = None, False, "Wiederholläufe (10 runs)", "Wiederhollaeufe"
+    if a.p or a.input:
+        import evaluate_r1_ergebnisse as X
+        single = True
+
+        def keep(f, model):
+            m, pr, inp = X.tokens(f)
+            pr = pr or "P3"                       # Dateien ohne Prompt-Angabe (Input-/Wiederholungsläufe) = P3
+            inp = inp or X.PREF.get(model, "pdf")  # ohne Eingabe-Angabe = bevorzugte Eingabe des Modells
+            want = (X.PREF.get(model, "pdf") if a.input == "bevorzugt" else a.input)
+            return (not a.p or pr == a.p) and (not want or inp == want)
+        tag = "_".join(x for x in (a.p, a.input) if x)
+        art = "Einzellauf (" + ", ".join(x for x in (a.p, a.input) if x) + ")"
+        stem = f"Einzellauf_{tag}"
+    data, info = collect(a.dir, a.sheet, gt, pe, issues, keep, single)
     rng = np.random.default_rng(SEED)
     results = {}
     for m in [x for x in MODEL_ORDER if x in data] + [x for x in data if x not in MODEL_ORDER]:
@@ -607,12 +640,12 @@ def main(argv=None):
                       f"Macro-F1 eindeutig {res['eindeutig']['f1']*100:.1f} %")
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    xlsx = out / f"Wiederhollaeufe_{a.gt_name}.xlsx"
-    write_excel(xlsx, results, a.gt_name)
+    xlsx = out / f"{stem}_{a.gt_name}.xlsx"
+    write_excel(xlsx, results, a.gt_name, art)
     from openpyxl import load_workbook
     wb = load_workbook(xlsx)
     short = {"Gemini 2.5 Pro": "Pro", "Gemini 2.5 Flash": "Flash", "Claude Haiku 4.5": "Haiku",
-             "GPT-5.5": "GPT", "DeepSeek-V4-Flash": "DeepSeek"}
+             "GPT-5.5": "GPT", "DeepSeek-V4-Flash": "DeepSeek", "Claude Opus 4.8": "Opus"}
     km_scopes = [] if a.km == "keine" else (["185", "115"] if a.km_bg == "beide" else [a.km_bg])
     km_models = [m for m in results if not a.km_modell or any(x.lower() in m.lower() for x in a.km_modell)]
     if a.km_modell and not km_models:
@@ -622,9 +655,11 @@ def main(argv=None):
             runs = build_runs(data[m]["main"], data[m]["supp"], scope)
             if not runs or (scope == "185" and not data[m]["supp"]):
                 continue
-            for summe in ([False] if a.km == "mittel" else [True] if a.km == "summe" else [False, True]):
-                art = "Summe über alle Läufe" if summe else "Mittel je Lauf"
-                write_confusion_sheet(wb, f"{m} – {scope} Baugruppen, {len(runs)} Läufe ({art}), GT {a.gt_name}",
+            for summe in ([False] if (single or a.km == "mittel") else [True] if a.km == "summe" else [False, True]):
+                art_k = "Summe über alle Läufe" if summe else "Mittel je Lauf"
+                art_s = art
+                write_confusion_sheet(wb, f"{m} – {scope} Baugruppen, " + (art_s if single else f"{len(runs)} Läufe ({art_k})")
+                                  + f", GT {a.gt_name}",
                                       f"{'KMS' if summe else 'KM'}_{short.get(m, m)}_{scope}", gt, runs, summe)
     wb.save(xlsx)
     print(f"\nAusgabe: {xlsx}")

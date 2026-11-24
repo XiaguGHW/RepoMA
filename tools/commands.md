@@ -298,3 +298,19 @@ python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R2.md --out "..\05_
 python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse" --km summe --km-bg 115 --km-modell Haiku --km-modell GPT
 python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R2.md --out "..\05_Ergebnisse_R2" --km keine
 ```
+
+### Konfusionsmatrizen für Einzelläufe (01_Prompt_P1-P4, 02_Input_P3)
+
+Mit `--p` und/oder `--input` wertet `evaluate_r1.py` Einzelläufe aus (je Modell und Datensatz eine Datei, auch Opus).
+Ausgabe: `Einzellauf_<P>_<Eingabe>_<GT>.xlsx` (Blatt „Einzellauf“, „Werte“, `KM_…` mit ganzen Zahlen). Die Wiederholungs-Ergebnisse werden nicht überschrieben.
+
+- `--p P1|P2|P3|P4`: nur dieser Prompt (Dateien ohne P-Angabe gelten als P3)
+- `--input pdf|image|text|bevorzugt`: nur diese Eingabe (bevorzugt = pdf, GPT-5.5 Bild, DeepSeek text; Dateien ohne Angabe = bevorzugte Eingabe)
+- `--km-bg`, `--km-modell` wie oben
+
+Prompt-Vergleich nur mit 01, Input-Vergleich nur mit 02 – sonst gibt es für P3 zwei passende Dateien (Warnung, die letzte nach Dateiname wird genommen):
+```
+python evaluate_r1.py --dir "..\01_Prompt_P1-P4" --p P1 --gt R2.md --out "..\05_Ergebnisse_R2\KM_Einzellauf"
+python evaluate_r1.py --dir "..\01_Prompt_P1-P4" --p P3 --input bevorzugt --gt R2.md --out "..\05_Ergebnisse_R2\KM_Einzellauf"
+python evaluate_r1.py --dir "..\02_Input_P3" --input image --gt R2.md --out "..\05_Ergebnisse_R2\KM_Einzellauf"
+```
