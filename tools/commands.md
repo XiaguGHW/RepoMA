@@ -314,3 +314,12 @@ python evaluate_r1.py --dir "..\01_Prompt_P1-P4" --p P1 --gt R2.md --out "..\05_
 python evaluate_r1.py --dir "..\01_Prompt_P1-P4" --p P3 --input bevorzugt --gt R2.md --out "..\05_Ergebnisse_R2\KM_Einzellauf"
 python evaluate_r1.py --dir "..\02_Input_P3" --input image --gt R2.md --out "..\05_Ergebnisse_R2\KM_Einzellauf"
 ```
+
+## 2026-11-24 · R2: Schnellstart (nach dem Austausch der Skripte)
+
+```
+python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R2.md --out "..\05_Ergebnisse_R2"
+python validate_r1.py --zehn "..\03_Wiederholung_10runs" --gt R2.md --werte "..\05_Ergebnisse_R2\Wiederhollaeufe_R2.xlsx"
+```
+
+Erwartet am Ende: „OK – alle Werte unabhängig bestätigt“.
