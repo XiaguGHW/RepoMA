@@ -124,7 +124,12 @@ def main(argv=None):
     # Ergebnisdateien lesen
     hits = defaultdict(list)   # k -> [(modell, prompt, eingabe, datei, pred, possible, reasoning)]
     nfiles, seen = 0, set()
+    src = {}            # Dateiname -> Experiment
     for root in a.dir:
+        rn = Path(root).resolve().name.lower()
+        exp = ("Wiederholungsläufe" if ("wiederhol" in rn or rn.startswith("03")) else
+               "Prompt-Vergleich" if ("prompt" in rn or rn.startswith("01")) else
+               "Input-Vergleich" if ("input" in rn or rn.startswith("02")) else Path(root).name)
         for f in sorted(Path(root).rglob("*.xlsx")):
             if E.is_output_or_backup(f):
                 continue
@@ -137,6 +142,7 @@ def main(argv=None):
                 continue
             nfiles += 1
             m, p, i = model_of(f)
+            src[f.name] = (exp, p, i)
             for k, pred, pos, rea in rows:
                 if k in bg:
                     hits[k].append((m, p, i, f.name, pred, pos, rea))
@@ -178,6 +184,79 @@ def main(argv=None):
                     rea = rea[:MAX_GRUND].rsplit(" ", 1)[0] + " …"
                 g.comment = Comment(f"LLM-Reasoning ({m}, {p}, {fn}):\n{rea}", "Auswertung")
                 g.comment.width, g.comment.height = 420, 60 + 14 * (len(rea) // 60)
+
+    # Tabelle unter der Liste: Zusammensetzung der LLM-Vorhersagen je Modell
+    EXPS = ["Wiederholungsläufe", "Prompt-Vergleich", "Input-Vergleich"]
+    comp = defaultdict(Counter)       # Modell -> Counter(Zusammensetzung je BG)
+    for k in bg:
+        per = defaultdict(list)
+        for m, p, i, fn, pr, pos, rea in hits.get(k, []):
+            if pr:
+                per[m].append(src.get(fn, ("?", p, i)))
+        for m, lst in per.items():
+            sig = []
+            for e in EXPS + sorted({x[0] for x in lst} - set(EXPS)):
+                sel = [x for x in lst if x[0] == e]
+                if e == "Prompt-Vergleich":
+                    det = ", ".join(sorted({x[1] for x in sel}))
+                elif e == "Input-Vergleich":
+                    det = ", ".join(x for x in ("pdf", "image", "text") if x in {y[2] for y in sel})
+                else:
+                    det = ""
+                sig.append((e, len(sel), det))
+            comp[m][tuple(sig)] += 1
+    last = max(r for r, _ in bg.values())
+    ncols = ws.max_column
+    tr = last + 3
+    t = ws.cell(tr, 2, "Anzahl der LLM-Vorhersagen je Baugruppe (Nenner in „von LLM markiert“)")
+    t.font = Font(bold=True, size=12)
+    heads = ["Modell", "Wiederholungsläufe", "Prompt-Vergleich", "", "Input-Vergleich", "", "Vorhersagen je BG", "Baugruppen"]
+    spans = [(2, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8), (9, 9), (10, 10)]
+    sub = ["", "Anzahl", "Anzahl", "Prompts", "Anzahl", "Eingaben", "gesamt", "mit dieser Anzahl"]
+    thick = Side(style="medium", color="C00000")
+    hdr_r = tr + 1
+    for (c1, c2), h, sh in zip(spans, heads, sub):
+        if c2 > c1:
+            ws.merge_cells(start_row=hdr_r, start_column=c1, end_row=hdr_r, end_column=c2)
+            ws.merge_cells(start_row=hdr_r + 1, start_column=c1, end_row=hdr_r + 1, end_column=c2)
+        for rr_, txt in ((hdr_r, h), (hdr_r + 1, sh)):
+            for cc in range(c1, c2 + 1):
+                c = ws.cell(rr_, cc)
+                c.fill, c.font = PatternFill("solid", fgColor="D9D9D9"), Font(bold=True)
+                c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                c.border = Border(left=thin, right=thin, top=thin, bottom=thick if rr_ == hdr_r + 1 else thin)
+            ws.cell(rr_, c1, txt or None)
+    for c1 in (5, 7):
+        ws.merge_cells(start_row=hdr_r, start_column=c1, end_row=hdr_r, end_column=c1 + 1)
+    rr_ = hdr_r + 2
+    first_t = rr_
+    for m in MODEL_PRIO + sorted(set(comp) - set(MODEL_PRIO)):
+        if m not in comp:
+            continue
+        for sig, nbg in comp[m].most_common():
+            d = {e: (n, det) for e, n, det in sig}
+            tot_n = sum(n for _, n, _ in sig)
+            vals = [(2, m), (4, d.get("Wiederholungsläufe", (0, ""))[0]),
+                    (5, d.get("Prompt-Vergleich", (0, ""))[0]), (6, d.get("Prompt-Vergleich", (0, ""))[1] or "–"),
+                    (7, d.get("Input-Vergleich", (0, ""))[0]), (8, d.get("Input-Vergleich", (0, ""))[1] or "–"),
+                    (9, tot_n), (10, nbg)]
+            ws.merge_cells(start_row=rr_, start_column=2, end_row=rr_, end_column=3)
+            for cc in range(2, 11):
+                c = ws.cell(rr_, cc)
+                c.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+                c.alignment = Alignment(horizontal="left" if cc == 2 else "center", vertical="center", indent=1 if cc == 2 else 0)
+            for cc, v in vals:
+                ws.cell(rr_, cc, v)
+            ws.cell(rr_, 9).font = Font(bold=True)
+            ws.row_dimensions[rr_].height = 18
+            rr_ += 1
+    for cc in range(2, 11):
+        c = ws.cell(rr_ - 1, cc)
+        c.border = Border(left=thin, right=thin, top=thin, bottom=thick)
+    ws.cell(rr_ + 1, 2, "Wiederholungsläufe = 10 Läufe mit P3 und bevorzugter Eingabe; Prompt-Vergleich = P1–P4 "
+            "(Einzellauf); Input-Vergleich = P3 mit pdf/Bild/text (Einzellauf). Dieselbe Datei in mehreren Ordnern "
+            "wird nur einmal gezählt. Unterschiedliche Zeilen je Modell = abweichende Anzahl bei einzelnen Baugruppen."
+            ).font = Font(size=9, italic=True)
 
     # Blatt LLM-Reasoning
     if "LLM-Reasoning" in wb.sheetnames:
