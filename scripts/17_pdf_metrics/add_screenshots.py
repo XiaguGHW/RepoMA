@@ -196,7 +196,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     # Quelle
-    qwb = load_workbook(a.quelle)
+    qwb = load_workbook(a.quelle, data_only=True)   # Formelergebnisse (SAP/Teamcenter oft per Formel)
     q_idx = None
     for i_, sh in enumerate(qwb.worksheets):
         if a.blatt and sh.title != a.blatt:
