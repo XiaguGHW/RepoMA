@@ -86,9 +86,10 @@ def read_mensch(path, sheet=None):
             continue
         for p, v in vals.items():
             if (k, p) in seen:
-                dup.append((k, p, seen[(k, p)], xrow))
+                r0, v0 = seen[(k, p)]
+                dup.append((k, p, r0, xrow, v0, v))
                 continue
-            seen[(k, p)] = xrow
+            seen[(k, p)] = (xrow, v)
             lab = cm.canon(v)
             if lab.startswith("UNGÜLTIG"):
                 unk_names[v] += 1
@@ -133,8 +134,11 @@ def main(argv=None):
     if info["unk_names"]:
         print(f"  ! nicht erkannte Klassennamen (als „ungültig“ gezählt): {dict(info['unk_names'])}")
     if info["dup"]:
-        print(f"  ! {len(info['dup'])} doppelte Klassifikationen derselben Person (zweite ignoriert), "
-              f"z. B. {info['dup'][0][0]} {info['dup'][0][1]} Zeilen {info['dup'][0][2]}/{info['dup'][0][3]}")
+        print(f"  ! {len(info['dup'])} doppelte Klassifikationen derselben Person (gleiche BG in mehreren Zeilen; "
+              f"gezählt wird die erste):")
+        for k, p, r0, r1, v0, v1 in info["dup"]:
+            same = "gleich" if cm.canon(v0) == cm.canon(v1) else "ANDERS"
+            print(f"     {k}  {p}: Zeile {r0} „{v0}“ / Zeile {r1} „{v1}“  ({same})")
     if info["unknown_rows"]:
         print(f"  ! {len(info['unknown_rows'])} Zeilen ohne bekannte SAP/Teamcenter ignoriert, "
               f"z. B. Excel-Zeile {info['unknown_rows'][0][0]} ({info['unknown_rows'][0][1]})")
