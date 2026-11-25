@@ -345,3 +345,12 @@ Vorlage neu erzeugen (z. B. nach Änderung der GT):
 python make_vorlage_mehrdeutig.py --gt R2.md --out Mehrdeutige_Baugruppen_R2_Begruendung.xlsx
 ```
 „von LLM markiert“ steht jetzt direkt in der Zelle als „ja (n/N)“ / „nein (0/N)“, dazu Spalte „andere Klassen“ (z. B. „GR × 2, RO × 1“); keine Kommentare mehr. Aufschlüsselung je Modell im Blatt „LLM-Häufigkeiten“.
+
+## 2026-11-25 · CAD-Screenshots in die Liste der mehrdeutigen BG übernehmen
+
+Stammdaten-Tabelle (SAP-Nummer, Teamcenter, Benennung, Abbildung) nach `R1_Auswertung\06_Stammdaten\` legen.
+Als letzten Schritt (nach `fill_mehrdeutig_llm.py`):
+```
+python add_screenshots.py --quelle "..\06_Stammdaten\<Tabelle>.xlsx" --ziel "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM.xlsx" --out "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM_Bilder.xlsx"
+```
+Optional größere Bilder: `--zeilenhoehe 110` (Zeilenhöhe in pt). Bilder werden mit Seitenverhältnis in die Zelle „Screenshot“ eingepasst und zentriert; erkannt werden normal eingefügte Bilder und „in Zelle platzierte“ Bilder.
