@@ -12,7 +12,5 @@ anbei die Liste der mehrdeutigen Baugruppen (R2) mit Begründung je Label: die 3
 
 „ja (n/N)“ bedeutet: n von N Klassifikationen haben dieses Label vergeben (Mensch = Workshop-Teilnehmende, LLM = alle Läufe aller Modelle). Unter „andere Klassen“ stehen die übrigen Vergaben, z. B. „GR × 2“. Die Aufschlüsselung je Modell und die LLM-Begründungen sind in den weiteren Blättern.
 
-Kürzel: LE = Lineareinheit, RE = Rotationseinheit, GR = Greifer, MA = Multi-Achs-System (Gantry), RO = Roboter, KE = Kombinierte Einheit, SO = Keine der verfügbaren Klassen
-
 Viele Grüße
 Duanni
