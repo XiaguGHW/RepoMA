@@ -101,10 +101,20 @@ def _in_cell_images(path, sheet_index):
             v = int(rc.get("v")) if rc is not None else None
             vm_to_rv.append(fut[v] if v is not None and v < len(fut) else None)
         # Rich Value -> Bild-Relation
+        # Position des Schlüssels „_rvRel:LocalImageIdentifier“ je Struktur (meist 0)
+        key_pos = []
+        if "xl/richData/rdrichvaluestructure.xml" in names:
+            sx_ = ET.fromstring(z.read("xl/richData/rdrichvaluestructure.xml"))
+            for st in sx_.findall("rv:s", NS):
+                ks = [k.get("n") for k in st.findall("rv:k", NS)]
+                key_pos.append(ks.index("_rvRel:LocalImageIdentifier") if "_rvRel:LocalImageIdentifier" in ks else None)
         rvx = ET.fromstring(z.read("xl/richData/rdrichvalue.xml"))
         rv_first = []
         for rv in rvx.findall("rv:rv", NS):
-            v = rv.find("rv:v", NS)
+            vs = rv.findall("rv:v", NS)
+            si = int(rv.get("s", 0))
+            pos = key_pos[si] if si < len(key_pos) else 0
+            v = vs[pos] if pos is not None and pos < len(vs) else None
             rv_first.append(int(v.text) if v is not None and (v.text or "").strip().isdigit() else None)
         relx = ET.fromstring(z.read("xl/richData/richValueRel.xml"))
         rel_ids = [x.get(f"{{{NS['r']}}}id") for x in relx]
