@@ -354,3 +354,15 @@ Als letzten Schritt (nach `fill_mehrdeutig_llm.py`):
 python add_screenshots.py --quelle "..\06_Stammdaten\<Tabelle>.xlsx" --ziel "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM.xlsx" --out "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM_Bilder.xlsx"
 ```
 Optional größere Bilder: `--zeilenhoehe 110` (Zeilenhöhe in pt). Bilder werden mit Seitenverhältnis in die Zelle „Screenshot“ eingepasst und zentriert; erkannt werden normal eingefügte Bilder und „in Zelle platzierte“ Bilder.
+
+## 2026-11-25 · „von Mensch markiert“ aus der Workshop-Auswertung füllen
+
+Blatt „Klassifikation_Übersicht_Gesamt“ als eigene Datei speichern (z. B. `06_Stammdaten\Klassifikation_Uebersicht_Gesamt.xlsx`;
+falls die TN-Zellen Formeln auf andere Blätter enthalten: als Werte einfügen). Gezählt werden alle Spalten, deren Überschrift mit „TN“ beginnt.
+
+Reihenfolge: 1. fill_mehrdeutig_llm.py → 2. fill_mehrdeutig_mensch.py → 3. add_screenshots.py
+```
+python fill_mehrdeutig_mensch.py --mensch "..\06_Stammdaten\Klassifikation_Uebersicht_Gesamt.xlsx" --ziel "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM.xlsx" --out "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM_Mensch.xlsx"
+python add_screenshots.py --quelle "..\06_Stammdaten\<Tabelle mit Abbildung>.xlsx" --ziel "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM_Mensch.xlsx" --out "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_final.xlsx"
+```
+Das Skript listet alle Klassennamen der Tabelle mit ihrer Vereinheitlichung auf (bitte kurz prüfen).
