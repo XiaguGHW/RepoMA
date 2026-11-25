@@ -109,7 +109,7 @@ def main(argv=None):
                 c.fill = PatternFill("solid", fgColor=YEL)
                 if col in (13, 14, 15, 17, 18, 19):
                     dv.add(c)
-        ws.row_dimensions[rr].height = 75
+        ws.row_dimensions[rr].height = 150
     last = first + len(rows) - 1
     for j in range(2, 2 + len(COLS)):
         ws.cell(last, j).border = Border(left=thin, right=thin, top=thin, bottom=thick)
