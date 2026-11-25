@@ -2,11 +2,11 @@
 Füllt die Vorlage „Mehrdeutige_Baugruppen_R2_Begruendung.xlsx“ aus allen LLM-Ergebnisdateien vor.
 
 Für jede mehrdeutige Baugruppe und jedes Label der Labelmenge:
-- „Label n von LLM markiert“ = ja, wenn das Label in irgendeinem Lauf irgendeines Modells
-  als Predicted_Label vorhergesagt ODER in Possible_Classes_If_Ambiguous genannt wurde, sonst nein.
-  Ein Kommentar an der Zelle zeigt, welches Modell wie oft (vorhergesagt / als möglich genannt).
-- „Grund Label n“ = Entwurf aus der Reasoning-Spalte eines Laufs, der dieses Label vorhergesagt hat
-  (falls keiner: eines Laufs, der es als möglich genannt hat). Hellblau markiert = automatischer Entwurf.
+- „Label n von LLM markiert“ = ja, wenn das Label in mindestens einem Lauf irgendeines Modells
+  als Predicted_Label vorhergesagt wurde, sonst nein. Ein Kommentar an der Zelle zeigt je Modell,
+  wie oft vorhergesagt (nur zur Info zusätzlich: wie oft unter Possible_Classes_If_Ambiguous genannt).
+- „Grund Label n“ bleibt leer (Begründung der Ground Truth durch den Menschen). Als Hilfe hängt an der
+  Zelle ein Kommentar mit einem Auszug aus dem Reasoning eines LLM-Laufs, der dieses Label vorhergesagt hat.
 - Blatt „LLM-Reasoning“: alle Läufe zu den mehrdeutigen Baugruppen mit vollständigem Reasoning.
 Die Spalten „von Mensch markiert“ und „Screenshot“ werden nicht verändert.
 
@@ -150,14 +150,14 @@ def main(argv=None):
             pred_cnt = Counter(m for m, *_r in runs if _r[3] == lab)
             pos_cnt = Counter(m for m, p, i, fn, pr, pos, rea in runs if lab in pos and pr != lab)
             tot = Counter(m for m, *_ in runs)
-            marked = bool(pred_cnt or pos_cnt)
+            marked = bool(pred_cnt)
             c = ws.cell(row, c_llm[n], "ja" if marked else "nein")
             c.fill = PatternFill("solid", fgColor=AUTO)
             txt = [f"{lab}:"]
             for m in MODEL_PRIO + sorted(set(tot) - set(MODEL_PRIO)):
                 if tot.get(m):
                     txt.append(f"{m}: vorhergesagt {pred_cnt.get(m, 0)}/{tot[m]}"
-                               + (f", als möglich genannt {pos_cnt[m]}" if pos_cnt.get(m) else ""))
+                               + (f" (zusätzlich als möglich genannt: {pos_cnt[m]})" if pos_cnt.get(m) else ""))
             if len(txt) == 1:
                 txt.append("keine LLM-Läufe gefunden")
             c.comment = Comment("\n".join(txt), "Auswertung")
@@ -166,17 +166,15 @@ def main(argv=None):
             g = ws.cell(row, c_grund[n])
             if g.value not in (None, ""):
                 continue
-            cand = [x for x in runs if x[4] == lab and x[6]] or [x for x in runs if lab in x[5] and x[6]]
+            cand = [x for x in runs if x[4] == lab and x[6]]
             if cand:
                 cand.sort(key=lambda x: (MODEL_PRIO.index(x[0]) if x[0] in MODEL_PRIO else 99, x[1] != "P3", x[3]))
                 m, p, i, fn, pr, pos, rea = cand[0]
                 rea = re.sub(r"\s+", " ", rea)
                 if len(rea) > MAX_GRUND:
                     rea = rea[:MAX_GRUND].rsplit(" ", 1)[0] + " …"
-                g.value = f"[LLM-Entwurf, {m}, {p}{'' if pr == lab else ', als möglich genannt'}] {rea}"
-                g.fill = PatternFill("solid", fgColor=AUTO)
-                g.alignment = Alignment(wrap_text=True, vertical="top")
-                g.font = Font(size=9)
+                g.comment = Comment(f"LLM-Reasoning ({m}, {p}, {fn}):\n{rea}", "Auswertung")
+                g.comment.width, g.comment.height = 420, 60 + 14 * (len(rea) // 60)
 
     # Blatt LLM-Reasoning
     if "LLM-Reasoning" in wb.sheetnames:
@@ -210,10 +208,10 @@ def main(argv=None):
         h = wb["Hinweise"]
         r = h.max_row + 2
         for t in ["Automatisch vorbefüllt (hellblau):",
-                  "„von LLM markiert“ = ja, wenn ein LLM das Label in mindestens einem Lauf vorhergesagt oder unter "
-                  "Possible_Classes_If_Ambiguous genannt hat; Details im Kommentar der Zelle.",
-                  "„Grund Label n“ = Entwurf aus dem Reasoning eines Laufs (bevorzugt Gemini Pro / Opus, P3) – bitte prüfen "
-                  "und überarbeiten. Alle Reasonings im Blatt „LLM-Reasoning“."]:
+                  "„von LLM markiert“ = ja, wenn ein LLM das Label in mindestens einem Lauf als Predicted_Label "
+                  "vorhergesagt hat; Häufigkeit je Modell im Kommentar der Zelle.",
+                  "„Grund Label n“: Begründung, warum das Label für die Baugruppe zulässig ist (Ground Truth). Als Hilfe "
+                  "enthält der Kommentar der Zelle einen Auszug aus einem LLM-Reasoning; alle Reasonings im Blatt „LLM-Reasoning“."]:
             h.cell(r, 2, t).alignment = Alignment(wrap_text=True)
             r += 1
         h.cell(h.max_row - 2, 2).font = Font(bold=True)
