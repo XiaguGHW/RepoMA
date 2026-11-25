@@ -48,6 +48,19 @@ def read_gt_rows(path):
     return rows
 
 
+
+def save_safe(wb, out):
+    """Speichern; ist die Datei in Excel geöffnet, unter neuem Namen mit Uhrzeit speichern."""
+    try:
+        wb.save(out)
+        return out
+    except PermissionError:
+        import datetime
+        alt = out.with_name(f"{out.stem}_{datetime.datetime.now():%H-%M-%S}{out.suffix}")
+        print(f"  ! {out.name} ist geöffnet (Excel?) – gespeichert als {alt.name}")
+        wb.save(alt)
+        return alt
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--gt", required=True)
@@ -143,7 +156,7 @@ def main(argv=None):
 
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(out)
+    out = save_safe(wb, out)
     print(f"{len(rows)} Baugruppen -> {out}")
 
 

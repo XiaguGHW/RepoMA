@@ -171,6 +171,19 @@ def row_px(ws, row):
     return int(h * 96 / 72)
 
 
+
+def save_safe(wb, out):
+    """Speichern; ist die Datei in Excel geöffnet, unter neuem Namen mit Uhrzeit speichern."""
+    try:
+        wb.save(out)
+        return out
+    except PermissionError:
+        import datetime
+        alt = out.with_name(f"{out.stem}_{datetime.datetime.now():%H-%M-%S}{out.suffix}")
+        print(f"  ! {out.name} ist geöffnet (Excel?) – gespeichert als {alt.name}")
+        wb.save(alt)
+        return alt
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--quelle", required=True, help="Tabelle mit SAP-Nummer, Teamcenter und Abbildung")
@@ -281,7 +294,7 @@ def main(argv=None):
         r += 1
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(out)
+    out = save_safe(wb, out)
     print(f"Ziel: {placed} Bilder eingefügt" + (f"; ohne Bild: {', '.join(missing)}" if missing else ""))
     print(f"Ausgabe: {out}")
 

@@ -113,6 +113,19 @@ def model_of(f):
     return m or "?", p or "P3", i or X.PREF.get(m, "pdf")
 
 
+
+def save_safe(wb, out):
+    """Speichern; ist die Datei in Excel geöffnet, unter neuem Namen mit Uhrzeit speichern."""
+    try:
+        wb.save(out)
+        return out
+    except PermissionError:
+        import datetime
+        alt = out.with_name(f"{out.stem}_{datetime.datetime.now():%H-%M-%S}{out.suffix}")
+        print(f"  ! {out.name} ist geöffnet (Excel?) – gespeichert als {alt.name}")
+        wb.save(alt)
+        return alt
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dir", action="append", required=True, help="Ordner mit LLM-Ergebnissen (mehrfach möglich)")
@@ -369,7 +382,7 @@ def main(argv=None):
 
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(out)
+    out = save_safe(wb, out)
     # Kontrolle: gleiche Anzahl gültiger Vorhersagen je Modell über alle Baugruppen?
     per_model = defaultdict(Counter)
     for k in bg:

@@ -75,7 +75,8 @@ def read_mensch(path, sheet=None):
     out, seen, dup, unknown_rows, unk_names = defaultdict(list), {}, [], [], Counter()
     for i, row in df.iterrows():
         xrow = i + hr + 2
-        vals = {c: str(row[c]).strip() for c in tn_cols if not E.is_empty(row[c]) and str(row[c]).strip()}
+        vals = {c: str(row[c]).strip() for c in tn_cols
+                if not E.is_empty(row[c]) and str(row[c]).strip() not in ("", "0", "0.0", "#N/A", "#NV")}
         if not vals:
             continue
         k = cm.match_key(None if E.is_empty(row[c_sap]) else row[c_sap],
@@ -97,6 +98,19 @@ def read_mensch(path, sheet=None):
                 unk_names=unk_names, raw_names=Counter(v for lst in out.values() for _, _, v, _ in lst))
     return out, info
 
+
+
+def save_safe(wb, out):
+    """Speichern; ist die Datei in Excel geöffnet, unter neuem Namen mit Uhrzeit speichern."""
+    try:
+        wb.save(out)
+        return out
+    except PermissionError:
+        import datetime
+        alt = out.with_name(f"{out.stem}_{datetime.datetime.now():%H-%M-%S}{out.suffix}")
+        print(f"  ! {out.name} ist geöffnet (Excel?) – gespeichert als {alt.name}")
+        wb.save(alt)
+        return alt
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -186,7 +200,7 @@ def main(argv=None):
 
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(out)
+    out = save_safe(wb, out)
     print(f"Ziel: {filled} Baugruppen mit Klassifikationen gefüllt"
           + (f"; ohne Klassifikation durch Personen: {', '.join(none)}" if none else ""))
     print(f"Ausgabe: {out}")
