@@ -175,9 +175,9 @@ python find_incomplete_runs.py --root "..\01_Prompt_P1-P4\70BG" --root "..\02_In
 ## 2026-11-23 · R1-Auswertung: Kennzahlen berechnen
 
 ```
-python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse"
-python validate_r1.py --zehn "..\03_Wiederholung_10runs" --gt R1.md --werte "..\05_Ergebnisse\Wiederhollaeufe_R1.xlsx"
-python evaluate_r1_ergebnisse.py --gt R1.md --prompt "..\01_Prompt_P1-P4" --input "..\02_Input_P3" --zehn "..\03_Wiederholung_10runs" --out "..\05_Ergebnisse"
+python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse_R1"
+python validate_r1.py --zehn "..\03_Wiederholung_10runs" --gt R1.md --werte "..\05_Ergebnisse_R1\Wiederhollaeufe_R1.xlsx"
+python evaluate_r1_ergebnisse.py --gt R1.md --prompt "..\01_Prompt_P1-P4" --input "..\02_Input_P3" --zehn "..\03_Wiederholung_10runs" --out "..\05_Ergebnisse_R1"
 ```
 
 检查：每个模型 “10 Läufe 115 BG, 10 Läufe 70 BG”；validate 最后一行 “OK – alle Werte unabhängig bestätigt.”；ergebnisse 没有 “Einzelläufe gefunden”。
@@ -220,7 +220,7 @@ python find_incomplete_runs.py --root "..\01_Prompt_P1-P4\70BG" --root "..\02_In
 ## 2026-11-23 · R1-Auswertung: Diagramme Wiederholungsläufe
 
 ```
-python plot_wiederholung_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse\Diagramme"
+python plot_wiederholung_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse_R1\Diagramme"
 ```
 
 Ausgabe: `Diagramme_Wiederholung_R1.xlsx` (alle Diagramme, Blätter 185 BG / 115 BG / Werte je Lauf) – zum Versenden; dazu die einzelnen PNGs und `Accuracy_je_Lauf_R1.xlsx`.
@@ -228,14 +228,14 @@ Ausgabe: `Diagramme_Wiederholung_R1.xlsx` (alle Diagramme, Blätter 185 BG / 115
 ## 2026-11-23 · R1: Einzelnachweis je Baugruppe
 
 ```
-python detail_bg_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse\Detail_BG_R1.xlsx"
+python detail_bg_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse_R1\Detail_BG_R1.xlsx"
 ```
 
 ## 2026-11-23 · R1: Input-Vergleich (02_Input_P3) nach Teilmengen
 
 ```
-python eval_input_regime_r1.py --input "..\02_Input_P3" --gt R1.md --nur pdf --out "..\05_Ergebnisse\Input_P3_pdf_Teilmengen_R1.xlsx"
-python eval_input_regime_r1.py --input "..\02_Input_P3" --gt R1.md --out "..\05_Ergebnisse\Input_P3_Teilmengen_R1.xlsx"
+python eval_input_regime_r1.py --input "..\02_Input_P3" --gt R1.md --nur pdf --out "..\05_Ergebnisse_R1\Input_P3_pdf_Teilmengen_R1.xlsx"
+python eval_input_regime_r1.py --input "..\02_Input_P3" --gt R1.md --out "..\05_Ergebnisse_R1\Input_P3_Teilmengen_R1.xlsx"
 ```
 
 Allowed und Strict Accuracy für alle / eindeutig / mehrdeutig / E1 / E2 / M (R1-Register), 115 und 185 BG, Einzelläufe.
@@ -243,17 +243,17 @@ Allowed und Strict Accuracy für alle / eindeutig / mehrdeutig / E1 / E2 / M (R1
 ## 2026-11-23 · R1: Prompt-Vergleich P3 (01_Prompt_P1-P4) nach Teilmengen
 
 ```
-python eval_prompt_p3_regime_r1.py --prompt "..\01_Prompt_P1-P4" --gt R1.md --out "..\05_Ergebnisse\Prompt_P3_Teilmengen_R1.xlsx"
+python eval_prompt_p3_regime_r1.py --prompt "..\01_Prompt_P1-P4" --gt R1.md --out "..\05_Ergebnisse_R1\Prompt_P3_Teilmengen_R1.xlsx"
 ```
 
 Andere Prompts: `--p P1` (bzw. P2, P4), z. B.
 ```
-python eval_prompt_p3_regime_r1.py --prompt "..\01_Prompt_P1-P4" --gt R1.md --p P1 --out "..\05_Ergebnisse\Prompt_P1_Teilmengen_R1.xlsx"
+python eval_prompt_p3_regime_r1.py --prompt "..\01_Prompt_P1-P4" --gt R1.md --p P1 --out "..\05_Ergebnisse_R1\Prompt_P1_Teilmengen_R1.xlsx"
 ```
 
 Einzelnachweis für einen Prompt/ein Modell aus 01 (z. B. Haiku, P1):
 ```
-python detail_bg_r1.py --dir "..\01_Prompt_P1-P4" --gt R1.md --p P1 --modell Haiku --out "..\05_Ergebnisse\Detail_Haiku_P1.xlsx"
+python detail_bg_r1.py --dir "..\01_Prompt_P1-P4" --gt R1.md --p P1 --modell Haiku --out "..\05_Ergebnisse_R1\Detail_Haiku_P1.xlsx"
 ```
 
 ## 2026-11-24 · R2-Auswertung (gleiche Ergebnisse wie R1, nur mit R2 als Ground Truth)
@@ -295,7 +295,7 @@ Accuracy und Precision/Recall/F1 sind in beiden Varianten gleich; nur die Zellwe
 Beispiele:
 ```
 python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R2.md --out "..\05_Ergebnisse_R2" --km summe --km-bg 185
-python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse" --km summe --km-bg 115 --km-modell Haiku --km-modell GPT
+python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R1.md --out "..\05_Ergebnisse_R1" --km summe --km-bg 115 --km-modell Haiku --km-modell GPT
 python evaluate_r1.py --dir "..\03_Wiederholung_10runs" --gt R2.md --out "..\05_Ergebnisse_R2" --km keine
 ```
 
@@ -373,3 +373,6 @@ $ws = "<Pfad>\Ergebnis_WS1-4_gesamt_16TN_final.xlsx"
 python fill_mehrdeutig_mensch.py --mensch $ws --blatt "Klassifikation_Übersicht_Gesamt" --ziel "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM.xlsx" --out "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM_Mensch.xlsx"
 python add_screenshots.py --quelle $ws --blatt "R1_Ground_Truth_Abb" --ziel "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM_Mensch.xlsx" --out "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_final.xlsx"
 ```
+
+## 2026-11-25 · Ordner umbenannt
+`05_Ergebnisse` → `05_Ergebnisse_R1` (Ergebnisse unter R1); `05_Ergebnisse_R2` bleibt. Alle Befehle oben sind angepasst.
