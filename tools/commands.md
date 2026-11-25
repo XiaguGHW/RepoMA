@@ -339,3 +339,9 @@ Vorlage `thesis/Mehrdeutige_Baugruppen_R2_Begruendung.xlsx` nach 00_Skripte kopi
 python fill_mehrdeutig_llm.py --dir "..\01_Prompt_P1-P4" --dir "..\02_Input_P3" --dir "..\03_Wiederholung_10runs" --vorlage Mehrdeutige_Baugruppen_R2_Begruendung.xlsx --out "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM.xlsx"
 ```
 Füllt „von LLM markiert“ (ja/nein + Kommentar mit Häufigkeit je Modell), Entwürfe für „Grund Label n“ (hellblau) und das Blatt „LLM-Reasoning“.
+
+Vorlage neu erzeugen (z. B. nach Änderung der GT):
+```
+python make_vorlage_mehrdeutig.py --gt R2.md --out Mehrdeutige_Baugruppen_R2_Begruendung.xlsx
+```
+„von LLM markiert“ steht jetzt direkt in der Zelle als „ja (n/N)“ / „nein (0/N)“, dazu Spalte „andere Klassen“ (z. B. „GR × 2, RO × 1“); keine Kommentare mehr. Aufschlüsselung je Modell im Blatt „LLM-Häufigkeiten“.

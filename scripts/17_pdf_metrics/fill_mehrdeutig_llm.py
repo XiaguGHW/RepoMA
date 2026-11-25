@@ -2,11 +2,10 @@
 Füllt die Vorlage „Mehrdeutige_Baugruppen_R2_Begruendung.xlsx“ aus allen LLM-Ergebnisdateien vor.
 
 Für jede mehrdeutige Baugruppe und jedes Label der Labelmenge:
-- „Label n von LLM markiert“ = ja, wenn das Label in mindestens einem Lauf irgendeines Modells
-  als Predicted_Label vorhergesagt wurde, sonst nein. Ein Kommentar an der Zelle zeigt je Modell,
-  wie oft vorhergesagt / Anzahl gültiger Vorhersagen dieses Modells für die Baugruppe.
-- „Grund Label n“ bleibt leer (Begründung der Ground Truth durch den Menschen). Als Hilfe hängt an der
-  Zelle ein Kommentar mit einem Auszug aus dem Reasoning eines LLM-Laufs, der dieses Label vorhergesagt hat.
+- „Label n von LLM markiert“ = „ja (n/N)“: n von N gültigen Vorhersagen (alle Modelle, alle Läufe) sind dieses Label;
+  „nein (0/N)“ = nie vorhergesagt.
+- „andere Klassen“ (LLM) = Vorhersagen außerhalb der Labelmenge, z. B. „GR × 2, RO × 1“ (Summe aller Zahlen = N).
+- Blatt „LLM-Häufigkeiten“: dasselbe je Modell. „Grund Label n“ und die Mensch-Spalten bleiben unverändert.
 - Blatt „LLM-Reasoning“: alle Läufe zu den mehrdeutigen Baugruppen mit vollständigem Reasoning.
 Die Spalten „von Mensch markiert“ und „Screenshot“ werden nicht verändert.
 
@@ -23,8 +22,9 @@ from pathlib import Path
 
 import pandas as pd
 from openpyxl import load_workbook
-from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.cell_range import MultiCellRange
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import evaluate_pdf_results as E          # noqa: E402
@@ -32,6 +32,7 @@ import evaluate_r1 as R                    # noqa: E402
 import evaluate_r1_ergebnisse as X         # noqa: E402
 
 cm = R.cm
+ABBR = R.ABBR
 MODEL_PRIO = ["Gemini 2.5 Pro", "Claude Opus 4.8", "Gemini 2.5 Flash", "GPT-5.5", "Claude Haiku 4.5", "DeepSeek-V4-Flash"]
 AUTO = "DCE6F1"     # hellblau = automatisch vorbefüllt
 MAX_GRUND = 600
@@ -150,40 +151,33 @@ def main(argv=None):
 
     thin = Side(style="thin", color="BFBFBF")
     no_llm = []
+    c_other = col["andere Klassen"][0]                  # erstes Vorkommen = LLM
+    # Datenüberprüfung ja/nein von den LLM-Zellen entfernen (dort steht jetzt „ja (n/N)“)
+    llm_cols = {get_column_letter(c) for c in c_llm}
+    for dv in ws.data_validations.dataValidation:
+        keep = [rg for rg in str(dv.sqref).split() if re.match(r"[A-Z]+", rg).group(0) not in llm_cols]
+        dv.sqref = MultiCellRange(" ".join(keep)) if keep else MultiCellRange()
+    detail = {}
     for k, (row, labs) in bg.items():
-        runs = hits.get(k, [])
+        runs = [x for x in hits.get(k, []) if x[4]]           # nur gültige Vorhersagen
         if not runs:
             no_llm.append(k)
+        tot = len(runs)
+        cnt = Counter(x[4] for x in runs)
         for n, lab in enumerate(labs):
             if not lab:
                 continue
-            pred_cnt = Counter(m for m, *_r in runs if _r[3] == lab)
-            tot = Counter(m for m, *_r in runs if _r[3])          # nur gültige Vorhersagen
-            marked = bool(pred_cnt)
-            c = ws.cell(row, c_llm[n], "ja" if marked else "nein")
+            c = ws.cell(row, c_llm[n], (f"ja ({cnt[lab]}/{tot})" if cnt[lab] else f"nein (0/{tot})") if tot else "–")
             c.fill = PatternFill("solid", fgColor=AUTO)
-            txt = [f"{lab}:"]
-            for m in MODEL_PRIO + sorted(set(tot) - set(MODEL_PRIO)):
-                if tot.get(m):
-                    txt.append(f"{m}: vorhergesagt {pred_cnt.get(m, 0)}/{tot[m]}"
-                               )
-            if len(txt) == 1:
-                txt.append("keine LLM-Läufe gefunden")
-            c.comment = Comment("\n".join(txt), "Auswertung")
-            c.comment.width, c.comment.height = 320, 20 + 16 * len(txt)
-            # Grund-Entwurf
-            g = ws.cell(row, c_grund[n])
-            if g.value not in (None, ""):
-                continue
-            cand = [x for x in runs if x[4] == lab and x[6]]
-            if cand:
-                cand.sort(key=lambda x: (MODEL_PRIO.index(x[0]) if x[0] in MODEL_PRIO else 99, x[1] != "P3", x[3]))
-                m, p, i, fn, pr, pos, rea = cand[0]
-                rea = re.sub(r"\s+", " ", rea)
-                if len(rea) > MAX_GRUND:
-                    rea = rea[:MAX_GRUND].rsplit(" ", 1)[0] + " …"
-                g.comment = Comment(f"LLM-Reasoning ({m}, {p}, {fn}):\n{rea}", "Auswertung")
-                g.comment.width, g.comment.height = 420, 60 + 14 * (len(rea) // 60)
+        other = {lab_: n_ for lab_, n_ in cnt.items() if lab_ not in labs}
+        txt = ", ".join(f"{ABBR.get(l_, l_)} × {n_}" for l_, n_ in sorted(other.items(), key=lambda x: (-x[1], x[0])))
+        c = ws.cell(row, c_other, (txt or "–") if tot else "–")
+        c.fill = PatternFill("solid", fgColor=AUTO)
+        # je Modell für Blatt „LLM-Häufigkeiten“
+        per = defaultdict(Counter)
+        for x in runs:
+            per[x[0]][x[4]] += 1
+        detail[k] = (row, labs, per)
 
     # Tabelle unter der Liste: Zusammensetzung der LLM-Vorhersagen je Modell
     EXPS = ["Wiederholungsläufe", "Prompt-Vergleich", "Input-Vergleich"]
@@ -285,15 +279,54 @@ def main(argv=None):
     s.freeze_panes = "C2"
     s.auto_filter.ref = f"A1:K{max(rr - 1, 1)}"
 
+    # Blatt LLM-Häufigkeiten: je Baugruppe und Modell, welche Klassen wie oft
+    if "LLM-Häufigkeiten" in wb.sheetnames:
+        del wb["LLM-Häufigkeiten"]
+    q = wb.create_sheet("LLM-Häufigkeiten")
+    q.sheet_view.showGridLines = False
+    models = [m for m in MODEL_PRIO if any(m in d[2] for d in detail.values())]
+    models += sorted({m for d in detail.values() for m in d[2]} - set(models))
+    head = ["SAP Nr", "Teamcenter", "Datensatz", "Labelmenge"] + models
+    q.column_dimensions["A"].width = 2
+    for j, h_ in enumerate(head):
+        c = q.cell(2, 2 + j, h_)
+        c.font, c.fill = Font(bold=True), PatternFill("solid", fgColor="D9D9D9")
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = Border(left=thin, right=thin, top=thin, bottom=Side(style="medium", color="C00000"))
+        q.column_dimensions[get_column_letter(2 + j)].width = [14, 13, 13, 16][j] if j < 4 else 26
+    rr = 3
+    c_ds = col["Datensatz"][0]
+    for k, (row, labs, per) in detail.items():
+        vals = [ws.cell(row, c_sap).value, ws.cell(row, c_tc).value, ws.cell(row, c_ds).value,
+                ", ".join(ABBR.get(x, x) for x in labs if x)]
+        for m in models:
+            cn = per.get(m)
+            if not cn:
+                vals.append("–")
+                continue
+            inside = [f"{ABBR.get(l_, l_)} × {cn[l_]}" for l_ in labs if l_ and cn.get(l_)]
+            outside = [f"{ABBR.get(l_, l_)} × {n_}" for l_, n_ in sorted(cn.items(), key=lambda x: (-x[1], x[0])) if l_ not in labs]
+            vals.append(", ".join(inside + outside) + f"  (N = {sum(cn.values())})")
+        for j, v in enumerate(vals):
+            c = q.cell(rr, 2 + j, v)
+            c.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+            c.alignment = Alignment(horizontal="left" if j < 4 else "center", vertical="center", indent=1 if j < 4 else 0)
+        rr += 1
+    for j in range(len(head)):
+        q.cell(rr - 1, 2 + j).border = Border(left=thin, right=thin, top=thin, bottom=Side(style="medium", color="C00000"))
+    q.cell(rr + 1, 2, "Je Modell: Klassen der Labelmenge zuerst, dann andere Klassen; N = gültige Vorhersagen des Modells "
+                      "für die Baugruppe. Kürzel: " + ", ".join(f"{v} = {k_}" for k_, v in ABBR.items())).font = Font(size=9, italic=True)
+    q.freeze_panes = "F3"
+
     # Hinweis ergänzen
     if "Hinweise" in wb.sheetnames:
         h = wb["Hinweise"]
         r = h.max_row + 2
         for t in ["Automatisch vorbefüllt (hellblau):",
-                  "„von LLM markiert“ = ja, wenn ein LLM das Label in mindestens einem Lauf als Predicted_Label "
-                  "vorhergesagt hat; Häufigkeit je Modell im Kommentar der Zelle.",
-                  "„Grund Label n“: Begründung, warum das Label für die Baugruppe zulässig ist (Ground Truth). Als Hilfe "
-                  "enthält der Kommentar der Zelle einen Auszug aus einem LLM-Reasoning; alle Reasonings im Blatt „LLM-Reasoning“."]:
+                  "„von LLM markiert“: ja (n/N) = in n von N gültigen LLM-Vorhersagen (alle Modelle und Läufe) wurde dieses Label "
+                  "vorhergesagt; nein (0/N) = nie. „andere Klassen“ = Vorhersagen außerhalb der Labelmenge, z. B. GR × 2. "
+                  "Die Zahlen ergeben zusammen N. Aufschlüsselung je Modell im Blatt „LLM-Häufigkeiten“.",
+                  "„Grund Label n“ bleibt für die Begründung der Ground Truth frei; alle LLM-Reasonings im Blatt „LLM-Reasoning“."]:
             h.cell(r, 2, t).alignment = Alignment(wrap_text=True)
             r += 1
         h.cell(h.max_row - 2, 2).font = Font(bold=True)
