@@ -366,3 +366,10 @@ python fill_mehrdeutig_mensch.py --mensch "..\06_Stammdaten\Klassifikation_Ueber
 python add_screenshots.py --quelle "..\06_Stammdaten\<Tabelle mit Abbildung>.xlsx" --ziel "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM_Mensch.xlsx" --out "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_final.xlsx"
 ```
 Das Skript listet alle Klassennamen der Tabelle mit ihrer Vereinheitlichung auf (bitte kurz prüfen).
+
+Ohne Aufteilen direkt aus der großen Workshop-Datei (Blätter werden automatisch gefunden; optional `--blatt`):
+```
+$ws = "<Pfad>\Ergebnis_WS1-4_gesamt_16TN_final.xlsx"
+python fill_mehrdeutig_mensch.py --mensch $ws --blatt "Klassifikation_Übersicht_Gesamt" --ziel "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM.xlsx" --out "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM_Mensch.xlsx"
+python add_screenshots.py --quelle $ws --blatt "R1_Ground_Truth_Abb" --ziel "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM_Mensch.xlsx" --out "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_final.xlsx"
+```

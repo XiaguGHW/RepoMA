@@ -166,6 +166,7 @@ def main(argv=None):
     ap.add_argument("--quelle", required=True, help="Tabelle mit SAP-Nummer, Teamcenter und Abbildung")
     ap.add_argument("--ziel", required=True, help="Tabelle mit Spalte „Screenshot“")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--blatt", help="Blatt der Quelle (Standard: erstes Blatt mit Spalte „Abbildung“)")
     ap.add_argument("--rand", type=int, default=4, help="Rand in Pixeln (Standard 4)")
     ap.add_argument("--zeilenhoehe", type=float, default=None,
                     help="Zeilenhöhe der Zielzeilen in pt setzen (z. B. 110 für größere Bilder)")
@@ -175,6 +176,8 @@ def main(argv=None):
     qwb = load_workbook(a.quelle)
     q_idx = None
     for i_, sh in enumerate(qwb.worksheets):
+        if a.blatt and sh.title != a.blatt:
+            continue
         try:
             hr_, cols_ = find_header(sh, {"sap": ["sap"], "tc": ["teamcenter"], "img": ["abbildung"]})
         except SystemExit:
@@ -183,7 +186,8 @@ def main(argv=None):
             q_idx, q_hr, q_cols = i_, hr_, cols_
             break
     if q_idx is None:
-        raise SystemExit("In der Quelle kein Blatt mit den Spalten SAP-Nummer/Teamcenter und „Abbildung“ gefunden.")
+        raise SystemExit("In der Quelle kein Blatt mit den Spalten SAP-Nummer/Teamcenter und „Abbildung“ gefunden"
+                         + (f" (gesucht: „{a.blatt}“; vorhanden: {', '.join(qwb.sheetnames)})" if a.blatt else "") + ".")
     qws = qwb.worksheets[q_idx]
     if len(qwb.worksheets) > 1:
         print(f"Quelle: Blatt „{qws.title}“")
