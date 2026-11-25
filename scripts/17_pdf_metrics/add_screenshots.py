@@ -65,6 +65,14 @@ def find_header(ws, names, max_rows=15):
 # ---------------------------------------------------------------- Bilder „in der Zelle“
 def in_cell_images(path, sheet_index):
     """{(zeile, spalte): bytes} für Bilder, die per „Bild in Zelle platzieren“ eingefügt wurden."""
+    try:
+        return _in_cell_images(path, sheet_index)
+    except Exception as e:     # unbekannte Variante des Dateiformats -> nur die übrigen Bilder verwenden
+        print(f"  ! Bilder in Zellen konnten nicht gelesen werden ({type(e).__name__}: {e})")
+        return {}
+
+
+def _in_cell_images(path, sheet_index):
     out = {}
     with zipfile.ZipFile(path) as z:
         names = set(z.namelist())
@@ -73,6 +81,8 @@ def in_cell_images(path, sheet_index):
         # Arbeitsblatt-Datei des gewünschten Blatts
         wbx = ET.fromstring(z.read("xl/workbook.xml"))
         rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+        if "xl/metadata.xml" not in names or "xl/richData/richValueRel.xml" not in names:
+            return out
         rid = wbx.findall("m:sheets/m:sheet", NS)[sheet_index].get(f"{{{NS['r']}}}id")
         target = next(x.get("Target") for x in rels if x.get("Id") == rid)
         sheet_path = target.lstrip("/") if target.startswith("/") else posixpath.join("xl", target)
@@ -127,7 +137,15 @@ def floating_images(ws):
             continue
         r0, c0 = fr.row + 1, fr.col + 1
         to = getattr(a, "to", None)
-        mid = (fr.row + to.row) / 2 + 1 if to is not None else r0
+        if to is not None:
+            mid = (fr.row + to.row) / 2 + 1
+        else:                                   # OneCellAnchor: Mitte über die Bildhöhe bestimmen
+            ext = getattr(a, "ext", None)
+            half = (ext.height / 9525 / 2 if ext is not None and ext.height else 0) + fr.rowOff / 9525
+            mid, acc = r0, 0
+            while acc + row_px(ws, mid) < half and mid < r0 + 50:
+                acc += row_px(ws, mid)
+                mid += 1
         data = img._data()
         out.append((r0, round(mid), c0, data))
     return out
@@ -155,10 +173,20 @@ def main(argv=None):
 
     # Quelle
     qwb = load_workbook(a.quelle)
-    qws = qwb.worksheets[0]
-    q_hr, q_cols = find_header(qws, {"sap": ["sap"], "tc": ["teamcenter"], "img": ["abbildung"]})
-    if "img" not in q_cols:
-        raise SystemExit("Spalte „Abbildung“ in der Quelle nicht gefunden.")
+    q_idx = None
+    for i_, sh in enumerate(qwb.worksheets):
+        try:
+            hr_, cols_ = find_header(sh, {"sap": ["sap"], "tc": ["teamcenter"], "img": ["abbildung"]})
+        except SystemExit:
+            continue
+        if "img" in cols_:
+            q_idx, q_hr, q_cols = i_, hr_, cols_
+            break
+    if q_idx is None:
+        raise SystemExit("In der Quelle kein Blatt mit den Spalten SAP-Nummer/Teamcenter und „Abbildung“ gefunden.")
+    qws = qwb.worksheets[q_idx]
+    if len(qwb.worksheets) > 1:
+        print(f"Quelle: Blatt „{qws.title}“")
     c_img = q_cols["img"]
     key_of_row = {}
     for r in range(q_hr + 1, qws.max_row + 1):
@@ -168,21 +196,25 @@ def main(argv=None):
         if k:
             key_of_row[r] = k
     pics = {}
-    for (r, c), data in in_cell_images(a.quelle, 0).items():
+    for (r, c), data in in_cell_images(a.quelle, q_idx).items():
         if c == c_img and r in key_of_row:
             pics.setdefault(key_of_row[r], data)
     n_cell = len(pics)
-    off_col = 0
+    off_col, dup = 0, []
     for r0, mid, c, data in floating_images(qws):
         if abs(c - c_img) > 1:
             off_col += 1
             continue
         r = mid if mid in key_of_row else r0
         if r in key_of_row:
+            if key_of_row[r] in pics:
+                dup.append(key_of_row[r])
             pics.setdefault(key_of_row[r], data)
     print(f"Quelle: {len(key_of_row)} Baugruppen, {len(pics)} mit Bild "
           f"({n_cell} in Zellen, {len(pics) - n_cell} über den Zellen)"
           + (f"; {off_col} Bilder außerhalb der Spalte „Abbildung“ ignoriert" if off_col else ""))
+    if dup:
+        print(f"  ! mehrere Bilder für: {', '.join(sorted(set(dup)))} – jeweils das erste verwendet")
 
     # Ziel
     wb = load_workbook(a.ziel)
@@ -206,13 +238,22 @@ def main(argv=None):
             missing.append(str(ws.cell(r, t_cols["sap"]).value or ws.cell(r, t_cols["tc"]).value))
             r += 1
             continue
-        pil = PILImage.open(io.BytesIO(data))
+        try:
+            pil = PILImage.open(io.BytesIO(data))
+            pil.load()
+        except Exception as e:
+            missing.append(f"{ws.cell(r, t_cols['sap']).value or ws.cell(r, t_cols['tc']).value} (Bildformat nicht lesbar: {e})")
+            r += 1
+            continue
         w0, h0 = pil.size
         box_w, box_h = col_px(ws, c_shot) - 2 * a.rand, row_px(ws, r) - 2 * a.rand
         s = min(box_w / w0, box_h / h0)
         w, h = max(1, int(w0 * s)), max(1, int(h0 * s))
+        pil = pil.convert("RGBA" if pil.mode in ("RGBA", "LA", "P") else "RGB")
+        if pil.width > 3 * w:                       # Datei klein halten, 3-fache Auflösung bleibt scharf
+            pil = pil.resize((3 * w, max(1, int(3 * w * h0 / w0))), PILImage.LANCZOS)
         buf = io.BytesIO()
-        pil.convert("RGBA" if pil.mode in ("RGBA", "LA", "P") else "RGB").save(buf, format="PNG")
+        pil.save(buf, format="PNG")
         buf.seek(0)
         img = XLImage(buf)
         img.width, img.height = w, h

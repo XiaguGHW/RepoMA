@@ -36,6 +36,28 @@ ABBR = R.ABBR
 MODEL_PRIO = ["Gemini 2.5 Pro", "Claude Opus 4.8", "Gemini 2.5 Flash", "GPT-5.5", "Claude Haiku 4.5", "DeepSeek-V4-Flash"]
 AUTO = "DCE6F1"     # hellblau = automatisch vorbefüllt
 MAX_GRUND = 600
+_ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def clean(v):
+    """Text für Excel: Steuerzeichen entfernen, auf Zellgrenze kürzen."""
+    if not isinstance(v, str):
+        return v
+    v = _ILLEGAL.sub(" ", v)
+    return v if len(v) <= 32000 else v[:32000] + " …"
+
+
+def norm(pred):
+    """Alle nicht erkannten Vorhersagen zu einer Kategorie „ungültig“ zusammenfassen."""
+    return "ungültig" if str(pred).startswith("UNGÜLTIG") else pred
+
+
+def put(ws, r, c, v):
+    """Wert als Text schreiben (auch wenn er mit „=“ beginnt – keine Formel)."""
+    cell = ws.cell(r, c, clean(v))
+    if isinstance(v, str) and v.startswith("="):
+        cell.data_type = "s"
+    return cell
 
 
 def split_classes(v):
@@ -77,19 +99,14 @@ def read_file(f):
         raw = "" if E.is_empty(r[c_pred]) else str(r[c_pred]).strip()
         pred = cm.canon(raw) if raw and raw.upper() != "[EMPTY]" else None
         if pred and pred.startswith("UNGÜLTIG"):
-            pred = None
+            pred = f"UNGÜLTIG: {raw}"           # nicht erkannte Klasse: zählt als „andere Klasse“ (ungültig)
         rea = "" if (not c_rea or E.is_empty(r[c_rea])) else str(r[c_rea]).strip()
         rows.append((k, pred, split_classes(r[c_pos]) if c_pos else [], rea))
     return rows
 
 
 def model_of(f):
-    m, p, i = X.tokens(f)
-    if m is None:
-        for d in [f.parent, *f.parents]:
-            m = R.model_from_name(d.name) if hasattr(R, "model_from_name") else None
-            if m:
-                break
+    m, p, i = X.tokens(f)          # aus Dateiname, ersatzweise aus den Ordnernamen darüber
     return m or "?", p or "P3", i or X.PREF.get(m, "pdf")
 
 
@@ -130,6 +147,10 @@ def main(argv=None):
         bg[k] = (r, [cm.canon(x) if x and x != "–" else None for x in labs])
         r += 1
     print(f"Vorlage: {len(bg)} Baugruppen")
+    for rr_ in range(r, min(r + 6, ws.max_row + 1)):
+        if str(ws.cell(rr_, 2).value or "").startswith("Anzahl der LLM-Vorhersagen"):
+            raise SystemExit("Die Vorlage ist bereits eine vorbefüllte Ausgabe – bitte die leere Vorlage "
+                             "(Mehrdeutige_Baugruppen_R2_Begruendung.xlsx) als --vorlage angeben.")
 
     # Ergebnisdateien lesen
     hits = defaultdict(list)   # k -> [(modell, prompt, eingabe, datei, pred, possible, reasoning)]
@@ -140,9 +161,7 @@ def main(argv=None):
         exp = ("Wiederholungsläufe" if ("wiederhol" in rn or rn.startswith("03")) else
                "Prompt-Vergleich" if ("prompt" in rn or rn.startswith("01")) else
                "Input-Vergleich" if ("input" in rn or rn.startswith("02")) else Path(root).name)
-        for f in sorted(Path(root).rglob("*.xlsx")):
-            if E.is_output_or_backup(f):
-                continue
+        for f in X.files_in([root]):
             if f.name in seen:          # gleiche Datei in mehreren Ordnern (z. B. 01 und 02) nur einmal
                 print(f"  Hinweis: {f.name} mehrfach vorhanden – nur einmal gezählt")
                 continue
@@ -152,6 +171,8 @@ def main(argv=None):
                 continue
             nfiles += 1
             m, p, i = model_of(f)
+            if m == "?":
+                print(f"  ! {f.name}: Modell nicht erkannt – unter „?“ gezählt")
             src[f.name] = (exp, p, i)
             for k, pred, pos, rea in rows:
                 if k in bg:
@@ -166,13 +187,14 @@ def main(argv=None):
     for dv in ws.data_validations.dataValidation:
         keep = [rg for rg in str(dv.sqref).split() if re.match(r"[A-Z]+", rg).group(0) not in llm_cols]
         dv.sqref = MultiCellRange(" ".join(keep)) if keep else MultiCellRange()
+    ws.data_validations.dataValidation = [d for d in ws.data_validations.dataValidation if str(d.sqref).strip()]
     detail = {}
     for k, (row, labs) in bg.items():
         runs = [x for x in hits.get(k, []) if x[4]]           # nur gültige Vorhersagen
         if not runs:
             no_llm.append(k)
         tot = len(runs)
-        cnt = Counter(x[4] for x in runs)
+        cnt = Counter(norm(x[4]) for x in runs)
         for n, lab in enumerate(labs):
             if not lab:
                 continue
@@ -185,7 +207,7 @@ def main(argv=None):
         # je Modell für Blatt „LLM-Häufigkeiten“
         per = defaultdict(Counter)
         for x in runs:
-            per[x[0]][x[4]] += 1
+            per[x[0]][norm(x[4])] += 1
         detail[k] = (row, labs, per)
 
     # Tabelle unter der Liste: Zusammensetzung der LLM-Vorhersagen je Modell
@@ -281,7 +303,7 @@ def main(argv=None):
             vals = [sap, tc, ", ".join(x for x in labs if x), m, p, i, fn, pr or "(leer)",
                     "ja" if pr in labs else "nein", ", ".join(pos), rea]
             for j, v in enumerate(vals, 1):
-                c = s.cell(rr, j, v)
+                c = put(s, rr, j, v)
                 c.border = Border(left=thin, right=thin, top=thin, bottom=thin)
                 c.alignment = Alignment(wrap_text=j == 11, vertical="top")
             rr += 1
@@ -355,7 +377,7 @@ def main(argv=None):
             flag = "" if len(v) == 1 else "   ! unterschiedlich – bitte prüfen"
             print(f"  {m}: " + ", ".join(f"{n} → {c} BG" for n, c in sorted(v.items())) + flag)
     if no_llm:
-        print(f"  ! keine LLM-Läufe gefunden für: {', '.join(no_llm)}")
+        print(f"  ! keine gültigen LLM-Vorhersagen für: {', '.join(no_llm)}")
     print(f"LLM-Läufe zu mehrdeutigen BG: {sum(len(v) for v in hits.values())}")
     print(f"Ausgabe: {out}")
 
