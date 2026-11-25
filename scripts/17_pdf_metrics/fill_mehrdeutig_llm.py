@@ -172,29 +172,49 @@ def main(argv=None):
     hits = defaultdict(list)   # k -> [(modell, prompt, eingabe, datei, pred, possible, reasoning)]
     nfiles, seen = 0, {}
     src = {}            # Dateiname -> Experiment
+    cand = []          # (exp, datei, modell, prompt, eingabe, datensatz, rows)
+    main115 = set(cm.MAIN_115)
     for root in a.dir:
         rn = Path(root).resolve().name.lower()
         exp = ("Wiederholungsläufe" if ("wiederhol" in rn or rn.startswith("03")) else
                "Prompt-Vergleich" if ("prompt" in rn or rn.startswith("01")) else
                "Input-Vergleich" if ("input" in rn or rn.startswith("02")) else Path(root).name)
         for f in X.files_in([root]):
-            h_ = hashlib.md5(f.read_bytes()).hexdigest()   # identische Kopie (z. B. in 01 und 02) nur einmal
+            h_ = hashlib.md5(f.read_bytes()).hexdigest()   # identische Kopie nur einmal
             if h_ in seen:
-                print(f"  Hinweis: {f.name} ist eine identische Kopie von {seen[h_]} – nur einmal gezählt")
                 continue
             seen[h_] = f.name
             rows = read_file(f)
             if not rows:
                 continue
-            nfiles += 1
             m, p, i = model_of(f)
             if m == "?":
                 print(f"  ! {f.name}: Modell nicht erkannt – unter „?“ gezählt")
-            fid = str(f)
-            src[fid] = (exp, p, i)
-            for k, pred, pos, rea in rows:
-                if k in bg:
-                    hits[k].append((m, p, i, fid, pred, pos, rea))
+            n115 = sum(1 for k, *_ in rows if k in main115)
+            ds = "115" if n115 >= len(rows) / 2 else "70"
+            cand.append((exp, f, m, p, i, ds, rows))
+    # Einzelläufe: derselbe Versuch (Modell, Prompt, Eingabe, Datensatz) kann in 01 und 02 liegen
+    # (z. B. P3 = pdf). Er wird nur einmal gezählt – die Datei mit den meisten gültigen Vorhersagen.
+    groups = defaultdict(list)
+    for c_ in cand:
+        if c_[0] == "Wiederholungsläufe":
+            groups[("W", id(c_))].append(c_)
+        else:
+            groups[(c_[2], c_[3], c_[4], c_[5])].append(c_)
+    used = []
+    for key, lst in groups.items():
+        if len(lst) > 1:
+            lst.sort(key=lambda c_: -sum(1 for _, pr, _, _ in c_[6] if pr))
+            print(f"  Hinweis: {key[0]} {key[1]} {key[2]} {key[3]} BG liegt {len(lst)}× vor – gezählt einmal "
+                  f"({lst[0][1].name}, {lst[0][0]}); ignoriert: {', '.join(c_[1].name for c_ in lst[1:])}")
+        used.append(lst[0])
+    for exp, f, m, p, i, ds, rows in used:
+        nfiles += 1
+        fid = str(f)
+        src[fid] = (exp, p, i)
+        for k, pred, pos, rea in rows:
+            if k in bg:
+                hits[k].append((m, p, i, fid, pred, pos, rea))
     print(f"Ergebnisdateien gelesen: {nfiles}; Baugruppen mit LLM-Läufen: {len(hits)} von {len(bg)}")
 
     thin = Side(style="thin", color="BFBFBF")
@@ -297,8 +317,8 @@ def main(argv=None):
         c = ws.cell(rr_ - 1, cc)
         c.border = Border(left=thin, right=thin, top=thin, bottom=thick)
     ws.cell(rr_ + 1, 2, "Wiederholungsläufe = 10 Läufe mit P3 und bevorzugter Eingabe; Prompt-Vergleich = P1–P4 "
-            "(Einzellauf); Input-Vergleich = P3 mit pdf/Bild/text (Einzellauf). Dieselbe Datei in mehreren Ordnern "
-            "(identischer Inhalt) wird nur einmal gezählt. Unterschiedliche Zeilen je Modell = abweichende Anzahl bei einzelnen Baugruppen."
+            "(Einzellauf); Input-Vergleich = P3 mit pdf/Bild/text (Einzellauf). Derselbe Einzellauf in 01 und 02 "
+            "(z. B. P3 = pdf) wird nur einmal gezählt. Unterschiedliche Zeilen je Modell = abweichende Anzahl bei einzelnen Baugruppen."
             ).font = Font(size=9, italic=True)
 
     # Blatt LLM-Reasoning
