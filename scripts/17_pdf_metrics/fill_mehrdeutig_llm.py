@@ -180,8 +180,9 @@ def main(argv=None):
                "Prompt-Vergleich" if ("prompt" in rn or rn.startswith("01")) else
                "Input-Vergleich" if ("input" in rn or rn.startswith("02")) else Path(root).name)
         for f in X.files_in([root]):
-            h_ = hashlib.md5(f.read_bytes()).hexdigest()   # identische Kopie nur einmal
+            h_ = (exp, hashlib.md5(f.read_bytes()).hexdigest())   # identische Kopie im selben Experiment nur einmal
             if h_ in seen:
+                print(f"  Hinweis: {f.name} ist eine identische Kopie von {seen[h_]} ({exp}) – nur einmal gezählt")
                 continue
             seen[h_] = f.name
             rows = read_file(f)
@@ -193,19 +194,19 @@ def main(argv=None):
             n115 = sum(1 for k, *_ in rows if k in main115)
             ds = "115" if n115 >= len(rows) / 2 else "70"
             cand.append((exp, f, m, p, i, ds, rows))
-    # Einzelläufe: derselbe Versuch (Modell, Prompt, Eingabe, Datensatz) kann in 01 und 02 liegen
-    # (z. B. P3 = pdf). Er wird nur einmal gezählt – die Datei mit den meisten gültigen Vorhersagen.
+    # Einzelläufe: je Experiment zählt jede Konfiguration (Modell, Prompt, Eingabe, Datensatz) einmal.
+    # P3 im Prompt-Vergleich und pdf/Bild/text im Input-Vergleich werden getrennt gezählt (P1–P4 = 4, pdf/Bild/text = 3).
     groups = defaultdict(list)
     for c_ in cand:
         if c_[0] == "Wiederholungsläufe":
             groups[("W", id(c_))].append(c_)
         else:
-            groups[(c_[2], c_[3], c_[4], c_[5])].append(c_)
+            groups[(c_[0], c_[2], c_[3], c_[4], c_[5])].append(c_)
     used = []
     for key, lst in groups.items():
         if len(lst) > 1:
             lst.sort(key=lambda c_: -sum(1 for _, pr, _, _ in c_[6] if pr))
-            print(f"  Hinweis: {key[0]} {key[1]} {key[2]} {key[3]} BG liegt {len(lst)}× vor – gezählt einmal "
+            print(f"  Hinweis: {key[0]}: {key[1]} {key[2]} {key[3]} {key[4]} BG liegt {len(lst)}× vor – gezählt einmal "
                   f"({lst[0][1].name}, {lst[0][0]}); ignoriert: {', '.join(c_[1].name for c_ in lst[1:])}")
         used.append(lst[0])
     for exp, f, m, p, i, ds, rows in used:
@@ -317,8 +318,8 @@ def main(argv=None):
         c = ws.cell(rr_ - 1, cc)
         c.border = Border(left=thin, right=thin, top=thin, bottom=thick)
     ws.cell(rr_ + 1, 2, "Wiederholungsläufe = 10 Läufe mit P3 und bevorzugter Eingabe; Prompt-Vergleich = P1–P4 "
-            "(Einzellauf); Input-Vergleich = P3 mit pdf/Bild/text (Einzellauf). Derselbe Einzellauf in 01 und 02 "
-            "(z. B. P3 = pdf) wird nur einmal gezählt. Unterschiedliche Zeilen je Modell = abweichende Anzahl bei einzelnen Baugruppen."
+            "(Einzellauf); Input-Vergleich = P3 mit pdf/Bild/text (Einzellauf). P3 zählt im Prompt- und im Input-Vergleich "
+            "jeweils mit. Unterschiedliche Zeilen je Modell = abweichende Anzahl bei einzelnen Baugruppen."
             ).font = Font(size=9, italic=True)
 
     # Blatt LLM-Reasoning
