@@ -1,14 +1,6 @@
 # Notiz: Kürzel der 7 Klassen
 
-| Kürzel | Klasse |
-|---|---|
-| LE | Lineareinheit |
-| RE | Rotationseinheit |
-| GR | Greifer |
-| MA | Multi-Achs-System (Gantry) |
-| RO | Roboter |
-| KE | Kombinierte Einheit |
-| SO | Keine der verfügbaren Klassen (Sonstige) |
+LE = Lineareinheit, RE = Rotationseinheit, GR = Greifer, MA = Multi-Achs-System (Gantry), RO = Roboter, KE = Kombinierte Einheit, SO = Keine der verfügbaren Klassen
 
 Zusätzlich in den Auswertungen: `ungültig` = Ausgabe, die keiner der 7 Klassen zugeordnet werden konnte.
 
