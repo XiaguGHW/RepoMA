@@ -222,6 +222,17 @@ def main(argv=None):
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out)
+    # Kontrolle: gleiche Anzahl gültiger Vorhersagen je Modell über alle Baugruppen?
+    per_model = defaultdict(Counter)
+    for k in bg:
+        for m, n in Counter(m for m, *_r in hits.get(k, []) if _r[3]).items():
+            per_model[m][n] += 1
+    print("Gültige Vorhersagen je Baugruppe (Modell: Anzahl → wie viele BG):")
+    for m in MODEL_PRIO + sorted(set(per_model) - set(MODEL_PRIO)):
+        if m in per_model:
+            v = per_model[m]
+            flag = "" if len(v) == 1 else "   ! unterschiedlich – bitte prüfen"
+            print(f"  {m}: " + ", ".join(f"{n} → {c} BG" for n, c in sorted(v.items())) + flag)
     if no_llm:
         print(f"  ! keine LLM-Läufe gefunden für: {', '.join(no_llm)}")
     print(f"LLM-Läufe zu mehrdeutigen BG: {sum(len(v) for v in hits.values())}")
