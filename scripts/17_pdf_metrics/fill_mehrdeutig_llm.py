@@ -4,7 +4,7 @@ Füllt die Vorlage „Mehrdeutige_Baugruppen_R2_Begruendung.xlsx“ aus allen LL
 Für jede mehrdeutige Baugruppe und jedes Label der Labelmenge:
 - „Label n von LLM markiert“ = ja, wenn das Label in mindestens einem Lauf irgendeines Modells
   als Predicted_Label vorhergesagt wurde, sonst nein. Ein Kommentar an der Zelle zeigt je Modell,
-  wie oft vorhergesagt (nur zur Info zusätzlich: wie oft unter Possible_Classes_If_Ambiguous genannt).
+  wie oft vorhergesagt / Anzahl gültiger Vorhersagen dieses Modells für die Baugruppe.
 - „Grund Label n“ bleibt leer (Begründung der Ground Truth durch den Menschen). Als Hilfe hängt an der
   Zelle ein Kommentar mit einem Auszug aus dem Reasoning eines LLM-Laufs, der dieses Label vorhergesagt hat.
 - Blatt „LLM-Reasoning“: alle Läufe zu den mehrdeutigen Baugruppen mit vollständigem Reasoning.
@@ -123,11 +123,15 @@ def main(argv=None):
 
     # Ergebnisdateien lesen
     hits = defaultdict(list)   # k -> [(modell, prompt, eingabe, datei, pred, possible, reasoning)]
-    nfiles = 0
+    nfiles, seen = 0, set()
     for root in a.dir:
         for f in sorted(Path(root).rglob("*.xlsx")):
             if E.is_output_or_backup(f):
                 continue
+            if f.name in seen:          # gleiche Datei in mehreren Ordnern (z. B. 01 und 02) nur einmal
+                print(f"  Hinweis: {f.name} mehrfach vorhanden – nur einmal gezählt")
+                continue
+            seen.add(f.name)
             rows = read_file(f)
             if not rows:
                 continue
@@ -148,8 +152,7 @@ def main(argv=None):
             if not lab:
                 continue
             pred_cnt = Counter(m for m, *_r in runs if _r[3] == lab)
-            pos_cnt = Counter(m for m, p, i, fn, pr, pos, rea in runs if lab in pos and pr != lab)
-            tot = Counter(m for m, *_ in runs)
+            tot = Counter(m for m, *_r in runs if _r[3])          # nur gültige Vorhersagen
             marked = bool(pred_cnt)
             c = ws.cell(row, c_llm[n], "ja" if marked else "nein")
             c.fill = PatternFill("solid", fgColor=AUTO)
@@ -157,7 +160,7 @@ def main(argv=None):
             for m in MODEL_PRIO + sorted(set(tot) - set(MODEL_PRIO)):
                 if tot.get(m):
                     txt.append(f"{m}: vorhergesagt {pred_cnt.get(m, 0)}/{tot[m]}"
-                               + (f" (zusätzlich als möglich genannt: {pos_cnt[m]})" if pos_cnt.get(m) else ""))
+                               )
             if len(txt) == 1:
                 txt.append("keine LLM-Läufe gefunden")
             c.comment = Comment("\n".join(txt), "Auswertung")
