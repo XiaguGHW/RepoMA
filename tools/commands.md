@@ -331,3 +331,11 @@ python plot_wiederholung_r1.py --dir "..\03_Wiederholung_10runs" --gt R2.md --ou
 ```
 
 Zum Versenden: `Wiederhollaeufe_R2.xlsx` (ohne KM_-Blätter), `Ergebnisse_unter_R2.xlsx`, `Diagramme\Diagramme_Wiederholung_R2.xlsx`.
+
+## 2026-11-25 · Liste mehrdeutige Baugruppen (R2) aus LLM-Ergebnissen vorbefüllen
+
+Vorlage `thesis/Mehrdeutige_Baugruppen_R2_Begruendung.xlsx` nach 00_Skripte kopieren, dann:
+```
+python fill_mehrdeutig_llm.py --dir "..\01_Prompt_P1-P4" --dir "..\02_Input_P3" --dir "..\03_Wiederholung_10runs" --vorlage Mehrdeutige_Baugruppen_R2_Begruendung.xlsx --out "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM.xlsx"
+```
+Füllt „von LLM markiert“ (ja/nein + Kommentar mit Häufigkeit je Modell), Entwürfe für „Grund Label n“ (hellblau) und das Blatt „LLM-Reasoning“.
