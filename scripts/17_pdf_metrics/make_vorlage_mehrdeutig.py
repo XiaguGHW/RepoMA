@@ -28,7 +28,7 @@ COLS = [("Nr.", 5), ("SAP Nr", 15), ("Teamcenter", 14), ("Datensatz", 16), ("Scr
         ("Label 1", 11), ("Label 2", 11), ("Label 3", 11), ("andere Klassen", 24),
         ("Label 1", 11), ("Label 2", 11), ("Label 3", 11), ("andere Klassen", 24)]
 GROUPS = [(2, 6, ""), (7, 12, "Zulässige Labels und Begründung"),
-          (13, 16, "von LLM markiert"), (17, 20, "von Mensch markiert")]
+          (13, 16, "von Mensch markiert"), (17, 20, "von LLM markiert")]
 
 
 def read_gt_rows(path):

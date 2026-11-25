@@ -112,7 +112,16 @@ def main(argv=None):
     c_sap, c_tc = col["SAP Nr"][0], col["Teamcenter"][0]
     c_lab = [col["Label 1"][0], col["Label 2"][0], col["Label 3"][0]]          # erste Vorkommen = Labelspalten
     c_grund = [col[f"Grund Label {i}"][0] for i in (1, 2, 3)]
-    c_llm = [col["Label 1"][1], col["Label 2"][1], col["Label 3"][1]]           # zweites Vorkommen = LLM
+    # Gruppe je Spalte aus der Zeile darüber („von LLM markiert“ / „von Mensch markiert“)
+    grp, cur = {}, None
+    for c in range(2, ws.max_column + 1):
+        v = ws.cell(hr - 1, c).value
+        if v:
+            cur = str(v)
+        grp[c] = cur or ""
+    llm = [c for c in range(2, ws.max_column + 1) if "LLM" in grp[c]]
+    c_llm = [next(c for c in llm if ws.cell(hr, c).value == f"Label {i}") for i in (1, 2, 3)]
+    c_other_llm = next(c for c in llm if ws.cell(hr, c).value == "andere Klassen")
     bg = {}
     r = hr + 1
     while ws.cell(r, c_sap).value or ws.cell(r, c_tc).value:
@@ -151,7 +160,7 @@ def main(argv=None):
 
     thin = Side(style="thin", color="BFBFBF")
     no_llm = []
-    c_other = col["andere Klassen"][0]                  # erstes Vorkommen = LLM
+    c_other = c_other_llm
     # Datenüberprüfung ja/nein von den LLM-Zellen entfernen (dort steht jetzt „ja (n/N)“)
     llm_cols = {get_column_letter(c) for c in c_llm}
     for dv in ws.data_validations.dataValidation:
