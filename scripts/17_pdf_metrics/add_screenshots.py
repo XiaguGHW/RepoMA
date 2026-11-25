@@ -63,16 +63,16 @@ def find_header(ws, names, max_rows=15):
 
 
 # ---------------------------------------------------------------- Bilder „in der Zelle“
-def in_cell_images(path, sheet_index):
+def in_cell_images(path, sheet_name):
     """{(zeile, spalte): bytes} für Bilder, die per „Bild in Zelle platzieren“ eingefügt wurden."""
     try:
-        return _in_cell_images(path, sheet_index)
+        return _in_cell_images(path, sheet_name)
     except Exception as e:     # unbekannte Variante des Dateiformats -> nur die übrigen Bilder verwenden
         print(f"  ! Bilder in Zellen konnten nicht gelesen werden ({type(e).__name__}: {e})")
         return {}
 
 
-def _in_cell_images(path, sheet_index):
+def _in_cell_images(path, sheet_name):
     out = {}
     with zipfile.ZipFile(path) as z:
         names = set(z.namelist())
@@ -83,7 +83,7 @@ def _in_cell_images(path, sheet_index):
         rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
         if "xl/metadata.xml" not in names or "xl/richData/richValueRel.xml" not in names:
             return out
-        rid = wbx.findall("m:sheets/m:sheet", NS)[sheet_index].get(f"{{{NS['r']}}}id")
+        rid = next(s_.get(f"{{{NS['r']}}}id") for s_ in wbx.findall("m:sheets/m:sheet", NS) if s_.get("name") == sheet_name)
         target = next(x.get("Target") for x in rels if x.get("Id") == rid)
         sheet_path = target.lstrip("/") if target.startswith("/") else posixpath.join("xl", target)
         # vm -> Rich-Value-Index
@@ -210,7 +210,7 @@ def main(argv=None):
         if k:
             key_of_row[r] = k
     pics = {}
-    for (r, c), data in in_cell_images(a.quelle, q_idx).items():
+    for (r, c), data in in_cell_images(a.quelle, qws.title).items():
         if c == c_img and r in key_of_row:
             pics.setdefault(key_of_row[r], data)
     n_cell = len(pics)

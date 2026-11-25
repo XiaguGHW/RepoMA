@@ -14,6 +14,7 @@ Beispiel (in 00_Skripte):
          --vorlage Mehrdeutige_Baugruppen_R2_Begruendung.xlsx --out "..\\05_Ergebnisse_R2\\Mehrdeutige_Baugruppen_R2_LLM.xlsx"
 """
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -80,7 +81,9 @@ def split_classes(v):
 
 def read_file(f):
     try:
-        df = pd.read_excel(f, sheet_name=0, dtype=str)
+        xl = pd.ExcelFile(f)
+        sh = "Sheet1" if "Sheet1" in xl.sheet_names else xl.sheet_names[0]
+        df = xl.parse(sh, dtype=str)
     except Exception as e:
         print(f"  ! {f.name}: nicht lesbar ({e})")
         return []
@@ -154,7 +157,7 @@ def main(argv=None):
 
     # Ergebnisdateien lesen
     hits = defaultdict(list)   # k -> [(modell, prompt, eingabe, datei, pred, possible, reasoning)]
-    nfiles, seen = 0, set()
+    nfiles, seen = 0, {}
     src = {}            # Dateiname -> Experiment
     for root in a.dir:
         rn = Path(root).resolve().name.lower()
@@ -162,10 +165,11 @@ def main(argv=None):
                "Prompt-Vergleich" if ("prompt" in rn or rn.startswith("01")) else
                "Input-Vergleich" if ("input" in rn or rn.startswith("02")) else Path(root).name)
         for f in X.files_in([root]):
-            if f.name in seen:          # gleiche Datei in mehreren Ordnern (z. B. 01 und 02) nur einmal
-                print(f"  Hinweis: {f.name} mehrfach vorhanden – nur einmal gezählt")
+            h_ = hashlib.md5(f.read_bytes()).hexdigest()   # identische Kopie (z. B. in 01 und 02) nur einmal
+            if h_ in seen:
+                print(f"  Hinweis: {f.name} ist eine identische Kopie von {seen[h_]} – nur einmal gezählt")
                 continue
-            seen.add(f.name)
+            seen[h_] = f.name
             rows = read_file(f)
             if not rows:
                 continue
@@ -173,10 +177,11 @@ def main(argv=None):
             m, p, i = model_of(f)
             if m == "?":
                 print(f"  ! {f.name}: Modell nicht erkannt – unter „?“ gezählt")
-            src[f.name] = (exp, p, i)
+            fid = str(f)
+            src[fid] = (exp, p, i)
             for k, pred, pos, rea in rows:
                 if k in bg:
-                    hits[k].append((m, p, i, f.name, pred, pos, rea))
+                    hits[k].append((m, p, i, fid, pred, pos, rea))
     print(f"Ergebnisdateien gelesen: {nfiles}; Baugruppen mit LLM-Läufen: {len(hits)} von {len(bg)}")
 
     thin = Side(style="thin", color="BFBFBF")
@@ -280,14 +285,14 @@ def main(argv=None):
         c.border = Border(left=thin, right=thin, top=thin, bottom=thick)
     ws.cell(rr_ + 1, 2, "Wiederholungsläufe = 10 Läufe mit P3 und bevorzugter Eingabe; Prompt-Vergleich = P1–P4 "
             "(Einzellauf); Input-Vergleich = P3 mit pdf/Bild/text (Einzellauf). Dieselbe Datei in mehreren Ordnern "
-            "wird nur einmal gezählt. Unterschiedliche Zeilen je Modell = abweichende Anzahl bei einzelnen Baugruppen."
+            "(identischer Inhalt) wird nur einmal gezählt. Unterschiedliche Zeilen je Modell = abweichende Anzahl bei einzelnen Baugruppen."
             ).font = Font(size=9, italic=True)
 
     # Blatt LLM-Reasoning
     if "LLM-Reasoning" in wb.sheetnames:
         del wb["LLM-Reasoning"]
     s = wb.create_sheet("LLM-Reasoning")
-    head = ["SAP Nr", "Teamcenter", "Labelmenge (R2)", "Modell", "Prompt", "Eingabe", "Datei",
+    head = ["SAP Nr", "Teamcenter", "Labelmenge", "Modell", "Prompt", "Eingabe", "Datei",
             "Predicted_Label", "in Labelmenge", "Possible_Classes_If_Ambiguous", "Reasoning"]
     widths = [14, 13, 40, 18, 7, 8, 30, 24, 10, 30, 110]
     for j, (h, w) in enumerate(zip(head, widths), 1):
@@ -300,7 +305,7 @@ def main(argv=None):
         sap, tc = ws.cell(row, c_sap).value, ws.cell(row, c_tc).value
         for m, p, i, fn, pr, pos, rea in sorted(hits.get(k, []), key=lambda x: (
                 MODEL_PRIO.index(x[0]) if x[0] in MODEL_PRIO else 99, x[1], x[2], x[3])):
-            vals = [sap, tc, ", ".join(x for x in labs if x), m, p, i, fn, pr or "(leer)",
+            vals = [sap, tc, ", ".join(x for x in labs if x), m, p, i, Path(fn).name, pr or "(leer)",
                     "ja" if pr in labs else "nein", ", ".join(pos), rea]
             for j, v in enumerate(vals, 1):
                 c = put(s, rr, j, v)

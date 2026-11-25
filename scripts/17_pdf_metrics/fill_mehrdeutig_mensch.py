@@ -53,7 +53,9 @@ def read_mensch(path, sheet=None):
         pref = [n for n in names if "bersicht" in n.lower() and "gesamt" in n.lower()]
         cand = pref + [n for n in names if n not in pref]
     for sh in cand:
-        raw = pd.read_excel(path, sheet_name=sh, header=None, dtype=str, nrows=15)
+        if sh not in names:
+            raise SystemExit(f"Blatt „{sh}“ nicht gefunden. Vorhandene Blätter: {names}")
+        raw = xl.parse(sh, header=None, dtype=str, nrows=15)
         hr = None
         for i in range(len(raw)):
             vals = [str(v) for v in raw.iloc[i].tolist() if isinstance(v, str)]
@@ -64,7 +66,7 @@ def read_mensch(path, sheet=None):
             break
     else:
         raise SystemExit(f"Kein Blatt mit Spalten SAP/Teamcenter und TN… gefunden. Blätter: {names}")
-    df = pd.read_excel(path, sheet_name=sh, header=hr, dtype=str)
+    df = xl.parse(sh, header=hr, dtype=str)
     cols = [str(c) for c in df.columns]
     df.columns = cols
     c_sap = E.find_col(cols, contains=["sap"])
