@@ -376,3 +376,26 @@ python add_screenshots.py --quelle $ws --blatt "R1_Ground_Truth_Abb" --ziel "..\
 
 ## 2026-11-25 · Ordner umbenannt
 `05_Ergebnisse` → `05_Ergebnisse_R1` (Ergebnisse unter R1); `05_Ergebnisse_R2` bleibt. Alle Befehle oben sind angepasst.
+
+## 2026-11-25 · ★ Liste mehrdeutige BG (R2) – kompletter Ablauf in Reihenfolge
+
+Vorbereitung:
+- `00_Skripte`: `make_vorlage_mehrdeutig.py`, `fill_mehrdeutig_llm.py`, `fill_mehrdeutig_mensch.py`, `add_screenshots.py` (aus `scripts/17_pdf_metrics/`), `R2.md`, leere Vorlage `Mehrdeutige_Baugruppen_R2_Begruendung.xlsx` (aus `thesis/`)
+- `06_Stammdaten`: Kopie von `Ergebnis_WS1-4_gesamt_16TN_final.xlsx`
+- Ausgabedateien vorher in Excel schließen.
+
+In `00_Skripte`:
+```
+$ws = "..\06_Stammdaten\Ergebnis_WS1-4_gesamt_16TN_final.xlsx"
+
+# 1) LLM-Spalten, Tabelle „Anzahl der LLM-Vorhersagen“ unter der Liste, Blätter LLM-Häufigkeiten / LLM-Reasoning
+python fill_mehrdeutig_llm.py --dir "..\01_Prompt_P1-P4" --dir "..\02_Input_P3" --dir "..\03_Wiederholung_10runs" --vorlage Mehrdeutige_Baugruppen_R2_Begruendung.xlsx --out "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM.xlsx"
+
+# 2) Mensch-Spalten aus Blatt „Klassifikation_Übersicht_Gesamt“
+python fill_mehrdeutig_mensch.py --mensch $ws --blatt "Klassifikation_Übersicht_Gesamt" --ziel "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM.xlsx" --out "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM_Mensch.xlsx"
+
+# 3) Screenshots aus Blatt „R1_Ground_Truth_Abb“
+python add_screenshots.py --quelle $ws --blatt "R1_Ground_Truth_Abb" --ziel "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_LLM_Mensch.xlsx" --out "..\05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_final.xlsx"
+```
+Ergebnis: `05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_final.xlsx` (danach nur noch „Grund Label n“ ausfüllen).
+Prüfen im Terminal: Schritt 1 „unterschiedlich“-Warnungen; Schritt 2 Liste der Klassennamen; Schritt 3 „… in Zellen“ ≈ Anzahl BG.
