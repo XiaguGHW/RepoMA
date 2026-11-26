@@ -82,7 +82,7 @@ def load_gt(path):
         if g is None or g.startswith("UNGÜLTIG"):
             issues.append(f"GT-Label nicht erkannt: {sap} / {tc}: {r[c['gt']]}")
             continue
-        alts = {cm.canon(a.strip()) for a in re.split(r"[,;\n|]", str(r[c["alt"]] or "")) if a.strip()} - {g}
+        alts = {cm.canon(a.strip()) for a in re.split(r"[,;\n|]", str((r[c["alt"]] if c["alt"] else "") or "")) if a.strip()} - {g}
         alts = {a for a in alts if a and not a.startswith("UNGÜLTIG")}
         gt[k] = (g, frozenset({g} | alts))
         if c["pe"] and str(r[c["pe"]]).strip().lower() == "yes":
@@ -247,23 +247,33 @@ def evaluate(gt, runs_main, runs_supp, scope, rng):
             ks = [k for k in keys if k in run]
             if ks:
                 accs.append(np.mean([correct(gt, k, run[k]) for k in ks]))
-        # je BG: Anteil korrekter Läufe (für Bootstrap)
+        # je BG: Anteil korrekter Läufe
         share = {k: np.mean([correct(gt, k, run[k]) for run in runs if k in run]) for k in keys
                  if any(k in run for run in runs)}
-        # Bootstrap (bei 185 je Datensatz getrennt gezogen)
+        bgs = list(share)
+        # Matrix BG × Lauf (1 = korrekt, 0 = falsch, NaN = keine gültige Vorhersage)
+        M = np.array([[float(correct(gt, k, run[k])) if k in run else np.nan for run in runs] for k in bgs]) \
+            if bgs else np.empty((0, len(runs)))
+        # Bootstrap über Baugruppen (bei 185 je Datensatz getrennt gezogen); Statistik wie der Mittelwert:
+        # Accuracy je Lauf über die gezogenen BG, dann Mittel über die Läufe
         if scope == "185":
-            groups = [[k for k in share if k in strata[0]], [k for k in share if k not in strata[0]]]
+            idx_groups = [[i for i, k in enumerate(bgs) if k in strata[0]], [i for i, k in enumerate(bgs) if k not in strata[0]]]
         else:
-            groups = [list(share)]
-        groups = [np.array([share[k] for k in g]) for g in groups if g]
-        boots = np.empty(B)
-        for b in range(B):
-            draws = [g[rng.integers(0, len(g), len(g))] for g in groups]
-            boots[b] = np.concatenate(draws).mean()
+            idx_groups = [list(range(len(bgs)))]
+        idx_groups = [np.array(g) for g in idx_groups if g]
+        if idx_groups:
+            boots = np.empty(B)
+            with np.errstate(all="ignore"):
+                for b in range(B):
+                    sel = np.concatenate([g[rng.integers(0, len(g), len(g))] for g in idx_groups])
+                    boots[b] = np.nanmean(np.nanmean(M[sel], axis=0))
+            ci_lo, ci_hi = float(np.nanpercentile(boots, 2.5)), float(np.nanpercentile(boots, 97.5))
+        else:
+            ci_lo = ci_hi = np.nan
         row = dict(n=len(share), runs=len(runs), acc=float(np.mean(accs)) if accs else np.nan,
                    sd=float(np.std(accs, ddof=1) * 100) if len(accs) > 1 else np.nan,
-                   ci_lo=float(np.percentile(boots, 2.5)), ci_hi=float(np.percentile(boots, 97.5)),
-                   acc_bg=float(np.mean(list(share.values()))))
+                   ci_lo=ci_lo, ci_hi=ci_hi,
+                   acc_bg=float(np.mean(list(share.values()))) if share else np.nan)
         if which == "eindeutig":
             prf = []
             for run in runs:
@@ -379,7 +389,7 @@ def write_confusion_sheet(wb, title, sheet_name, gt, runs, summe=False):
                 if j < len(COL_ORDER) and COL_ORDER[j] in v["allowed"]:
                     cell.font = Font(bold=True, color="1F4E9E")
             base = 3 + len(vals)
-            for j, (x, f) in enumerate(((v["n"], "0"), (v["korrekt"], fmt), (v["korrekt"] / v["n"], "0.0%"))):
+            for j, (x, f) in enumerate(((v["n"], "0"), (v["korrekt"], fmt), (v["korrekt"] / (v["n"] - v["miss"]) if v["n"] - v["miss"] > 0 else None, "0.0%"))):
                 cell = ws.cell(r, base + j, x)
                 cell.number_format = f
                 cell.alignment = St["right"]
@@ -390,7 +400,7 @@ def write_confusion_sheet(wb, title, sheet_name, gt, runs, summe=False):
                 cell.border = St["border"]
             key = "E" if section == "Eindeutig" else "M"
             tot[key][0] += v["korrekt"]
-            tot[key][1] += v["n"]
+            tot[key][1] += v["n"] - v["miss"]          # ohne fehlende Vorhersagen (wie die Hauptauswertung)
             r += 1
 
     # Accuracy nach Teilmenge
@@ -493,8 +503,8 @@ def write_excel(path, results, gt_name, art="Wiederholläufe (10 runs)"):
                   ("Eindeutige: Macro (Mittel der Läufe)", 16)]
         for txt, c0 in groups:
             span = 3
-            ws.merge_cells(start_row=r + 1, start_column=2 + c0 - 1 + (0 if c0 != 4 else 0),
-                           end_row=r + 1, end_column=2 + c0 - 1 + span - 1 + (0 if c0 != 4 else 0))
+            ws.merge_cells(start_row=r + 1, start_column=2 + c0 - 1,
+                           end_row=r + 1, end_column=2 + c0 - 1 + span - 1)
         heads1 = ["Modell", "Läufe", "", "Alle Baugruppen", "", "", "", "Eindeutige Baugruppen", "", "", "",
                   "Mehrdeutige Baugruppen", "", "", "", "Eindeutige: Macro-Werte", "", ""]
         heads2 = ["", "", "", "Mittelwert", "SD (pp)", "95%-KI", "", "Mittelwert", "SD (pp)", "95%-KI", "",
@@ -530,7 +540,7 @@ def write_excel(path, results, gt_name, art="Wiederholläufe (10 runs)"):
                 hd = heads2[j]
                 c.number_format = "0.0%" if hd in ("Mittelwert", "Precision", "Recall", "F1") else (
                     "0.00" if hd == "SD (pp)" else "General")
-                c.font = Font(bold=hd == "Mittelwert" and j == 4)
+                c.font = Font(bold=hd == "Mittelwert" and j == 3)
             rr += 1
         # n
         any_res = next((results[m][scope] for m in results if results[m].get(scope)), None)
@@ -594,8 +604,7 @@ def main(argv=None):
                     help="Einzellauf: nur diese Eingabeform; bevorzugt = pdf, GPT-5.5 Bild, DeepSeek text")
     a = ap.parse_args(argv)
     if not a.gt_name:
-        import re as _re
-        a.gt_name = (_re.match(r"(R\d+)", Path(a.gt).stem, _re.I) or [Path(a.gt).stem])[0].upper()
+        a.gt_name = (re.match(r"(R\d+)", Path(a.gt).stem, re.I) or [Path(a.gt).stem])[0].upper()
 
     gt, pe, gt_issues = load_gt(a.gt)
     for i in gt_issues:
@@ -618,7 +627,6 @@ def main(argv=None):
         art = "Einzellauf (" + ", ".join(x for x in (a.p, a.input) if x) + ")"
         stem = f"Einzellauf_{tag}"
     data, info = collect(a.dir, a.sheet, gt, pe, issues, keep, single)
-    rng = np.random.default_rng(SEED)
     results = {}
     for m in [x for x in MODEL_ORDER if x in data] + [x for x in data if x not in MODEL_ORDER]:
         rm, rs = data[m]["main"], data[m]["supp"]
