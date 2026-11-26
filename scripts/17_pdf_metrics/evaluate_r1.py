@@ -39,7 +39,6 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import evaluate_pdf_results as E  # noqa: E402
-import evaluate_70bg_results as S  # noqa: E402
 
 cm = E.cm
 B, SEED = 2000, 42

@@ -2,7 +2,7 @@
 
 Typisch: pdf_only_70BG_P3_claude-haiku…, pdf_only_70BG_P3_gemini-2.5-pro…, image_only_70BG_P3_gpt-5.5…,
 text_only_70BG_P3_deepseek-v4-flash… . Eingabeform aus dem Dateinamen (pdf_/image_/text_),
-Modell wie in evaluate_pdf_results.py. Mit --dir werden nur Dateien mit "70BG" im Namen gelesen.
+Modell wie in evaluate_pdf_results.py. Mit --dir werden alle Dateien mit "70BG" im Namen oder Pfad gelesen (auch Unterordner).
 
 Die Dateien brauchen keine Spalte Allowed_Set_Status: korrekt/falsch wird aus Ground Truth und
 "Weitere zulässige Ground Truth" berechnet (wie in den anderen Skripten).
@@ -52,8 +52,8 @@ def main(argv=None):
 
     files = [Path(f) for f in a.files]
     if a.dir:
-        files += sorted(p for p in Path(a.dir).glob("*")
-                        if p.suffix.lower() in (".xlsx", ".xlsm") and "70bg" in p.name.lower()
+        files += sorted(p for p in Path(a.dir).rglob("*")       # auch Unterordner (z. B. 70BG\Claude_Haiku)
+                        if p.suffix.lower() in (".xlsx", ".xlsm") and "70bg" in str(p).lower()
                         and not E.is_output_or_backup(p))
     if not files:
         ap.error("keine 70BG-Dateien gefunden (Dateien oder --dir)")
@@ -64,8 +64,8 @@ def main(argv=None):
     issues, results = [], []
     for f in files:
         name, inp = E.model_name(f), input_label(f)
-        if any(n == name for n, _, _ in results):
-            sys.exit(f"Modell '{name}' doppelt erkannt ({f.name}). Dateinamen prüfen.")
+        if any(n == name and i_ == inp for n, i_, _ in results):
+            sys.exit(f"Modell '{name}' ({inp}) doppelt erkannt ({f.name}). Bitte nur eine Datei je Modell und Eingabe.")
         recs = E.read_file(f, a.sheet, name, issues)
         results.append((name, inp, recs))
     results.sort(key=lambda x: E.model_rank(x[0]))
