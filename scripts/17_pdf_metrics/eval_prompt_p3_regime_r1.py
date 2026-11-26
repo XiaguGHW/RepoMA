@@ -4,7 +4,7 @@ Je Modell (P3 mit bevorzugter Eingabe: pdf, GPT-5.5 Bild, DeepSeek text) × Date
 Allowed und Strict Accuracy für alle / eindeutig / mehrdeutig / E1 / E2 / M (R1-Register).
 
 Aufruf:
-    python eval_prompt_p3_regime_r1.py --prompt "..\\01_Prompt_P1-P4" --gt R1.md --out "..\\05_Ergebnisse\\Prompt_P3_Teilmengen_R1.xlsx"
+    python eval_prompt_p3_regime_r1.py --prompt "..\\01_Prompt_P1-P4" --gt R1.md --out "..\\05_Ergebnisse_R1\\Prompt_P3_Teilmengen_R1.xlsx"
 Benötigt im selben Ordner: eval_input_regime_r1.py, evaluate_r1_ergebnisse.py, evaluate_r1.py (+ Abhängigkeiten).
 """
 import sys

@@ -6,7 +6,7 @@ Je Modell × Eingabe × Datensatz (115 / 185 BG):
 Hinweis: Register M ohne weiteres zulässiges Label zählt in „eindeutig“, bleibt aber in der Spalte M.
 
 Aufruf:
-    python eval_input_regime_r1.py --input "..\\02_Input_P3" --gt R1.md --out "..\\05_Ergebnisse\\Input_P3_Teilmengen_R1.xlsx"
+    python eval_input_regime_r1.py --input "..\\02_Input_P3" --gt R1.md --out "..\\05_Ergebnisse_R1\\Input_P3_Teilmengen_R1.xlsx"
     (nur pdf: --nur pdf)
 """
 import argparse
@@ -26,8 +26,19 @@ cm = R.cm
 
 
 def registers(path):
-    """R1-Register (E1/E2/M) je Baugruppe aus R1.md."""
-    head, reg = None, {}
+    """Register (E1/E2/M) je Baugruppe aus der GT-Datei (.md oder .xlsx); Spaltennamen unscharf."""
+    reg = {}
+    if Path(path).suffix.lower() in (".xlsx", ".xlsm"):
+        df = pd.read_excel(path, dtype=str)
+        cols = list(df.columns)
+        c_sap, c_tc = R.E.find_col(cols, contains=["sap"]), R.E.find_col(cols, contains=["teamcenter"])
+        c_reg = R.E.find_col(cols, contains=["regist"])
+        for _, r in df.iterrows():
+            k = cm.match_key(r[c_sap] if c_sap else None, r[c_tc] if c_tc else None)
+            if k and c_reg:
+                reg[k] = str(r[c_reg] or "").strip().upper()
+        return reg
+    head = None
     for line in Path(path).read_text(encoding="utf-8").splitlines():
         if not line.startswith("|") or re.fullmatch(r"[|\-: ]+", line.strip()):
             continue
@@ -36,12 +47,15 @@ def registers(path):
             if any("SAP" in c for c in cells):
                 head = cells
             continue
-        if len(cells) != len(head):
+        if len(cells) < len(head) - 1:
             continue
-        r = dict(zip(head, cells))
-        k = cm.match_key(r.get("SAP-Nummer") or None, r.get("Teamcenter") or None)
-        if k:
-            reg[k] = r.get("Register", "").strip().upper()
+        r = dict(zip(head, cells + [""] * (len(head) - len(cells))))
+        c_sap = next((h for h in head if "sap" in h.lower()), None)
+        c_tc = next((h for h in head if "teamcenter" in h.lower()), None)
+        c_reg = next((h for h in head if "regist" in h.lower()), None)
+        k = cm.match_key(r.get(c_sap) or None, r.get(c_tc) or None)
+        if k and c_reg:
+            reg[k] = r.get(c_reg, "").strip().upper()
     return reg
 
 
@@ -56,7 +70,14 @@ def main(argv=None, kind="input", default_out="Input_P3_Teilmengen_R1.xlsx", onl
     a = ap.parse_args(argv)
     gt, pe, _ = R.load_gt(a.gt)
     reg = registers(a.gt)
-    groups, unknown = X.load_runs(X.files_in(a.input), gt, pe, [], kind)
+    if len(reg) < len(gt):
+        print(f"! Register nur für {len(reg)} von {len(gt)} Baugruppen gelesen – E1/E2/M-Spalten unvollständig")
+    issues = []
+    groups, unknown = X.load_runs(X.files_in(a.input), gt, pe, issues, kind)
+    if issues:
+        print(f"Hinweise beim Einlesen ({len(issues)}):")
+        for t in sorted(set(map(str, issues)))[:20]:
+            print("  ", t)
     for u in unknown:
         print("! nicht zugeordnet:", u)
     subsets = {
@@ -78,7 +99,8 @@ def main(argv=None, kind="input", default_out="Input_P3_Teilmengen_R1.xlsx", onl
             main = groups.get((m, a.p, inp, "main"), [])
             supp = groups.get((m, a.p, inp, "supp"), [])
             if len(main) > 1 or len(supp) > 1:
-                print(f"! {m} {inp}: mehrere Dateien – letzte verwendet: {[f.name for f, _ in main + supp]}")
+                print(f"! {m} {inp}: mehrere Dateien {[f.name for f, _ in main + supp]} – verwendet: "
+                      f"{main[-1][0].name if main else '-'}" + (f" + {supp[-1][0].name}" if supp else ""))
             for scope in ("115", "185"):
                 if not main or (scope == "185" and not supp):
                     continue
@@ -96,8 +118,10 @@ def main(argv=None, kind="input", default_out="Input_P3_Teilmengen_R1.xlsx", onl
                     row[f"Strict {name}"] = round(np.mean([run[k] == gt[k][0] for k in ks]) * 100, 1)
                 rows.append(row)
     df = pd.DataFrame(rows)
+    if df.empty:
+        sys.exit(f"Keine passenden Ergebnisdateien gefunden (Prompt {a.p}"
+                 + (f", Eingabe {a.nur}" if a.nur else "") + ") – Ordner und Optionen prüfen.")
     pd.set_option("display.width", 220, "display.max_columns", 40)
-    show = ["Modell", "Eingabe", "Datensatz"] + [c for c in df.columns if c.startswith(("Allowed", "Strict"))]
     for metric in ("Allowed", "Strict"):
         cols = ["Modell", "Eingabe", "Datensatz"] + [f"{metric} {s}" for s in subsets if f"{metric} {s}" in df]
         print(f"\n{metric} Accuracy (%), R1:")
