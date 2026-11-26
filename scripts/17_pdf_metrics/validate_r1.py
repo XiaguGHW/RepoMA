@@ -10,7 +10,7 @@ Erwartete Ordnerstruktur wie besprochen: <zehn>\\115BG\\<Konfiguration>\\*.xlsx 
 (Datensatz aus dem Ordnernamen 115BG/70BG). Backups (_backup_vor_merge*), nachlauf_*-Dateien werden übersprungen.
 
 Aufruf:
-    python validate_r1.py --zehn "..\\03_Wiederholung_10runs" --gt R1.md --werte "..\\05_Ergebnisse\\Wiederhollaeufe_R1.xlsx"
+    python validate_r1.py --zehn "..\\03_Wiederholung_10runs" --gt R1.md --werte "..\\05_Ergebnisse_R1\\Wiederhollaeufe_R1.xlsx"
 """
 
 import argparse
@@ -135,6 +135,9 @@ def main():
     rng = np.random.default_rng(7)
     ok = bad = 0
     for m, d in data.items():
+        if not d.get("115"):
+            print(f"HINWEIS {m}: keine 115-BG-Läufe gefunden – übersprungen")
+            continue
         for scope in ("115", "185"):
             if scope == "115":
                 runs = d.get("115", [])
@@ -147,6 +150,8 @@ def main():
             for sub in ("alle", "eindeutig", "mehrdeutig"):
                 keys = [k for k in gt if sub == "alle" or (len(gt[k][1]) > 1) == (sub == "mehrdeutig")]
                 keys = [k for k in keys if any(k in r for r in runs)]
+                if not keys or not runs:
+                    continue
                 accs = [np.mean([r[k] in gt[k][1] for k in keys if k in r]) * 100 for r in runs]
                 mine = {"n BG": len(keys), "Läufe": len(runs), "Accuracy Mittel (%)": np.mean(accs),
                         "SD (pp)": np.std(accs, ddof=1) if len(accs) > 1 else np.nan}
@@ -154,19 +159,22 @@ def main():
                     prf = [macro([(gt[k][0], r[k]) for k in keys if k in r]) for r in runs]
                     mine.update({"Macro-P (%)": np.mean([x[0] for x in prf]), "Macro-R (%)": np.mean([x[1] for x in prf]),
                                  "Macro-F1 (%)": np.mean([x[2] for x in prf])})
-                # eigenes Bootstrap (je Datensatz getrennt bei 185)
-                share = {k: np.mean([r[k] in gt[k][1] for r in runs if k in r]) for k in keys}
-                main_keys = set(d["115"][0]) if d.get("115") else set()
-                groups = [np.array([v for k, v in share.items() if k in main_keys]),
-                          np.array([v for k, v in share.items() if k not in main_keys])] if scope == "185" else [np.array(list(share.values()))]
-                groups = [g for g in groups if len(g)]
+                # eigenes Bootstrap (je Datensatz getrennt bei 185); Statistik wie der Mittelwert:
+                # Accuracy je Lauf über die gezogenen BG, dann Mittel über die Läufe
+                M = np.array([[float(r[k] in gt[k][1]) if k in r else np.nan for r in runs] for k in keys])
+                main_keys = set().union(*d["115"])          # alle BG, die in einem 115-BG-Lauf vorkommen
+                idx = [np.array([i for i, k in enumerate(keys) if k in main_keys]),
+                       np.array([i for i, k in enumerate(keys) if k not in main_keys])] if scope == "185" \
+                    else [np.arange(len(keys))]
+                idx = [g for g in idx if len(g)]
                 # Bootstrap-Grenzen schwanken zufällig (Monte-Carlo-Fehler, bei kleinem n deutlich):
                 # 20 unabhängige Wiederholungen à 2000 Ziehungen -> Spannweite der Grenzen als Toleranzbereich
                 lo_hi = []
-                for _ in range(20):
-                    boots = [np.concatenate([g[rng.integers(0, len(g), len(g))] for g in groups]).mean() * 100
-                             for _ in range(2000)]
-                    lo_hi.append((np.percentile(boots, 2.5), np.percentile(boots, 97.5)))
+                with np.errstate(all="ignore"):
+                    for _ in range(20):
+                        sel = np.concatenate([g[rng.integers(0, len(g), (2000, len(g)))] for g in idx], axis=1)
+                        boots = np.nanmean(np.nanmean(M[sel], axis=1), axis=1) * 100
+                        lo_hi.append((np.nanpercentile(boots, 2.5), np.nanpercentile(boots, 97.5)))
                 ci_range = {"KI unten (%)": (min(x[0] for x in lo_hi), max(x[0] for x in lo_hi)),
                             "KI oben (%)": (min(x[1] for x in lo_hi), max(x[1] for x in lo_hi))}
                 row = ref[(ref["Modell"] == m) & (ref["Datensatz"].astype(str) == scope) & (ref["Teilmenge"] == sub)]
@@ -191,6 +199,9 @@ def main():
                         bad += 1
                         print(f"ABWEICHUNG {m} {scope} {sub} {col}: evaluate_r1 {x:.2f} außerhalb der Spannweite "
                               f"unabhängiger Bootstraps [{lo:.2f}; {hi:.2f}]")
+    for m in sorted(set(ref["Modell"]) - set(data)):
+        print(f"HINWEIS: {m} steht in Werte, aber unter --zehn wurden keine Läufe gefunden")
+        bad += 1
     print(f"\nGegenrechnung: {ok} Werte übereinstimmend, {bad} Abweichungen.")
     if bad == 0:
         print("OK – alle Werte unabhängig bestätigt.")
