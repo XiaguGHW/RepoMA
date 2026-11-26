@@ -127,22 +127,37 @@ def load_runs(files, gt, pe, issues, kind):
 # ---------------------------------------------------------------- Kennzahlen
 def stats(gt, runs_by_ds, keys_filter=None, rng=None):
     """runs_by_ds: {"main": [Lauf...], "supp": [Lauf...]} (1 oder mehrere Läufe je Datensatz).
-    Wert je BG = Anteil korrekter Läufe; Accuracy = Mittel über BG; KI: Bootstrap je Datensatz getrennt."""
-    shares = {}
-    for ds, runs in runs_by_ds.items():
-        keys = sorted(set().union(*runs)) if runs else []
+    Accuracy wie in evaluate_r1.py: je Lauf über die gültigen BG, dann Mittel über die Läufe
+    (Lauf i des Hauptdatensatzes zusammen mit Lauf i der Ergänzung; ist dort nur 1 Lauf, wird er für alle verwendet).
+    KI: Bootstrap über Baugruppen, je Datensatz getrennt gezogen, mit derselben Statistik."""
+    main, supp = runs_by_ds.get("main", []), runs_by_ds.get("supp", [])
+    nrun = max(len(main), len(supp))
+    if nrun == 0:
+        return None
+    blocks = []
+    for runs in (main, supp):
+        if not runs:
+            continue
+        keys = sorted(set().union(*runs))
         if keys_filter is not None:
             keys = [k for k in keys if keys_filter(k)]
-        shares[ds] = np.array([np.mean([R.correct(gt, k, r[k]) for r in runs if k in r]) for k in keys])
-    groups = [v for v in shares.values() if len(v)]
-    if not groups:
+        if not keys:
+            continue
+        cols = [runs[min(i, len(runs) - 1)] for i in range(nrun)]
+        blocks.append(np.array([[float(R.correct(gt, k, r[k])) if k in r else np.nan for r in cols] for k in keys]))
+    if not blocks:
         return None
-    allv = np.concatenate(groups)
-    boots = np.empty(B)
-    for b in range(B):
-        boots[b] = np.concatenate([g[rng.integers(0, len(g), len(g))] for g in groups]).mean()
-    return dict(acc=float(allv.mean()), lo=float(np.percentile(boots, 2.5)), hi=float(np.percentile(boots, 97.5)),
-                n=int(len(allv)))
+    M = np.vstack(blocks)
+    with np.errstate(all="ignore"):
+        acc = float(np.nanmean(np.nanmean(M, axis=0)))
+        offs = np.cumsum([0] + [len(b_) for b_ in blocks])
+        idx = [np.arange(offs[i], offs[i + 1]) for i in range(len(blocks))]
+        boots = np.empty(B)
+        for b in range(B):
+            sel = np.concatenate([g[rng.integers(0, len(g), len(g))] for g in idx])
+            boots[b] = np.nanmean(np.nanmean(M[sel], axis=0))
+    return dict(acc=acc, lo=float(np.nanpercentile(boots, 2.5)), hi=float(np.nanpercentile(boots, 97.5)),
+                n=int(M.shape[0]))
 
 
 def prf(gt, runs_by_ds):
@@ -169,7 +184,7 @@ def pick_single(groups, key, note, issues_out):
     lst = groups.get(key, [])
     if len(lst) > 1:
         names = ", ".join(f.name for f, _ in lst)
-        issues_out.append(f"{key}: {len(lst)} Einzelläufe gefunden ({names}) – der letzte (nach Dateiname) wird verwendet")
+        issues_out.append(f"{key}: {len(lst)} Einzelläufe gefunden ({names}) – verwendet wird {lst[-1][0].name}")
     return [lst[-1]] if lst else []
 
 
@@ -200,6 +215,8 @@ def cell_data(model, col, kind, scope, P, I, Z, issues_out):
                     pick_single(I, (model, "P3", pin, ds), "", issues_out)
                 if single:
                     runs, fallback = single, True
+                elif runs:
+                    fallback = True                    # nur 1 Wiederholungslauf vorhanden
         if not runs:
             return None, f"{'70' if ds == 'supp' else '115'} BG fehlen", False
         out[ds] = [r for _, r in runs]
@@ -285,10 +302,12 @@ def write(path, tables, gt_name):
             r += 1
         # n
         any_d = next((d for d in T.values() if d and not d.get("missing")), None)
-        ns = {c: next((d["n"] for (m, cc), d in T.items() if cc == c and d and not d.get("missing")), None)
-              for c in ("eindeutig", "mehrdeutig", "Gesamt")}
+        def nrange(c):
+            vs = sorted({d["n"] for (m, cc), d in T.items() if cc == c and d and not d.get("missing") and "n" in d})
+            return "–" if not vs else (str(vs[0]) if len(vs) == 1 else f"{vs[0]}–{vs[-1]}")
         if any_d:
-            ws.cell(r, 1, f"n Baugruppen: Gesamt {ns['Gesamt']}, eindeutig {ns['eindeutig']}, mehrdeutig {ns['mehrdeutig']}") \
+            ws.cell(r, 1, f"n Baugruppen: Gesamt {nrange('Gesamt')}, eindeutig {nrange('eindeutig')}, "
+                          f"mehrdeutig {nrange('mehrdeutig')}") \
                 .font = Font(italic=True, size=9)
             r += 1
         for (m, c), d in T.items():
@@ -333,8 +352,7 @@ def main(argv=None):
     ap.add_argument("--out", default="Ergebnis_R1")
     a = ap.parse_args(argv)
     if not a.gt_name:
-        import re as _re
-        a.gt_name = (_re.match(r"(R\d+)", Path(a.gt).stem, _re.I) or [Path(a.gt).stem])[0].upper()
+        a.gt_name = (re.match(r"(R\d+)", Path(a.gt).stem, re.I) or [Path(a.gt).stem])[0].upper()
 
     gt, pe, gi = R.load_gt(a.gt)
     for i in gi:
