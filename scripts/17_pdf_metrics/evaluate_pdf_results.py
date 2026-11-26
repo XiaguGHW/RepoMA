@@ -1,4 +1,4 @@
-"""Metriktabellen und Konfusionsmatrizen für die PDF-Ergebnisdateien (vier Modelle, ein Lauf, 115 BG).
+"""Metriktabellen und Konfusionsmatrizen für die PDF-Ergebnisdateien (alle Modelle in --dir, ein Lauf, 115 BG).
 
 Offline, keine Modellaufrufe. GT, Register und weitere zulässige Labels kommen aus Blatt "Sheet1"
 der jeweiligen Ergebnisdatei (nicht aus FINAL_GT); FINAL_GT aus Skript 12 dient nur zur Kontrolle.
@@ -131,6 +131,9 @@ def read_file(path, sheet, model, issues):
         tc_raw = row[c["tc"]] if c["tc"] else None
         key = cm.match_key(sap_raw, tc_raw)
         sap = key or ("" if is_empty(sap_raw) else str(sap_raw).strip())
+        if not sap:
+            issues.append(dict(Modell=model, Typ="Zeile ohne SAP/Teamcenter-Zuordnung (ignoriert)", Zeile=xrow))
+            continue
         if sap in seen:
             issues.append(dict(Modell=model, Typ="Doppelte Baugruppe (zweite Zeile ignoriert)", Zeile=xrow, SAP=sap))
             continue

@@ -1,4 +1,4 @@
-"""Wie evaluate_pdf_results.py, aber für die Image-Ergebnisdateien (vier Modelle, P3, 115 BG).
+"""Wie evaluate_pdf_results.py, aber für die Image-Ergebnisdateien (alle Modelle in --dir, P3, 115 BG).
 
 Nutzt evaluate_pdf_results.py unverändert (muss im selben Ordner liegen, ebenso
 confusion_human_llm.py und evaluate_validation_regimes.py) und benennt nur Titel und Ausgabedateien um:

@@ -1,4 +1,4 @@
-"""Prompt-Vergleich: P1–P4 × vier Modelle (PDF, 115 BG, je ein Lauf) = 16 Ergebnisdateien.
+"""Prompt-Vergleich: P1–P4 × alle Modelle in --dir (PDF, 115 BG, je ein Lauf) = 16 Ergebnisdateien.
 
 Nutzt evaluate_pdf_results.py (gleicher Ordner, ebenso confusion_human_llm.py und
 evaluate_validation_regimes.py); dieselben Regeln für GT, Regime, Normalisierung und Metriken.
