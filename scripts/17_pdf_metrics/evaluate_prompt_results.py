@@ -121,7 +121,7 @@ def write_metric_grid(wb, items, ncols):
         r0 = 2 + (k // ncols) * (nrow + gapr)
         c0 = 2 + (k % ncols) * (ncol + gapc)
         ws.merge_cells(start_row=r0, start_column=c0, end_row=r0, end_column=c0 + ncol - 1)
-        t = ws.cell(r0, c0, title if recs else f"{title} – Datei fehlt")
+        t = ws.cell(r0, c0, title if recs else (f"{title} – Datei fehlt" if recs is None else f"{title} – keine gültigen Zeilen"))
         t.font = Font(bold=True, color="FFFFFF", size=12)
         t.alignment = S["center"]
         for j in range(ncol):
@@ -270,7 +270,11 @@ def main(argv=None):
                     grund = " [übersprungen]" if x.suffix.lower() == ".xlsx" and E.is_output_or_backup(x) else ""
                     print(f"    {x.relative_to(d)}{grund}")
         ap.error("keine Dateien angegeben (Dateien oder --dir)")
-    print(f"Version 2 – {len(files)} Excel-Dateien gefunden")
+    n70 = [f for f in files if "70bg" in str(f).lower()]
+    if n70:   # dieses Skript wertet nur 115 BG aus; 70-BG-Dateien (z. B. in 01_Prompt_P1-P4\70BG) überspringen
+        print(f"  Hinweis: {len(n70)} Dateien mit „70BG“ im Pfad übersprungen (Skript wertet 115 BG aus)")
+        files = [f for f in files if f not in n70]
+    print(f"{len(files)} Excel-Dateien gefunden")
 
     grid, src, issues, unknown = {}, {}, [], []
     for f in files:
@@ -279,7 +283,7 @@ def main(argv=None):
             unknown.append(f"{f}  (Prompt: {p or '?'}, Modell: {m or '?'})")
             continue
         if (m, p) in grid:
-            sys.exit(f"Doppelt: {m} {p}\n  {src[(m, p)]}\n  {f}")
+            sys.exit(f"Doppelt: {m} {p}\n  {src[(m, p)]}\n  {f}\nBitte nur eine Datei je Modell und Prompt im Ordner lassen.")
         grid[(m, p)] = E.read_file(f, a.sheet, f"{m} {p}", issues)
         src[(m, p)] = f
     if unknown:
@@ -302,7 +306,8 @@ def main(argv=None):
             recs = grid.get((m, p))
             m_items.append((f"{m} (115BG, {p}, {a.input_label})", recs))
             mat = E.matrix_for(recs) if recs else None
-            c_items.append((f"{m} ({p}), n = {mat['n']}" if mat else f"{m} ({p})", mat))
+            c_items.append((f"{m} ({p}), n = {mat['n']}" if mat else
+                            (f"{m} ({p})" if recs is None else f"{m} ({p}) – keine gültigen Zeilen"), mat))
     write_metric_grid(wb, m_items, len(PROMPTS))
     write_confusion_grid(wb, c_items, len(PROMPTS), a.lang)
     xlsx = out / "Prompt_Metriken_Konfusion.xlsx"
@@ -312,7 +317,7 @@ def main(argv=None):
 
     # Konsole
     print(f"Ausgabe: {xlsx}")
-    print(f"  Allowed Accuracy (%), n in Klammern")
+    print("  Allowed Accuracy (%), n in Klammern")
     print(f"  {'':<18}" + "".join(f"{p:>14}" for p in PROMPTS))
     for m in models:
         row = ""
@@ -333,7 +338,7 @@ def main(argv=None):
             k = (i["Typ"], i.get("SAP"), i.get("Detail"))
             groups.setdefault(k, []).append(i.get("Modell"))
         for (typ, sap, det), who in groups.items():
-            where = "alle 16 Dateien" if len(who) == len(grid) and len(grid) > 1 else ", ".join(who)
+            where = f"alle {len(grid)} Dateien" if len(who) == len(grid) and len(grid) > 1 else ", ".join(who)
             parts = [typ, sap, det, where]
             print("   - " + " | ".join(str(x) for x in parts if x))
     if a.nur_sheet1:
