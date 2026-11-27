@@ -13,8 +13,9 @@ anbei das Template für die E2-Baugruppen und die E1-Baugruppen mit abweichender
 Zum Aufbau:
 - Als Begründung ist jeweils das vollständige Reasoning eines LLM-Laufs mit diesem Label eingetragen.
 - Bei Labels, die nur von Menschen vergeben wurden, ist das entsprechend vermerkt; bei den Baugruppen aus der Label-Konfiguration gibt es keine LLM-Läufe und damit keine Begründungen.
+- Die Begründungen sind ungeprüft übernommen und teilweise inhaltlich fehlerhaft; sie dienen nur als Orientierung.
 
-Mein eigenes Review dazu schicke ich dir voraussichtlich morgen.
+Da es recht viele Einträge sind, schaffe ich es heute nicht mehr, das Review vollständig auszufüllen. Meine Review-Ergebnisse schicke ich dir morgen.
 
 Viele Grüße
 Duanni
