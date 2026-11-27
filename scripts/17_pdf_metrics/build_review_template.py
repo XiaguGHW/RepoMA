@@ -5,7 +5,7 @@ Review-Template (Format wie „BG-Label Template“ von Jonas) für
 
 Eine Zeile je Kombination aus Baugruppe und Label. Labels = GT-Label + alle Klassen, die von Menschen
 (Workshop, Spalten „TN …“) oder LLMs (alle Modelle und Läufe) vergeben wurden.
-Begründung = Auszug aus dem Reasoning eines LLM-Laufs mit diesem Label (bei rein menschlichen Labels leer).
+Begründung = vollständiges Reasoning eines LLM-Laufs mit diesem Label (Gemini Pro > Opus > Flash > GPT > Haiku > DeepSeek, P3 bevorzugt).
 Labels je Baugruppe in fester Klassenreihenfolge (die Position verrät nicht, welches Label bisher
 Ground Truth war). Spalte „Review“ (passed/failed) und „Anmerkung“ bleiben leer. Hilfsspalten S–AA sind ausgeblendet
 (Teamcenter, Datensatz, von Mensch/LLM vergeben, Herkunft, Label-Nr., Register).
@@ -128,7 +128,7 @@ def main(argv=None):
     ws.cell(hr, 27, "Register (R2)")._style = copy(ws.cell(hr, 26)._style)
     ws.cell(2, 2).value = "Review: Baugruppe × vergebenes Label (Register E2 sowie E1 mit abweichender LLM-Vorhersage, Ground Truth R2)"
     ws.cell(3, 2).value = ("Eine Zeile je Kombination aus Baugruppe und Label (Ground-Truth-Label sowie alle von Menschen "
-                           "oder LLMs vergebenen Klassen). Begründung = Auszug aus einer LLM-Begründung für dieses Label.")
+                           "oder LLMs vergebenen Klassen). Begründung = vollständige LLM-Begründung für dieses Label.")
 
     r = first
     reasoning_rows = []
@@ -148,11 +148,10 @@ def main(argv=None):
         for lab in labs_all:
             j = gl_labels.index(lab) if lab in gl_labels else len(gl_labels)
             cand = [x for x in llm if x[4] == lab and x[6] and len(str(x[6]).strip()) > 40]
-            # bevorzugt: Begründung, die vollständig in die Zelle passt; dann Modellreihenfolge, P3, Dateiname
-            cand.sort(key=lambda x: (len(re.sub(r"\s+", " ", str(x[6]))) > MAX_GRUND,
-                                     MODEL_PRIO.index(x[0]) if x[0] in MODEL_PRIO else 99, x[1] != "P3", x[3]))
+            # Auswahl: Modellreihenfolge, dann P3, dann Dateiname; vollständiges Reasoning wird übernommen
+            cand.sort(key=lambda x: (MODEL_PRIO.index(x[0]) if x[0] in MODEL_PRIO else 99, x[1] != "P3", x[3]))
             if cand:
-                grund = excerpt(cand[0][6])
+                grund = re.sub(r"[ \t]+", " ", str(cand[0][6])).strip()
             elif llm_cnt[lab]:
                 grund = "Von LLMs vergeben, aber keine verwertbare Begründung vorhanden."
             else:   # wie im M-Template von Jonas: rein menschliche Labels kennzeichnen
