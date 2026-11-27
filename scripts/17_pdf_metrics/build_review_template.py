@@ -42,12 +42,21 @@ MODEL_PRIO = F.MODEL_PRIO
 
 
 def excerpt(text):
+    """Kurzfassung: vollständiger Text, wenn kurz genug; sonst Anfang + „…“ + Schlusssatz,
+    damit die Schlussfolgerung (welche Klasse und warum) sichtbar bleibt."""
     t = re.sub(r"\s+", " ", str(text or "")).strip()
     if len(t) <= MAX_GRUND:
         return t
-    cut = t[:MAX_GRUND]
-    end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
-    return (cut[:end + 1] if end > 150 else cut.rsplit(" ", 1)[0] + " …")
+    sents = re.split(r"(?<=[.!?])\s+", t)
+    tail = sents[-1] if len(sents[-1]) <= MAX_GRUND // 2 else sents[-1][:MAX_GRUND // 2].rsplit(" ", 1)[0] + " …"
+    head, used = "", len(tail) + 5
+    for x in sents[:-1]:
+        if used + len(head) + len(x) + 1 > MAX_GRUND:
+            break
+        head = (head + " " + x).strip()
+    if not head:
+        head = t[:MAX_GRUND - used].rsplit(" ", 1)[0]
+    return f"{head} … {tail}"
 
 
 def njn(n, N):
@@ -138,8 +147,10 @@ def main(argv=None):
         labs_all = sorted(gl_labels + others, key=lambda x: CLS.index(x) if x in CLS else 99)
         for lab in labs_all:
             j = gl_labels.index(lab) if lab in gl_labels else len(gl_labels)
-            cand = [x for x in llm if x[4] == lab and x[6]]
-            cand.sort(key=lambda x: (MODEL_PRIO.index(x[0]) if x[0] in MODEL_PRIO else 99, x[1] != "P3", x[3]))
+            cand = [x for x in llm if x[4] == lab and x[6] and len(str(x[6]).strip()) > 40]
+            # bevorzugt: Begründung, die vollständig in die Zelle passt; dann Modellreihenfolge, P3, Dateiname
+            cand.sort(key=lambda x: (len(re.sub(r"\s+", " ", str(x[6]))) > MAX_GRUND,
+                                     MODEL_PRIO.index(x[0]) if x[0] in MODEL_PRIO else 99, x[1] != "P3", x[3]))
             grund = excerpt(cand[0][6]) if cand else None
             labnr = f"Label {j + 1}" if j < len(gl_labels) else "weitere Klasse"
             vals = {2: nr, 3: sap or tc or None, 5: lab, 6: grund,     # ohne SAP: Teamcenter-Nr. anzeigen
