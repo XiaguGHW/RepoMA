@@ -155,7 +155,10 @@ def main(argv=None):
             cand = [x for x in llm if x[4] == lab and x[6] and len(str(x[6]).strip()) > 40]
             # Auswahl: Modellreihenfolge, dann P3, dann Dateiname; vollständiges Reasoning wird übernommen
             cand.sort(key=lambda x: (MODEL_PRIO.index(x[0]) if x[0] in MODEL_PRIO else 99, x[1] != "P3", x[3]))
-            if cand:
+            if k in pe and not llm:
+                grund = ("Baugruppe aus der Label-Konfiguration: nur menschliche Annotation vorhanden, "
+                         "keine LLM-Klassifikation und daher keine Begründung.")
+            elif cand:
                 grund = re.sub(r"[ \t]+", " ", str(cand[0][6])).strip()
             elif llm_cnt[lab]:
                 grund = "Von LLMs vergeben, aber keine verwertbare Begründung vorhanden."
