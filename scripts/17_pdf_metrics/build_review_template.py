@@ -158,8 +158,7 @@ def main(argv=None):
             else:   # wie im M-Template von Jonas: rein menschliche Labels kennzeichnen
                 n_h = hum_cnt[lab]
                 grund = (f"Nur von {'einem menschlichen Annotator' if n_h == 1 else f'{n_h} menschlichen Annotatoren'} "
-                         "markiert; im Ausgangsblatt ist keine Begründung hinterlegt und die Klasse wurde von keinem "
-                         "LLM vergeben.")
+                         "markiert; es liegt keine Begründung vor und die Klasse wurde von keinem LLM vergeben.")
             labnr = f"Label {j + 1}" if j < len(gl_labels) else "weitere Klasse"
             vals = {2: nr, 3: sap or tc or None, 5: lab, 6: grund,     # ohne SAP: Teamcenter-Nr. anzeigen
                     19: tc or None, 20: ds, 21: njn(hum_cnt[lab], len(hum)), 22: njn(llm_cnt[lab], len(llm)),
