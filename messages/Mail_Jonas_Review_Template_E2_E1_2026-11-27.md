@@ -8,10 +8,9 @@
 
 Hallo Jonas,
 
-anbei das Template für die E2-Baugruppen und die E1-Baugruppen mit abweichender LLM-Vorhersage: 47 E2- und 54 E1-Baugruppen, insgesamt 251 Zeilen (Baugruppe × Label). Pro Baugruppe sind das Ground-Truth-Label sowie alle Klassen enthalten, die von Menschen oder LLMs vergeben wurden. Ein E1-Item ist enthalten, sobald mindestens ein LLM-Lauf abweichend gelabelt hat.
+anbei das Template für die E2-Baugruppen und die E1-Baugruppen mit abweichender LLM-Vorhersage: 47 E2- und 54 E1-Baugruppen, insgesamt 251 Zeilen (Baugruppe × Label).
 
 Zum Aufbau:
-- Die Labels stehen je Baugruppe in fester Klassenreihenfolge, damit nicht erkennbar ist, welches bisher die Ground Truth war.
 - Als Begründung ist jeweils das vollständige Reasoning eines LLM-Laufs mit diesem Label eingetragen.
 - Bei Labels, die nur von Menschen vergeben wurden, ist das entsprechend vermerkt; bei den Baugruppen aus der Label-Konfiguration gibt es keine LLM-Läufe und damit keine Begründungen.
 
