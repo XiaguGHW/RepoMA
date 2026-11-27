@@ -71,6 +71,8 @@ def main(argv=None):
     ap.add_argument("--mensch", required=True, help="Workshop-Datei (Blatt Klassifikation_Übersicht_Gesamt)")
     ap.add_argument("--blatt-mensch", default=None)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--ohne-label-konfig", action="store_true",
+                    help="die 14 Baugruppen der Label-Konfiguration nicht aufnehmen (dafür gibt es keine LLM-Läufe)")
     a = ap.parse_args(argv)
 
     gt, pe, _ = R.load_gt(a.gt)
@@ -96,6 +98,8 @@ def main(argv=None):
 
     sel = []
     for k in order:
+        if a.ohne_label_konfig and k in pe:
+            continue
         r_ = reg.get(k)
         llm = [x for x in hits.get(k, []) if x[4] and not str(x[4]).startswith("UNGÜLTIG")]
         dev = sum(1 for x in llm if x[4] != gt[k][0])
@@ -105,7 +109,8 @@ def main(argv=None):
             sel.append((k, "E1", dev))
     sel.sort(key=lambda x: (x[1] != "E2", x[0] in pe))
     print(f"Ausgewählt: {sum(1 for s in sel if s[1] == 'E2')} BG mit E2, "
-          f"{sum(1 for s in sel if s[1] == 'E1')} BG mit E1 und abweichender LLM-Vorhersage")
+          f"{sum(1 for s in sel if s[1] == 'E1')} BG mit E1 und abweichender LLM-Vorhersage"
+          f" (davon Label-Konfiguration: {sum(1 for s in sel if s[0] in pe)})")
 
     # ------------------------------------------------ Vorlage: nur Formatierung übernehmen
     wb = load_workbook(a.vorlage)
