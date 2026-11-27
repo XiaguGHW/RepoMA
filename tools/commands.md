@@ -399,3 +399,13 @@ python add_screenshots.py --quelle $ws --blatt "R1_Ground_Truth_Abb" --ziel "..\
 ```
 Ergebnis: `05_Ergebnisse_R2\Mehrdeutige_Baugruppen_R2_final.xlsx` (danach nur noch „Grund Label n“ ausfüllen).
 Prüfen im Terminal: Schritt 1 „unterschiedlich“-Warnungen; Schritt 2 Liste der Klassennamen; Schritt 3 „… in Zellen“ ≈ Anzahl BG.
+
+## 2026-11-27 · Review-Template E2 + E1 mit abweichender LLM-Vorhersage (Format wie Jonas’ „BG-Label Template“)
+
+Jonas’ Template (z. B. `Review_M_Regime_Template.xlsx`) nach 00_Skripte legen; nur dessen Formatierung wird übernommen.
+```
+$ws = "..\06_Stammdaten\Ergebnis_WS1-4_gesamt_16TN_final.xlsx"
+python build_review_template.py --vorlage Review_M_Regime_Template.xlsx --gt R2.md --dir "..\01_Prompt_P1-P4" --dir "..\02_Input_P3" --dir "..\03_Wiederholung_10runs" --mensch $ws --out "..\05_Ergebnisse_R2\Review_E2_E1_Template.xlsx"
+python add_screenshots.py --quelle $ws --blatt "R1_Ground_Truth_Abb" --ziel "..\05_Ergebnisse_R2\Review_E2_E1_Template.xlsx" --out "..\05_Ergebnisse_R2\Review_E2_E1_Template_Bilder.xlsx"
+```
+Eine Zeile je BG × Label (GT-Label + alle von Menschen/LLMs vergebenen Klassen), feste Klassenreihenfolge, Begründung = LLM-Auszug, Hilfsspalten S–AA ausgeblendet.

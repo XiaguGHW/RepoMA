@@ -114,6 +114,54 @@ def model_of(f):
 
 
 
+def collect_llm(dirs, keys):
+    """Alle LLM-Läufe aus den Ordnern lesen (Zählregeln wie in der Liste der mehrdeutigen BG).
+    Rückgabe: hits {BG: [(modell, prompt, eingabe, datei, pred, possible, reasoning)]}, src {datei: (exp, p, i)}, nfiles."""
+    hits = defaultdict(list)
+    nfiles, seen, src, cand = 0, {}, {}, []
+    main115 = set(cm.MAIN_115)
+    for root in dirs:
+        rn = Path(root).resolve().name.lower()
+        exp = ("Wiederholungsläufe" if ("wiederhol" in rn or rn.startswith("03")) else
+               "Prompt-Vergleich" if ("prompt" in rn or rn.startswith("01")) else
+               "Input-Vergleich" if ("input" in rn or rn.startswith("02")) else Path(root).name)
+        for f in X.files_in([root]):
+            h_ = (exp, hashlib.md5(f.read_bytes()).hexdigest())   # identische Kopie im selben Experiment nur einmal
+            if h_ in seen:
+                print(f"  Hinweis: {f.name} ist eine identische Kopie von {seen[h_]} ({exp}) – nur einmal gezählt")
+                continue
+            seen[h_] = f.name
+            rows = read_file(f)
+            if not rows:
+                continue
+            m, p, i = model_of(f)
+            if m == "?":
+                print(f"  ! {f.name}: Modell nicht erkannt – unter „?“ gezählt")
+            n115 = sum(1 for k, *_ in rows if k in main115)
+            ds = "115" if n115 >= len(rows) / 2 else "70"
+            cand.append((exp, f, m, p, i, ds, rows))
+    # Einzelläufe: je Experiment zählt jede Konfiguration (Modell, Prompt, Eingabe, Datensatz) einmal.
+    groups = defaultdict(list)
+    for c_ in cand:
+        if c_[0] == "Wiederholungsläufe":
+            groups[("W", id(c_))].append(c_)
+        else:
+            groups[(c_[0], c_[2], c_[3], c_[4], c_[5])].append(c_)
+    for key, lst in groups.items():
+        if len(lst) > 1:
+            lst.sort(key=lambda c_: -sum(1 for _, pr, _, _ in c_[6] if pr))
+            print(f"  Hinweis: {key[0]}: {key[1]} {key[2]} {key[3]} {key[4]} BG liegt {len(lst)}× vor – gezählt einmal "
+                  f"({lst[0][1].name}, {lst[0][0]}); ignoriert: {', '.join(c_[1].name for c_ in lst[1:])}")
+        exp, f, m, p, i, ds, rows = lst[0]
+        nfiles += 1
+        fid = str(f)
+        src[fid] = (exp, p, i)
+        for k, pred, pos, rea in rows:
+            if keys is None or k in keys:
+                hits[k].append((m, p, i, fid, pred, pos, rea))
+    return hits, src, nfiles
+
+
 def save_safe(wb, out):
     """Speichern; ist die Datei in Excel geöffnet, unter neuem Namen mit Uhrzeit speichern."""
     try:
@@ -169,53 +217,7 @@ def main(argv=None):
                              "(Mehrdeutige_Baugruppen_R2_Begruendung.xlsx) als --vorlage angeben.")
 
     # Ergebnisdateien lesen
-    hits = defaultdict(list)   # k -> [(modell, prompt, eingabe, datei, pred, possible, reasoning)]
-    nfiles, seen = 0, {}
-    src = {}            # Dateiname -> Experiment
-    cand = []          # (exp, datei, modell, prompt, eingabe, datensatz, rows)
-    main115 = set(cm.MAIN_115)
-    for root in a.dir:
-        rn = Path(root).resolve().name.lower()
-        exp = ("Wiederholungsläufe" if ("wiederhol" in rn or rn.startswith("03")) else
-               "Prompt-Vergleich" if ("prompt" in rn or rn.startswith("01")) else
-               "Input-Vergleich" if ("input" in rn or rn.startswith("02")) else Path(root).name)
-        for f in X.files_in([root]):
-            h_ = (exp, hashlib.md5(f.read_bytes()).hexdigest())   # identische Kopie im selben Experiment nur einmal
-            if h_ in seen:
-                print(f"  Hinweis: {f.name} ist eine identische Kopie von {seen[h_]} ({exp}) – nur einmal gezählt")
-                continue
-            seen[h_] = f.name
-            rows = read_file(f)
-            if not rows:
-                continue
-            m, p, i = model_of(f)
-            if m == "?":
-                print(f"  ! {f.name}: Modell nicht erkannt – unter „?“ gezählt")
-            n115 = sum(1 for k, *_ in rows if k in main115)
-            ds = "115" if n115 >= len(rows) / 2 else "70"
-            cand.append((exp, f, m, p, i, ds, rows))
-    # Einzelläufe: je Experiment zählt jede Konfiguration (Modell, Prompt, Eingabe, Datensatz) einmal.
-    # P3 im Prompt-Vergleich und pdf/Bild/text im Input-Vergleich werden getrennt gezählt (P1–P4 = 4, pdf/Bild/text = 3).
-    groups = defaultdict(list)
-    for c_ in cand:
-        if c_[0] == "Wiederholungsläufe":
-            groups[("W", id(c_))].append(c_)
-        else:
-            groups[(c_[0], c_[2], c_[3], c_[4], c_[5])].append(c_)
-    used = []
-    for key, lst in groups.items():
-        if len(lst) > 1:
-            lst.sort(key=lambda c_: -sum(1 for _, pr, _, _ in c_[6] if pr))
-            print(f"  Hinweis: {key[0]}: {key[1]} {key[2]} {key[3]} {key[4]} BG liegt {len(lst)}× vor – gezählt einmal "
-                  f"({lst[0][1].name}, {lst[0][0]}); ignoriert: {', '.join(c_[1].name for c_ in lst[1:])}")
-        used.append(lst[0])
-    for exp, f, m, p, i, ds, rows in used:
-        nfiles += 1
-        fid = str(f)
-        src[fid] = (exp, p, i)
-        for k, pred, pos, rea in rows:
-            if k in bg:
-                hits[k].append((m, p, i, fid, pred, pos, rea))
+    hits, src, nfiles = collect_llm(a.dir, set(bg))
     print(f"Ergebnisdateien gelesen: {nfiles}; Baugruppen mit LLM-Läufen: {len(hits)} von {len(bg)}")
 
     thin = Side(style="thin", color="BFBFBF")

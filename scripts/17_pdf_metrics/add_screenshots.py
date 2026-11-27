@@ -295,7 +295,7 @@ def main(argv=None):
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out = save_safe(wb, out)
-    print(f"Ziel: {placed} Bilder eingefügt" + (f"; ohne Bild: {', '.join(missing)}" if missing else ""))
+    print(f"Ziel: {placed} Bilder eingefügt" + (f"; ohne Bild ({len(dict.fromkeys(missing))} BG): {', '.join(dict.fromkeys(missing))}" if missing else ""))
     print(f"Ausgabe: {out}")
 
 
