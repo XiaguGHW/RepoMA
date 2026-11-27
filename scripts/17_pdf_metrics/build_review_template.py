@@ -111,7 +111,11 @@ def main(argv=None):
     cf_rules = [(str(cf.sqref), list(cf.rules)) for cf in ws.conditional_formatting]
     dvs = list(ws.data_validations.dataValidation)
     ws._images = []
-    ws.delete_rows(first, ws.max_row - first + 1)
+    old_max = ws.max_row
+    ws.delete_rows(first, old_max - first + 1)
+    for rr in range(first, old_max + 1):          # alte Zeilenhöhen entfernen
+        if rr in ws.row_dimensions:
+            del ws.row_dimensions[rr]
     ws.cell(hr, 27, "Register (R2)")._style = copy(ws.cell(hr, 26)._style)
     ws.cell(2, 2).value = "Review: Baugruppe × vergebenes Label (Register E2 sowie E1 mit abweichender LLM-Vorhersage, Ground Truth R2)"
     ws.cell(3, 2).value = ("Eine Zeile je Kombination aus Baugruppe und Label (Ground-Truth-Label sowie alle von Menschen "
@@ -138,7 +142,7 @@ def main(argv=None):
             cand.sort(key=lambda x: (MODEL_PRIO.index(x[0]) if x[0] in MODEL_PRIO else 99, x[1] != "P3", x[3]))
             grund = excerpt(cand[0][6]) if cand else None
             labnr = f"Label {j + 1}" if j < len(gl_labels) else "weitere Klasse"
-            vals = {2: nr, 3: sap or None, 5: lab, 6: grund,
+            vals = {2: nr, 3: sap or tc or None, 5: lab, 6: grund,     # ohne SAP: Teamcenter-Nr. anzeigen
                     19: tc or None, 20: ds, 21: njn(hum_cnt[lab], len(hum)), 22: njn(llm_cnt[lab], len(llm)),
                     23: "nein" if j < len(gl_labels) else "ja", 24: labnr, 27: rg}
             for c in range(1, ncol + 1):
